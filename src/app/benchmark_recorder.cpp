@@ -237,6 +237,7 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.pcfRadius << ','
         << localShadowAtlas.pcfKernelRadius << ','
         << localShadowAtlas.pcssStrength << ','
+        << localShadowAtlas.faceBlendStrength << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -418,7 +419,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_recorded_draws,local_shadow_recorded_mesh_binds,"
         << "local_shadow_bias_min,local_shadow_bias_slope,"
         << "local_shadow_pcf_radius,local_shadow_pcf_kernel_radius,"
-        << "local_shadow_pcss_strength,"
+        << "local_shadow_pcss_strength,local_shadow_face_blend_strength,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

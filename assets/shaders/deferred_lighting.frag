@@ -295,6 +295,23 @@ int DominantPointShadowFace(vec3 fromLight) {
     return fromLight.z >= 0.0 ? 4 : 5;
 }
 
+int SecondaryPointShadowFace(vec3 fromLight) {
+    vec3 absDir = abs(fromLight);
+    if (absDir.x >= absDir.y && absDir.x >= absDir.z) {
+        return absDir.y >= absDir.z
+            ? (fromLight.y >= 0.0 ? 2 : 3)
+            : (fromLight.z >= 0.0 ? 4 : 5);
+    }
+    if (absDir.y >= absDir.x && absDir.y >= absDir.z) {
+        return absDir.x >= absDir.z
+            ? (fromLight.x >= 0.0 ? 0 : 1)
+            : (fromLight.z >= 0.0 ? 4 : 5);
+    }
+    return absDir.x >= absDir.y
+        ? (fromLight.x >= 0.0 ? 0 : 1)
+        : (fromLight.y >= 0.0 ? 2 : 3);
+}
+
 vec3 PointShadowFaceColor(int faceIndex) {
     if (faceIndex == 0) {
         return vec3(1.00, 0.18, 0.10);
@@ -327,6 +344,31 @@ float PointShadowFaceSeamRisk(vec3 fromLight) {
     );
     float axisGap = clamp((dominant - second) / dominant, 0.0, 1.0);
     return 1.0 - smoothstep(0.02, 0.16, axisGap);
+}
+
+bool FindLocalShadowTile(
+    int assignedTileCount,
+    int localLightIndex,
+    int targetFace,
+    out LocalShadowTileRecord foundTile
+) {
+    for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
+        if (tileIndex >= assignedTileCount) {
+            break;
+        }
+        LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
+        if (int(tile.tileInfo.y) != localLightIndex) {
+            continue;
+        }
+        if (int(tile.tileInfo.z) != targetFace) {
+            continue;
+        }
+
+        foundTile = tile;
+        return true;
+    }
+
+    return false;
 }
 
 bool LocalShadowFaceDebugColor(
@@ -523,33 +565,47 @@ float LocalShadowVisibility(
     }
 
     int targetFace = 0;
+    int blendFace = -1;
+    float faceBlend = 0.0;
     uint lightKind = uint(clamp(int(localLight.directionType.w + 0.5), 0, 3));
     if (lightKind == 0u) {
-        targetFace = DominantPointShadowFace(worldPosition - localLight.positionRadius.xyz);
+        vec3 fromLight = worldPosition - localLight.positionRadius.xyz;
+        targetFace = DominantPointShadowFace(fromLight);
+        blendFace = SecondaryPointShadowFace(fromLight);
+        float seamRisk = PointShadowFaceSeamRisk(fromLight);
+        float blendStrength = clamp(localShadows.softShadowControls.y, 0.0, 1.0);
+        faceBlend = seamRisk * blendStrength;
     } else if (lightKind != 1u) {
         return 1.0;
     }
 
-    for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
-        if (tileIndex >= assignedTileCount) {
-            break;
-        }
-        LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
-        if (int(tile.tileInfo.y) != localLightIndex) {
-            continue;
-        }
-        if (int(tile.tileInfo.z) != targetFace) {
-            continue;
-        }
-        return SampleLocalShadowTileVisibility(
-            tile,
-            worldPosition,
-            normal,
-            lightDir
-        );
+    LocalShadowTileRecord primaryTile;
+    if (!FindLocalShadowTile(assignedTileCount, localLightIndex, targetFace, primaryTile)) {
+        return 1.0;
     }
 
-    return 1.0;
+    float primaryVisibility = SampleLocalShadowTileVisibility(
+        primaryTile,
+        worldPosition,
+        normal,
+        lightDir
+    );
+    if (faceBlend <= 0.0001 || blendFace == targetFace) {
+        return primaryVisibility;
+    }
+
+    LocalShadowTileRecord secondaryTile;
+    if (!FindLocalShadowTile(assignedTileCount, localLightIndex, blendFace, secondaryTile)) {
+        return primaryVisibility;
+    }
+
+    float secondaryVisibility = SampleLocalShadowTileVisibility(
+        secondaryTile,
+        worldPosition,
+        normal,
+        lightDir
+    );
+    return mix(primaryVisibility, secondaryVisibility, clamp(faceBlend, 0.0, 1.0));
 }
 
 vec3 DirectionToLocalLight(LocalLightRecord localLight, vec3 worldPosition) {

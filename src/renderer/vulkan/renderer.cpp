@@ -1856,6 +1856,8 @@ void VulkanRenderer::DrawFrame() {
             std::clamp<u32>(m_ShadowSettings.localPcfKernelRadius, 0u, 2u);
         frameStats.localShadowAtlas.pcssStrength =
             std::clamp(m_ShadowSettings.localPcssStrength, 0.0f, 1.0f);
+        frameStats.localShadowAtlas.faceBlendStrength =
+            std::clamp(m_ShadowSettings.localFaceBlendStrength, 0.0f, 1.0f);
     }
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
@@ -3749,7 +3751,7 @@ void VulkanRenderer::UpdateLocalShadowBuffer(
     );
     localShadowData.softShadowControls = glm::vec4(
         std::clamp(m_ShadowSettings.localPcssStrength, 0.0f, 1.0f),
-        0.0f,
+        std::clamp(m_ShadowSettings.localFaceBlendStrength, 0.0f, 1.0f),
         0.0f,
         0.0f
     );

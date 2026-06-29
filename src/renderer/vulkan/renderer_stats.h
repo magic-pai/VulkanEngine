@@ -116,6 +116,7 @@ struct RendererLocalShadowAtlasStats {
     f32 biasSlope = 0.0f;
     f32 pcfRadius = 0.0f;
     f32 pcssStrength = 0.0f;
+    f32 faceBlendStrength = 0.0f;
 };
 
 struct RendererBindStats {

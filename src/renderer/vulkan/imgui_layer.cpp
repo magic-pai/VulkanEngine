@@ -284,6 +284,13 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         1.0f,
         "%.3f"
     );
+    ImGui::SliderFloat(
+        "Local face blend##Shadow",
+        &settings.localFaceBlendStrength,
+        0.0f,
+        1.0f,
+        "%.3f"
+    );
 
     if (ImGui::Button("Reset shadows")) {
         ResetShadowSettings(settings);
@@ -557,13 +564,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         localShadowAtlas.recordedMeshBinds
     );
     ImGui::Text(
-        "Local shadow filtering: bias %.5f / slope %.5f, PCF radius %.2f, kernel %ux%u, PCSS %.3f",
+        "Local shadow filtering: bias %.5f / slope %.5f, PCF radius %.2f, kernel %ux%u, PCSS %.3f, face blend %.3f",
         localShadowAtlas.biasMin,
         localShadowAtlas.biasSlope,
         localShadowAtlas.pcfRadius,
         localShadowAtlas.pcfKernelRadius * 2u + 1u,
         localShadowAtlas.pcfKernelRadius * 2u + 1u,
-        localShadowAtlas.pcssStrength
+        localShadowAtlas.pcssStrength,
+        localShadowAtlas.faceBlendStrength
     );
     ImGui::Text(
         "Bounds cache: %u/%u main hits/misses, %u/%u overlay",
