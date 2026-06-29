@@ -350,6 +350,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Local Shadow Visibility";
     case ForwardDebugView::ContactShadow:
         return "Contact Shadow";
+    case ForwardDebugView::LocalShadowFace:
+        return "Local Shadow Face";
     }
 
     return "Lit";
@@ -385,7 +387,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::ShadowCascade,
         ForwardDebugView::LocalShadowAtlas,
         ForwardDebugView::LocalShadowVisibility,
-        ForwardDebugView::ContactShadow
+        ForwardDebugView::ContactShadow,
+        ForwardDebugView::LocalShadowFace
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -622,6 +625,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.localShadowVisibilityDebugDraws,
         binds.localShadowVisibilityDebugFrameBinds,
         binds.localShadowVisibilityDebugTextureBinds
+    );
+    ImGui::Text(
+        "Local shadow face debug: %u draws / %u frame binds / %u texture binds",
+        binds.localShadowFaceDebugDraws,
+        binds.localShadowFaceDebugFrameBinds,
+        binds.localShadowFaceDebugTextureBinds
     );
     ImGui::Text(
         "Contact shadow debug: %u draws / %u frame binds / %u gbuffer binds",

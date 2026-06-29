@@ -295,6 +295,110 @@ int DominantPointShadowFace(vec3 fromLight) {
     return fromLight.z >= 0.0 ? 4 : 5;
 }
 
+vec3 PointShadowFaceColor(int faceIndex) {
+    if (faceIndex == 0) {
+        return vec3(1.00, 0.18, 0.10);
+    }
+    if (faceIndex == 1) {
+        return vec3(0.12, 0.64, 1.00);
+    }
+    if (faceIndex == 2) {
+        return vec3(0.18, 0.95, 0.26);
+    }
+    if (faceIndex == 3) {
+        return vec3(1.00, 0.76, 0.10);
+    }
+    if (faceIndex == 4) {
+        return vec3(0.78, 0.28, 1.00);
+    }
+    return vec3(0.12, 1.00, 0.84);
+}
+
+float PointShadowFaceSeamRisk(vec3 fromLight) {
+    vec3 absDir = abs(fromLight);
+    float dominant = max(max(absDir.x, absDir.y), absDir.z);
+    if (dominant <= 0.0001) {
+        return 1.0;
+    }
+
+    float second = min(
+        max(absDir.x, absDir.y),
+        min(max(absDir.x, absDir.z), max(absDir.y, absDir.z))
+    );
+    float axisGap = clamp((dominant - second) / dominant, 0.0, 1.0);
+    return 1.0 - smoothstep(0.02, 0.16, axisGap);
+}
+
+bool LocalShadowFaceDebugColor(
+    vec3 worldPosition,
+    out vec3 debugColor
+) {
+    int assignedTileCount = clamp(int(localShadows.atlasInfo.x), 0, MAX_LOCAL_SHADOW_TILES);
+    int localLightCount = clamp(int(lights.lightCounts.z + 0.5), 0, MAX_LOCAL_LIGHTS);
+    if (assignedTileCount <= 0 || localLightCount <= 0) {
+        debugColor = vec3(0.08, 0.02, 0.05);
+        return false;
+    }
+
+    float bestInfluence = 0.0;
+    vec3 bestColor = vec3(0.04, 0.06, 0.08);
+    bool foundPointShadow = false;
+    for (int localLightIndex = 0; localLightIndex < MAX_LOCAL_LIGHTS; ++localLightIndex) {
+        if (localLightIndex >= localLightCount) {
+            break;
+        }
+
+        LocalLightRecord localLight = lights.localLights[localLightIndex];
+        uint lightKind = uint(clamp(int(localLight.directionType.w + 0.5), 0, 3));
+        if (lightKind != 0u) {
+            continue;
+        }
+
+        float radius = max(localLight.positionRadius.w, 0.001);
+        vec3 fromLight = worldPosition - localLight.positionRadius.xyz;
+        float distanceToLight = length(fromLight);
+        float attenuation = clamp(1.0 - distanceToLight / radius, 0.0, 1.0);
+        if (attenuation <= 0.0001) {
+            continue;
+        }
+
+        int faceIndex = DominantPointShadowFace(fromLight);
+        bool hasFaceTile = false;
+        for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
+            if (tileIndex >= assignedTileCount) {
+                break;
+            }
+
+            LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
+            if (int(tile.tileInfo.y) == localLightIndex &&
+                int(tile.tileInfo.z) == faceIndex &&
+                tile.tileInfo.w == 1u) {
+                hasFaceTile = true;
+                break;
+            }
+        }
+
+        if (!hasFaceTile) {
+            continue;
+        }
+
+        float influence = attenuation * max(localLight.colorIntensity.w, 0.001);
+        if (influence <= bestInfluence) {
+            continue;
+        }
+
+        float seamRisk = PointShadowFaceSeamRisk(fromLight);
+        vec3 faceColor = PointShadowFaceColor(faceIndex);
+        bestColor = mix(faceColor * 0.72, vec3(1.0, 0.97, 0.78), seamRisk * 0.88);
+        bestColor += vec3(attenuation) * 0.08;
+        bestInfluence = influence;
+        foundPointShadow = true;
+    }
+
+    debugColor = clamp(bestColor, vec3(0.0), vec3(1.0));
+    return foundPointShadow;
+}
+
 float SampleLocalShadowTileVisibility(
     LocalShadowTileRecord tile,
     vec3 worldPosition,
@@ -1467,6 +1571,16 @@ void main() {
         vec3 contactColor = mix(blocked, partial, smoothstep(0.0, 0.72, contactShadowVisibility));
         contactColor = mix(contactColor, lit, smoothstep(0.58, 1.0, contactShadowVisibility));
         outColor = vec4(contactColor, 1.0);
+        return;
+    }
+    if (deferredDebugView == 10) {
+        vec3 faceColor = vec3(0.0);
+        if (!LocalShadowFaceDebugColor(worldPosition, faceColor)) {
+            outColor = vec4(0.08, 0.02, 0.05, 1.0);
+            return;
+        }
+
+        outColor = vec4(faceColor, 1.0);
         return;
     }
 
