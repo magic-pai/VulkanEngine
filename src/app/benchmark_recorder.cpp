@@ -150,6 +150,9 @@ void BenchmarkRecorder::RecordFrame(
         << draw.hybridDeferredOpaqueDraws << ','
         << draw.hybridForwardTransparentDraws << ','
         << draw.hybridForwardSpecialDraws << ','
+        << draw.hybridWeightedTranslucencyDraws << ','
+        << draw.hybridWeightedTranslucencySortOps << ','
+        << draw.hybridWeightedTranslucencySortedTransparentDraws << ','
         << draw.hybridForwardResidualDraws << ','
         << draw.hybridForwardResidualSortOps << ','
         << draw.hybridForwardResidualSortedTransparentDraws << ','
@@ -159,6 +162,7 @@ void BenchmarkRecorder::RecordFrame(
         << draw.overlayTriangles << ','
         << draw.shadowTriangles << ','
         << draw.hybridDeferredOpaqueTriangles << ','
+        << draw.hybridWeightedTranslucencyTriangles << ','
         << draw.hybridForwardResidualTriangles << ','
         << draw.matrixRecalculations << ','
         << draw.mainBoundsCacheHits << ','
@@ -309,6 +313,7 @@ void BenchmarkRecorder::RecordFrame(
         << binds.weightedTranslucencyResolveDraws << ','
         << binds.weightedTranslucencyResolveFrameBinds << ','
         << binds.weightedTranslucencyResolveTextureBinds << ','
+        << binds.forwardResidualAlphaReferenceEnabled << ','
         << binds.forwardResidualDraws << ','
         << binds.forwardResidualFrameBinds << ','
         << binds.forwardResidualSharedLightListDraws << ','
@@ -406,12 +411,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_available,gpu_total_recorded_ms,gpu_shadow_ms,gpu_main_ms,gpu_overlay_ms,gpu_imgui_ms,"
         << "main_draws,gbuffer_draws,overlay_draws,shadow_draws,"
         << "hybrid_deferred_opaque_draws,hybrid_forward_transparent_draws,"
-        << "hybrid_forward_special_draws,hybrid_forward_residual_draws,"
+        << "hybrid_forward_special_draws,hybrid_weighted_translucency_draws,"
+        << "hybrid_weighted_translucency_sort_ops,"
+        << "hybrid_weighted_translucency_sorted_transparent_draws,"
+        << "hybrid_forward_residual_draws,"
         << "hybrid_forward_residual_sort_ops,"
         << "hybrid_forward_residual_sorted_transparent_draws,"
         << "hybrid_forward_residual_stable_special_draws,"
         << "main_triangles,gbuffer_triangles,overlay_triangles,shadow_triangles,"
-        << "hybrid_deferred_opaque_triangles,hybrid_forward_residual_triangles,"
+        << "hybrid_deferred_opaque_triangles,hybrid_weighted_translucency_triangles,"
+        << "hybrid_forward_residual_triangles,"
         << "matrix_recalculations,"
         << "main_bounds_cache_hits,main_bounds_cache_misses,"
         << "main_command_cache_hits,main_command_cache_misses,"
@@ -487,6 +496,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_mesh_binds,weighted_translucency_resolve_bind_draws,"
         << "weighted_translucency_resolve_frame_binds,"
         << "weighted_translucency_resolve_texture_binds,"
+        << "forward_residual_alpha_reference_enabled,"
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"
         << "forward_residual_material_binds,forward_residual_mesh_binds,"

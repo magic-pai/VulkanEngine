@@ -808,6 +808,11 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "YES";
 }
 
+bool WeightedTranslucencyAlphaReferenceEnabled() {
+    return EnvironmentFlagEnabled("SE_WBOIT_REFERENCE_ALPHA") ||
+        EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_ALPHA_REFERENCE");
+}
+
 RendererLocalLight PointLocalLight(
     glm::vec3 position,
     f32 radius,
@@ -1866,6 +1871,8 @@ void VulkanRenderer::DrawFrame() {
     const std::span<const RenderCommand> overlayCommands = m_OverlayRenderQueue.Commands();
     const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
     const bool shadowSamplingEnabled = shadowPassEnabled && !shadowCommands.empty();
+    const bool recordTransparentAlphaReference =
+        WeightedTranslucencyAlphaReferenceEnabled();
     if (m_LocalShadowCacheStates.size() != m_Swapchain->Images().size()) {
         m_LocalShadowCacheStates.assign(m_Swapchain->Images().size(), LocalShadowCacheState{});
     }
@@ -1874,6 +1881,7 @@ void VulkanRenderer::DrawFrame() {
             ? &m_LocalShadowCacheStates[imageIndex]
             : nullptr;
     std::vector<RenderCommand> gBufferCommands;
+    std::vector<RenderCommand> weightedTranslucencyCommands;
     std::vector<RenderCommand> forwardResidualCommands;
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
@@ -2049,11 +2057,15 @@ void VulkanRenderer::DrawFrame() {
         BuildGBufferCommandList(
             mainCommands,
             gBufferCommands,
+            weightedTranslucencyCommands,
             forwardResidualCommands,
             mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
+            recordTransparentAlphaReference,
             frameStats.draw
         );
     }
+    frameStats.binds.forwardResidualAlphaReferenceEnabled =
+        recordTransparentAlphaReference ? 1u : 0u;
     frameStats.draw.mainVisible = mainCullingStats.visible;
     frameStats.draw.mainCulled = mainCullingStats.culled;
     frameStats.draw.overlayVisible = overlayCullingStats.visible;
@@ -2320,6 +2332,12 @@ void VulkanRenderer::DrawFrame() {
         has3DMainPass ? m_DoubleSidedWeightedTranslucencyGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_WeightedTranslucencyResolvePipeline.get() : nullptr,
         m_WeightedTranslucencyDescriptorSets.get(),
+        has3DMainPass
+            ? std::span<const RenderCommand>(
+                weightedTranslucencyCommands.data(),
+                weightedTranslucencyCommands.size()
+            )
+            : std::span<const RenderCommand>{},
         has3DMainPass ? m_GBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedGBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DescriptorSets.get() : nullptr,
@@ -4382,12 +4400,16 @@ FrameMaterialSet VulkanRenderer::BuildFrameMaterialSet(
 void VulkanRenderer::BuildGBufferCommandList(
     std::span<const RenderCommand> renderCommands,
     std::vector<RenderCommand>& gBufferCommands,
+    std::vector<RenderCommand>& weightedTranslucencyCommands,
     std::vector<RenderCommand>& forwardResidualCommands,
     const FrameMatrices* matrices,
+    bool recordTransparentAlphaReference,
     RendererDrawStats& drawStats
 ) const {
     gBufferCommands.clear();
     gBufferCommands.reserve(renderCommands.size());
+    weightedTranslucencyCommands.clear();
+    weightedTranslucencyCommands.reserve(renderCommands.size());
     forwardResidualCommands.clear();
     forwardResidualCommands.reserve(renderCommands.size());
 
@@ -4395,10 +4417,14 @@ void VulkanRenderer::BuildGBufferCommandList(
         const u64 triangles = TriangleCountForCommand(command);
         switch (RenderClassForCommand(command)) {
         case MaterialRenderClass::Transparent:
-            forwardResidualCommands.push_back(command);
+            weightedTranslucencyCommands.push_back(command);
             ++drawStats.hybridForwardTransparentDraws;
-            ++drawStats.hybridForwardResidualDraws;
-            drawStats.hybridForwardResidualTriangles += triangles;
+            ++drawStats.hybridWeightedTranslucencyDraws;
+            drawStats.hybridWeightedTranslucencyTriangles += triangles;
+            if (recordTransparentAlphaReference) {
+                ++drawStats.hybridForwardResidualDraws;
+                drawStats.hybridForwardResidualTriangles += triangles;
+            }
             break;
         case MaterialRenderClass::ForwardSpecial:
             forwardResidualCommands.push_back(command);
@@ -4415,20 +4441,20 @@ void VulkanRenderer::BuildGBufferCommandList(
         }
     }
 
-    if (!forwardResidualCommands.empty()) {
-        std::vector<std::size_t> sortedIndices(forwardResidualCommands.size());
+    const glm::vec3 cameraPosition = CameraPositionFromMatrices(matrices);
+    const bool hasCameraMatrices = matrices != nullptr;
+    auto sortResidualCommands = [&](std::vector<RenderCommand>& commands) {
+        std::vector<std::size_t> sortedIndices(commands.size());
         for (std::size_t index = 0; index < sortedIndices.size(); ++index) {
             sortedIndices[index] = index;
         }
 
-        const glm::vec3 cameraPosition = CameraPositionFromMatrices(matrices);
-        const bool hasCameraMatrices = matrices != nullptr;
         std::sort(
             sortedIndices.begin(),
             sortedIndices.end(),
             [&](std::size_t lhsIndex, std::size_t rhsIndex) {
-                const RenderCommand& lhs = forwardResidualCommands[lhsIndex];
-                const RenderCommand& rhs = forwardResidualCommands[rhsIndex];
+                const RenderCommand& lhs = commands[lhsIndex];
+                const RenderCommand& rhs = commands[rhsIndex];
                 if (lhs.drawOrder != rhs.drawOrder) {
                     return lhs.drawOrder < rhs.drawOrder;
                 }
@@ -4452,16 +4478,34 @@ void VulkanRenderer::BuildGBufferCommandList(
             }
         );
 
-        std::vector<RenderCommand> sortedResidualCommands;
-        sortedResidualCommands.reserve(forwardResidualCommands.size());
+        std::vector<RenderCommand> sortedCommands;
+        sortedCommands.reserve(commands.size());
         for (std::size_t sortedIndex : sortedIndices) {
-            sortedResidualCommands.push_back(forwardResidualCommands[sortedIndex]);
+            sortedCommands.push_back(commands[sortedIndex]);
         }
-        forwardResidualCommands = std::move(sortedResidualCommands);
+        commands = std::move(sortedCommands);
+    };
 
+    if (!weightedTranslucencyCommands.empty()) {
+        sortResidualCommands(weightedTranslucencyCommands);
+        ++drawStats.hybridWeightedTranslucencySortOps;
+        drawStats.hybridWeightedTranslucencySortedTransparentDraws =
+            drawStats.hybridForwardTransparentDraws;
+    }
+
+    if (recordTransparentAlphaReference && !weightedTranslucencyCommands.empty()) {
+        forwardResidualCommands.insert(
+            forwardResidualCommands.begin(),
+            weightedTranslucencyCommands.begin(),
+            weightedTranslucencyCommands.end()
+        );
+    }
+
+    if (!forwardResidualCommands.empty()) {
+        sortResidualCommands(forwardResidualCommands);
         ++drawStats.hybridForwardResidualSortOps;
         drawStats.hybridForwardResidualSortedTransparentDraws =
-            drawStats.hybridForwardTransparentDraws;
+            recordTransparentAlphaReference ? drawStats.hybridForwardTransparentDraws : 0u;
         drawStats.hybridForwardResidualStableSpecialDraws =
             drawStats.hybridForwardSpecialDraws;
     }

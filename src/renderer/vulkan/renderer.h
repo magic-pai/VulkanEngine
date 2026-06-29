@@ -296,8 +296,10 @@ private:
     void BuildGBufferCommandList(
         std::span<const RenderCommand> renderCommands,
         std::vector<RenderCommand>& gBufferCommands,
+        std::vector<RenderCommand>& weightedTranslucencyCommands,
         std::vector<RenderCommand>& forwardResidualCommands,
         const FrameMatrices* matrices,
+        bool recordTransparentAlphaReference,
         RendererDrawStats& drawStats
     ) const;
     glm::mat4 LightViewProjection(

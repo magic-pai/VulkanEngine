@@ -451,19 +451,26 @@ void DrawPerformanceStats(const RendererStats& stats) {
         draw.shadowDraws
     );
     ImGui::Text(
-        "Hybrid routes: %u deferred / %u transparent / %u special / %u residual",
+        "Hybrid routes: %u deferred / %u transparent / %u special / %u weighted / %u residual",
         draw.hybridDeferredOpaqueDraws,
         draw.hybridForwardTransparentDraws,
         draw.hybridForwardSpecialDraws,
+        draw.hybridWeightedTranslucencyDraws,
         draw.hybridForwardResidualDraws
     );
     ImGui::Text(
-        "Residual pass: %u draws / %u frame binds / %u shared light-list draws / %u material binds / %u mesh binds",
+        "Residual pass: %u draws / alpha ref %s / %u frame binds / %u shared light-list draws / %u material binds / %u mesh binds",
         binds.forwardResidualDraws,
+        binds.forwardResidualAlphaReferenceEnabled ? "on" : "off",
         binds.forwardResidualFrameBinds,
         binds.forwardResidualSharedLightListDraws,
         binds.forwardResidualMaterialBinds,
         binds.forwardResidualMeshBinds
+    );
+    ImGui::Text(
+        "Weighted sort: %u ops / %u transparent",
+        draw.hybridWeightedTranslucencySortOps,
+        draw.hybridWeightedTranslucencySortedTransparentDraws
     );
     ImGui::Text(
         "Residual sort: %u ops / %u transparent / %u stable special",

@@ -904,6 +904,7 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* doubleSidedWeightedTranslucencyGraphicsPipeline,
     const VulkanGraphicsPipeline* weightedTranslucencyResolvePipeline,
     const VulkanWeightedTranslucencyDescriptorSets* weightedTranslucencyDescriptorSets,
+    std::span<const RenderCommand> weightedTranslucencyRenderCommands,
     const VulkanGraphicsPipeline* gBufferGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline,
     const VulkanDescriptorSets* gBufferDescriptorSets,
@@ -1405,7 +1406,7 @@ void VulkanCommandBuffer::Record(
         );
 
         if (weightedTranslucencyGraphicsPipeline != nullptr &&
-            !forwardResidualRenderCommands.empty()) {
+            !weightedTranslucencyRenderCommands.empty()) {
             u32 translucencyMaterialBinds = 0;
             u32 translucencyMeshBinds = 0;
             u32 translucencyPushConstantUpdates = 0;
@@ -1418,7 +1419,7 @@ void VulkanCommandBuffer::Record(
                 descriptorSets,
                 materialDescriptorSets,
                 frameMaterials,
-                forwardResidualRenderCommands,
+                weightedTranslucencyRenderCommands,
                 weightedTranslucencyFramebuffer->Extent(),
                 imageIndex,
                 translucencyState,
@@ -1430,7 +1431,7 @@ void VulkanCommandBuffer::Record(
 
             if (bindStats != nullptr) {
                 const u32 translucencyDrawCount =
-                    static_cast<u32>(forwardResidualRenderCommands.size());
+                    static_cast<u32>(weightedTranslucencyRenderCommands.size());
                 bindStats->weightedTranslucencyDraws += translucencyDrawCount;
                 bindStats->weightedTranslucencySharedLightListDraws +=
                     lightTileCullComputePipeline != nullptr ? translucencyDrawCount : 0u;

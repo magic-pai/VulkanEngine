@@ -100,6 +100,7 @@ public:
         const VulkanGraphicsPipeline* doubleSidedWeightedTranslucencyGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* weightedTranslucencyResolvePipeline = nullptr,
         const VulkanWeightedTranslucencyDescriptorSets* weightedTranslucencyDescriptorSets = nullptr,
+        std::span<const RenderCommand> weightedTranslucencyRenderCommands = {},
         const VulkanGraphicsPipeline* gBufferGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline = nullptr,
         const VulkanDescriptorSets* gBufferDescriptorSets = nullptr,

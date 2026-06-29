@@ -27,6 +27,9 @@ struct RendererDrawStats {
     u32 hybridDeferredOpaqueDraws = 0;
     u32 hybridForwardTransparentDraws = 0;
     u32 hybridForwardSpecialDraws = 0;
+    u32 hybridWeightedTranslucencyDraws = 0;
+    u32 hybridWeightedTranslucencySortOps = 0;
+    u32 hybridWeightedTranslucencySortedTransparentDraws = 0;
     u32 hybridForwardResidualDraws = 0;
     u32 hybridForwardResidualSortOps = 0;
     u32 hybridForwardResidualSortedTransparentDraws = 0;
@@ -36,6 +39,7 @@ struct RendererDrawStats {
     u64 overlayTriangles = 0;
     u64 shadowTriangles = 0;
     u64 hybridDeferredOpaqueTriangles = 0;
+    u64 hybridWeightedTranslucencyTriangles = 0;
     u64 hybridForwardResidualTriangles = 0;
     u32 matrixRecalculations = 0;
     u32 mainVisible = 0;
@@ -192,6 +196,7 @@ struct RendererBindStats {
     u32 weightedTranslucencyResolveDraws = 0;
     u32 weightedTranslucencyResolveFrameBinds = 0;
     u32 weightedTranslucencyResolveTextureBinds = 0;
+    u32 forwardResidualAlphaReferenceEnabled = 0;
     u32 forwardResidualDraws = 0;
     u32 forwardResidualFrameBinds = 0;
     u32 forwardResidualSharedLightListDraws = 0;
