@@ -165,10 +165,13 @@ struct LocalShadowTile {
     u32 localLightIndex = 0;
     u32 faceIndex = 0;
     u32 lightKind = 0;
+    u64 cacheKey = 0;
+    bool cacheReusable = false;
 };
 
 struct LocalShadowTileSet {
     std::array<LocalShadowTile, kMaxLocalShadowTiles> tiles{};
+    std::array<u64, kMaxLocalShadowTiles> cacheKeys{};
     u32 tileSize = 0;
     u32 tileColumns = 0;
     u32 tileRows = 0;
@@ -180,6 +183,9 @@ struct LocalShadowTileSet {
     u32 spotLightCount = 0;
     u32 pointFaceTiles = 0;
     u32 spotTiles = 0;
+    u32 cacheEligibleTiles = 0;
+    u32 cacheHitTiles = 0;
+    u32 cacheMissTiles = 0;
 };
 
 struct RenderQueueContext {
@@ -295,7 +301,8 @@ private:
     ) const;
     LocalShadowTileSet BuildLocalShadowTiles(
         const FrameLightSet& lights,
-        u32 atlasTileCapacity
+        u32 atlasTileCapacity,
+        bool allowCacheReuse
     ) const;
     std::span<const RenderCommand> ShadowRenderCommands() const;
     const VulkanDescriptorSets* ShadowDescriptorSets() const;
@@ -327,6 +334,10 @@ private:
     RenderQueue m_RenderQueue;
     RenderQueue m_OverlayRenderQueue;
     RenderQueue m_ShadowRenderQueue;
+    std::array<u64, kMaxLocalShadowTiles> m_PreviousLocalShadowTileKeys{};
+    u32 m_PreviousLocalShadowTileCount = 0;
+    u64 m_PreviousLocalShadowCommandSignature = 0;
+    bool m_HasPreviousLocalShadowCache = false;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
     RendererStats m_LastStats;
