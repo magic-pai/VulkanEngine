@@ -112,6 +112,8 @@ void BenchmarkRecorder::RecordFrame(
     const RendererDrawStats& draw = stats.draw;
     const RendererShadowCascadeStats& shadowCascades = stats.shadowCascades;
     const RendererLocalShadowAtlasStats& localShadowAtlas = stats.localShadowAtlas;
+    const RendererWeightedTranslucencyStats& weightedTranslucency =
+        stats.weightedTranslucency;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
 
@@ -243,6 +245,16 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.pcfKernelRadius << ','
         << localShadowAtlas.pcssStrength << ','
         << localShadowAtlas.faceBlendStrength << ','
+        << weightedTranslucency.allocated << ','
+        << weightedTranslucency.accumWidth << ','
+        << weightedTranslucency.accumHeight << ','
+        << weightedTranslucency.revealageWidth << ','
+        << weightedTranslucency.revealageHeight << ','
+        << static_cast<int>(weightedTranslucency.accumFormat) << ','
+        << static_cast<int>(weightedTranslucency.revealageFormat) << ','
+        << weightedTranslucency.renderPassAllocated << ','
+        << weightedTranslucency.framebufferCount << ','
+        << weightedTranslucency.clearPasses << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -284,6 +296,7 @@ void BenchmarkRecorder::RecordFrame(
         << binds.depthCopyOps << ','
         << binds.depthPrefillDraws << ','
         << binds.depthPrefillMeshBinds << ','
+        << binds.weightedTranslucencyClearPasses << ','
         << binds.forwardResidualDraws << ','
         << binds.forwardResidualFrameBinds << ','
         << binds.forwardResidualSharedLightListDraws << ','
@@ -428,6 +441,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_bias_min,local_shadow_bias_slope,"
         << "local_shadow_pcf_radius,local_shadow_pcf_kernel_radius,"
         << "local_shadow_pcss_strength,local_shadow_face_blend_strength,"
+        << "weighted_translucency_allocated,"
+        << "weighted_translucency_accum_width,weighted_translucency_accum_height,"
+        << "weighted_translucency_revealage_width,weighted_translucency_revealage_height,"
+        << "weighted_translucency_accum_format,weighted_translucency_revealage_format,"
+        << "weighted_translucency_render_pass_allocated,"
+        << "weighted_translucency_framebuffer_count,weighted_translucency_clear_passes,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"
@@ -446,6 +465,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"
+        << "weighted_translucency_bind_clear_passes,"
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"
         << "forward_residual_material_binds,forward_residual_mesh_binds,"

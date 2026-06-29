@@ -107,6 +107,11 @@ struct CurrentVulkanFrameGraphInputs {
     bool lightTileCullComputeEnabled = false;
     bool hdrCompositeEnabled = false;
     bool gBufferDebugEnabled = false;
+    bool weightedTranslucencyTargetsAllocated = false;
+    VkFormat weightedTranslucencyAccumFormat = VK_FORMAT_UNDEFINED;
+    VkFormat weightedTranslucencyRevealageFormat = VK_FORMAT_UNDEFINED;
+    bool weightedTranslucencyRenderPassAllocated = false;
+    u32 weightedTranslucencyFramebufferCount = 0;
     bool deferredTargetsAllocated = false;
     VkFormat sceneDepthFormat = VK_FORMAT_UNDEFINED;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;

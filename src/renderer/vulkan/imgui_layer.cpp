@@ -431,6 +431,8 @@ void DrawPerformanceStats(const RendererStats& stats) {
     const RendererDrawStats& draw = stats.draw;
     const RendererShadowCascadeStats& shadowCascades = stats.shadowCascades;
     const RendererLocalShadowAtlasStats& localShadowAtlas = stats.localShadowAtlas;
+    const RendererWeightedTranslucencyStats& weightedTranslucency =
+        stats.weightedTranslucency;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
 
@@ -474,6 +476,16 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.depthCopyOps,
         binds.depthPrefillDraws,
         binds.depthPrefillMeshBinds
+    );
+    ImGui::Text(
+        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u",
+        weightedTranslucency.allocated ? "yes" : "no",
+        weightedTranslucency.accumWidth,
+        weightedTranslucency.accumHeight,
+        weightedTranslucency.revealageWidth,
+        weightedTranslucency.revealageHeight,
+        weightedTranslucency.framebufferCount,
+        weightedTranslucency.clearPasses
     );
     ImGui::Text(
         "Instancing: %u draws / %u instances",

@@ -27,6 +27,8 @@ class VulkanSceneRenderTargets;
 class VulkanShadowFramebuffer;
 class VulkanShadowRenderPass;
 class VulkanSwapchain;
+class VulkanWeightedTranslucencyFramebuffer;
+class VulkanWeightedTranslucencyRenderPass;
 struct RenderCommand;
 struct RenderInstanceBatch;
 struct RendererBindStats;
@@ -91,6 +93,8 @@ public:
         const VulkanDepthBuffer* swapchainDepthBuffer = nullptr,
         const VulkanGBufferRenderPass* gBufferRenderPass = nullptr,
         const VulkanGBufferFramebuffer* gBufferFramebuffer = nullptr,
+        const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass = nullptr,
+        const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer = nullptr,
         const VulkanGraphicsPipeline* gBufferGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline = nullptr,
         const VulkanDescriptorSets* gBufferDescriptorSets = nullptr,

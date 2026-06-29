@@ -43,6 +43,8 @@ class VulkanGBufferRenderPass;
 class VulkanHdrFramebuffer;
 class VulkanHdrRenderPass;
 class VulkanSceneRenderTargets;
+class VulkanWeightedTranslucencyFramebuffer;
+class VulkanWeightedTranslucencyRenderPass;
 class VulkanShadowFramebuffer;
 class VulkanDirectionalShadowCascadeAtlas;
 class VulkanShadowMap;
@@ -370,6 +372,8 @@ private:
     std::unique_ptr<VulkanGBufferFramebuffer> m_GBufferFramebuffer;
     std::unique_ptr<VulkanHdrRenderPass> m_HdrRenderPass;
     std::unique_ptr<VulkanHdrFramebuffer> m_HdrFramebuffer;
+    std::unique_ptr<VulkanWeightedTranslucencyRenderPass> m_WeightedTranslucencyRenderPass;
+    std::unique_ptr<VulkanWeightedTranslucencyFramebuffer> m_WeightedTranslucencyFramebuffer;
     std::unique_ptr<VulkanDepthBuffer> m_DepthBuffer;
     std::unique_ptr<VulkanShadowMap> m_ShadowMap;
     std::unique_ptr<VulkanDirectionalShadowCascadeAtlas> m_DirectionalShadowCascadeAtlas;

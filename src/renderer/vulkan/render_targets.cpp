@@ -82,6 +82,87 @@ void VulkanHdrRenderPass::Release() {
     }
 }
 
+VulkanWeightedTranslucencyRenderPass::VulkanWeightedTranslucencyRenderPass(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) : m_Device(device.Handle()) {
+    CreateRenderPass(device, renderTargets);
+}
+
+VulkanWeightedTranslucencyRenderPass::~VulkanWeightedTranslucencyRenderPass() {
+    Release();
+}
+
+VkRenderPass VulkanWeightedTranslucencyRenderPass::Handle() const {
+    return m_RenderPass;
+}
+
+void VulkanWeightedTranslucencyRenderPass::Recreate(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateRenderPass(device, renderTargets);
+}
+
+void VulkanWeightedTranslucencyRenderPass::CreateRenderPass(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    std::array<VkAttachmentDescription, 2> attachments{};
+    attachments[0].format = renderTargets.WeightedTranslucencyAccumFormat();
+    attachments[1].format = renderTargets.WeightedTranslucencyRevealageFormat();
+    for (VkAttachmentDescription& attachment : attachments) {
+        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    std::array<VkAttachmentReference, 2> colorAttachmentReferences{};
+    for (std::size_t index = 0; index < colorAttachmentReferences.size(); ++index) {
+        colorAttachmentReferences[index].attachment = static_cast<u32>(index);
+        colorAttachmentReferences[index].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = static_cast<u32>(colorAttachmentReferences.size());
+    subpass.pColorAttachments = colorAttachmentReferences.data();
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.attachmentCount = static_cast<u32>(attachments.size());
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan weighted translucency render pass");
+    }
+}
+
+void VulkanWeightedTranslucencyRenderPass::Release() {
+    if (m_RenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+        m_RenderPass = VK_NULL_HANDLE;
+    }
+}
+
 VulkanGBufferRenderPass::VulkanGBufferRenderPass(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
@@ -202,6 +283,22 @@ VkImageView VulkanSceneRenderTargets::HdrSceneColorView(std::size_t index) const
     return m_HdrSceneColorImages[index]->View();
 }
 
+VkImageView VulkanSceneRenderTargets::WeightedTranslucencyAccumView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_WeightedTranslucencyAccumImages.size(),
+        "Weighted translucency accum index is out of range"
+    );
+    return m_WeightedTranslucencyAccumImages[index]->View();
+}
+
+VkImageView VulkanSceneRenderTargets::WeightedTranslucencyRevealageView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_WeightedTranslucencyRevealageImages.size(),
+        "Weighted translucency revealage index is out of range"
+    );
+    return m_WeightedTranslucencyRevealageImages[index]->View();
+}
+
 VkImage VulkanSceneRenderTargets::SceneDepthImage(std::size_t index) const {
     SE_ASSERT(index < m_SceneDepthImages.size(), "Scene depth index is out of range");
     return m_SceneDepthImages[index]->Handle();
@@ -242,6 +339,14 @@ VkImageView VulkanSceneRenderTargets::GBufferEmissiveView(std::size_t index) con
 
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
     return kHdrSceneColorFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::WeightedTranslucencyAccumFormat() const {
+    return kWeightedTranslucencyAccumFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::WeightedTranslucencyRevealageFormat() const {
+    return kWeightedTranslucencyRevealageFormat;
 }
 
 VkFormat VulkanSceneRenderTargets::SceneDepthFormat() const {
@@ -297,6 +402,28 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_HdrSceneColorImages
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kWeightedTranslucencyAccumFormat,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_STORAGE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_WeightedTranslucencyAccumImages
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kWeightedTranslucencyRevealageFormat,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_STORAGE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_WeightedTranslucencyRevealageImages
     );
     CreateImageArray(
         device,
@@ -366,6 +493,8 @@ void VulkanSceneRenderTargets::Recreate(
 
 void VulkanSceneRenderTargets::Release() {
     m_HdrSceneColorImages.clear();
+    m_WeightedTranslucencyAccumImages.clear();
+    m_WeightedTranslucencyRevealageImages.clear();
     m_SceneDepthImages.clear();
     m_VelocityImages.clear();
     m_GBufferAlbedoImages.clear();
@@ -462,6 +591,82 @@ void VulkanHdrFramebuffer::CreateFramebuffers(
 }
 
 void VulkanHdrFramebuffer::Release() {
+    for (VkFramebuffer framebuffer : m_Framebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+        }
+    }
+
+    m_Framebuffers.clear();
+    m_Extent = {};
+}
+
+VulkanWeightedTranslucencyFramebuffer::VulkanWeightedTranslucencyFramebuffer(
+    const VulkanDevice& device,
+    const VulkanWeightedTranslucencyRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) : m_Device(device.Handle()) {
+    CreateFramebuffers(device, renderPass, renderTargets);
+}
+
+VulkanWeightedTranslucencyFramebuffer::~VulkanWeightedTranslucencyFramebuffer() {
+    Release();
+}
+
+VkFramebuffer VulkanWeightedTranslucencyFramebuffer::Handle(std::size_t index) const {
+    SE_ASSERT(index < m_Framebuffers.size(), "Weighted translucency framebuffer index is out of range");
+    return m_Framebuffers[index];
+}
+
+VkExtent2D VulkanWeightedTranslucencyFramebuffer::Extent() const {
+    return m_Extent;
+}
+
+std::size_t VulkanWeightedTranslucencyFramebuffer::Count() const {
+    return m_Framebuffers.size();
+}
+
+void VulkanWeightedTranslucencyFramebuffer::Recreate(
+    const VulkanDevice& device,
+    const VulkanWeightedTranslucencyRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateFramebuffers(device, renderPass, renderTargets);
+}
+
+void VulkanWeightedTranslucencyFramebuffer::CreateFramebuffers(
+    const VulkanDevice& device,
+    const VulkanWeightedTranslucencyRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    m_Extent = renderTargets.Extent();
+    m_Framebuffers.resize(renderTargets.Count());
+
+    for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        const std::array<VkImageView, 2> attachments = {
+            renderTargets.WeightedTranslucencyAccumView(index),
+            renderTargets.WeightedTranslucencyRevealageView(index)
+        };
+
+        VkFramebufferCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        createInfo.renderPass = renderPass.Handle();
+        createInfo.attachmentCount = static_cast<u32>(attachments.size());
+        createInfo.pAttachments = attachments.data();
+        createInfo.width = m_Extent.width;
+        createInfo.height = m_Extent.height;
+        createInfo.layers = 1;
+
+        if (vkCreateFramebuffer(device.Handle(), &createInfo, nullptr, &m_Framebuffers[index]) != VK_SUCCESS) {
+            Release();
+            throw std::runtime_error("Failed to create Vulkan weighted translucency framebuffer");
+        }
+    }
+}
+
+void VulkanWeightedTranslucencyFramebuffer::Release() {
     for (VkFramebuffer framebuffer : m_Framebuffers) {
         if (framebuffer != VK_NULL_HANDLE) {
             vkDestroyFramebuffer(m_Device, framebuffer, nullptr);

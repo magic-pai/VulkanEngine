@@ -30,6 +30,36 @@ private:
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
 };
 
+class VulkanWeightedTranslucencyRenderPass {
+public:
+    explicit VulkanWeightedTranslucencyRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    ~VulkanWeightedTranslucencyRenderPass();
+
+    SE_DISABLE_COPY(VulkanWeightedTranslucencyRenderPass);
+    SE_DISABLE_MOVE(VulkanWeightedTranslucencyRenderPass);
+
+    VkRenderPass Handle() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    void Release();
+
+private:
+    void CreateRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+};
+
 class VulkanGBufferRenderPass {
 public:
     explicit VulkanGBufferRenderPass(
@@ -74,6 +104,8 @@ public:
     SE_DISABLE_MOVE(VulkanSceneRenderTargets);
 
     VkImageView HdrSceneColorView(std::size_t index) const;
+    VkImageView WeightedTranslucencyAccumView(std::size_t index) const;
+    VkImageView WeightedTranslucencyRevealageView(std::size_t index) const;
     VkImage SceneDepthImage(std::size_t index) const;
     VkImageView SceneDepthView(std::size_t index) const;
     VkImageView VelocityView(std::size_t index) const;
@@ -82,6 +114,8 @@ public:
     VkImageView GBufferMaterialView(std::size_t index) const;
     VkImageView GBufferEmissiveView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
+    VkFormat WeightedTranslucencyAccumFormat() const;
+    VkFormat WeightedTranslucencyRevealageFormat() const;
     VkFormat SceneDepthFormat() const;
     VkFormat VelocityFormat() const;
     VkFormat GBufferAlbedoFormat() const;
@@ -100,6 +134,10 @@ public:
 
     static constexpr VkFormat kHdrSceneColorFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat kWeightedTranslucencyAccumFormat =
+        VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat kWeightedTranslucencyRevealageFormat =
+        VK_FORMAT_R16_SFLOAT;
     static constexpr VkFormat kSceneDepthFormat = VK_FORMAT_D32_SFLOAT;
     static constexpr VkFormat kVelocityFormat = VK_FORMAT_R16G16_SFLOAT;
     static constexpr VkFormat kGBufferAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
@@ -122,6 +160,8 @@ private:
 
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyAccumImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyRevealageImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SceneDepthImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VelocityImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferAlbedoImages;
@@ -159,6 +199,43 @@ private:
     void CreateFramebuffers(
         const VulkanDevice& device,
         const VulkanHdrRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> m_Framebuffers;
+    VkExtent2D m_Extent{};
+};
+
+class VulkanWeightedTranslucencyFramebuffer {
+public:
+    VulkanWeightedTranslucencyFramebuffer(
+        const VulkanDevice& device,
+        const VulkanWeightedTranslucencyRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+    ~VulkanWeightedTranslucencyFramebuffer();
+
+    SE_DISABLE_COPY(VulkanWeightedTranslucencyFramebuffer);
+    SE_DISABLE_MOVE(VulkanWeightedTranslucencyFramebuffer);
+
+    VkFramebuffer Handle(std::size_t index) const;
+    VkExtent2D Extent() const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanWeightedTranslucencyRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    void Release();
+
+private:
+    void CreateFramebuffers(
+        const VulkanDevice& device,
+        const VulkanWeightedTranslucencyRenderPass& renderPass,
         const VulkanSceneRenderTargets& renderTargets
     );
 

@@ -124,6 +124,19 @@ struct RendererLocalShadowAtlasStats {
     f32 faceBlendStrength = 0.0f;
 };
 
+struct RendererWeightedTranslucencyStats {
+    u32 allocated = 0;
+    u32 accumWidth = 0;
+    u32 accumHeight = 0;
+    u32 revealageWidth = 0;
+    u32 revealageHeight = 0;
+    VkFormat accumFormat = VK_FORMAT_UNDEFINED;
+    VkFormat revealageFormat = VK_FORMAT_UNDEFINED;
+    u32 renderPassAllocated = 0;
+    u32 framebufferCount = 0;
+    u32 clearPasses = 0;
+};
+
 struct RendererBindStats {
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
@@ -166,6 +179,7 @@ struct RendererBindStats {
     u32 depthCopyOps = 0;
     u32 depthPrefillDraws = 0;
     u32 depthPrefillMeshBinds = 0;
+    u32 weightedTranslucencyClearPasses = 0;
     u32 forwardResidualDraws = 0;
     u32 forwardResidualFrameBinds = 0;
     u32 forwardResidualSharedLightListDraws = 0;
@@ -252,6 +266,7 @@ struct RendererStats {
     RendererDrawStats draw;
     RendererShadowCascadeStats shadowCascades;
     RendererLocalShadowAtlasStats localShadowAtlas;
+    RendererWeightedTranslucencyStats weightedTranslucency;
     RendererBindStats binds;
     RendererGpuStats gpu;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();

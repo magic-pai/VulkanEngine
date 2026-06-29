@@ -1659,6 +1659,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_RenderPass.reset();
     m_GBufferFramebuffer.reset();
     m_GBufferRenderPass.reset();
+    m_WeightedTranslucencyFramebuffer.reset();
+    m_WeightedTranslucencyRenderPass.reset();
     m_HdrFramebuffer.reset();
     m_HdrRenderPass.reset();
     m_DirectionalShadowCascadeFramebuffer.reset();
@@ -2019,6 +2021,26 @@ void VulkanRenderer::DrawFrame() {
         frameStats.localShadowAtlas.faceBlendStrength =
             std::clamp(m_ShadowSettings.localFaceBlendStrength, 0.0f, 1.0f);
     }
+    if (m_SceneRenderTargets != nullptr &&
+        m_WeightedTranslucencyRenderPass != nullptr &&
+        m_WeightedTranslucencyFramebuffer != nullptr) {
+        const VkExtent2D weightedExtent =
+            m_WeightedTranslucencyFramebuffer->Extent();
+        frameStats.weightedTranslucency.allocated =
+            weightedExtent.width > 0 && weightedExtent.height > 0 ? 1u : 0u;
+        frameStats.weightedTranslucency.accumWidth = weightedExtent.width;
+        frameStats.weightedTranslucency.accumHeight = weightedExtent.height;
+        frameStats.weightedTranslucency.revealageWidth = weightedExtent.width;
+        frameStats.weightedTranslucency.revealageHeight = weightedExtent.height;
+        frameStats.weightedTranslucency.accumFormat =
+            m_SceneRenderTargets->WeightedTranslucencyAccumFormat();
+        frameStats.weightedTranslucency.revealageFormat =
+            m_SceneRenderTargets->WeightedTranslucencyRevealageFormat();
+        frameStats.weightedTranslucency.renderPassAllocated =
+            m_WeightedTranslucencyRenderPass->Handle() != VK_NULL_HANDLE ? 1u : 0u;
+        frameStats.weightedTranslucency.framebufferCount =
+            static_cast<u32>(m_WeightedTranslucencyFramebuffer->Count());
+    }
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,
@@ -2200,6 +2222,11 @@ void VulkanRenderer::DrawFrame() {
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
+            frameStats.weightedTranslucency.allocated > 0,
+            frameStats.weightedTranslucency.accumFormat,
+            frameStats.weightedTranslucency.revealageFormat,
+            frameStats.weightedTranslucency.renderPassAllocated > 0,
+            frameStats.weightedTranslucency.framebufferCount,
             m_SceneRenderTargets != nullptr,
             m_SceneRenderTargets != nullptr
                 ? m_SceneRenderTargets->SceneDepthFormat()
@@ -2283,6 +2310,8 @@ void VulkanRenderer::DrawFrame() {
         has3DMainPass ? m_DepthBuffer.get() : nullptr,
         m_GBufferRenderPass.get(),
         m_GBufferFramebuffer.get(),
+        m_WeightedTranslucencyRenderPass.get(),
+        m_WeightedTranslucencyFramebuffer.get(),
         has3DMainPass ? m_GBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedGBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DescriptorSets.get() : nullptr,
@@ -2311,6 +2340,8 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.localShadowAtlasDraws;
     frameStats.localShadowAtlas.recordedMeshBinds =
         frameStats.binds.localShadowAtlasMeshBinds;
+    frameStats.weightedTranslucency.clearPasses =
+        frameStats.binds.weightedTranslucencyClearPasses;
     if (imageIndex < m_LocalShadowCacheStates.size()) {
         LocalShadowCacheState& cacheState = m_LocalShadowCacheStates[imageIndex];
         cacheState.tileKeys = localShadowTiles.cacheKeys;
@@ -2562,6 +2593,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_Device,
         m_SceneRenderTargets->HdrSceneColorFormat()
     );
+    m_WeightedTranslucencyRenderPass =
+        std::make_unique<VulkanWeightedTranslucencyRenderPass>(
+            m_Device,
+            *m_SceneRenderTargets
+        );
     m_GBufferRenderPass = std::make_unique<VulkanGBufferRenderPass>(
         m_Device,
         *m_SceneRenderTargets
@@ -2571,6 +2607,12 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_HdrRenderPass,
         *m_SceneRenderTargets
     );
+    m_WeightedTranslucencyFramebuffer =
+        std::make_unique<VulkanWeightedTranslucencyFramebuffer>(
+            m_Device,
+            *m_WeightedTranslucencyRenderPass,
+            *m_SceneRenderTargets
+        );
     m_GBufferFramebuffer = std::make_unique<VulkanGBufferFramebuffer>(
         m_Device,
         *m_GBufferRenderPass,
@@ -2976,6 +3018,12 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_HdrRenderPass != nullptr) {
         m_HdrRenderPass->Release();
     }
+    if (m_WeightedTranslucencyFramebuffer != nullptr) {
+        m_WeightedTranslucencyFramebuffer->Release();
+    }
+    if (m_WeightedTranslucencyRenderPass != nullptr) {
+        m_WeightedTranslucencyRenderPass->Release();
+    }
     if (m_ShadowFramebuffer != nullptr) {
         m_ShadowFramebuffer->Release();
     }
@@ -3084,6 +3132,13 @@ void VulkanRenderer::RecreateSwapchain() {
             m_SceneRenderTargets->HdrSceneColorFormat()
         );
     }
+    if (m_WeightedTranslucencyRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_WeightedTranslucencyRenderPass->Recreate(
+            m_Device,
+            *m_SceneRenderTargets
+        );
+    }
     if (m_GBufferRenderPass != nullptr && m_SceneRenderTargets != nullptr) {
         m_GBufferRenderPass->Recreate(
             m_Device,
@@ -3096,6 +3151,15 @@ void VulkanRenderer::RecreateSwapchain() {
         m_HdrFramebuffer->Recreate(
             m_Device,
             *m_HdrRenderPass,
+            *m_SceneRenderTargets
+        );
+    }
+    if (m_WeightedTranslucencyFramebuffer != nullptr &&
+        m_WeightedTranslucencyRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_WeightedTranslucencyFramebuffer->Recreate(
+            m_Device,
+            *m_WeightedTranslucencyRenderPass,
             *m_SceneRenderTargets
         );
     }

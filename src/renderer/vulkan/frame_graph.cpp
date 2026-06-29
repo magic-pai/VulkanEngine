@@ -70,6 +70,8 @@ std::string_view VulkanFormatName(VkFormat format) {
         return "R8G8B8A8_UNORM";
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return "R16G16B16A16_SFLOAT";
+    case VK_FORMAT_R16_SFLOAT:
+        return "R16_SFLOAT";
     case VK_FORMAT_R16G16_SFLOAT:
         return "R16G16_SFLOAT";
     case VK_FORMAT_R16G16B16A16_UNORM:
@@ -223,7 +225,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
 void AppendAAAResourceBlueprint(
     RenderFrameGraphPlan& plan,
     bool includeHdrSceneColor = true,
-    bool includeDeferredTargets = true
+    bool includeDeferredTargets = true,
+    bool includeWeightedTranslucencyTargets = true
 ) {
     if (includeHdrSceneColor) {
         AppendResource(
@@ -289,6 +292,26 @@ void AppendAAAResourceBlueprint(
             "GBufferEmissive",
             "R16G16B16A16_SFLOAT",
             "color attachment, sampled",
+            "dynamic internal resolution"
+        );
+    }
+    if (includeWeightedTranslucencyTargets) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Planned,
+            RenderGraphResourceLifetime::PerFrame,
+            "WeightedTranslucencyAccum",
+            "R16G16B16A16_SFLOAT",
+            "color attachment, sampled, storage",
+            "dynamic internal resolution"
+        );
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Planned,
+            RenderGraphResourceLifetime::PerFrame,
+            "WeightedTranslucencyRevealage",
+            "R16_SFLOAT",
+            "color attachment, sampled, storage",
             "dynamic internal resolution"
         );
     }
@@ -484,6 +507,26 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "window extent"
         );
     }
+    if (inputs.weightedTranslucencyTargetsAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "WeightedTranslucencyAccum",
+            VulkanFormatName(inputs.weightedTranslucencyAccumFormat),
+            "color attachment, sampled, storage",
+            "window extent"
+        );
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "WeightedTranslucencyRevealage",
+            VulkanFormatName(inputs.weightedTranslucencyRevealageFormat),
+            "color attachment, sampled, storage",
+            "window extent"
+        );
+    }
     if (inputs.deferredTargetsAllocated) {
         AppendResource(
             plan,
@@ -566,6 +609,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "frame matrices, local light records",
             "tile light lists",
             "First compute-backed tiled light-list write feeding deferred lighting."
+        );
+    }
+    if (inputs.weightedTranslucencyRenderPassAllocated &&
+        inputs.weightedTranslucencyFramebufferCount > 0) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Forward,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "WeightedTranslucencyCarrier",
+            "transparent residual queue, frame light lists",
+            "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
+            "Clears physical weighted blended translucency targets; residual transparency writes and resolve follow in the next slice."
         );
     }
     if (inputs.hdrRenderPassAllocated) {
@@ -699,7 +755,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     AppendAAAResourceBlueprint(
         plan,
         !inputs.hdrSceneColorAllocated,
-        !inputs.deferredTargetsAllocated
+        !inputs.deferredTargetsAllocated,
+        !inputs.weightedTranslucencyTargetsAllocated
     );
     return plan;
 }

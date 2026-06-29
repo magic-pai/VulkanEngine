@@ -862,63 +862,65 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline& graphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedGraphicsPipeline,
     const VulkanDescriptorSets& descriptorSets,
-        const VulkanMaterialDescriptorSets& materialDescriptorSets,
-        std::span<const RenderCommand> renderCommands,
-        const VulkanFramebuffer& framebuffer,
-        const VulkanRenderPass* depthLoadRenderPass,
-        const VulkanFramebuffer* depthLoadFramebuffer,
-        const VulkanSwapchain& swapchain,
-        VulkanImGuiLayer* imguiLayer,
+    const VulkanMaterialDescriptorSets& materialDescriptorSets,
+    std::span<const RenderCommand> renderCommands,
+    const VulkanFramebuffer& framebuffer,
+    const VulkanRenderPass* depthLoadRenderPass,
+    const VulkanFramebuffer* depthLoadFramebuffer,
+    const VulkanSwapchain& swapchain,
+    VulkanImGuiLayer* imguiLayer,
     const VulkanShadowRenderPass* shadowRenderPass,
     const VulkanGraphicsPipeline* shadowGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedShadowGraphicsPipeline,
-        const VulkanShadowFramebuffer* shadowFramebuffer,
-        const VulkanDescriptorSets* shadowDescriptorSets,
-        std::span<const RenderCommand> shadowRenderCommands,
-        const VulkanShadowFramebuffer* directionalShadowCascadeFramebuffer,
-        const DirectionalShadowCascadeSet* directionalShadowCascades,
-        const VulkanShadowFramebuffer* localShadowFramebuffer,
-        const LocalShadowTileSet* localShadowTiles,
-        bool skipCachedLocalShadowTiles,
-        const VulkanHdrRenderPass* hdrRenderPass,
-        const VulkanHdrFramebuffer* hdrFramebuffer,
-        const VulkanGraphicsPipeline* deferredLightingPipeline,
-        const VulkanDescriptorSets* deferredLightingFrameDescriptorSets,
-        const VulkanGBufferDescriptorSets* deferredLightingGBufferDescriptorSets,
-        int deferredPbrDebugView,
-        const VulkanGraphicsPipeline* hdrCompositePipeline,
-        const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
-        bool useHdrCompositeAsMain,
-        const VulkanGraphicsPipeline* gBufferDebugPipeline,
-        const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
-        int gBufferDebugView,
+    const VulkanShadowFramebuffer* shadowFramebuffer,
+    const VulkanDescriptorSets* shadowDescriptorSets,
+    std::span<const RenderCommand> shadowRenderCommands,
+    const VulkanShadowFramebuffer* directionalShadowCascadeFramebuffer,
+    const DirectionalShadowCascadeSet* directionalShadowCascades,
+    const VulkanShadowFramebuffer* localShadowFramebuffer,
+    const LocalShadowTileSet* localShadowTiles,
+    bool skipCachedLocalShadowTiles,
+    const VulkanHdrRenderPass* hdrRenderPass,
+    const VulkanHdrFramebuffer* hdrFramebuffer,
+    const VulkanGraphicsPipeline* deferredLightingPipeline,
+    const VulkanDescriptorSets* deferredLightingFrameDescriptorSets,
+    const VulkanGBufferDescriptorSets* deferredLightingGBufferDescriptorSets,
+    int deferredPbrDebugView,
+    const VulkanGraphicsPipeline* hdrCompositePipeline,
+    const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
+    bool useHdrCompositeAsMain,
+    const VulkanGraphicsPipeline* gBufferDebugPipeline,
+    const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
+    int gBufferDebugView,
     const VulkanGraphicsPipeline* depthPrefillGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedDepthPrefillGraphicsPipeline,
-        const VulkanSceneRenderTargets* sceneRenderTargets,
-        const VulkanDepthBuffer* swapchainDepthBuffer,
-        const VulkanGBufferRenderPass* gBufferRenderPass,
-        const VulkanGBufferFramebuffer* gBufferFramebuffer,
+    const VulkanSceneRenderTargets* sceneRenderTargets,
+    const VulkanDepthBuffer* swapchainDepthBuffer,
+    const VulkanGBufferRenderPass* gBufferRenderPass,
+    const VulkanGBufferFramebuffer* gBufferFramebuffer,
+    const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass,
+    const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer,
     const VulkanGraphicsPipeline* gBufferGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline,
     const VulkanDescriptorSets* gBufferDescriptorSets,
-        std::span<const RenderCommand> gBufferRenderCommands,
-        const VulkanComputePipeline* lightTileCullComputePipeline,
-        const VulkanDescriptorSets* lightTileCullDescriptorSets,
-        u32 lightTileCullGroupCountX,
-        u32 lightTileCullGroupCountY,
+    std::span<const RenderCommand> gBufferRenderCommands,
+    const VulkanComputePipeline* lightTileCullComputePipeline,
+    const VulkanDescriptorSets* lightTileCullDescriptorSets,
+    u32 lightTileCullGroupCountX,
+    u32 lightTileCullGroupCountY,
     const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline,
-        std::span<const RenderCommand> forwardResidualRenderCommands,
-        const FrameMaterialSet* frameMaterials,
-        const VulkanGraphicsPipeline* overlayGraphicsPipeline,
-        const VulkanDescriptorSets* overlayDescriptorSets,
-        std::span<const RenderCommand> overlayRenderCommands,
-        const VulkanGraphicsPipeline* instancedGraphicsPipeline,
-        const VulkanGraphicsPipeline* doubleSidedInstancedGraphicsPipeline,
-        const VulkanInstanceBuffer* instanceBuffer,
-        std::span<const RenderInstanceBatch> instanceBatches,
-        const VulkanGpuTimer* gpuTimer,
-        RendererBindStats* bindStats
+    std::span<const RenderCommand> forwardResidualRenderCommands,
+    const FrameMaterialSet* frameMaterials,
+    const VulkanGraphicsPipeline* overlayGraphicsPipeline,
+    const VulkanDescriptorSets* overlayDescriptorSets,
+    std::span<const RenderCommand> overlayRenderCommands,
+    const VulkanGraphicsPipeline* instancedGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedInstancedGraphicsPipeline,
+    const VulkanInstanceBuffer* instanceBuffer,
+    std::span<const RenderInstanceBatch> instanceBatches,
+    const VulkanGpuTimer* gpuTimer,
+    RendererBindStats* bindStats
 ) const {
     const std::vector<VkFramebuffer>& framebuffers = framebuffer.Handles();
     const VkExtent2D extent = swapchain.Extent();
@@ -1333,6 +1335,36 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    if (weightedTranslucencyRenderPass != nullptr &&
+        weightedTranslucencyFramebuffer != nullptr) {
+        std::array<VkClearValue, 2> translucencyClearValues{};
+        translucencyClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+        translucencyClearValues[1].color = { { 1.0f, 0.0f, 0.0f, 0.0f } };
+
+        VkRenderPassBeginInfo translucencyPassInfo{};
+        translucencyPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        translucencyPassInfo.renderPass = weightedTranslucencyRenderPass->Handle();
+        translucencyPassInfo.framebuffer =
+            weightedTranslucencyFramebuffer->Handle(imageIndex);
+        translucencyPassInfo.renderArea.offset = { 0, 0 };
+        translucencyPassInfo.renderArea.extent =
+            weightedTranslucencyFramebuffer->Extent();
+        translucencyPassInfo.clearValueCount =
+            static_cast<u32>(translucencyClearValues.size());
+        translucencyPassInfo.pClearValues = translucencyClearValues.data();
+
+        vkCmdBeginRenderPass(
+            commandBuffer,
+            &translucencyPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+        vkCmdEndRenderPass(commandBuffer);
+
+        if (bindStats != nullptr) {
+            ++bindStats->weightedTranslucencyClearPasses;
+        }
     }
 
     if (lightTileCullComputePipeline != nullptr &&
