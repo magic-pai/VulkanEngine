@@ -905,6 +905,7 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* weightedTranslucencyResolvePipeline,
     const VulkanWeightedTranslucencyDescriptorSets* weightedTranslucencyDescriptorSets,
     std::span<const RenderCommand> weightedTranslucencyRenderCommands,
+    int weightedTranslucencyDebugView,
     const VulkanGraphicsPipeline* gBufferGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline,
     const VulkanDescriptorSets* gBufferDescriptorSets,
@@ -1593,11 +1594,38 @@ void VulkanCommandBuffer::Record(
                 nullptr
             );
 
+            ObjectPushConstants resolveConstants =
+                DeferredLightingPushConstants(gBufferRenderCommands);
+            resolveConstants.materialControls = glm::vec4(
+                0.0f,
+                0.0f,
+                0.0f,
+                static_cast<f32>(std::max(weightedTranslucencyDebugView, 0))
+            );
+            u32 resolvePushConstantUpdates = 0;
+            u64 resolvePushConstantBytes = 0;
+            PushConstants(
+                commandBuffer,
+                *weightedTranslucencyResolvePipeline,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                0,
+                sizeof(ObjectPushConstants),
+                &resolveConstants,
+                resolvePushConstantUpdates,
+                resolvePushConstantBytes
+            );
             vkCmdDraw(commandBuffer, 3, 1, 0, 0);
             if (bindStats != nullptr) {
                 ++bindStats->weightedTranslucencyResolveDraws;
                 ++bindStats->weightedTranslucencyResolveFrameBinds;
                 ++bindStats->weightedTranslucencyResolveTextureBinds;
+                if (weightedTranslucencyDebugView > 0) {
+                    ++bindStats->weightedTranslucencyDebugDraws;
+                    ++bindStats->weightedTranslucencyDebugFrameBinds;
+                    ++bindStats->weightedTranslucencyDebugTextureBinds;
+                }
+                bindStats->pushConstantUpdates += resolvePushConstantUpdates;
+                bindStats->pushConstantBytes += resolvePushConstantBytes;
             }
         }
 

@@ -380,6 +380,12 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Contact Shadow";
     case ForwardDebugView::LocalShadowFace:
         return "Local Shadow Face";
+    case ForwardDebugView::WeightedTranslucencyAccum:
+        return "WBOIT Accum";
+    case ForwardDebugView::WeightedTranslucencyRevealage:
+        return "WBOIT Revealage";
+    case ForwardDebugView::WeightedTranslucencyWeight:
+        return "WBOIT Weight";
     }
 
     return "Lit";
@@ -416,7 +422,10 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::LocalShadowAtlas,
         ForwardDebugView::LocalShadowVisibility,
         ForwardDebugView::ContactShadow,
-        ForwardDebugView::LocalShadowFace
+        ForwardDebugView::LocalShadowFace,
+        ForwardDebugView::WeightedTranslucencyAccum,
+        ForwardDebugView::WeightedTranslucencyRevealage,
+        ForwardDebugView::WeightedTranslucencyWeight
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -499,7 +508,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.depthPrefillMeshBinds
     );
     ImGui::Text(
-        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u, draws %u, shared lights %u, shadow-ready %u, resolves %u",
+        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u, draws %u, shared lights %u, shadow-ready %u, resolves %u, debug %u",
         weightedTranslucency.allocated ? "yes" : "no",
         weightedTranslucency.accumWidth,
         weightedTranslucency.accumHeight,
@@ -510,7 +519,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         weightedTranslucency.draws,
         weightedTranslucency.sharedLightListDraws,
         weightedTranslucency.shadowReadyDraws,
-        weightedTranslucency.resolveDraws
+        weightedTranslucency.resolveDraws,
+        binds.weightedTranslucencyDebugDraws
+    );
+    ImGui::Text(
+        "Weighted reference: alpha ref %s, mismatch draws %u",
+        binds.forwardResidualAlphaReferenceEnabled ? "on" : "off",
+        binds.weightedTranslucencyAlphaReferenceMismatchDraws
     );
     ImGui::Text(
         "Instancing: %u draws / %u instances",

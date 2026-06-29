@@ -1409,6 +1409,19 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
     }
 }
 
+int WeightedTranslucencyDebugViewIndex(ForwardDebugView view) {
+    switch (view) {
+    case ForwardDebugView::WeightedTranslucencyAccum:
+        return 1;
+    case ForwardDebugView::WeightedTranslucencyRevealage:
+        return 2;
+    case ForwardDebugView::WeightedTranslucencyWeight:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
 bool UsesDeferredHdrComposite(ForwardDebugView view) {
     return view == ForwardDebugView::DeferredHdr ||
         view == ForwardDebugView::DeferredDirect ||
@@ -1420,7 +1433,10 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::LocalShadowAtlas ||
         view == ForwardDebugView::LocalShadowVisibility ||
         view == ForwardDebugView::ContactShadow ||
-        view == ForwardDebugView::LocalShadowFace;
+        view == ForwardDebugView::LocalShadowFace ||
+        view == ForwardDebugView::WeightedTranslucencyAccum ||
+        view == ForwardDebugView::WeightedTranslucencyRevealage ||
+        view == ForwardDebugView::WeightedTranslucencyWeight;
 }
 
 std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
@@ -1518,6 +1534,27 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "point-shadow-seam" ||
         value == "point_shadow_seam") {
         return ForwardDebugView::LocalShadowFace;
+    }
+    if (value == "wboit-accum" ||
+        value == "wboit_accum" ||
+        value == "weighted-translucency-accum" ||
+        value == "weighted_translucency_accum" ||
+        value == "WeightedTranslucencyAccum") {
+        return ForwardDebugView::WeightedTranslucencyAccum;
+    }
+    if (value == "wboit-revealage" ||
+        value == "wboit_revealage" ||
+        value == "weighted-translucency-revealage" ||
+        value == "weighted_translucency_revealage" ||
+        value == "WeightedTranslucencyRevealage") {
+        return ForwardDebugView::WeightedTranslucencyRevealage;
+    }
+    if (value == "wboit-weight" ||
+        value == "wboit_weight" ||
+        value == "weighted-translucency-weight" ||
+        value == "weighted_translucency_weight" ||
+        value == "WeightedTranslucencyWeight") {
+        return ForwardDebugView::WeightedTranslucencyWeight;
     }
     if (value == "gbuffer-albedo" || value == "GBufferAlbedo" || value == "gbuffer_albedo") {
         return ForwardDebugView::GBufferAlbedo;
@@ -1947,6 +1984,8 @@ void VulkanRenderer::DrawFrame() {
         UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView);
     const int deferredPbrDebugView =
         DeferredPbrDebugViewIndex(m_RenderDebugSettings.forwardView);
+    const int weightedTranslucencyDebugView =
+        WeightedTranslucencyDebugViewIndex(m_RenderDebugSettings.forwardView);
     const int gBufferDebugView = GBufferDebugViewIndex(m_RenderDebugSettings.forwardView);
     const bool allowInstanceBatchCacheReuse =
         mainCacheStats.queueCacheHits > 0 &&
@@ -2070,6 +2109,16 @@ void VulkanRenderer::DrawFrame() {
     }
     frameStats.binds.forwardResidualAlphaReferenceEnabled =
         recordTransparentAlphaReference ? 1u : 0u;
+    if (recordTransparentAlphaReference) {
+        const u32 weightedDraws =
+            static_cast<u32>(weightedTranslucencyCommands.size());
+        const u32 residualDraws =
+            static_cast<u32>(forwardResidualCommands.size());
+        frameStats.binds.weightedTranslucencyAlphaReferenceMismatchDraws =
+            weightedDraws > residualDraws
+                ? weightedDraws - residualDraws
+                : residualDraws - weightedDraws;
+    }
     frameStats.draw.mainVisible = mainCullingStats.visible;
     frameStats.draw.mainCulled = mainCullingStats.culled;
     frameStats.draw.overlayVisible = overlayCullingStats.visible;
@@ -2342,6 +2391,7 @@ void VulkanRenderer::DrawFrame() {
                 weightedTranslucencyCommands.size()
             )
             : std::span<const RenderCommand>{},
+        weightedTranslucencyDebugView,
         has3DMainPass ? m_GBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedGBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DescriptorSets.get() : nullptr,

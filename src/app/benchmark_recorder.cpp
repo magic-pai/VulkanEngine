@@ -315,6 +315,10 @@ void BenchmarkRecorder::RecordFrame(
         << binds.weightedTranslucencyResolveDraws << ','
         << binds.weightedTranslucencyResolveFrameBinds << ','
         << binds.weightedTranslucencyResolveTextureBinds << ','
+        << binds.weightedTranslucencyDebugDraws << ','
+        << binds.weightedTranslucencyDebugFrameBinds << ','
+        << binds.weightedTranslucencyDebugTextureBinds << ','
+        << binds.weightedTranslucencyAlphaReferenceMismatchDraws << ','
         << binds.forwardResidualAlphaReferenceEnabled << ','
         << binds.forwardResidualDraws << ','
         << binds.forwardResidualFrameBinds << ','
@@ -499,6 +503,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_mesh_binds,weighted_translucency_resolve_bind_draws,"
         << "weighted_translucency_resolve_frame_binds,"
         << "weighted_translucency_resolve_texture_binds,"
+        << "weighted_translucency_debug_draws,"
+        << "weighted_translucency_debug_frame_binds,"
+        << "weighted_translucency_debug_texture_binds,"
+        << "weighted_translucency_alpha_reference_mismatch_draws,"
         << "forward_residual_alpha_reference_enabled,"
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"
