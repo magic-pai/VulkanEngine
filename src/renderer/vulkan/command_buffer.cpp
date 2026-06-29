@@ -1341,6 +1341,45 @@ void VulkanCommandBuffer::Record(
         vkCmdEndRenderPass(commandBuffer);
     }
 
+    if (lightTileCullComputePipeline != nullptr &&
+        lightTileCullDescriptorSets != nullptr &&
+        lightTileCullGroupCountX > 0 &&
+        lightTileCullGroupCountY > 0) {
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            lightTileCullComputePipeline->Handle()
+        );
+
+        const VkDescriptorSet frameDescriptorSet =
+            lightTileCullDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            lightTileCullComputePipeline->Layout(),
+            0,
+            1,
+            &frameDescriptorSet,
+            0,
+            nullptr
+        );
+
+        vkCmdDispatch(
+            commandBuffer,
+            lightTileCullGroupCountX,
+            lightTileCullGroupCountY,
+            1
+        );
+        BarrierComputeLightTilesForFragmentRead(commandBuffer);
+
+        if (bindStats != nullptr) {
+            ++bindStats->lightTileCullComputeDispatches;
+            ++bindStats->lightTileCullComputeFrameBinds;
+            bindStats->lightTileCullComputeGroupsX = lightTileCullGroupCountX;
+            bindStats->lightTileCullComputeGroupsY = lightTileCullGroupCountY;
+        }
+    }
+
     if (weightedTranslucencyRenderPass != nullptr &&
         weightedTranslucencyFramebuffer != nullptr) {
         std::array<VkClearValue, 2> translucencyClearValues{};
@@ -1390,8 +1429,17 @@ void VulkanCommandBuffer::Record(
             );
 
             if (bindStats != nullptr) {
-                bindStats->weightedTranslucencyDraws +=
+                const u32 translucencyDrawCount =
                     static_cast<u32>(forwardResidualRenderCommands.size());
+                bindStats->weightedTranslucencyDraws += translucencyDrawCount;
+                bindStats->weightedTranslucencySharedLightListDraws +=
+                    lightTileCullComputePipeline != nullptr ? translucencyDrawCount : 0u;
+                bindStats->weightedTranslucencyShadowReadyDraws +=
+                    ((directionalShadowCascades != nullptr &&
+                        directionalShadowCascades->activeCount > 0) ||
+                        (localShadowTiles != nullptr && localShadowTiles->assignedCount > 0))
+                            ? translucencyDrawCount
+                            : 0u;
                 bindStats->weightedTranslucencyMaterialBinds += translucencyMaterialBinds;
                 bindStats->weightedTranslucencyMeshBinds += translucencyMeshBinds;
                 bindStats->pushConstantUpdates += translucencyPushConstantUpdates;
@@ -1402,45 +1450,6 @@ void VulkanCommandBuffer::Record(
 
         if (bindStats != nullptr) {
             ++bindStats->weightedTranslucencyClearPasses;
-        }
-    }
-
-    if (lightTileCullComputePipeline != nullptr &&
-        lightTileCullDescriptorSets != nullptr &&
-        lightTileCullGroupCountX > 0 &&
-        lightTileCullGroupCountY > 0) {
-        vkCmdBindPipeline(
-            commandBuffer,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            lightTileCullComputePipeline->Handle()
-        );
-
-        const VkDescriptorSet frameDescriptorSet =
-            lightTileCullDescriptorSets->Handle(imageIndex);
-        vkCmdBindDescriptorSets(
-            commandBuffer,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            lightTileCullComputePipeline->Layout(),
-            0,
-            1,
-            &frameDescriptorSet,
-            0,
-            nullptr
-        );
-
-        vkCmdDispatch(
-            commandBuffer,
-            lightTileCullGroupCountX,
-            lightTileCullGroupCountY,
-            1
-        );
-        BarrierComputeLightTilesForFragmentRead(commandBuffer);
-
-        if (bindStats != nullptr) {
-            ++bindStats->lightTileCullComputeDispatches;
-            ++bindStats->lightTileCullComputeFrameBinds;
-            bindStats->lightTileCullComputeGroupsX = lightTileCullGroupCountX;
-            bindStats->lightTileCullComputeGroupsY = lightTileCullGroupCountY;
         }
     }
 

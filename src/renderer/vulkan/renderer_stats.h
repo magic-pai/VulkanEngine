@@ -136,6 +136,8 @@ struct RendererWeightedTranslucencyStats {
     u32 framebufferCount = 0;
     u32 clearPasses = 0;
     u32 draws = 0;
+    u32 sharedLightListDraws = 0;
+    u32 shadowReadyDraws = 0;
     u32 resolveDraws = 0;
 };
 
@@ -183,6 +185,8 @@ struct RendererBindStats {
     u32 depthPrefillMeshBinds = 0;
     u32 weightedTranslucencyClearPasses = 0;
     u32 weightedTranslucencyDraws = 0;
+    u32 weightedTranslucencySharedLightListDraws = 0;
+    u32 weightedTranslucencyShadowReadyDraws = 0;
     u32 weightedTranslucencyMaterialBinds = 0;
     u32 weightedTranslucencyMeshBinds = 0;
     u32 weightedTranslucencyResolveDraws = 0;

@@ -618,10 +618,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassKind::Forward,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            "WeightedTranslucencyCarrier",
-            "transparent residual queue, frame light lists",
+            "WeightedTranslucencyForwardPlus",
+            "transparent residual queue, compute-written frame light lists, shadow metadata",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
-            "Clears and writes the first weighted blended translucency accum/revealage targets before resolving them into HDR scene color."
+            "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling, then resolves them into HDR scene color."
         );
     }
     if (inputs.hdrRenderPassAllocated) {

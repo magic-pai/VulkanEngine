@@ -2352,6 +2352,10 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.weightedTranslucencyClearPasses;
     frameStats.weightedTranslucency.draws =
         frameStats.binds.weightedTranslucencyDraws;
+    frameStats.weightedTranslucency.sharedLightListDraws =
+        frameStats.binds.weightedTranslucencySharedLightListDraws;
+    frameStats.weightedTranslucency.shadowReadyDraws =
+        frameStats.binds.weightedTranslucencyShadowReadyDraws;
     frameStats.weightedTranslucency.resolveDraws =
         frameStats.binds.weightedTranslucencyResolveDraws;
     if (imageIndex < m_LocalShadowCacheStates.size()) {

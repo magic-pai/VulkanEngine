@@ -478,7 +478,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.depthPrefillMeshBinds
     );
     ImGui::Text(
-        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u, draws %u, resolves %u",
+        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u, draws %u, shared lights %u, shadow-ready %u, resolves %u",
         weightedTranslucency.allocated ? "yes" : "no",
         weightedTranslucency.accumWidth,
         weightedTranslucency.accumHeight,
@@ -487,6 +487,8 @@ void DrawPerformanceStats(const RendererStats& stats) {
         weightedTranslucency.framebufferCount,
         weightedTranslucency.clearPasses,
         weightedTranslucency.draws,
+        weightedTranslucency.sharedLightListDraws,
+        weightedTranslucency.shadowReadyDraws,
         weightedTranslucency.resolveDraws
     );
     ImGui::Text(
