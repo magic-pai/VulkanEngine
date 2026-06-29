@@ -724,6 +724,7 @@ float ContactShadowVisibility(
     float strength = clamp(frame.contactShadowControls.x, 0.0, 1.0);
     float rayLength = clamp(frame.contactShadowControls.y, 0.0, 1.0);
     int stepCount = clamp(int(frame.contactShadowControls.z + 0.5), 0, 12);
+    float thickness = clamp(frame.contactShadowControls.w, 0.0, 0.5);
     if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0) {
         return 1.0;
     }
@@ -736,6 +737,8 @@ float ContactShadowVisibility(
     vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
     vec4 viewPosition = frame.view * vec4(worldPosition, 1.0);
     float viewDepth = max(abs(viewPosition.z), 0.0001);
+    float receiverBias = max(0.0015, thickness * 0.08);
+    float maxThickness = max(thickness, rayLength * 0.08);
     float rayPixels = clamp(
         (rayLength / viewDepth) * 220.0,
         1.0,
@@ -777,10 +780,12 @@ float ContactShadowVisibility(
         float normalSeparation = dot(toSample, normal);
         if (alongLight > 0.0 &&
             alongLight < rayLength &&
-            normalSeparation > 0.0005 &&
-            normalSeparation < rayLength * 0.65) {
-            float fade = 1.0 - t;
-            occlusion = max(occlusion, fade * smoothstep(0.0, 0.08, normalSeparation));
+            normalSeparation > receiverBias &&
+            normalSeparation < maxThickness) {
+            float distanceFade = 1.0 - smoothstep(0.0, rayLength, alongLight);
+            float thicknessFade = 1.0 - smoothstep(receiverBias, maxThickness, normalSeparation);
+            float stepFade = 1.0 - smoothstep(0.55, 1.0, t);
+            occlusion = max(occlusion, distanceFade * thicknessFade * stepFade);
         }
     }
 

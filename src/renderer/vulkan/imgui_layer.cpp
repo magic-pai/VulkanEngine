@@ -240,6 +240,13 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         1.0f,
         "%.3f"
     );
+    ImGui::SliderFloat(
+        "Contact thickness##Shadow",
+        &settings.contactShadowThickness,
+        0.0f,
+        0.5f,
+        "%.3f"
+    );
     int contactShadowSteps = static_cast<int>(settings.contactShadowSteps);
     if (ImGui::SliderInt("Contact steps##Shadow", &contactShadowSteps, 0, 12)) {
         settings.contactShadowSteps =
@@ -532,9 +539,10 @@ void DrawPerformanceStats(const RendererStats& stats) {
         shadowCascades.atlasCascadeCapacity
     );
     ImGui::Text(
-        "Contact shadows: strength %.3f, length %.3f, steps %u",
+        "Contact shadows: strength %.3f, length %.3f, thickness %.3f, steps %u",
         shadowCascades.contactShadowStrength,
         shadowCascades.contactShadowLength,
+        shadowCascades.contactShadowThickness,
         shadowCascades.contactShadowSteps
     );
     ImGui::Text(

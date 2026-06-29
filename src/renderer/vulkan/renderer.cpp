@@ -1904,6 +1904,8 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.contactShadowStrength, 0.0f, 1.0f);
     frameStats.shadowCascades.contactShadowLength =
         std::clamp(m_ShadowSettings.contactShadowLength, 0.0f, 1.0f);
+    frameStats.shadowCascades.contactShadowThickness =
+        std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f);
     frameStats.shadowCascades.contactShadowSteps =
         std::clamp<u32>(m_ShadowSettings.contactShadowSteps, 0u, 12u);
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
@@ -3647,7 +3649,7 @@ void VulkanRenderer::UpdateUniformBuffer(
             0u,
             12u
         )),
-        0.0f
+        std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f)
     );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
@@ -3692,7 +3694,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
             0u,
             12u
         )),
-        0.0f
+        std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

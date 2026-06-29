@@ -195,6 +195,7 @@ void BenchmarkRecorder::RecordFrame(
         << shadowCascades.fadeRatio << ','
         << shadowCascades.contactShadowStrength << ','
         << shadowCascades.contactShadowLength << ','
+        << shadowCascades.contactShadowThickness << ','
         << shadowCascades.contactShadowSteps << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
@@ -402,7 +403,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_cascade_stable_snapping,shadow_pcf_kernel_radius,shadow_pcss_strength,"
         << "shadow_cascade_split_lambda,"
         << "shadow_cascade_blend_ratio,shadow_cascade_fade_ratio,"
-        << "shadow_contact_strength,shadow_contact_length,shadow_contact_steps,"
+        << "shadow_contact_strength,shadow_contact_length,"
+        << "shadow_contact_thickness,shadow_contact_steps,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"

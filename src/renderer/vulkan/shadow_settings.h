@@ -34,6 +34,7 @@ struct VulkanShadowSettings {
     f32 localFaceBlendStrength = 0.35f;
     f32 contactShadowStrength = 0.35f;
     f32 contactShadowLength = 0.18f;
+    f32 contactShadowThickness = 0.08f;
     u32 contactShadowSteps = 4;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
@@ -66,6 +67,7 @@ inline void ApplyShadowQualityPreset(
         settings.localFaceBlendStrength = 0.0f;
         settings.contactShadowStrength = 0.0f;
         settings.contactShadowLength = 0.0f;
+        settings.contactShadowThickness = 0.0f;
         settings.contactShadowSteps = 0;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
@@ -90,6 +92,7 @@ inline void ApplyShadowQualityPreset(
         settings.localFaceBlendStrength = 0.0f;
         settings.contactShadowStrength = 0.0f;
         settings.contactShadowLength = 0.0f;
+        settings.contactShadowThickness = 0.0f;
         settings.contactShadowSteps = 0;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
@@ -114,6 +117,7 @@ inline void ApplyShadowQualityPreset(
         settings.localFaceBlendStrength = 0.35f;
         settings.contactShadowStrength = 0.35f;
         settings.contactShadowLength = 0.18f;
+        settings.contactShadowThickness = 0.08f;
         settings.contactShadowSteps = 4;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
@@ -138,6 +142,7 @@ inline void ApplyShadowQualityPreset(
         settings.localFaceBlendStrength = 0.55f;
         settings.contactShadowStrength = 0.48f;
         settings.contactShadowLength = 0.28f;
+        settings.contactShadowThickness = 0.12f;
         settings.contactShadowSteps = 6;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
@@ -162,6 +167,7 @@ inline void ApplyShadowQualityPreset(
         settings.localFaceBlendStrength = 0.75f;
         settings.contactShadowStrength = 0.60f;
         settings.contactShadowLength = 0.36f;
+        settings.contactShadowThickness = 0.16f;
         settings.contactShadowSteps = 8;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
