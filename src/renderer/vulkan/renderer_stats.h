@@ -91,6 +91,8 @@ struct RendererShadowCascadeStats {
     f32 contactShadowLength = 0.0f;
     f32 contactShadowThickness = 0.0f;
     u32 contactShadowSteps = 0;
+    f32 contactShadowJitterStrength = 0.0f;
+    f32 contactShadowEdgeFadePixels = 0.0f;
     f32 nearDepth = 0.0f;
     f32 farDepth = 0.0f;
     std::array<f32, kMaxDirectionalShadowCascades> splitDepths{};

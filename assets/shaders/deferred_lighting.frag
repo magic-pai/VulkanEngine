@@ -14,6 +14,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadowControls;
     vec4 shadowFiltering;
     vec4 contactShadowControls;
+    vec4 contactShadowStabilityControls;
 } frame;
 
 struct LocalLightRecord {
@@ -111,6 +112,10 @@ const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_FRAME_MATERIALS = 256;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
+
+float InterleavedGradientNoise(vec2 pixel) {
+    return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
 
 bool HasTextureFlag(float flags, float bit) {
     return mod(floor(flags / bit), 2.0) > 0.5;
@@ -725,6 +730,8 @@ float ContactShadowVisibility(
     float rayLength = clamp(frame.contactShadowControls.y, 0.0, 1.0);
     int stepCount = clamp(int(frame.contactShadowControls.z + 0.5), 0, 12);
     float thickness = clamp(frame.contactShadowControls.w, 0.0, 0.5);
+    float jitterStrength = clamp(frame.contactShadowStabilityControls.x, 0.0, 1.0);
+    float edgeFadePixels = clamp(frame.contactShadowStabilityControls.y, 0.0, 96.0);
     if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0) {
         return 1.0;
     }
@@ -757,12 +764,15 @@ float ContactShadowVisibility(
     }
 
     float occlusion = 0.0;
+    vec2 depthExtent = vec2(textureSize(sceneDepth, 0));
+    float jitter = (InterleavedGradientNoise(floor(uv * depthExtent)) - 0.5) * jitterStrength;
     for (int index = 1; index <= 12; ++index) {
         if (index > stepCount) {
             break;
         }
 
-        float t = float(index) / float(stepCount);
+        float t = (float(index) + jitter) / float(stepCount);
+        t = clamp(t, 0.0001, 1.0);
         vec2 sampleUv = uv + rayDir * texelSize * rayPixels * t;
         if (sampleUv.x <= 0.0 || sampleUv.x >= 1.0 ||
             sampleUv.y <= 0.0 || sampleUv.y >= 1.0) {
@@ -785,7 +795,11 @@ float ContactShadowVisibility(
             float distanceFade = 1.0 - smoothstep(0.0, rayLength, alongLight);
             float thicknessFade = 1.0 - smoothstep(receiverBias, maxThickness, normalSeparation);
             float stepFade = 1.0 - smoothstep(0.55, 1.0, t);
-            occlusion = max(occlusion, distanceFade * thicknessFade * stepFade);
+            vec2 edgePixels = min(sampleUv, 1.0 - sampleUv) * depthExtent;
+            float edgeFade = edgeFadePixels > 0.0001
+                ? smoothstep(0.0, edgeFadePixels, min(edgePixels.x, edgePixels.y))
+                : 1.0;
+            occlusion = max(occlusion, distanceFade * thicknessFade * stepFade * edgeFade);
         }
     }
 

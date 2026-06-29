@@ -252,6 +252,20 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.contactShadowSteps =
             static_cast<u32>(std::clamp(contactShadowSteps, 0, 12));
     }
+    ImGui::SliderFloat(
+        "Contact jitter##Shadow",
+        &settings.contactShadowJitterStrength,
+        0.0f,
+        1.0f,
+        "%.3f"
+    );
+    ImGui::SliderFloat(
+        "Contact edge fade px##Shadow",
+        &settings.contactShadowEdgeFadePixels,
+        0.0f,
+        96.0f,
+        "%.1f"
+    );
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -562,11 +576,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         shadowCascades.atlasCascadeCapacity
     );
     ImGui::Text(
-        "Contact shadows: strength %.3f, length %.3f, thickness %.3f, steps %u",
+        "Contact shadows: strength %.3f, length %.3f, thickness %.3f, steps %u, jitter %.3f, edge %.1f px",
         shadowCascades.contactShadowStrength,
         shadowCascades.contactShadowLength,
         shadowCascades.contactShadowThickness,
-        shadowCascades.contactShadowSteps
+        shadowCascades.contactShadowSteps,
+        shadowCascades.contactShadowJitterStrength,
+        shadowCascades.contactShadowEdgeFadePixels
     );
     ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",

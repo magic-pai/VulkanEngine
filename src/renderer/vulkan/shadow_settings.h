@@ -36,6 +36,8 @@ struct VulkanShadowSettings {
     f32 contactShadowLength = 0.18f;
     f32 contactShadowThickness = 0.08f;
     u32 contactShadowSteps = 4;
+    f32 contactShadowJitterStrength = 0.35f;
+    f32 contactShadowEdgeFadePixels = 18.0f;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
     f32 cascadeBlendRatio = 0.08f;
@@ -69,6 +71,8 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowLength = 0.0f;
         settings.contactShadowThickness = 0.0f;
         settings.contactShadowSteps = 0;
+        settings.contactShadowJitterStrength = 0.0f;
+        settings.contactShadowEdgeFadePixels = 0.0f;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -94,6 +98,8 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowLength = 0.0f;
         settings.contactShadowThickness = 0.0f;
         settings.contactShadowSteps = 0;
+        settings.contactShadowJitterStrength = 0.0f;
+        settings.contactShadowEdgeFadePixels = 0.0f;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -119,6 +125,8 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowLength = 0.18f;
         settings.contactShadowThickness = 0.08f;
         settings.contactShadowSteps = 4;
+        settings.contactShadowJitterStrength = 0.35f;
+        settings.contactShadowEdgeFadePixels = 18.0f;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 250.0f;
@@ -144,6 +152,8 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowLength = 0.28f;
         settings.contactShadowThickness = 0.12f;
         settings.contactShadowSteps = 6;
+        settings.contactShadowJitterStrength = 0.55f;
+        settings.contactShadowEdgeFadePixels = 24.0f;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 500.0f;
@@ -169,6 +179,8 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowLength = 0.36f;
         settings.contactShadowThickness = 0.16f;
         settings.contactShadowSteps = 8;
+        settings.contactShadowJitterStrength = 0.75f;
+        settings.contactShadowEdgeFadePixels = 30.0f;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 1000.0f;

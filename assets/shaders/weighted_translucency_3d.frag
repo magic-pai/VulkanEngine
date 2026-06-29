@@ -33,6 +33,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadowControls;
     vec4 shadowFiltering;
     vec4 contactShadowControls;
+    vec4 contactShadowStabilityControls;
 } frame;
 
 struct LocalLightRecord {

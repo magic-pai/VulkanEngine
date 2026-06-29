@@ -1983,6 +1983,10 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f);
     frameStats.shadowCascades.contactShadowSteps =
         std::clamp<u32>(m_ShadowSettings.contactShadowSteps, 0u, 12u);
+    frameStats.shadowCascades.contactShadowJitterStrength =
+        std::clamp(m_ShadowSettings.contactShadowJitterStrength, 0.0f, 1.0f);
+    frameStats.shadowCascades.contactShadowEdgeFadePixels =
+        std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f);
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -3925,6 +3929,12 @@ void VulkanRenderer::UpdateUniformBuffer(
         )),
         std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f)
     );
+    uniformData.contactShadowStabilityControls = glm::vec4(
+        std::clamp(m_ShadowSettings.contactShadowJitterStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f),
+        0.0f,
+        0.0f
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -3969,6 +3979,12 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
             12u
         )),
         std::clamp(m_ShadowSettings.contactShadowThickness, 0.0f, 0.5f)
+    );
+    uniformData.contactShadowStabilityControls = glm::vec4(
+        std::clamp(m_ShadowSettings.contactShadowJitterStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f),
+        0.0f,
+        0.0f
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }
