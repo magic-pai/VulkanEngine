@@ -262,19 +262,57 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(
         colorAttachmentCount
     );
-    for (VkPipelineColorBlendAttachmentState& colorBlendAttachment : colorBlendAttachments) {
+    for (u32 attachmentIndex = 0; attachmentIndex < colorAttachmentCount; ++attachmentIndex) {
+        VkPipelineColorBlendAttachmentState& colorBlendAttachment =
+            colorBlendAttachments[attachmentIndex];
         colorBlendAttachment.colorWriteMask =
             VK_COLOR_COMPONENT_R_BIT |
             VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT |
             VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = spec.alphaBlendEnabled ? VK_TRUE : VK_FALSE;
-        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+        ColorBlendMode blendMode = spec.colorBlendModes[attachmentIndex];
+        if (blendMode == ColorBlendMode::Disabled && spec.alphaBlendEnabled) {
+            blendMode = ColorBlendMode::Alpha;
+        }
+
+        switch (blendMode) {
+        case ColorBlendMode::Disabled:
+            colorBlendAttachment.blendEnable = VK_FALSE;
+            colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        case ColorBlendMode::Alpha:
+            colorBlendAttachment.blendEnable = VK_TRUE;
+            colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        case ColorBlendMode::Additive:
+            colorBlendAttachment.blendEnable = VK_TRUE;
+            colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        case ColorBlendMode::ZeroSource:
+            colorBlendAttachment.blendEnable = VK_TRUE;
+            colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_COLOR;
+            colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+        }
     }
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};

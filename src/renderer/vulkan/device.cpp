@@ -30,6 +30,7 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
 
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = physicalDevice.Features().samplerAnisotropy;
+    deviceFeatures.independentBlend = physicalDevice.Features().independentBlend;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

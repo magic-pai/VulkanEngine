@@ -478,14 +478,16 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.depthPrefillMeshBinds
     );
     ImGui::Text(
-        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u",
+        "Weighted translucency: %s, accum %ux%u, revealage %ux%u, framebuffers %u, clears %u, draws %u, resolves %u",
         weightedTranslucency.allocated ? "yes" : "no",
         weightedTranslucency.accumWidth,
         weightedTranslucency.accumHeight,
         weightedTranslucency.revealageWidth,
         weightedTranslucency.revealageHeight,
         weightedTranslucency.framebufferCount,
-        weightedTranslucency.clearPasses
+        weightedTranslucency.clearPasses,
+        weightedTranslucency.draws,
+        weightedTranslucency.resolveDraws
     );
     ImGui::Text(
         "Instancing: %u draws / %u instances",

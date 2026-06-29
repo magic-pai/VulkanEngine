@@ -48,6 +48,8 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/forward_3d.vert
     ${SHADER_SOURCE_DIR}/forward_3d_instanced.vert
     ${SHADER_SOURCE_DIR}/forward_3d.frag
+    ${SHADER_SOURCE_DIR}/weighted_translucency_3d.frag
+    ${SHADER_SOURCE_DIR}/weighted_translucency_resolve.frag
     ${SHADER_SOURCE_DIR}/gbuffer_3d.vert
     ${SHADER_SOURCE_DIR}/gbuffer_3d.frag
     ${SHADER_SOURCE_DIR}/deferred_lighting.vert

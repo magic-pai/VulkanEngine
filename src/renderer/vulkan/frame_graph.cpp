@@ -621,7 +621,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "WeightedTranslucencyCarrier",
             "transparent residual queue, frame light lists",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
-            "Clears physical weighted blended translucency targets; residual transparency writes and resolve follow in the next slice."
+            "Clears and writes the first weighted blended translucency accum/revealage targets before resolving them into HDR scene color."
         );
     }
     if (inputs.hdrRenderPassAllocated) {

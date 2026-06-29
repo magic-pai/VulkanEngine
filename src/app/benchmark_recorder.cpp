@@ -255,6 +255,8 @@ void BenchmarkRecorder::RecordFrame(
         << weightedTranslucency.renderPassAllocated << ','
         << weightedTranslucency.framebufferCount << ','
         << weightedTranslucency.clearPasses << ','
+        << weightedTranslucency.draws << ','
+        << weightedTranslucency.resolveDraws << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -297,6 +299,12 @@ void BenchmarkRecorder::RecordFrame(
         << binds.depthPrefillDraws << ','
         << binds.depthPrefillMeshBinds << ','
         << binds.weightedTranslucencyClearPasses << ','
+        << binds.weightedTranslucencyDraws << ','
+        << binds.weightedTranslucencyMaterialBinds << ','
+        << binds.weightedTranslucencyMeshBinds << ','
+        << binds.weightedTranslucencyResolveDraws << ','
+        << binds.weightedTranslucencyResolveFrameBinds << ','
+        << binds.weightedTranslucencyResolveTextureBinds << ','
         << binds.forwardResidualDraws << ','
         << binds.forwardResidualFrameBinds << ','
         << binds.forwardResidualSharedLightListDraws << ','
@@ -447,6 +455,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_accum_format,weighted_translucency_revealage_format,"
         << "weighted_translucency_render_pass_allocated,"
         << "weighted_translucency_framebuffer_count,weighted_translucency_clear_passes,"
+        << "weighted_translucency_draws,weighted_translucency_resolve_draws,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"
@@ -466,6 +475,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"
         << "weighted_translucency_bind_clear_passes,"
+        << "weighted_translucency_bind_draws,weighted_translucency_material_binds,"
+        << "weighted_translucency_mesh_binds,weighted_translucency_resolve_bind_draws,"
+        << "weighted_translucency_resolve_frame_binds,"
+        << "weighted_translucency_resolve_texture_binds,"
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"
         << "forward_residual_material_binds,forward_residual_mesh_binds,"

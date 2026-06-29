@@ -29,6 +29,7 @@ class VulkanGpuTimer;
 class VulkanGBufferDescriptorSets;
 class VulkanGraphicsPipeline;
 class VulkanHdrDescriptorSets;
+class VulkanWeightedTranslucencyDescriptorSets;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
 class VulkanLocalShadowAtlas;
@@ -361,6 +362,7 @@ private:
     std::unique_ptr<VulkanMaterialDescriptorSets> m_MaterialDescriptorSets;
     std::unique_ptr<VulkanGBufferDescriptorSets> m_GBufferDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
+    std::unique_ptr<VulkanWeightedTranslucencyDescriptorSets> m_WeightedTranslucencyDescriptorSets;
     std::unique_ptr<VulkanLightBuffer> m_LightBuffer;
     std::unique_ptr<VulkanLightTileDiagnosticsBuffer> m_LightTileDiagnosticsBuffer;
     std::unique_ptr<VulkanMaterialBuffer> m_MaterialBuffer;
@@ -397,6 +399,9 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedWeightedTranslucencyGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyResolvePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedForwardResidualGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ShadowGraphicsPipeline;

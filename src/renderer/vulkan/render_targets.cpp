@@ -110,10 +110,11 @@ void VulkanWeightedTranslucencyRenderPass::CreateRenderPass(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
 ) {
-    std::array<VkAttachmentDescription, 2> attachments{};
+    std::array<VkAttachmentDescription, 3> attachments{};
     attachments[0].format = renderTargets.WeightedTranslucencyAccumFormat();
     attachments[1].format = renderTargets.WeightedTranslucencyRevealageFormat();
-    for (VkAttachmentDescription& attachment : attachments) {
+    for (std::size_t index = 0; index < 2; ++index) {
+        VkAttachmentDescription& attachment = attachments[index];
         attachment.samples = VK_SAMPLE_COUNT_1_BIT;
         attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -122,6 +123,14 @@ void VulkanWeightedTranslucencyRenderPass::CreateRenderPass(
         attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
+    attachments[2].format = renderTargets.SceneDepthFormat();
+    attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[2].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
     std::array<VkAttachmentReference, 2> colorAttachmentReferences{};
     for (std::size_t index = 0; index < colorAttachmentReferences.size(); ++index) {
@@ -129,18 +138,31 @@ void VulkanWeightedTranslucencyRenderPass::CreateRenderPass(
         colorAttachmentReferences[index].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
+    VkAttachmentReference depthAttachmentReference{};
+    depthAttachmentReference.attachment = 2;
+    depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = static_cast<u32>(colorAttachmentReferences.size());
     subpass.pColorAttachments = colorAttachmentReferences.data();
+    subpass.pDepthStencilAttachment = &depthAttachmentReference;
 
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 
     VkRenderPassCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -645,9 +667,10 @@ void VulkanWeightedTranslucencyFramebuffer::CreateFramebuffers(
     m_Framebuffers.resize(renderTargets.Count());
 
     for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
-        const std::array<VkImageView, 2> attachments = {
+        const std::array<VkImageView, 3> attachments = {
             renderTargets.WeightedTranslucencyAccumView(index),
-            renderTargets.WeightedTranslucencyRevealageView(index)
+            renderTargets.WeightedTranslucencyRevealageView(index),
+            renderTargets.SceneDepthView(index)
         };
 
         VkFramebufferCreateInfo createInfo{};

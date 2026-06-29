@@ -210,4 +210,44 @@ private:
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
 
+class VulkanWeightedTranslucencyDescriptorSets {
+public:
+    VulkanWeightedTranslucencyDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+
+    ~VulkanWeightedTranslucencyDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanWeightedTranslucencyDescriptorSets);
+    SE_DISABLE_MOVE(VulkanWeightedTranslucencyDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t index) const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(const VulkanDevice& device, std::size_t count);
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
 }

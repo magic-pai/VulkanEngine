@@ -900,6 +900,10 @@ void VulkanCommandBuffer::Record(
     const VulkanGBufferFramebuffer* gBufferFramebuffer,
     const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass,
     const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer,
+    const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedWeightedTranslucencyGraphicsPipeline,
+    const VulkanGraphicsPipeline* weightedTranslucencyResolvePipeline,
+    const VulkanWeightedTranslucencyDescriptorSets* weightedTranslucencyDescriptorSets,
     const VulkanGraphicsPipeline* gBufferGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline,
     const VulkanDescriptorSets* gBufferDescriptorSets,
@@ -1360,6 +1364,40 @@ void VulkanCommandBuffer::Record(
             &translucencyPassInfo,
             VK_SUBPASS_CONTENTS_INLINE
         );
+
+        if (weightedTranslucencyGraphicsPipeline != nullptr &&
+            !forwardResidualRenderCommands.empty()) {
+            u32 translucencyMaterialBinds = 0;
+            u32 translucencyMeshBinds = 0;
+            u32 translucencyPushConstantUpdates = 0;
+            u64 translucencyPushConstantBytes = 0;
+            DrawStateCache translucencyState{};
+            DrawForwardCommands(
+                commandBuffer,
+                *weightedTranslucencyGraphicsPipeline,
+                doubleSidedWeightedTranslucencyGraphicsPipeline,
+                descriptorSets,
+                materialDescriptorSets,
+                frameMaterials,
+                forwardResidualRenderCommands,
+                weightedTranslucencyFramebuffer->Extent(),
+                imageIndex,
+                translucencyState,
+                translucencyMaterialBinds,
+                translucencyMeshBinds,
+                translucencyPushConstantUpdates,
+                translucencyPushConstantBytes
+            );
+
+            if (bindStats != nullptr) {
+                bindStats->weightedTranslucencyDraws +=
+                    static_cast<u32>(forwardResidualRenderCommands.size());
+                bindStats->weightedTranslucencyMaterialBinds += translucencyMaterialBinds;
+                bindStats->weightedTranslucencyMeshBinds += translucencyMeshBinds;
+                bindStats->pushConstantUpdates += translucencyPushConstantUpdates;
+                bindStats->pushConstantBytes += translucencyPushConstantBytes;
+            }
+        }
         vkCmdEndRenderPass(commandBuffer);
 
         if (bindStats != nullptr) {
@@ -1509,6 +1547,47 @@ void VulkanCommandBuffer::Record(
                 }
                 bindStats->pushConstantUpdates += deferredPushConstantUpdates;
                 bindStats->pushConstantBytes += deferredPushConstantBytes;
+            }
+        }
+
+        if (weightedTranslucencyResolvePipeline != nullptr &&
+            weightedTranslucencyDescriptorSets != nullptr) {
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                weightedTranslucencyResolvePipeline->Handle()
+            );
+
+            const VkDescriptorSet frameDescriptorSet = descriptorSets.Handle(imageIndex);
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                weightedTranslucencyResolvePipeline->Layout(),
+                0,
+                1,
+                &frameDescriptorSet,
+                0,
+                nullptr
+            );
+
+            const VkDescriptorSet translucencyDescriptorSet =
+                weightedTranslucencyDescriptorSets->Handle(imageIndex);
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                weightedTranslucencyResolvePipeline->Layout(),
+                1,
+                1,
+                &translucencyDescriptorSet,
+                0,
+                nullptr
+            );
+
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+            if (bindStats != nullptr) {
+                ++bindStats->weightedTranslucencyResolveDraws;
+                ++bindStats->weightedTranslucencyResolveFrameBinds;
+                ++bindStats->weightedTranslucencyResolveTextureBinds;
             }
         }
 

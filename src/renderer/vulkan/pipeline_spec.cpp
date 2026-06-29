@@ -32,6 +32,7 @@ PipelineSpec PipelineSpec::DefaultForward3D(
     spec.depthTestEnabled = true;
     spec.depthWriteEnabled = true;
     spec.alphaBlendEnabled = false;
+    spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     return spec;
 }
 
@@ -47,6 +48,25 @@ PipelineSpec PipelineSpec::ForwardResidual3D(
     spec.instancedVertexShaderPath.clear();
     spec.depthWriteEnabled = false;
     spec.alphaBlendEnabled = true;
+    spec.colorBlendModes[0] = ColorBlendMode::Alpha;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::WeightedTranslucency3D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DefaultForward3D(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.supportsInstancing = false;
+    spec.instancedVertexShaderPath.clear();
+    spec.depthWriteEnabled = false;
+    spec.alphaBlendEnabled = false;
+    spec.colorAttachmentCount = 2;
+    spec.colorBlendModes[0] = ColorBlendMode::Additive;
+    spec.colorBlendModes[1] = ColorBlendMode::ZeroSource;
     return spec;
 }
 
@@ -63,6 +83,7 @@ PipelineSpec PipelineSpec::DepthPrefill3D(std::string vertexShaderPath) {
     spec.hasFragmentShader = false;
     spec.hasColorAttachment = true;
     spec.colorAttachmentCount = 1;
+    spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     return spec;
 }
 
@@ -77,6 +98,7 @@ PipelineSpec PipelineSpec::GBuffer3D(
     spec.supportsInstancing = false;
     spec.instancedVertexShaderPath.clear();
     spec.colorAttachmentCount = 5;
+    spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     return spec;
 }
 
@@ -94,6 +116,7 @@ PipelineSpec PipelineSpec::DeferredLighting(
     spec.depthWriteEnabled = false;
     spec.alphaBlendEnabled = false;
     spec.colorAttachmentCount = 1;
+    spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     return spec;
 }
 
@@ -105,6 +128,19 @@ PipelineSpec PipelineSpec::HdrComposite(
         std::move(vertexShaderPath),
         std::move(fragmentShaderPath)
     );
+    return spec;
+}
+
+PipelineSpec PipelineSpec::WeightedTranslucencyResolve(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DeferredLighting(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.alphaBlendEnabled = true;
+    spec.colorBlendModes[0] = ColorBlendMode::Alpha;
     return spec;
 }
 

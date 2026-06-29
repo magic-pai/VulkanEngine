@@ -895,4 +895,137 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     }
 }
 
+VulkanWeightedTranslucencyDescriptorSets::VulkanWeightedTranslucencyDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanSampler& sampler
+) : m_Device(device.Handle()) {
+    try {
+        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, sampler);
+    } catch (...) {
+        Release();
+        throw;
+    }
+}
+
+VulkanWeightedTranslucencyDescriptorSets::~VulkanWeightedTranslucencyDescriptorSets() {
+    Release();
+}
+
+VkDescriptorSet VulkanWeightedTranslucencyDescriptorSets::Handle(std::size_t index) const {
+    SE_ASSERT(index < m_DescriptorSets.size(), "Weighted translucency descriptor set index is out of range");
+    return m_DescriptorSets[index];
+}
+
+std::size_t VulkanWeightedTranslucencyDescriptorSets::Count() const {
+    return m_DescriptorSets.size();
+}
+
+void VulkanWeightedTranslucencyDescriptorSets::Recreate(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanSampler& sampler
+) {
+    Release();
+    m_Device = device.Handle();
+
+    try {
+        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, sampler);
+    } catch (...) {
+        Release();
+        throw;
+    }
+}
+
+void VulkanWeightedTranslucencyDescriptorSets::Release() {
+    m_DescriptorSets.clear();
+
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        m_DescriptorPool = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorPool(
+    const VulkanDevice& device,
+    std::size_t count
+) {
+    SE_ASSERT(count > 0, "Weighted translucency descriptor set count must be greater than zero");
+
+    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 13);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<u32>(count);
+
+    if (vkCreateDescriptorPool(device.Handle(), &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan weighted translucency descriptor pool");
+    }
+}
+
+void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanSampler& sampler
+) {
+    const std::size_t count = renderTargets.Count();
+    CreateDescriptorPool(device, count);
+
+    std::vector<VkDescriptorSetLayout> layouts(count, descriptorSetLayout.Handle());
+    m_DescriptorSets.resize(count);
+
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_DescriptorPool;
+    allocateInfo.descriptorSetCount = static_cast<u32>(m_DescriptorSets.size());
+    allocateInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(device.Handle(), &allocateInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
+        Release();
+        throw std::runtime_error("Failed to allocate Vulkan weighted translucency descriptor sets");
+    }
+
+    for (std::size_t index = 0; index < count; ++index) {
+        std::array<VkDescriptorImageInfo, 13> imageInfos{};
+        imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[0].imageView = renderTargets.HdrSceneColorView(index);
+        imageInfos[0].sampler = sampler.Handle();
+        imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[1].imageView = renderTargets.WeightedTranslucencyAccumView(index);
+        imageInfos[1].sampler = sampler.Handle();
+        imageInfos[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[2].imageView = renderTargets.WeightedTranslucencyRevealageView(index);
+        imageInfos[2].sampler = sampler.Handle();
+        for (std::size_t binding = 3; binding < imageInfos.size(); ++binding) {
+            imageInfos[binding] = imageInfos[0];
+        }
+
+        std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
+        for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
+            descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[binding].dstSet = m_DescriptorSets[index];
+            descriptorWrites[binding].dstBinding = static_cast<u32>(binding);
+            descriptorWrites[binding].dstArrayElement = 0;
+            descriptorWrites[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[binding].descriptorCount = 1;
+            descriptorWrites[binding].pImageInfo = &imageInfos[binding];
+        }
+
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            static_cast<u32>(descriptorWrites.size()),
+            descriptorWrites.data(),
+            0,
+            nullptr
+        );
+    }
+}
+
 }

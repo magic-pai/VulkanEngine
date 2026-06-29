@@ -11,6 +11,13 @@ enum class VertexLayout {
     FullscreenTriangle
 };
 
+enum class ColorBlendMode {
+    Disabled,
+    Alpha,
+    Additive,
+    ZeroSource
+};
+
 struct PipelineSpec {
     std::string vertexShaderPath;
     std::string fragmentShaderPath;
@@ -26,6 +33,7 @@ struct PipelineSpec {
     bool hasFragmentShader = true;
     bool hasColorAttachment = true;
     u32 colorAttachmentCount = 1;
+    std::array<ColorBlendMode, 8> colorBlendModes{};
     bool supportsInstancing = false;
     bool dynamicViewportScissor = false;
     VkExtent2D fixedExtent{};
@@ -42,6 +50,10 @@ struct PipelineSpec {
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );
+    static PipelineSpec WeightedTranslucency3D(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
     static PipelineSpec DepthPrefill3D(std::string vertexShaderPath);
     static PipelineSpec GBuffer3D(
         std::string vertexShaderPath,
@@ -52,6 +64,10 @@ struct PipelineSpec {
         std::string fragmentShaderPath
     );
     static PipelineSpec HdrComposite(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
+    static PipelineSpec WeightedTranslucencyResolve(
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );

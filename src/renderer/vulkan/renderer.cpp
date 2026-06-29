@@ -1642,12 +1642,15 @@ VulkanRenderer::~VulkanRenderer() {
     m_DoubleSidedInstancedGraphicsPipeline.reset();
     m_GBufferDebugPipeline.reset();
     m_HdrCompositePipeline.reset();
+    m_WeightedTranslucencyResolvePipeline.reset();
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
     m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
+    m_WeightedTranslucencyGraphicsPipeline.reset();
+    m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
     m_ForwardResidualGraphicsPipeline.reset();
     m_DoubleSidedForwardResidualGraphicsPipeline.reset();
     m_ShadowGraphicsPipeline.reset();
@@ -1671,6 +1674,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_DirectionalShadowCascadeAtlas.reset();
     m_ShadowMap.reset();
     m_HdrDescriptorSets.reset();
+    m_WeightedTranslucencyDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
     m_SceneTargetSampler.reset();
     m_SceneRenderTargets.reset();
@@ -2312,6 +2316,10 @@ void VulkanRenderer::DrawFrame() {
         m_GBufferFramebuffer.get(),
         m_WeightedTranslucencyRenderPass.get(),
         m_WeightedTranslucencyFramebuffer.get(),
+        has3DMainPass ? m_WeightedTranslucencyGraphicsPipeline.get() : nullptr,
+        has3DMainPass ? m_DoubleSidedWeightedTranslucencyGraphicsPipeline.get() : nullptr,
+        has3DMainPass ? m_WeightedTranslucencyResolvePipeline.get() : nullptr,
+        m_WeightedTranslucencyDescriptorSets.get(),
         has3DMainPass ? m_GBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedGBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DescriptorSets.get() : nullptr,
@@ -2342,6 +2350,10 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.localShadowAtlasMeshBinds;
     frameStats.weightedTranslucency.clearPasses =
         frameStats.binds.weightedTranslucencyClearPasses;
+    frameStats.weightedTranslucency.draws =
+        frameStats.binds.weightedTranslucencyDraws;
+    frameStats.weightedTranslucency.resolveDraws =
+        frameStats.binds.weightedTranslucencyResolveDraws;
     if (imageIndex < m_LocalShadowCacheStates.size()) {
         LocalShadowCacheState& cacheState = m_LocalShadowCacheStates[imageIndex];
         cacheState.tileKeys = localShadowTiles.cacheKeys;
@@ -2686,6 +2698,13 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_SceneRenderTargets,
         *m_SceneTargetSampler
     );
+    m_WeightedTranslucencyDescriptorSets =
+        std::make_unique<VulkanWeightedTranslucencyDescriptorSets>(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler
+        );
     m_RenderPass = std::make_unique<VulkanRenderPass>(m_Device, *m_Swapchain, *m_DepthBuffer);
     m_DepthLoadRenderPass = std::make_unique<VulkanRenderPass>(
         m_Device,
@@ -2739,6 +2758,31 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_Swapchain,
             PipelineSpec::DoubleSided(depthPrefillSpec)
         );
+        const std::string weightedTranslucencyFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/weighted_translucency_3d.frag.spv";
+        const PipelineSpec weightedTranslucencySpec =
+            PipelineSpec::WeightedTranslucency3D(
+                m_PipelineSpec.vertexShaderPath,
+                weightedTranslucencyFragmentShaderPath
+            );
+        m_WeightedTranslucencyGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_WeightedTranslucencyRenderPass->Handle(),
+                *m_Swapchain,
+                weightedTranslucencySpec
+            );
+        m_DoubleSidedWeightedTranslucencyGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_WeightedTranslucencyRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(weightedTranslucencySpec)
+            );
         const PipelineSpec forwardResidualSpec =
             PipelineSpec::ForwardResidual3D(
                 m_PipelineSpec.vertexShaderPath,
@@ -2763,6 +2807,8 @@ void VulkanRenderer::CreateSwapchainResources() {
     } else {
         m_DepthPrefillGraphicsPipeline.reset();
         m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
+        m_WeightedTranslucencyGraphicsPipeline.reset();
+        m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
         m_ForwardResidualGraphicsPipeline.reset();
         m_DoubleSidedForwardResidualGraphicsPipeline.reset();
     }
@@ -2781,6 +2827,20 @@ void VulkanRenderer::CreateSwapchainResources() {
             hdrCompositeFragmentShaderPath
         )
     );
+    const std::string weightedTranslucencyResolveFragmentShaderPath =
+        std::string(SE_SHADER_DIR) + "/weighted_translucency_resolve.frag.spv";
+    m_WeightedTranslucencyResolvePipeline =
+        std::make_unique<VulkanGraphicsPipeline>(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_HdrRenderPass->Handle(),
+            *m_Swapchain,
+            PipelineSpec::WeightedTranslucencyResolve(
+                hdrCompositeVertexShaderPath,
+                weightedTranslucencyResolveFragmentShaderPath
+            )
+        );
     const std::string gBufferDebugVertexShaderPath =
         std::string(SE_SHADER_DIR) + "/gbuffer_debug.vert.spv";
     const std::string gBufferDebugFragmentShaderPath =
@@ -2964,11 +3024,20 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_GBufferDebugPipeline != nullptr) {
         m_GBufferDebugPipeline->Release();
     }
+    if (m_WeightedTranslucencyResolvePipeline != nullptr) {
+        m_WeightedTranslucencyResolvePipeline->Release();
+    }
     if (m_DoubleSidedDepthPrefillGraphicsPipeline != nullptr) {
         m_DoubleSidedDepthPrefillGraphicsPipeline->Release();
     }
     if (m_DepthPrefillGraphicsPipeline != nullptr) {
         m_DepthPrefillGraphicsPipeline->Release();
+    }
+    if (m_DoubleSidedWeightedTranslucencyGraphicsPipeline != nullptr) {
+        m_DoubleSidedWeightedTranslucencyGraphicsPipeline->Release();
+    }
+    if (m_WeightedTranslucencyGraphicsPipeline != nullptr) {
+        m_WeightedTranslucencyGraphicsPipeline->Release();
     }
     if (m_DoubleSidedForwardResidualGraphicsPipeline != nullptr) {
         m_DoubleSidedForwardResidualGraphicsPipeline->Release();
@@ -3051,6 +3120,9 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_HdrDescriptorSets != nullptr) {
         m_HdrDescriptorSets->Release();
+    }
+    if (m_WeightedTranslucencyDescriptorSets != nullptr) {
+        m_WeightedTranslucencyDescriptorSets->Release();
     }
     if (m_OverlayDescriptorSets != nullptr) {
         m_OverlayDescriptorSets->Release();
@@ -3258,6 +3330,16 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneTargetSampler
         );
     }
+    if (m_WeightedTranslucencyDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_WeightedTranslucencyDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler
+        );
+    }
     m_RenderPass->Recreate(m_Device, *m_Swapchain, *m_DepthBuffer);
     if (m_DepthLoadRenderPass != nullptr) {
         m_DepthLoadRenderPass->Recreate(
@@ -3318,6 +3400,34 @@ void VulkanRenderer::RecreateSwapchain() {
             );
         }
     }
+    if (m_WeightedTranslucencyGraphicsPipeline != nullptr &&
+        m_WeightedTranslucencyRenderPass != nullptr) {
+        const std::string weightedTranslucencyFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/weighted_translucency_3d.frag.spv";
+        const PipelineSpec weightedTranslucencySpec =
+            PipelineSpec::WeightedTranslucency3D(
+                m_PipelineSpec.vertexShaderPath,
+                weightedTranslucencyFragmentShaderPath
+            );
+        m_WeightedTranslucencyGraphicsPipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_WeightedTranslucencyRenderPass->Handle(),
+            *m_Swapchain,
+            weightedTranslucencySpec
+        );
+        if (m_DoubleSidedWeightedTranslucencyGraphicsPipeline != nullptr) {
+            m_DoubleSidedWeightedTranslucencyGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_WeightedTranslucencyRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(weightedTranslucencySpec)
+            );
+        }
+    }
     if (m_DepthPrefillGraphicsPipeline != nullptr) {
         const std::string depthPrefillShaderPath =
             std::string(SE_SHADER_DIR) + "/depth_prefill_3d.vert.spv";
@@ -3356,6 +3466,24 @@ void VulkanRenderer::RecreateSwapchain() {
             PipelineSpec::HdrComposite(
                 hdrCompositeVertexShaderPath,
                 hdrCompositeFragmentShaderPath
+            )
+        );
+    }
+    if (m_WeightedTranslucencyResolvePipeline != nullptr &&
+        m_HdrRenderPass != nullptr) {
+        const std::string hdrCompositeVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/hdr_composite.vert.spv";
+        const std::string weightedTranslucencyResolveFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/weighted_translucency_resolve.frag.spv";
+        m_WeightedTranslucencyResolvePipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_HdrRenderPass->Handle(),
+            *m_Swapchain,
+            PipelineSpec::WeightedTranslucencyResolve(
+                hdrCompositeVertexShaderPath,
+                weightedTranslucencyResolveFragmentShaderPath
             )
         );
     }
