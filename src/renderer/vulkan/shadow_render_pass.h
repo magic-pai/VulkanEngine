@@ -19,17 +19,22 @@ public:
     SE_DISABLE_MOVE(VulkanShadowRenderPass);
 
     VkRenderPass Handle() const;
+    VkRenderPass LoadHandle() const;
     void Release();
 
 private:
     void CreateRenderPass(
         const VulkanDevice& device,
-        const VulkanShadowMap& shadowMap
+        const VulkanShadowMap& shadowMap,
+        VkAttachmentLoadOp loadOp,
+        VkImageLayout initialLayout,
+        VkRenderPass& renderPass
     );
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_LoadRenderPass = VK_NULL_HANDLE;
 };
 
 }

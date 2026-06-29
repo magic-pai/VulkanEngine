@@ -98,6 +98,7 @@ public:
     );
     void Clear();
     void Update(f32 deltaSeconds);
+    bool MovePointLight(std::size_t index, glm::vec3 position);
 
     std::span<Renderable3D* const> Renderables() const;
     const DirectionalLight3D* PrimaryDirectionalLight() const;

@@ -1130,19 +1130,25 @@ void VulkanCommandBuffer::Record(
         localShadowTiles != nullptr &&
         localShadowTiles->assignedCount > 0 &&
         !skipCachedLocalShadowTiles) {
+        const bool reuseCachedLocalShadowTiles =
+            localShadowTiles->cacheSkippedTiles > 0 &&
+            localShadowTiles->cacheSkippedTiles < localShadowTiles->assignedCount;
         VkClearValue localShadowClearValue{};
         localShadowClearValue.depthStencil = { 1.0f, 0 };
 
         VkRenderPassBeginInfo localShadowPassInfo{};
         localShadowPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        localShadowPassInfo.renderPass = shadowRenderPass->Handle();
+        localShadowPassInfo.renderPass = reuseCachedLocalShadowTiles
+            ? shadowRenderPass->LoadHandle()
+            : shadowRenderPass->Handle();
         localShadowPassInfo.framebuffer =
             localShadowFramebuffer->Handle(imageIndex);
         localShadowPassInfo.renderArea.offset = { 0, 0 };
         localShadowPassInfo.renderArea.extent =
             localShadowFramebuffer->Extent();
-        localShadowPassInfo.clearValueCount = 1;
-        localShadowPassInfo.pClearValues = &localShadowClearValue;
+        localShadowPassInfo.clearValueCount = reuseCachedLocalShadowTiles ? 0u : 1u;
+        localShadowPassInfo.pClearValues =
+            reuseCachedLocalShadowTiles ? nullptr : &localShadowClearValue;
 
         vkCmdBeginRenderPass(
             commandBuffer,
@@ -1167,14 +1173,41 @@ void VulkanCommandBuffer::Record(
             localShadowTiles->assignedCount,
             static_cast<u32>(localShadowTiles->tiles.size())
         );
+        u32 recordedLocalShadowTileCount = 0;
         for (u32 tileSetIndex = 0; tileSetIndex < assignedLocalShadowTileCount; ++tileSetIndex) {
             const LocalShadowTile& tile = localShadowTiles->tiles[tileSetIndex];
+            if (reuseCachedLocalShadowTiles && tile.cacheReusable) {
+                continue;
+            }
+
             const u32 tileX = tile.tileIndex % tileColumns;
             const u32 tileY = tile.tileIndex / tileColumns;
             const VkOffset2D tileOffset{
                 static_cast<i32>(tileX * tileExtent.width),
                 static_cast<i32>(tileY * tileExtent.height)
             };
+            if (reuseCachedLocalShadowTiles) {
+                VkClearAttachment clearAttachment{};
+                clearAttachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                clearAttachment.clearValue.depthStencil = { 1.0f, 0 };
+
+                VkClearRect clearRect{};
+                clearRect.rect.offset = tileOffset;
+                clearRect.rect.extent = {
+                    std::min(tileExtent.width, localAtlasExtent.width - tileOffset.x),
+                    std::min(tileExtent.height, localAtlasExtent.height - tileOffset.y)
+                };
+                clearRect.baseArrayLayer = 0;
+                clearRect.layerCount = 1;
+
+                vkCmdClearAttachments(
+                    commandBuffer,
+                    1,
+                    &clearAttachment,
+                    1,
+                    &clearRect
+                );
+            }
             DrawShadowCommands(
                 commandBuffer,
                 *shadowGraphicsPipeline,
@@ -1189,12 +1222,13 @@ void VulkanCommandBuffer::Record(
                 localAtlasPushConstantUpdates,
                 localAtlasPushConstantBytes
             );
+            ++recordedLocalShadowTileCount;
         }
 
         if (bindStats != nullptr) {
-            bindStats->localShadowAtlasPasses += assignedLocalShadowTileCount;
+            bindStats->localShadowAtlasPasses += recordedLocalShadowTileCount;
             bindStats->localShadowAtlasDraws +=
-                assignedLocalShadowTileCount * static_cast<u32>(shadowRenderCommands.size());
+                recordedLocalShadowTileCount * static_cast<u32>(shadowRenderCommands.size());
             bindStats->localShadowAtlasMeshBinds += localAtlasMeshBinds;
             bindStats->pushConstantUpdates += localAtlasPushConstantUpdates;
             bindStats->pushConstantBytes += localAtlasPushConstantBytes;

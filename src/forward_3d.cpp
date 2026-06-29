@@ -314,6 +314,17 @@ bool BenchmarkLightOverflowRequested() {
         value == "YES";
 }
 
+bool BenchmarkPartialLocalShadowCacheRequested() {
+    const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkConstantEmissiveMaterialRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL");
     return value == "1" ||
@@ -1381,6 +1392,8 @@ int main() {
         !importedModelPath.empty() ? importedModelPath : bridgeModelPath;
     const bool hasStartupModel = !startupModelPath.empty();
     const bool useBenchmarkScene = !hasStartupModel && BenchmarkGridSceneRequested();
+    const bool animateBenchmarkPartialLocalShadowCache =
+        useBenchmarkScene && BenchmarkPartialLocalShadowCacheRequested();
 
     se::Application app(
         1280,
@@ -1767,6 +1780,12 @@ int main() {
     if (!bridgeLightsApplied) {
         ApplySceneDirectionalLight(scene, camera);
     }
+    const glm::vec3 benchmarkPartialLocalShadowBasePosition{
+        -2.2f,
+        1.1f,
+        -1.8f
+    };
+    se::f32 benchmarkPartialLocalShadowTime = 0.0f;
     PickClickState pickClickState{};
 
     app.CreateRenderer();
@@ -1822,6 +1841,17 @@ int main() {
             if (!bridgeLightsApplied) {
                 ApplySceneDirectionalLight(scene, camera);
             }
+        } else if (animateBenchmarkPartialLocalShadowCache) {
+            benchmarkPartialLocalShadowTime += std::max(
+                clampedDeltaSeconds,
+                1.0f / 60.0f
+            );
+            const glm::vec3 offset{
+                std::sin(benchmarkPartialLocalShadowTime * 1.7f) * 0.18f,
+                0.0f,
+                std::cos(benchmarkPartialLocalShadowTime * 1.3f) * 0.12f
+            };
+            scene.MovePointLight(0, benchmarkPartialLocalShadowBasePosition + offset);
         }
         ApplyCameraToMaterial(camera, cubeMaterial);
         ApplyCameraToMaterial(camera, blueCubeMaterial);

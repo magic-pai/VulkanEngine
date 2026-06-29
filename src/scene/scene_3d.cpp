@@ -252,6 +252,21 @@ std::span<Renderable3D* const> Scene3D::Renderables() const {
     return m_Storage.Renderables();
 }
 
+bool Scene3D::MovePointLight(std::size_t index, glm::vec3 position) {
+    if (index >= m_PointLights.size()) {
+        return false;
+    }
+
+    PointLight3D& light = m_PointLights[index];
+    if (glm::length(light.position - position) <= 0.0001f) {
+        return true;
+    }
+
+    light.position = position;
+    MarkLightsChanged();
+    return true;
+}
+
 const DirectionalLight3D* Scene3D::PrimaryDirectionalLight() const {
     return m_PrimaryDirectionalLight.has_value() ? &*m_PrimaryDirectionalLight : nullptr;
 }

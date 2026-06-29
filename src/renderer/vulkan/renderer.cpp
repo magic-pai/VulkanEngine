@@ -660,19 +660,14 @@ u64 LocalShadowTileCacheKey(
 bool LocalShadowTileCacheReusable(
     const std::array<u64, kMaxLocalShadowTiles>& previousKeys,
     u32 previousKeyCount,
-    u64 cacheKey
+    u64 cacheKey,
+    u32 tileIndex
 ) {
-    const u32 count = std::min<u32>(
-        previousKeyCount,
-        static_cast<u32>(previousKeys.size())
-    );
-    for (u32 index = 0; index < count; ++index) {
-        if (previousKeys[index] == cacheKey) {
-            return true;
-        }
+    if (tileIndex >= previousKeyCount || tileIndex >= previousKeys.size()) {
+        return false;
     }
 
-    return false;
+    return previousKeys[tileIndex] == cacheKey;
 }
 
 u64 LocalShadowCommandSignature(std::span<const RenderCommand> shadowCommands) {
@@ -4443,7 +4438,8 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
                     LocalShadowTileCacheReusable(
                         cacheState->tileKeys,
                         cacheState->tileCount,
-                        cacheKey
+                        cacheKey,
+                        tileSet.assignedCount
                     )
                 );
             }
@@ -4476,16 +4472,15 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
                 LocalShadowTileCacheReusable(
                     cacheState->tileKeys,
                     cacheState->tileCount,
-                    cacheKey
+                    cacheKey,
+                    tileSet.assignedCount
                 )
             );
         }
     }
 
-    if (tileSet.assignedCount > 0 &&
-        tileSet.cacheHitTiles == tileSet.assignedCount &&
-        tileSet.cacheMissTiles == 0) {
-        tileSet.cacheSkippedTiles = tileSet.assignedCount;
+    if (tileSet.assignedCount > 0 && tileSet.cacheHitTiles > 0) {
+        tileSet.cacheSkippedTiles = tileSet.cacheHitTiles;
     }
 
     return tileSet;

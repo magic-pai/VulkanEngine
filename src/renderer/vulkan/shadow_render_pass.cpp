@@ -9,7 +9,20 @@ VulkanShadowRenderPass::VulkanShadowRenderPass(
     const VulkanDevice& device,
     const VulkanShadowMap& shadowMap
 ) : m_Device(device.Handle()) {
-    CreateRenderPass(device, shadowMap);
+    CreateRenderPass(
+        device,
+        shadowMap,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        m_RenderPass
+    );
+    CreateRenderPass(
+        device,
+        shadowMap,
+        VK_ATTACHMENT_LOAD_OP_LOAD,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        m_LoadRenderPass
+    );
 }
 
 VulkanShadowRenderPass::~VulkanShadowRenderPass() {
@@ -20,25 +33,36 @@ VkRenderPass VulkanShadowRenderPass::Handle() const {
     return m_RenderPass;
 }
 
+VkRenderPass VulkanShadowRenderPass::LoadHandle() const {
+    return m_LoadRenderPass;
+}
+
 void VulkanShadowRenderPass::Release() {
     if (m_RenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
         m_RenderPass = VK_NULL_HANDLE;
     }
+    if (m_LoadRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_LoadRenderPass, nullptr);
+        m_LoadRenderPass = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanShadowRenderPass::CreateRenderPass(
     const VulkanDevice& device,
-    const VulkanShadowMap& shadowMap
+    const VulkanShadowMap& shadowMap,
+    VkAttachmentLoadOp loadOp,
+    VkImageLayout initialLayout,
+    VkRenderPass& renderPass
 ) {
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = shadowMap.Format();
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.loadOp = loadOp;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.initialLayout = initialLayout;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
     VkAttachmentReference depthAttachmentReference{};
@@ -76,7 +100,7 @@ void VulkanShadowRenderPass::CreateRenderPass(
     createInfo.dependencyCount = static_cast<u32>(dependencies.size());
     createInfo.pDependencies = dependencies.data();
 
-    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &renderPass) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan shadow render pass");
     }
 }
