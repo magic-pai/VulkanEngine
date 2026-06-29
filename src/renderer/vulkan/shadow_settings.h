@@ -31,6 +31,9 @@ struct VulkanShadowSettings {
     f32 localPcfRadius = 1.0f;
     u32 localPcfKernelRadius = 1;
     f32 localPcssStrength = 0.0f;
+    f32 contactShadowStrength = 0.35f;
+    f32 contactShadowLength = 0.18f;
+    u32 contactShadowSteps = 4;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
     f32 cascadeBlendRatio = 0.08f;
@@ -59,6 +62,9 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 0.0f;
         settings.localPcfKernelRadius = 0;
         settings.localPcssStrength = 0.0f;
+        settings.contactShadowStrength = 0.0f;
+        settings.contactShadowLength = 0.0f;
+        settings.contactShadowSteps = 0;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -79,6 +85,9 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 0.0f;
         settings.localPcfKernelRadius = 0;
         settings.localPcssStrength = 0.0f;
+        settings.contactShadowStrength = 0.0f;
+        settings.contactShadowLength = 0.0f;
+        settings.contactShadowSteps = 0;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -99,6 +108,9 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 1.0f;
         settings.localPcfKernelRadius = 1;
         settings.localPcssStrength = 0.0f;
+        settings.contactShadowStrength = 0.35f;
+        settings.contactShadowLength = 0.18f;
+        settings.contactShadowSteps = 4;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 250.0f;
@@ -119,6 +131,9 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 1.6f;
         settings.localPcfKernelRadius = 2;
         settings.localPcssStrength = 0.30f;
+        settings.contactShadowStrength = 0.48f;
+        settings.contactShadowLength = 0.28f;
+        settings.contactShadowSteps = 6;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 500.0f;
@@ -139,6 +154,9 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 2.2f;
         settings.localPcfKernelRadius = 2;
         settings.localPcssStrength = 0.45f;
+        settings.contactShadowStrength = 0.60f;
+        settings.contactShadowLength = 0.36f;
+        settings.contactShadowSteps = 8;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 1000.0f;

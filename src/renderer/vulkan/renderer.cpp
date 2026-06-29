@@ -1782,6 +1782,12 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.cascadeBlendRatio, 0.0f, 0.25f);
     frameStats.shadowCascades.fadeRatio =
         std::clamp(m_ShadowSettings.cascadeFadeRatio, 0.0f, 0.35f);
+    frameStats.shadowCascades.contactShadowStrength =
+        std::clamp(m_ShadowSettings.contactShadowStrength, 0.0f, 1.0f);
+    frameStats.shadowCascades.contactShadowLength =
+        std::clamp(m_ShadowSettings.contactShadowLength, 0.0f, 1.0f);
+    frameStats.shadowCascades.contactShadowSteps =
+        std::clamp<u32>(m_ShadowSettings.contactShadowSteps, 0u, 12u);
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -3484,6 +3490,16 @@ void VulkanRenderer::UpdateUniformBuffer(
         static_cast<f32>(static_cast<int>(m_RenderDebugSettings.forwardView)),
         m_RenderDebugSettings.exposure
     );
+    uniformData.contactShadowControls = glm::vec4(
+        std::clamp(m_ShadowSettings.contactShadowStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.contactShadowLength, 0.0f, 1.0f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.contactShadowSteps,
+            0u,
+            12u
+        )),
+        0.0f
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -3518,6 +3534,16 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         m_ShadowSettings.ambientStrength,
         static_cast<f32>(static_cast<int>(m_RenderDebugSettings.forwardView)),
         m_RenderDebugSettings.exposure
+    );
+    uniformData.contactShadowControls = glm::vec4(
+        std::clamp(m_ShadowSettings.contactShadowStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.contactShadowLength, 0.0f, 1.0f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.contactShadowSteps,
+            0u,
+            12u
+        )),
+        0.0f
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

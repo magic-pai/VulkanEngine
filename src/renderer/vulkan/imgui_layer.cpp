@@ -225,6 +225,26 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
     ImGui::SliderFloat("Cascade distance##Shadow", &settings.cascadeMaxDistance, 25.0f, 2000.0f);
     ImGui::SliderFloat("Cascade blend##Shadow", &settings.cascadeBlendRatio, 0.0f, 0.25f, "%.3f");
     ImGui::SliderFloat("Cascade fade##Shadow", &settings.cascadeFadeRatio, 0.0f, 0.35f, "%.3f");
+    ImGui::SeparatorText("Contact shadows");
+    ImGui::SliderFloat(
+        "Contact strength##Shadow",
+        &settings.contactShadowStrength,
+        0.0f,
+        1.0f,
+        "%.3f"
+    );
+    ImGui::SliderFloat(
+        "Contact length##Shadow",
+        &settings.contactShadowLength,
+        0.0f,
+        1.0f,
+        "%.3f"
+    );
+    int contactShadowSteps = static_cast<int>(settings.contactShadowSteps);
+    if (ImGui::SliderInt("Contact steps##Shadow", &contactShadowSteps, 0, 12)) {
+        settings.contactShadowSteps =
+            static_cast<u32>(std::clamp(contactShadowSteps, 0, 12));
+    }
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -497,6 +517,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         shadowCascades.atlasTileColumns,
         shadowCascades.atlasTileRows,
         shadowCascades.atlasCascadeCapacity
+    );
+    ImGui::Text(
+        "Contact shadows: strength %.3f, length %.3f, steps %u",
+        shadowCascades.contactShadowStrength,
+        shadowCascades.contactShadowLength,
+        shadowCascades.contactShadowSteps
     );
     ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",

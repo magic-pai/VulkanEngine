@@ -13,6 +13,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ambientLight;
     vec4 shadowControls;
     vec4 shadowFiltering;
+    vec4 contactShadowControls;
 } frame;
 
 struct LocalLightRecord {
@@ -553,6 +554,80 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
     return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
 }
 
+float ContactShadowVisibility(
+    vec2 uv,
+    float depth,
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir
+) {
+    float strength = clamp(frame.contactShadowControls.x, 0.0, 1.0);
+    float rayLength = clamp(frame.contactShadowControls.y, 0.0, 1.0);
+    int stepCount = clamp(int(frame.contactShadowControls.z + 0.5), 0, 12);
+    if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0) {
+        return 1.0;
+    }
+
+    float nDotL = max(dot(normal, lightDir), 0.0);
+    if (nDotL <= 0.001) {
+        return 1.0;
+    }
+
+    vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
+    vec4 viewPosition = frame.view * vec4(worldPosition, 1.0);
+    float viewDepth = max(abs(viewPosition.z), 0.0001);
+    float rayPixels = clamp(
+        (rayLength / viewDepth) * 220.0,
+        1.0,
+        48.0
+    );
+    vec4 lightClipA = frame.proj * (viewPosition + vec4(lightDir * rayLength, 0.0));
+    vec2 rayDir = vec2(0.0);
+    if (abs(lightClipA.w) > 0.000001) {
+        vec2 lightUv = lightClipA.xy / lightClipA.w * 0.5 + 0.5;
+        rayDir = uv - lightUv;
+    }
+    if (dot(rayDir, rayDir) <= 0.000001) {
+        rayDir = normalize(lightDir.xy + vec2(0.37, 0.19));
+    } else {
+        rayDir = normalize(rayDir);
+    }
+
+    float occlusion = 0.0;
+    for (int index = 1; index <= 12; ++index) {
+        if (index > stepCount) {
+            break;
+        }
+
+        float t = float(index) / float(stepCount);
+        vec2 sampleUv = uv + rayDir * texelSize * rayPixels * t;
+        if (sampleUv.x <= 0.0 || sampleUv.x >= 1.0 ||
+            sampleUv.y <= 0.0 || sampleUv.y >= 1.0) {
+            continue;
+        }
+
+        float sampleDepth = texture(sceneDepth, sampleUv).r;
+        if (sampleDepth >= 0.999999 || sampleDepth <= 0.0) {
+            continue;
+        }
+
+        vec3 sampleWorld = ReconstructWorldPosition(sampleUv, sampleDepth);
+        vec3 toSample = sampleWorld - worldPosition;
+        float alongLight = dot(toSample, lightDir);
+        float normalSeparation = dot(toSample, normal);
+        if (alongLight > 0.0 &&
+            alongLight < rayLength &&
+            normalSeparation > 0.0005 &&
+            normalSeparation < rayLength * 0.65) {
+            float fade = 1.0 - t;
+            occlusion = max(occlusion, fade * smoothstep(0.0, 0.08, normalSeparation));
+        }
+    }
+
+    float grazingBoost = mix(1.0, 0.35, nDotL);
+    return 1.0 - clamp(occlusion * strength * grazingBoost, 0.0, 1.0);
+}
+
 float SampleShadowCascadeVisibility(
     vec3 worldPosition,
     vec3 normal,
@@ -1042,7 +1117,15 @@ void main() {
     if (hasMaterialRecord) {
         specularStrength = max(specularStrength, materialSpecular);
     }
-    float shadowVisibility = ShadowVisibility(worldPosition, normal, lightDir);
+    float cascadeShadowVisibility = ShadowVisibility(worldPosition, normal, lightDir);
+    float contactShadowVisibility = ContactShadowVisibility(
+        fragUv,
+        depth,
+        worldPosition,
+        normal,
+        lightDir
+    );
+    float shadowVisibility = min(cascadeShadowVisibility, contactShadowVisibility);
 
     vec3 f0 = mix(vec3(0.04), baseColor, metallic);
     vec3 directionalSpecular = vec3(0.0);
