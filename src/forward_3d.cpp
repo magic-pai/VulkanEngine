@@ -1,5 +1,6 @@
 #include "assets/unreal_project_bridge.h"
 #include "app/application.h"
+#include "app/benchmark_recorder.h"
 #include "renderer/vulkan/material_library.h"
 #include "renderer/vulkan/mesh.h"
 #include "renderer/vulkan/pipeline_spec.h"
@@ -71,6 +72,7 @@ struct StartupBridgeScene {
     std::vector<se::UnrealBridgeMeshInstanceInfo> meshInstances;
     std::vector<se::UnrealBridgeCameraInfo> cameras;
     std::vector<se::UnrealBridgeLightInfo> lights;
+    se::u32 referenceCaptureCount = 0;
     se::u32 manifestMeshExportReadyCount = 0;
     se::u32 manifestMeshExportMissingCount = 0;
     se::u32 meshInstanceExportReadyCount = 0;
@@ -698,6 +700,7 @@ StartupBridgeScene ResolveStartupBridgeScene() {
         startup.meshInstances = scene.meshInstances;
         startup.cameras = scene.cameras;
         startup.lights = scene.lights;
+        startup.referenceCaptureCount = scene.referenceCaptureCount;
         startup.manifestMeshExportReadyCount = scene.meshExportReadyCount;
         startup.manifestMeshExportMissingCount = scene.meshExportMissingCount;
         break;
@@ -757,6 +760,7 @@ void PrintStartupBridgeScene(const StartupBridgeScene& startup) {
             << std::endl;
         std::cout << "  cameras=" << startup.cameras.size()
             << " lights=" << startup.lights.size()
+            << " references=" << startup.referenceCaptureCount
             << std::endl;
         if (!startup.cameras.empty()) {
             const se::UnrealBridgeCameraInfo& camera = startup.cameras.front();
@@ -808,10 +812,81 @@ void PrintStartupBridgeScene(const StartupBridgeScene& startup) {
                 << "SelfEngine will use a fallback camera key light instead of UE scene lighting."
                 << std::endl;
         }
+        if (startup.referenceCaptureCount == 0) {
+            std::cout << "  [warning] UE bridge scene has no UE reference capture yet; "
+                << "visual parity cannot be measured honestly until a matching screenshot is recorded."
+                << std::endl;
+        }
     }
     for (const se::UnrealProjectBridgeMessage& message : startup.messages) {
         PrintUnrealDiscoveryMessage(message);
     }
+}
+
+se::BenchmarkSceneDiagnostics BenchmarkDiagnosticsForStartupBridgeScene(
+    const StartupBridgeScene& startup,
+    se::u32 loadedBridgeMeshInstances,
+    bool bridgeCameraApplied,
+    bool bridgeLightsApplied
+) {
+    se::BenchmarkSceneDiagnostics diagnostics{};
+    diagnostics.ueBridgeRequested = startup.requested ? 1u : 0u;
+    diagnostics.ueBridgeManifestLoaded = startup.manifestLoaded ? 1u : 0u;
+    diagnostics.ueBridgeSceneFound = startup.sceneFound ? 1u : 0u;
+    diagnostics.ueBridgeExportedSceneReady = startup.exportedSceneReady ? 1u : 0u;
+    diagnostics.ueBridgeMeshInstanceCount =
+        static_cast<se::u32>(startup.meshInstances.size());
+    diagnostics.ueBridgeMeshInstanceLoadedCount = loadedBridgeMeshInstances;
+    diagnostics.ueBridgeMeshExportReadyCount =
+        startup.meshInstanceExportReadyCount;
+    diagnostics.ueBridgeMeshExportMissingCount =
+        startup.meshInstanceExportMissingCount;
+    diagnostics.ueBridgeManifestMeshExportReadyCount =
+        startup.manifestMeshExportReadyCount;
+    diagnostics.ueBridgeManifestMeshExportMissingCount =
+        startup.manifestMeshExportMissingCount;
+    diagnostics.ueBridgeCameraCount =
+        static_cast<se::u32>(startup.cameras.size());
+    diagnostics.ueBridgeCameraApplied = bridgeCameraApplied ? 1u : 0u;
+    diagnostics.ueBridgeLightCount =
+        static_cast<se::u32>(startup.lights.size());
+    diagnostics.ueBridgeLightsApplied = bridgeLightsApplied ? 1u : 0u;
+    diagnostics.ueBridgeReferenceCaptureCount = startup.referenceCaptureCount;
+    diagnostics.ueBridgeBlockedMissingManifest =
+        startup.requested && !startup.manifestLoaded ? 1u : 0u;
+    diagnostics.ueBridgeBlockedSceneMissing =
+        startup.requested && startup.manifestLoaded && !startup.sceneFound ? 1u : 0u;
+    diagnostics.ueBridgeBlockedNoMeshInstances =
+        startup.sceneFound && startup.meshInstances.empty() ? 1u : 0u;
+    diagnostics.ueBridgeBlockedMeshExports =
+        startup.sceneFound &&
+        (!startup.meshInstances.empty() &&
+            startup.meshInstanceExportMissingCount > 0)
+            ? 1u
+            : 0u;
+    diagnostics.ueBridgeBlockedMeshLoads =
+        startup.sceneFound &&
+        !startup.meshInstances.empty() &&
+        loadedBridgeMeshInstances < startup.meshInstances.size()
+            ? 1u
+            : 0u;
+    diagnostics.ueBridgeBlockedCamera =
+        startup.sceneFound && !bridgeCameraApplied ? 1u : 0u;
+    diagnostics.ueBridgeBlockedLights =
+        startup.sceneFound && !bridgeLightsApplied ? 1u : 0u;
+    diagnostics.ueBridgeBlockedReferenceCapture =
+        startup.sceneFound && startup.referenceCaptureCount == 0 ? 1u : 0u;
+    diagnostics.ueBridgeVisualParityReady =
+        startup.sceneFound &&
+        startup.meshInstanceExportMissingCount == 0 &&
+        !startup.meshInstances.empty() &&
+        loadedBridgeMeshInstances == startup.meshInstances.size() &&
+        bridgeCameraApplied &&
+        bridgeLightsApplied &&
+        startup.referenceCaptureCount > 0
+            ? 1u
+            : 0u;
+    return diagnostics;
 }
 
 int BenchmarkGridSize() {
@@ -1780,6 +1855,14 @@ int main() {
     if (!bridgeLightsApplied) {
         ApplySceneDirectionalLight(scene, camera);
     }
+    se::SetBenchmarkSceneDiagnostics(
+        BenchmarkDiagnosticsForStartupBridgeScene(
+            startupBridgeScene,
+            loadedBridgeMeshInstances,
+            bridgeCameraApplied,
+            bridgeLightsApplied
+        )
+    );
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
         1.1f,

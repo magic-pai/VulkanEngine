@@ -15,6 +15,36 @@ struct BenchmarkRecorderConfig {
     std::filesystem::path csvPath{ "selfengine_benchmark.csv" };
 };
 
+struct BenchmarkSceneDiagnostics {
+    u32 ueBridgeRequested = 0;
+    u32 ueBridgeManifestLoaded = 0;
+    u32 ueBridgeSceneFound = 0;
+    u32 ueBridgeExportedSceneReady = 0;
+    u32 ueBridgeMeshInstanceCount = 0;
+    u32 ueBridgeMeshInstanceLoadedCount = 0;
+    u32 ueBridgeMeshExportReadyCount = 0;
+    u32 ueBridgeMeshExportMissingCount = 0;
+    u32 ueBridgeManifestMeshExportReadyCount = 0;
+    u32 ueBridgeManifestMeshExportMissingCount = 0;
+    u32 ueBridgeCameraCount = 0;
+    u32 ueBridgeCameraApplied = 0;
+    u32 ueBridgeLightCount = 0;
+    u32 ueBridgeLightsApplied = 0;
+    u32 ueBridgeReferenceCaptureCount = 0;
+    u32 ueBridgeVisualParityReady = 0;
+    u32 ueBridgeBlockedMissingManifest = 0;
+    u32 ueBridgeBlockedSceneMissing = 0;
+    u32 ueBridgeBlockedNoMeshInstances = 0;
+    u32 ueBridgeBlockedMeshExports = 0;
+    u32 ueBridgeBlockedMeshLoads = 0;
+    u32 ueBridgeBlockedCamera = 0;
+    u32 ueBridgeBlockedLights = 0;
+    u32 ueBridgeBlockedReferenceCapture = 0;
+};
+
+void SetBenchmarkSceneDiagnostics(const BenchmarkSceneDiagnostics& diagnostics);
+const BenchmarkSceneDiagnostics& GetBenchmarkSceneDiagnostics();
+
 class BenchmarkRecorder {
 public:
     static BenchmarkRecorderConfig ConfigFromEnvironment();

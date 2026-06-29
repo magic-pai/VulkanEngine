@@ -9,6 +9,8 @@ namespace se {
 
 namespace {
 
+BenchmarkSceneDiagnostics g_BenchmarkSceneDiagnostics{};
+
 std::string ReadEnvironmentString(const char* name) {
 #ifdef _WIN32
     char* value = nullptr;
@@ -46,6 +48,14 @@ void WriteGpuValue(std::ofstream& csv, bool available, f32 value) {
     }
 }
 
+}
+
+void SetBenchmarkSceneDiagnostics(const BenchmarkSceneDiagnostics& diagnostics) {
+    g_BenchmarkSceneDiagnostics = diagnostics;
+}
+
+const BenchmarkSceneDiagnostics& GetBenchmarkSceneDiagnostics() {
+    return g_BenchmarkSceneDiagnostics;
 }
 
 BenchmarkRecorderConfig BenchmarkRecorder::ConfigFromEnvironment() {
@@ -116,6 +126,8 @@ void BenchmarkRecorder::RecordFrame(
         stats.weightedTranslucency;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
+    const BenchmarkSceneDiagnostics& sceneDiagnostics =
+        GetBenchmarkSceneDiagnostics();
 
     m_Csv << m_CapturedFrames << ','
         << renderedFrameIndex << ','
@@ -124,6 +136,30 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.roadmapPassCount << ','
         << stats.frameGraph.physicalResourceCount << ','
         << stats.frameGraph.plannedResourceCount << ','
+        << sceneDiagnostics.ueBridgeRequested << ','
+        << sceneDiagnostics.ueBridgeManifestLoaded << ','
+        << sceneDiagnostics.ueBridgeSceneFound << ','
+        << sceneDiagnostics.ueBridgeExportedSceneReady << ','
+        << sceneDiagnostics.ueBridgeMeshInstanceCount << ','
+        << sceneDiagnostics.ueBridgeMeshInstanceLoadedCount << ','
+        << sceneDiagnostics.ueBridgeMeshExportReadyCount << ','
+        << sceneDiagnostics.ueBridgeMeshExportMissingCount << ','
+        << sceneDiagnostics.ueBridgeManifestMeshExportReadyCount << ','
+        << sceneDiagnostics.ueBridgeManifestMeshExportMissingCount << ','
+        << sceneDiagnostics.ueBridgeCameraCount << ','
+        << sceneDiagnostics.ueBridgeCameraApplied << ','
+        << sceneDiagnostics.ueBridgeLightCount << ','
+        << sceneDiagnostics.ueBridgeLightsApplied << ','
+        << sceneDiagnostics.ueBridgeReferenceCaptureCount << ','
+        << sceneDiagnostics.ueBridgeVisualParityReady << ','
+        << sceneDiagnostics.ueBridgeBlockedMissingManifest << ','
+        << sceneDiagnostics.ueBridgeBlockedSceneMissing << ','
+        << sceneDiagnostics.ueBridgeBlockedNoMeshInstances << ','
+        << sceneDiagnostics.ueBridgeBlockedMeshExports << ','
+        << sceneDiagnostics.ueBridgeBlockedMeshLoads << ','
+        << sceneDiagnostics.ueBridgeBlockedCamera << ','
+        << sceneDiagnostics.ueBridgeBlockedLights << ','
+        << sceneDiagnostics.ueBridgeBlockedReferenceCapture << ','
         << cpu.totalFrameMs << ','
         << cpu.waitAcquireMs << ','
         << cpu.imguiMs << ','
@@ -412,6 +448,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "sample_frame,rendered_frame,elapsed_seconds,"
         << "framegraph_active_passes,framegraph_roadmap_passes,"
         << "framegraph_physical_resources,framegraph_planned_resources,"
+        << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
+        << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
+        << "ue_bridge_mesh_instance_loaded_count,"
+        << "ue_bridge_mesh_export_ready_count,ue_bridge_mesh_export_missing_count,"
+        << "ue_bridge_manifest_mesh_export_ready_count,"
+        << "ue_bridge_manifest_mesh_export_missing_count,"
+        << "ue_bridge_camera_count,ue_bridge_camera_applied,"
+        << "ue_bridge_light_count,ue_bridge_lights_applied,"
+        << "ue_bridge_reference_capture_count,ue_bridge_visual_parity_ready,"
+        << "ue_bridge_blocked_missing_manifest,ue_bridge_blocked_scene_missing,"
+        << "ue_bridge_blocked_no_mesh_instances,"
+        << "ue_bridge_blocked_mesh_exports,ue_bridge_blocked_mesh_loads,"
+        << "ue_bridge_blocked_camera,"
+        << "ue_bridge_blocked_lights,ue_bridge_blocked_reference_capture,"
         << "cpu_total_ms,cpu_wait_acquire_ms,cpu_imgui_ms,cpu_picking_ms,"
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"
         << "gpu_available,gpu_total_recorded_ms,gpu_shadow_ms,gpu_main_ms,gpu_overlay_ms,gpu_imgui_ms,"
