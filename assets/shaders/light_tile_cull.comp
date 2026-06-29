@@ -1,0 +1,270 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform FrameData {
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+    mat4 lightViewProj;
+    vec4 directionalLight;
+    vec4 ambientLight;
+    vec4 shadowControls;
+    vec4 shadowFiltering;
+} frame;
+
+struct LocalLightRecord {
+    vec4 positionRadius;
+    vec4 colorIntensity;
+    vec4 directionType;
+    vec4 parameters;
+};
+
+struct LightTileRecord {
+    uvec4 offsetCount;
+    uvec4 overflowOffsetCount;
+};
+
+layout(std430, set = 0, binding = 1) buffer LightData {
+    vec4 directionalLight;
+    vec4 ambientLight;
+    vec4 lightCounts;
+    vec4 tileInfo;
+    LocalLightRecord localLights[64];
+    LightTileRecord lightTiles[8192];
+    uvec4 tileLightIndexGroups[32768];
+    uint tileOverflowLightIndices[65536];
+} lights;
+
+layout(set = 0, binding = 3) buffer LightTileDiagnostics {
+    uvec4 counters;
+    uvec4 overflowCounters;
+} diagnostics;
+
+const uint MAX_LOCAL_LIGHTS = 64u;
+const uint MAX_LIGHT_TILES = 8192u;
+const uint MAX_LIGHTS_PER_TILE = 16u;
+const uint LIGHT_INDEX_GROUPS_PER_TILE = 4u;
+const uint MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536u;
+
+void StoreOverflowLightIndex(uint absoluteIndex, uint localLightIndex) {
+    if (absoluteIndex >= MAX_LIGHT_TILE_OVERFLOW_INDICES) {
+        return;
+    }
+
+    lights.tileOverflowLightIndices[absoluteIndex] = localLightIndex;
+}
+
+struct TileBounds {
+    uvec2 minTile;
+    uvec2 maxTile;
+    bool valid;
+    bool fullScreen;
+};
+
+void IncludeProjectedPoint(
+    vec3 worldPosition,
+    mat4 viewProjection,
+    vec2 extent,
+    inout vec2 minPixel,
+    inout vec2 maxPixel,
+    inout bool projectedAny,
+    inout bool touchesClipBoundary
+) {
+    vec4 clip = viewProjection * vec4(worldPosition, 1.0);
+    if (abs(clip.w) <= 0.0001) {
+        touchesClipBoundary = true;
+        return;
+    }
+
+    vec3 ndc = clip.xyz / clip.w;
+    if (clip.w <= 0.0 || ndc.z < 0.0 || ndc.z > 1.0) {
+        touchesClipBoundary = true;
+    }
+
+    vec2 pixel = (ndc.xy * 0.5 + 0.5) * extent;
+    minPixel = min(minPixel, pixel);
+    maxPixel = max(maxPixel, pixel);
+    projectedAny = true;
+}
+
+TileBounds ProjectLightToTileBounds(
+    LocalLightRecord light,
+    mat4 viewProjection,
+    uint tileSize,
+    uvec2 tileCounts
+) {
+    TileBounds bounds;
+    bounds.minTile = uvec2(0u);
+    bounds.maxTile = tileCounts - uvec2(1u);
+    bounds.valid = tileCounts.x > 0u && tileCounts.y > 0u;
+    bounds.fullScreen = true;
+    if (!bounds.valid) {
+        return bounds;
+    }
+
+    vec3 center = light.positionRadius.xyz;
+    float radius = max(light.positionRadius.w, 0.001);
+    vec2 extent = vec2(tileCounts * tileSize);
+    vec2 minPixel = vec2(3.402823e38);
+    vec2 maxPixel = vec2(-3.402823e38);
+    bool projectedAny = false;
+    bool touchesClipBoundary = false;
+
+    IncludeProjectedPoint(
+        center,
+        viewProjection,
+        extent,
+        minPixel,
+        maxPixel,
+        projectedAny,
+        touchesClipBoundary
+    );
+    IncludeProjectedPoint(center + vec3(radius, 0.0, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    IncludeProjectedPoint(center + vec3(-radius, 0.0, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    IncludeProjectedPoint(center + vec3(0.0, radius, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    IncludeProjectedPoint(center + vec3(0.0, -radius, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    IncludeProjectedPoint(center + vec3(0.0, 0.0, radius), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    IncludeProjectedPoint(center + vec3(0.0, 0.0, -radius), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+
+    if (!projectedAny || touchesClipBoundary) {
+        return bounds;
+    }
+
+    if (maxPixel.x < 0.0 || maxPixel.y < 0.0 ||
+        minPixel.x > extent.x || minPixel.y > extent.y ||
+        minPixel.x > maxPixel.x || minPixel.y > maxPixel.y) {
+        bounds.valid = false;
+        bounds.fullScreen = false;
+        return bounds;
+    }
+
+    minPixel = clamp(minPixel, vec2(0.0), extent);
+    maxPixel = clamp(maxPixel, vec2(0.0), extent);
+    uvec2 minTile = uvec2(floor(minPixel / float(tileSize)));
+    uvec2 maxTile = uvec2(floor(max(maxPixel - vec2(1.0), vec2(0.0)) / float(tileSize)));
+    bounds.minTile = min(minTile, tileCounts - uvec2(1u));
+    bounds.maxTile = min(maxTile, tileCounts - uvec2(1u));
+    bounds.valid = bounds.minTile.x <= bounds.maxTile.x &&
+        bounds.minTile.y <= bounds.maxTile.y;
+    bounds.fullScreen = false;
+    return bounds;
+}
+
+bool TileIntersectsLight(uvec2 tile, LocalLightRecord light, mat4 viewProjection, uint tileSize, uvec2 tileCounts) {
+    TileBounds bounds = ProjectLightToTileBounds(light, viewProjection, tileSize, tileCounts);
+    if (!bounds.valid) {
+        return false;
+    }
+    if (bounds.fullScreen) {
+        return true;
+    }
+
+    return tile.x >= bounds.minTile.x && tile.x <= bounds.maxTile.x &&
+        tile.y >= bounds.minTile.y && tile.y <= bounds.maxTile.y;
+}
+
+void main() {
+    uvec2 tile = gl_GlobalInvocationID.xy;
+    uint tileCountX = uint(max(lights.tileInfo.y, 0.0) + 0.5);
+    uint tileCountY = uint(max(lights.tileInfo.z, 0.0) + 0.5);
+    if (tile.x >= tileCountX || tile.y >= tileCountY) {
+        return;
+    }
+
+    uint tileIndex = tile.y * tileCountX + tile.x;
+    if (tileIndex >= 8192u) {
+        return;
+    }
+
+    uvec4 packedGroups[LIGHT_INDEX_GROUPS_PER_TILE];
+    for (uint groupIndex = 0u; groupIndex < LIGHT_INDEX_GROUPS_PER_TILE; ++groupIndex) {
+        packedGroups[groupIndex] = uvec4(0u);
+    }
+    uint overflowCandidates[MAX_LOCAL_LIGHTS];
+
+    uint localLightCount = min(uint(max(lights.lightCounts.z, 0.0) + 0.5), MAX_LOCAL_LIGHTS);
+    uint assignmentCount = 0u;
+    uint overflowCandidateCount = 0u;
+    uint rawCandidateCount = 0u;
+    uint tileSize = uint(max(lights.tileInfo.x, 1.0) + 0.5);
+    uvec2 tileCounts = uvec2(tileCountX, tileCountY);
+    mat4 viewProjection = frame.proj * frame.view;
+    for (uint lightIndex = 0u; lightIndex < localLightCount; ++lightIndex) {
+        if (!TileIntersectsLight(
+                tile,
+                lights.localLights[lightIndex],
+                viewProjection,
+                tileSize,
+                tileCounts
+            )) {
+            continue;
+        }
+
+        if (assignmentCount < MAX_LIGHTS_PER_TILE) {
+            uint groupIndex = assignmentCount / 4u;
+            uint componentIndex = assignmentCount % 4u;
+            if (componentIndex == 0u) {
+                packedGroups[groupIndex].x = lightIndex;
+            } else if (componentIndex == 1u) {
+                packedGroups[groupIndex].y = lightIndex;
+            } else if (componentIndex == 2u) {
+                packedGroups[groupIndex].z = lightIndex;
+            } else {
+                packedGroups[groupIndex].w = lightIndex;
+            }
+            ++assignmentCount;
+        } else if (overflowCandidateCount < MAX_LOCAL_LIGHTS) {
+            overflowCandidates[overflowCandidateCount] = lightIndex;
+            ++overflowCandidateCount;
+        }
+        ++rawCandidateCount;
+    }
+
+    uint groupOffset = tileIndex * LIGHT_INDEX_GROUPS_PER_TILE;
+    uint saturated = rawCandidateCount > MAX_LIGHTS_PER_TILE ? 1u : 0u;
+    uint overflowOffset = 0u;
+    uint overflowStoredCount = 0u;
+    uint overflowDroppedCount = 0u;
+    if (overflowCandidateCount > 0u) {
+        overflowOffset = atomicAdd(diagnostics.overflowCounters.z, overflowCandidateCount);
+        if (overflowOffset < MAX_LIGHT_TILE_OVERFLOW_INDICES) {
+            overflowStoredCount = min(
+                overflowCandidateCount,
+                MAX_LIGHT_TILE_OVERFLOW_INDICES - overflowOffset
+            );
+        }
+        overflowDroppedCount = overflowCandidateCount - overflowStoredCount;
+        for (uint overflowIndex = 0u; overflowIndex < overflowStoredCount; ++overflowIndex) {
+            StoreOverflowLightIndex(
+                overflowOffset + overflowIndex,
+                overflowCandidates[overflowIndex]
+            );
+        }
+    }
+
+    lights.lightTiles[tileIndex].offsetCount =
+        uvec4(groupOffset, assignmentCount, rawCandidateCount, saturated);
+    lights.lightTiles[tileIndex].overflowOffsetCount =
+        uvec4(
+            overflowOffset,
+            overflowStoredCount,
+            overflowDroppedCount,
+            overflowStoredCount > 0u ? 1u : 0u
+        );
+    for (uint groupIndex = 0u; groupIndex < LIGHT_INDEX_GROUPS_PER_TILE; ++groupIndex) {
+        lights.tileLightIndexGroups[groupOffset + groupIndex] = packedGroups[groupIndex];
+    }
+    atomicAdd(diagnostics.counters.x, saturated);
+    atomicMax(diagnostics.counters.y, rawCandidateCount);
+    atomicAdd(diagnostics.counters.z, rawCandidateCount);
+    atomicAdd(diagnostics.counters.w, 1u);
+    if (overflowStoredCount > 0u) {
+        atomicAdd(diagnostics.overflowCounters.x, 1u);
+    }
+    if (overflowDroppedCount > 0u) {
+        atomicAdd(diagnostics.overflowCounters.y, 1u);
+        atomicAdd(diagnostics.overflowCounters.w, overflowDroppedCount);
+    }
+}

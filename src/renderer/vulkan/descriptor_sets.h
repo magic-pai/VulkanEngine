@@ -1,0 +1,213 @@
+#pragma once
+
+#include "renderer/vulkan/vulkan_common.h"
+
+namespace se {
+
+class VulkanDescriptorSetLayout;
+class VulkanMaterialDescriptorSetLayout;
+class VulkanDevice;
+class VulkanMaterial;
+class VulkanSampler;
+class VulkanSceneRenderTargets;
+class VulkanDirectionalShadowCascadeAtlas;
+class VulkanLocalShadowAtlas;
+class VulkanShadowMap;
+class VulkanLightBuffer;
+class VulkanLightTileDiagnosticsBuffer;
+class VulkanMaterialBuffer;
+class VulkanDirectionalShadowCascadeBuffer;
+class VulkanLocalShadowBuffer;
+class VulkanUniformBuffer;
+
+class VulkanDescriptorSets {
+public:
+    VulkanDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& descriptorSetLayout,
+        const VulkanUniformBuffer& uniformBuffer,
+        const VulkanLightBuffer& lightBuffer,
+        const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
+        const VulkanMaterialBuffer& materialBuffer,
+        const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
+        const VulkanLocalShadowBuffer& localShadowBuffer
+    );
+
+    ~VulkanDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanDescriptorSets);
+    SE_DISABLE_MOVE(VulkanDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t index) const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& descriptorSetLayout,
+        const VulkanUniformBuffer& uniformBuffer,
+        const VulkanLightBuffer& lightBuffer,
+        const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
+        const VulkanMaterialBuffer& materialBuffer,
+        const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
+        const VulkanLocalShadowBuffer& localShadowBuffer
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(const VulkanDevice& device, std::size_t count);
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& descriptorSetLayout,
+        const VulkanUniformBuffer& uniformBuffer,
+        const VulkanLightBuffer& lightBuffer,
+        const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
+        const VulkanMaterialBuffer& materialBuffer,
+        const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
+        const VulkanLocalShadowBuffer& localShadowBuffer
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanMaterialDescriptorSets {
+public:
+    VulkanMaterialDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        std::span<const VulkanMaterial*> materials,
+        const VulkanShadowMap* shadowMap = nullptr,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+    );
+
+    ~VulkanMaterialDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanMaterialDescriptorSets);
+    SE_DISABLE_MOVE(VulkanMaterialDescriptorSets);
+
+    VkDescriptorSet Handle(const VulkanMaterial& material) const;
+    VkDescriptorSet Handle(const VulkanMaterial& material, std::size_t imageIndex) const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        std::span<const VulkanMaterial*> materials,
+        const VulkanShadowMap* shadowMap = nullptr,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(const VulkanDevice& device, std::size_t count);
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        std::span<const VulkanMaterial*> materials,
+        const VulkanShadowMap* shadowMap,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
+        const VulkanLocalShadowAtlas* localShadowAtlas
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<const VulkanMaterial*> m_Materials;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+    std::size_t m_SetsPerMaterial = 1;
+};
+
+class VulkanGBufferDescriptorSets {
+public:
+    VulkanGBufferDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler,
+        const VulkanShadowMap* shadowMap = nullptr,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+    );
+
+    ~VulkanGBufferDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanGBufferDescriptorSets);
+    SE_DISABLE_MOVE(VulkanGBufferDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t index) const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler,
+        const VulkanShadowMap* shadowMap = nullptr,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(const VulkanDevice& device, std::size_t count);
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler,
+        const VulkanShadowMap* shadowMap,
+        const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
+        const VulkanLocalShadowAtlas* localShadowAtlas
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanHdrDescriptorSets {
+public:
+    VulkanHdrDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+
+    ~VulkanHdrDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanHdrDescriptorSets);
+    SE_DISABLE_MOVE(VulkanHdrDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t index) const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(const VulkanDevice& device, std::size_t count);
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+}

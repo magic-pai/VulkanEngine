@@ -1,0 +1,145 @@
+#include "renderer/vulkan/pipeline_spec.h"
+
+#include <filesystem>
+#include <utility>
+
+namespace se {
+
+PipelineSpec PipelineSpec::Default2D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec{};
+    spec.vertexShaderPath = std::move(vertexShaderPath);
+    spec.fragmentShaderPath = std::move(fragmentShaderPath);
+    return spec;
+}
+
+PipelineSpec PipelineSpec::DefaultForward3D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec{};
+    spec.vertexShaderPath = std::move(vertexShaderPath);
+    spec.fragmentShaderPath = std::move(fragmentShaderPath);
+    const std::filesystem::path vertexPath(spec.vertexShaderPath);
+    spec.instancedVertexShaderPath =
+        (vertexPath.parent_path() / "forward_3d_instanced.vert.spv").string();
+    spec.vertexLayout = VertexLayout::Vertex3D;
+    spec.supportsInstancing = true;
+    spec.cullMode = VK_CULL_MODE_BACK_BIT;
+    spec.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    spec.depthTestEnabled = true;
+    spec.depthWriteEnabled = true;
+    spec.alphaBlendEnabled = false;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::ForwardResidual3D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DefaultForward3D(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.supportsInstancing = false;
+    spec.instancedVertexShaderPath.clear();
+    spec.depthWriteEnabled = false;
+    spec.alphaBlendEnabled = true;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::DepthPrefill3D(std::string vertexShaderPath) {
+    PipelineSpec spec{};
+    spec.vertexShaderPath = std::move(vertexShaderPath);
+    spec.vertexLayout = VertexLayout::Vertex3D;
+    spec.cullMode = VK_CULL_MODE_BACK_BIT;
+    spec.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    spec.depthTestEnabled = true;
+    spec.depthWriteEnabled = true;
+    spec.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    spec.alphaBlendEnabled = false;
+    spec.hasFragmentShader = false;
+    spec.hasColorAttachment = true;
+    spec.colorAttachmentCount = 1;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::GBuffer3D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DefaultForward3D(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.supportsInstancing = false;
+    spec.instancedVertexShaderPath.clear();
+    spec.colorAttachmentCount = 5;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::DeferredLighting(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec{};
+    spec.vertexShaderPath = std::move(vertexShaderPath);
+    spec.fragmentShaderPath = std::move(fragmentShaderPath);
+    spec.vertexLayout = VertexLayout::FullscreenTriangle;
+    spec.cullMode = VK_CULL_MODE_NONE;
+    spec.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    spec.depthTestEnabled = false;
+    spec.depthWriteEnabled = false;
+    spec.alphaBlendEnabled = false;
+    spec.colorAttachmentCount = 1;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::HdrComposite(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DeferredLighting(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    return spec;
+}
+
+PipelineSpec PipelineSpec::GBufferDebug(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DeferredLighting(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    return spec;
+}
+
+PipelineSpec PipelineSpec::ShadowDepth(std::string vertexShaderPath, VkExtent2D extent) {
+    PipelineSpec spec{};
+    spec.vertexShaderPath = std::move(vertexShaderPath);
+    spec.vertexLayout = VertexLayout::Vertex3D;
+    spec.cullMode = VK_CULL_MODE_BACK_BIT;
+    spec.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    spec.depthTestEnabled = true;
+    spec.depthWriteEnabled = true;
+    spec.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    spec.alphaBlendEnabled = false;
+    spec.hasFragmentShader = false;
+    spec.hasColorAttachment = false;
+    spec.colorAttachmentCount = 0;
+    spec.dynamicViewportScissor = true;
+    spec.fixedExtent = extent;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::DoubleSided(PipelineSpec spec) {
+    spec.cullMode = VK_CULL_MODE_NONE;
+    return spec;
+}
+
+}

@@ -1,0 +1,10 @@
+out/
+build/
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+.git_broken_*/
+__pycache__/
+*.pyc

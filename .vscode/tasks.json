@@ -1,0 +1,115 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "configure",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; if (-not (Test-Path out/build/build.ninja)) { cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Debug }; cmake --build out/build --target SelfEngine"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "build main",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; if (-not (Test-Path out/build/build.ninja)) { cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Debug }; cmake --build out/build --target SelfEngine"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "build black hole",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; if (-not (Test-Path out/build/build.ninja)) { cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Debug }; cmake --build out/build --target SelfEngineBlackHole"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "clean black hole",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; if (Test-Path out/build/build.ninja) { cmake --build out/build --target SelfEngineBlackHole --clean-first }"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "build forward 3d",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                ".\\scripts\\Enter-VulkanDev.ps1 -Quiet; if (-not (Test-Path out/build/build.ninja)) { cmake -S . -B out/build -G Ninja -DCMAKE_BUILD_TYPE=Debug }; cmake --build out/build --target SelfEngineForward3D"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "run",
+            "type": "shell",
+            "command": "${workspaceFolder}\\out\\build\\SelfEngine.exe",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "build",
+            "problemMatcher": []
+        }
+    ]
+}

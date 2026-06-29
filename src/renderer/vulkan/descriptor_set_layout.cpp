@@ -1,0 +1,243 @@
+#include "renderer/vulkan/descriptor_set_layout.h"
+
+#include "renderer/vulkan/device.h"
+
+namespace se {
+
+VulkanDescriptorSetLayout::VulkanDescriptorSetLayout(const VulkanDevice& device)
+    : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanDescriptorSetLayout::~VulkanDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& device) {
+    VkDescriptorSetLayoutBinding uniformBufferLayoutBinding{};
+    uniformBufferLayoutBinding.binding = 0;
+    uniformBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformBufferLayoutBinding.descriptorCount = 1;
+    uniformBufferLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    uniformBufferLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding lightBufferLayoutBinding{};
+    lightBufferLayoutBinding.binding = 1;
+    lightBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    lightBufferLayoutBinding.descriptorCount = 1;
+    lightBufferLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    lightBufferLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding materialBufferLayoutBinding{};
+    materialBufferLayoutBinding.binding = 2;
+    materialBufferLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    materialBufferLayoutBinding.descriptorCount = 1;
+    materialBufferLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    materialBufferLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding lightTileDiagnosticsLayoutBinding{};
+    lightTileDiagnosticsLayoutBinding.binding = 3;
+    lightTileDiagnosticsLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    lightTileDiagnosticsLayoutBinding.descriptorCount = 1;
+    lightTileDiagnosticsLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    lightTileDiagnosticsLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding directionalShadowCascadeLayoutBinding{};
+    directionalShadowCascadeLayoutBinding.binding = 4;
+    directionalShadowCascadeLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    directionalShadowCascadeLayoutBinding.descriptorCount = 1;
+    directionalShadowCascadeLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    directionalShadowCascadeLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding localShadowLayoutBinding{};
+    localShadowLayoutBinding.binding = 5;
+    localShadowLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    localShadowLayoutBinding.descriptorCount = 1;
+    localShadowLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    localShadowLayoutBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+        uniformBufferLayoutBinding,
+        lightBufferLayoutBinding,
+        materialBufferLayoutBinding,
+        lightTileDiagnosticsLayoutBinding,
+        directionalShadowCascadeLayoutBinding,
+        localShadowLayoutBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan frame descriptor set layout");
+    }
+}
+
+VulkanMaterialDescriptorSetLayout::VulkanMaterialDescriptorSetLayout(const VulkanDevice& device)
+    : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanMaterialDescriptorSetLayout::~VulkanMaterialDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanMaterialDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanMaterialDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& device) {
+    VkDescriptorSetLayoutBinding albedoSamplerLayoutBinding{};
+    albedoSamplerLayoutBinding.binding = 0;
+    albedoSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    albedoSamplerLayoutBinding.descriptorCount = 1;
+    albedoSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    albedoSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding colorMapSamplerLayoutBinding{};
+    colorMapSamplerLayoutBinding.binding = 1;
+    colorMapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    colorMapSamplerLayoutBinding.descriptorCount = 1;
+    colorMapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    colorMapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding cubemapSamplerLayoutBinding{};
+    cubemapSamplerLayoutBinding.binding = 2;
+    cubemapSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    cubemapSamplerLayoutBinding.descriptorCount = 1;
+    cubemapSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    cubemapSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding normalSamplerLayoutBinding{};
+    normalSamplerLayoutBinding.binding = 3;
+    normalSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normalSamplerLayoutBinding.descriptorCount = 1;
+    normalSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    normalSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding occlusionSamplerLayoutBinding{};
+    occlusionSamplerLayoutBinding.binding = 4;
+    occlusionSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    occlusionSamplerLayoutBinding.descriptorCount = 1;
+    occlusionSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    occlusionSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding emissiveSamplerLayoutBinding{};
+    emissiveSamplerLayoutBinding.binding = 5;
+    emissiveSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    emissiveSamplerLayoutBinding.descriptorCount = 1;
+    emissiveSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    emissiveSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding shadowSamplerLayoutBinding{};
+    shadowSamplerLayoutBinding.binding = 6;
+    shadowSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowSamplerLayoutBinding.descriptorCount = 1;
+    shadowSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shadowSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding opacitySamplerLayoutBinding{};
+    opacitySamplerLayoutBinding.binding = 7;
+    opacitySamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    opacitySamplerLayoutBinding.descriptorCount = 1;
+    opacitySamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    opacitySamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding specularSamplerLayoutBinding{};
+    specularSamplerLayoutBinding.binding = 8;
+    specularSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    specularSamplerLayoutBinding.descriptorCount = 1;
+    specularSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    specularSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding clearcoatSamplerLayoutBinding{};
+    clearcoatSamplerLayoutBinding.binding = 9;
+    clearcoatSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    clearcoatSamplerLayoutBinding.descriptorCount = 1;
+    clearcoatSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    clearcoatSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding transmissionSamplerLayoutBinding{};
+    transmissionSamplerLayoutBinding.binding = 10;
+    transmissionSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    transmissionSamplerLayoutBinding.descriptorCount = 1;
+    transmissionSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    transmissionSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding clearcoatRoughnessSamplerLayoutBinding{};
+    clearcoatRoughnessSamplerLayoutBinding.binding = 11;
+    clearcoatRoughnessSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    clearcoatRoughnessSamplerLayoutBinding.descriptorCount = 1;
+    clearcoatRoughnessSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    clearcoatRoughnessSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding localShadowSamplerLayoutBinding{};
+    localShadowSamplerLayoutBinding.binding = 12;
+    localShadowSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    localShadowSamplerLayoutBinding.descriptorCount = 1;
+    localShadowSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    localShadowSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 13> bindings = {
+        albedoSamplerLayoutBinding,
+        colorMapSamplerLayoutBinding,
+        cubemapSamplerLayoutBinding,
+        normalSamplerLayoutBinding,
+        occlusionSamplerLayoutBinding,
+        emissiveSamplerLayoutBinding,
+        shadowSamplerLayoutBinding,
+        opacitySamplerLayoutBinding,
+        specularSamplerLayoutBinding,
+        clearcoatSamplerLayoutBinding,
+        transmissionSamplerLayoutBinding,
+        clearcoatRoughnessSamplerLayoutBinding,
+        localShadowSamplerLayoutBinding
+    };
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan material descriptor set layout");
+    }
+}
+
+}
