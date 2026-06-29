@@ -1406,6 +1406,8 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 10;
     case ForwardDebugView::Ssao:
         return 11;
+    case ForwardDebugView::Ssr:
+        return 12;
     default:
         return 0;
     }
@@ -1437,6 +1439,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::ContactShadow ||
         view == ForwardDebugView::LocalShadowFace ||
         view == ForwardDebugView::Ssao ||
+        view == ForwardDebugView::Ssr ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1545,6 +1548,16 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "ambient-occlusion" ||
         value == "ambient_occlusion") {
         return ForwardDebugView::Ssao;
+    }
+    if (value == "ssr" ||
+        value == "SSR" ||
+        value == "screen-space-reflection" ||
+        value == "screen_space_reflection" ||
+        value == "screen-space-reflections" ||
+        value == "screen_space_reflections" ||
+        value == "reflection-debug" ||
+        value == "reflection_debug") {
+        return ForwardDebugView::Ssr;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2051,6 +2064,20 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssao.sampleCount > 0
             ? 1u
             : 0u;
+    frameStats.ssr.strength =
+        std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f);
+    frameStats.ssr.rayLength =
+        std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f);
+    frameStats.ssr.thickness =
+        std::clamp(m_ShadowSettings.ssrThickness, 0.0f, 0.5f);
+    frameStats.ssr.stepCount =
+        std::clamp<u32>(m_ShadowSettings.ssrStepCount, 0u, 32u);
+    frameStats.ssr.enabled =
+        frameStats.ssr.strength > 0.0001f &&
+        frameStats.ssr.rayLength > 0.0001f &&
+        frameStats.ssr.stepCount > 0
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2314,6 +2341,10 @@ void VulkanRenderer::DrawFrame() {
             m_HdrRenderPass != nullptr && m_HdrFramebuffer != nullptr,
             m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
             frameStats.ssao.enabled > 0 &&
+                has3DMainPass &&
+                m_DeferredLightingPipeline != nullptr &&
+                m_GBufferDescriptorSets != nullptr,
+            frameStats.ssr.enabled > 0 &&
                 has3DMainPass &&
                 m_DeferredLightingPipeline != nullptr &&
                 m_GBufferDescriptorSets != nullptr,
@@ -4024,6 +4055,16 @@ void VulkanRenderer::UpdateUniformBuffer(
             16u
         ))
     );
+    uniformData.ssrControls = glm::vec4(
+        std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
+        std::clamp(m_ShadowSettings.ssrThickness, 0.0f, 0.5f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.ssrStepCount,
+            0u,
+            32u
+        ))
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4083,6 +4124,16 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
             m_ShadowSettings.ssaoSampleCount,
             0u,
             16u
+        ))
+    );
+    uniformData.ssrControls = glm::vec4(
+        std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
+        std::clamp(m_ShadowSettings.ssrThickness, 0.0f, 0.5f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.ssrStepCount,
+            0u,
+            32u
         ))
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);

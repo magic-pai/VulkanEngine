@@ -125,6 +125,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererWeightedTranslucencyStats& weightedTranslucency =
         stats.weightedTranslucency;
     const RendererSsaoStats& ssao = stats.ssao;
+    const RendererSsrStats& ssr = stats.ssr;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
     const BenchmarkSceneDiagnostics& sceneDiagnostics =
@@ -247,6 +248,11 @@ void BenchmarkRecorder::RecordFrame(
         << ssao.radius << ','
         << ssao.bias << ','
         << ssao.sampleCount << ','
+        << ssr.enabled << ','
+        << ssr.strength << ','
+        << ssr.rayLength << ','
+        << ssr.thickness << ','
+        << ssr.stepCount << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
         << shadowCascades.farDepth << ','
@@ -344,6 +350,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ssaoDebugDraws << ','
         << binds.ssaoDebugFrameBinds << ','
         << binds.ssaoDebugGBufferBinds << ','
+        << binds.ssrDebugDraws << ','
+        << binds.ssrDebugFrameBinds << ','
+        << binds.ssrDebugGBufferBinds << ','
         << binds.lightTileCullComputeDispatches << ','
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
@@ -506,6 +515,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_contact_thickness,shadow_contact_steps,"
         << "shadow_contact_jitter_strength,shadow_contact_edge_fade_pixels,"
         << "ssao_enabled,ssao_strength,ssao_radius,ssao_bias,ssao_sample_count,"
+        << "ssr_enabled,ssr_strength,ssr_ray_length,ssr_thickness,ssr_step_count,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"
@@ -553,6 +563,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "contact_shadow_debug_draws,contact_shadow_debug_frame_binds,"
         << "contact_shadow_debug_gbuffer_binds,"
         << "ssao_debug_draws,ssao_debug_frame_binds,ssao_debug_gbuffer_binds,"
+        << "ssr_debug_draws,ssr_debug_frame_binds,ssr_debug_gbuffer_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"

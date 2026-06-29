@@ -623,6 +623,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First screen-space ambient occlusion tier integrated into deferred ambient with a debug view; a standalone AO target and temporal filter follow later."
         );
     }
+    if (inputs.ssrEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Reflections,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "SSRDiagnostic",
+            "GBufferNormalRoughness, SceneDepth, frame matrices",
+            "screen-space reflection hit confidence",
+            "First screen-space reflection tracing diagnostic integrated into deferred lighting; color resolve, hierarchy, temporal accumulation, and probe fallback follow later."
+        );
+    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(

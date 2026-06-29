@@ -42,6 +42,10 @@ struct VulkanShadowSettings {
     f32 ssaoRadius = 1.2f;
     f32 ssaoBias = 0.035f;
     u32 ssaoSampleCount = 8;
+    f32 ssrStrength = 0.55f;
+    f32 ssrRayLength = 18.0f;
+    f32 ssrThickness = 0.08f;
+    u32 ssrStepCount = 12;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
     f32 cascadeBlendRatio = 0.08f;
@@ -81,6 +85,10 @@ inline void ApplyShadowQualityPreset(
         settings.ssaoRadius = 0.0f;
         settings.ssaoBias = 0.0f;
         settings.ssaoSampleCount = 0;
+        settings.ssrStrength = 0.0f;
+        settings.ssrRayLength = 0.0f;
+        settings.ssrThickness = 0.0f;
+        settings.ssrStepCount = 0;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -112,6 +120,10 @@ inline void ApplyShadowQualityPreset(
         settings.ssaoRadius = 0.75f;
         settings.ssaoBias = 0.05f;
         settings.ssaoSampleCount = 4;
+        settings.ssrStrength = 0.35f;
+        settings.ssrRayLength = 10.0f;
+        settings.ssrThickness = 0.12f;
+        settings.ssrStepCount = 8;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -143,6 +155,10 @@ inline void ApplyShadowQualityPreset(
         settings.ssaoRadius = 1.2f;
         settings.ssaoBias = 0.035f;
         settings.ssaoSampleCount = 8;
+        settings.ssrStrength = 0.55f;
+        settings.ssrRayLength = 18.0f;
+        settings.ssrThickness = 0.08f;
+        settings.ssrStepCount = 12;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 250.0f;
@@ -174,6 +190,10 @@ inline void ApplyShadowQualityPreset(
         settings.ssaoRadius = 1.7f;
         settings.ssaoBias = 0.025f;
         settings.ssaoSampleCount = 12;
+        settings.ssrStrength = 0.70f;
+        settings.ssrRayLength = 28.0f;
+        settings.ssrThickness = 0.06f;
+        settings.ssrStepCount = 18;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 500.0f;
@@ -205,6 +225,10 @@ inline void ApplyShadowQualityPreset(
         settings.ssaoRadius = 2.1f;
         settings.ssaoBias = 0.02f;
         settings.ssaoSampleCount = 16;
+        settings.ssrStrength = 0.82f;
+        settings.ssrRayLength = 42.0f;
+        settings.ssrThickness = 0.05f;
+        settings.ssrStepCount = 24;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 1000.0f;

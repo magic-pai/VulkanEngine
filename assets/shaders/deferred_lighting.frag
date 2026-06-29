@@ -16,6 +16,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 contactShadowControls;
     vec4 contactShadowStabilityControls;
     vec4 ssaoControls;
+    vec4 ssrControls;
 } frame;
 
 struct LocalLightRecord {
@@ -733,6 +734,96 @@ float SsaoVisibility(vec2 uv, float depth, vec3 normal) {
         ? clamp(occlusion / weightSum, 0.0, 1.0)
         : 0.0;
     return clamp(1.0 - normalizedOcclusion * strength, 0.0, 1.0);
+}
+
+vec3 ScreenSpaceReflectionDebug(
+    vec2 uv,
+    float depth,
+    vec3 normal,
+    float roughness,
+    out float hitConfidence
+) {
+    float strength = clamp(frame.ssrControls.x, 0.0, 1.0);
+    float rayLength = clamp(frame.ssrControls.y, 0.0, 64.0);
+    float thickness = clamp(frame.ssrControls.z, 0.0, 0.5);
+    int stepCount = clamp(int(frame.ssrControls.w + 0.5), 0, 32);
+    hitConfidence = 0.0;
+    if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0 ||
+        depth >= 0.999999) {
+        return vec3(0.02, 0.025, 0.035);
+    }
+
+    vec3 viewPosition = ReconstructViewPosition(uv, depth);
+    vec3 viewNormal = normalize((frame.view * vec4(normal, 0.0)).xyz);
+    vec3 viewDirFromCamera = normalize(viewPosition);
+    vec3 reflectionDir = normalize(reflect(viewDirFromCamera, viewNormal));
+    if (reflectionDir.z >= -0.0001) {
+        float facing = smoothstep(0.0, 0.45, max(dot(-viewDirFromCamera, viewNormal), 0.0));
+        return mix(vec3(0.16, 0.035, 0.045), vec3(0.28, 0.10, 0.055), facing);
+    }
+
+    vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
+    vec2 depthExtent = vec2(textureSize(sceneDepth, 0));
+    float jitter = InterleavedGradientNoise(floor(uv * depthExtent));
+    float roughnessMask = 1.0 - smoothstep(0.45, 0.95, roughness);
+    float edgeFadePixels = 24.0;
+    float bestConfidence = 0.0;
+    vec2 bestUv = uv;
+    float validRay = 0.0;
+
+    for (int index = 1; index <= 32; ++index) {
+        if (index > stepCount) {
+            break;
+        }
+
+        float t = (float(index) - 0.35 + jitter * 0.7) / float(stepCount);
+        t = clamp(t, 0.001, 1.0);
+        vec3 rayView = viewPosition + reflectionDir * rayLength * t;
+        vec4 clip = frame.proj * vec4(rayView, 1.0);
+        if (abs(clip.w) <= 0.000001) {
+            continue;
+        }
+
+        vec3 ndc = clip.xyz / clip.w;
+        vec2 sampleUv = ndc.xy * 0.5 + 0.5;
+        if (sampleUv.x <= texelSize.x || sampleUv.x >= 1.0 - texelSize.x ||
+            sampleUv.y <= texelSize.y || sampleUv.y >= 1.0 - texelSize.y ||
+            ndc.z <= 0.0 || ndc.z >= 1.0) {
+            continue;
+        }
+        validRay = 1.0;
+
+        float sampleDepth = texture(sceneDepth, sampleUv).r;
+        if (sampleDepth >= 0.999999 || sampleDepth <= 0.0) {
+            continue;
+        }
+
+        vec3 sampleViewPosition = ReconstructViewPosition(sampleUv, sampleDepth);
+        float depthDelta = abs(rayView.z - sampleViewPosition.z);
+        float adaptiveThickness = max(thickness, abs(rayView.z) * 0.006);
+        float hit = 1.0 - smoothstep(adaptiveThickness, adaptiveThickness * 2.5, depthDelta);
+        if (rayView.z > sampleViewPosition.z) {
+            hit *= 0.45;
+        }
+
+        vec2 edgePixels = min(sampleUv, 1.0 - sampleUv) * depthExtent;
+        float edgeFade = smoothstep(0.0, edgeFadePixels, min(edgePixels.x, edgePixels.y));
+        float distanceFade = 1.0 - smoothstep(0.45, 1.0, t);
+        float confidence = hit * edgeFade * distanceFade * roughnessMask * strength;
+        if (confidence > bestConfidence) {
+            bestConfidence = confidence;
+            bestUv = sampleUv;
+        }
+    }
+
+    hitConfidence = clamp(bestConfidence, 0.0, 1.0);
+    vec3 miss = validRay > 0.5 ? vec3(0.03, 0.09, 0.16) : vec3(0.13, 0.03, 0.055);
+    vec3 rough = vec3(0.18, 0.11, 0.035);
+    vec3 hit = mix(vec3(0.08, 0.46, 0.72), vec3(0.85, 0.98, 1.0), hitConfidence);
+    vec2 hitDelta = abs(bestUv - uv);
+    float travel = clamp(length(hitDelta) * 3.5, 0.0, 1.0);
+    hit = mix(hit, vec3(0.26, 0.96, 0.78), travel * 0.35);
+    return mix(mix(miss, rough, smoothstep(0.45, 0.95, roughness)), hit, hitConfidence);
 }
 
 float SampleShadowCascadeVisibility(
@@ -1549,6 +1640,14 @@ void main() {
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
     float ssaoVisibility = SsaoVisibility(fragUv, depth, normal);
     ambient *= ssaoVisibility;
+    float ssrHitConfidence = 0.0;
+    vec3 ssrDebugColor = ScreenSpaceReflectionDebug(
+        fragUv,
+        depth,
+        normal,
+        roughness,
+        ssrHitConfidence
+    );
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =
@@ -1759,6 +1858,10 @@ void main() {
         vec3 ssaoColor = mix(occluded, mid, smoothstep(0.0, 0.75, ssaoVisibility));
         ssaoColor = mix(ssaoColor, open, smoothstep(0.55, 1.0, ssaoVisibility));
         outColor = vec4(ssaoColor, 1.0);
+        return;
+    }
+    if (deferredDebugView == 12) {
+        outColor = vec4(ssrDebugColor + vec3(ssrHitConfidence) * 0.08, 1.0);
         return;
     }
 

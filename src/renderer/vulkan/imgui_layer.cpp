@@ -275,6 +275,15 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.ssaoSampleCount =
             static_cast<u32>(std::clamp(ssaoSampleCount, 0, 16));
     }
+    ImGui::SeparatorText("SSR");
+    ImGui::SliderFloat("SSR strength##Shadow", &settings.ssrStrength, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("SSR ray length##Shadow", &settings.ssrRayLength, 0.0f, 64.0f, "%.1f");
+    ImGui::SliderFloat("SSR thickness##Shadow", &settings.ssrThickness, 0.0f, 0.5f, "%.3f");
+    int ssrStepCount = static_cast<int>(settings.ssrStepCount);
+    if (ImGui::SliderInt("SSR steps##Shadow", &ssrStepCount, 0, 32)) {
+        settings.ssrStepCount =
+            static_cast<u32>(std::clamp(ssrStepCount, 0, 32));
+    }
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -397,6 +406,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "WBOIT Weight";
     case ForwardDebugView::Ssao:
         return "SSAO";
+    case ForwardDebugView::Ssr:
+        return "SSR";
     }
 
     return "Lit";
@@ -437,7 +448,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::WeightedTranslucencyAccum,
         ForwardDebugView::WeightedTranslucencyRevealage,
         ForwardDebugView::WeightedTranslucencyWeight,
-        ForwardDebugView::Ssao
+        ForwardDebugView::Ssao,
+        ForwardDebugView::Ssr
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -620,6 +632,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssao.sampleCount
     );
     ImGui::Text(
+        "SSR: %s, strength %.3f, ray %.1f, thickness %.3f, steps %u",
+        stats.ssr.enabled ? "enabled" : "off",
+        stats.ssr.strength,
+        stats.ssr.rayLength,
+        stats.ssr.thickness,
+        stats.ssr.stepCount
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -740,6 +760,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.ssaoDebugDraws,
         binds.ssaoDebugFrameBinds,
         binds.ssaoDebugGBufferBinds
+    );
+    ImGui::Text(
+        "SSR debug: %u draws / %u frame binds / %u gbuffer binds",
+        binds.ssrDebugDraws,
+        binds.ssrDebugFrameBinds,
+        binds.ssrDebugGBufferBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

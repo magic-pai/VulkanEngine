@@ -21,6 +21,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 contactShadowControls;
     vec4 contactShadowStabilityControls;
     vec4 ssaoControls;
+    vec4 ssrControls;
 } frame;
 
 layout(push_constant) uniform ObjectPushConstants {

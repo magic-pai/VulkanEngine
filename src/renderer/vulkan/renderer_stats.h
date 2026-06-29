@@ -155,6 +155,14 @@ struct RendererSsaoStats {
     u32 sampleCount = 0;
 };
 
+struct RendererSsrStats {
+    u32 enabled = 0;
+    f32 strength = 0.0f;
+    f32 rayLength = 0.0f;
+    f32 thickness = 0.0f;
+    u32 stepCount = 0;
+};
+
 struct RendererBindStats {
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
@@ -193,6 +201,9 @@ struct RendererBindStats {
     u32 ssaoDebugDraws = 0;
     u32 ssaoDebugFrameBinds = 0;
     u32 ssaoDebugGBufferBinds = 0;
+    u32 ssrDebugDraws = 0;
+    u32 ssrDebugFrameBinds = 0;
+    u32 ssrDebugGBufferBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;
@@ -302,6 +313,7 @@ struct RendererStats {
     RendererLocalShadowAtlasStats localShadowAtlas;
     RendererWeightedTranslucencyStats weightedTranslucency;
     RendererSsaoStats ssao;
+    RendererSsrStats ssr;
     RendererBindStats binds;
     RendererGpuStats gpu;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();
