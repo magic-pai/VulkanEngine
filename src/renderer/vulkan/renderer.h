@@ -192,7 +192,6 @@ struct LocalShadowTileSet {
 struct LocalShadowCacheState {
     std::array<u64, kMaxLocalShadowTiles> tileKeys{};
     u32 tileCount = 0;
-    u64 commandSignature = 0;
     bool valid = false;
 };
 
@@ -310,8 +309,8 @@ private:
     ) const;
     LocalShadowTileSet BuildLocalShadowTiles(
         const FrameLightSet& lights,
+        std::span<const RenderCommand> shadowCommands,
         u32 atlasTileCapacity,
-        bool allowCacheReuse,
         const LocalShadowCacheState* cacheState
     ) const;
     std::span<const RenderCommand> ShadowRenderCommands() const;

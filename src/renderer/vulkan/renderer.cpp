@@ -639,7 +639,8 @@ void AddLocalShadowTile(
 u64 LocalShadowTileCacheKey(
     const RendererLocalLight& light,
     u32 localLightIndex,
-    u32 faceIndex
+    u32 faceIndex,
+    u64 casterSignature
 ) {
     u64 hash = 0x6f4d1f5bb9e6d9c5ull;
     hash = HashCombine(hash, static_cast<u64>(localLightIndex));
@@ -654,6 +655,7 @@ u64 LocalShadowTileCacheKey(
     hash = HashCombine(hash, FloatBits(light.direction.z));
     hash = HashCombine(hash, FloatBits(light.innerConeCos));
     hash = HashCombine(hash, FloatBits(light.outerConeCos));
+    hash = HashCombine(hash, casterSignature);
     return hash;
 }
 
@@ -670,37 +672,101 @@ bool LocalShadowTileCacheReusable(
     return previousKeys[tileIndex] == cacheKey;
 }
 
-u64 LocalShadowCommandSignature(std::span<const RenderCommand> shadowCommands) {
-    u64 signature = 0x35f0d5a8936a1c21ull;
-    signature = HashCombine(signature, static_cast<u64>(shadowCommands.size()));
-    for (const RenderCommand& command : shadowCommands) {
-        signature = HashCombine(
-            signature,
-            static_cast<u64>(reinterpret_cast<std::uintptr_t>(command.mesh))
-        );
-        signature = HashCombine(
-            signature,
-            static_cast<u64>(reinterpret_cast<std::uintptr_t>(command.material))
-        );
-        signature = HashCombine(signature, static_cast<u64>(command.meshSortKey));
-        signature = HashCombine(signature, static_cast<u64>(command.materialSortKey));
-        signature = HashCombine(signature, static_cast<u64>(command.drawOrder));
-        signature = HashCombine(signature, command.castShadow ? 1ull : 0ull);
-        signature = HashMatrix(signature, command.model);
-        if (command.worldBounds.valid) {
-            signature = HashCombine(signature, 1ull);
-            signature = HashCombine(signature, FloatBits(command.worldBounds.min.x));
-            signature = HashCombine(signature, FloatBits(command.worldBounds.min.y));
-            signature = HashCombine(signature, FloatBits(command.worldBounds.min.z));
-            signature = HashCombine(signature, FloatBits(command.worldBounds.max.x));
-            signature = HashCombine(signature, FloatBits(command.worldBounds.max.y));
-            signature = HashCombine(signature, FloatBits(command.worldBounds.max.z));
-        } else {
-            signature = HashCombine(signature, 0ull);
-        }
+bool SphereIntersectsAabb(
+    glm::vec3 center,
+    f32 radius,
+    const RenderBounds& bounds
+) {
+    if (!bounds.valid) {
+        return true;
+    }
+
+    const glm::vec3 closest = glm::clamp(center, bounds.min, bounds.max);
+    const glm::vec3 delta = closest - center;
+    return glm::dot(delta, delta) <= radius * radius;
+}
+
+glm::vec3 BoundsCenter(const RenderBounds& bounds) {
+    return (bounds.min + bounds.max) * 0.5f;
+}
+
+f32 BoundsRadius(const RenderBounds& bounds) {
+    if (!bounds.valid) {
+        return std::numeric_limits<f32>::max();
+    }
+
+    return glm::length(bounds.max - bounds.min) * 0.5f;
+}
+
+bool PointLightFaceMaySeeBounds(
+    const RendererLocalLight& light,
+    glm::vec3 faceDirection,
+    const RenderBounds& bounds
+) {
+    if (!bounds.valid) {
+        return true;
+    }
+    if (!SphereIntersectsAabb(light.position, std::max(light.radius, kLocalShadowNearPlane), bounds)) {
+        return false;
+    }
+
+    const glm::vec3 toBounds = BoundsCenter(bounds) - light.position;
+    return glm::dot(toBounds, faceDirection) + BoundsRadius(bounds) >= 0.0f;
+}
+
+u64 HashShadowCommand(u64 signature, const RenderCommand& command) {
+    signature = HashCombine(
+        signature,
+        static_cast<u64>(reinterpret_cast<std::uintptr_t>(command.mesh))
+    );
+    signature = HashCombine(
+        signature,
+        static_cast<u64>(reinterpret_cast<std::uintptr_t>(command.material))
+    );
+    signature = HashCombine(signature, static_cast<u64>(command.meshSortKey));
+    signature = HashCombine(signature, static_cast<u64>(command.materialSortKey));
+    signature = HashCombine(signature, static_cast<u64>(command.drawOrder));
+    signature = HashCombine(signature, command.castShadow ? 1ull : 0ull);
+    signature = HashMatrix(signature, command.model);
+    if (command.worldBounds.valid) {
+        signature = HashCombine(signature, 1ull);
+        signature = HashCombine(signature, FloatBits(command.worldBounds.min.x));
+        signature = HashCombine(signature, FloatBits(command.worldBounds.min.y));
+        signature = HashCombine(signature, FloatBits(command.worldBounds.min.z));
+        signature = HashCombine(signature, FloatBits(command.worldBounds.max.x));
+        signature = HashCombine(signature, FloatBits(command.worldBounds.max.y));
+        signature = HashCombine(signature, FloatBits(command.worldBounds.max.z));
+    } else {
+        signature = HashCombine(signature, 0ull);
     }
 
     return signature;
+}
+
+u64 LocalShadowCasterSignature(
+    std::span<const RenderCommand> shadowCommands,
+    const RendererLocalLight& light,
+    const glm::vec3* pointFaceDirection = nullptr
+) {
+    u64 signature = 0x35f0d5a8936a1c21ull;
+    u32 relevantCount = 0;
+    const f32 influenceRadius = std::max(light.radius, kLocalShadowNearPlane);
+    for (const RenderCommand& command : shadowCommands) {
+        if (!command.castShadow) {
+            continue;
+        }
+        const bool relevant = pointFaceDirection != nullptr
+            ? PointLightFaceMaySeeBounds(light, *pointFaceDirection, command.worldBounds)
+            : SphereIntersectsAabb(light.position, influenceRadius, command.worldBounds);
+        if (!relevant) {
+            continue;
+        }
+
+        signature = HashShadowCommand(signature, command);
+        ++relevantCount;
+    }
+
+    return HashCombine(signature, static_cast<u64>(relevantCount));
 }
 
 std::string ReadEnvironmentString(const char* name) {
@@ -1794,7 +1860,6 @@ void VulkanRenderer::DrawFrame() {
     const std::span<const RenderCommand> overlayCommands = m_OverlayRenderQueue.Commands();
     const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
     const bool shadowSamplingEnabled = shadowPassEnabled && !shadowCommands.empty();
-    const u64 localShadowCommandSignature = LocalShadowCommandSignature(shadowCommands);
     if (m_LocalShadowCacheStates.size() != m_Swapchain->Images().size()) {
         m_LocalShadowCacheStates.assign(m_Swapchain->Images().size(), LocalShadowCacheState{});
     }
@@ -1820,14 +1885,10 @@ void VulkanRenderer::DrawFrame() {
             mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
             shadowSamplingEnabled
         );
-    const bool allowLocalShadowCacheReuse =
-        localShadowCacheState != nullptr &&
-        localShadowCacheState->valid &&
-        localShadowCacheState->commandSignature == localShadowCommandSignature;
     const LocalShadowTileSet localShadowTiles = BuildLocalShadowTiles(
         frameLightSet,
+        shadowCommands,
         m_LocalShadowAtlas != nullptr ? m_LocalShadowAtlas->TileCapacity() : 0u,
-        allowLocalShadowCacheReuse,
         localShadowCacheState
     );
     UpdateUniformBuffer(
@@ -2254,7 +2315,6 @@ void VulkanRenderer::DrawFrame() {
         LocalShadowCacheState& cacheState = m_LocalShadowCacheStates[imageIndex];
         cacheState.tileKeys = localShadowTiles.cacheKeys;
         cacheState.tileCount = localShadowTiles.assignedCount;
-        cacheState.commandSignature = localShadowCommandSignature;
         cacheState.valid = localShadowTiles.assignedCount > 0;
     }
     if (imageIndex < m_LightTileGpuReadbackReady.size()) {
@@ -4374,8 +4434,8 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
 
 LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
     const FrameLightSet& lights,
+    std::span<const RenderCommand> shadowCommands,
     u32 atlasTileCapacity,
-    bool allowCacheReuse,
     const LocalShadowCacheState* cacheState
 ) const {
     LocalShadowTileSet tileSet{};
@@ -4413,14 +4473,21 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
     for (u32 index = 0; index < localCount; ++index) {
         const RendererLocalLight& light = lights.localLights[index];
         const f32 farPlane = std::max(light.radius, kLocalShadowNearPlane + 0.1f);
+        const bool allowCacheReuse = cacheState != nullptr && cacheState->valid;
         if (light.kind == RendererLightKind::Point) {
             ++tileSet.pointLightCount;
             tileSet.pointFaceTiles += 6u;
             for (std::size_t faceIndex = 0; faceIndex < kPointFaceDirections.size(); ++faceIndex) {
+                const u64 casterSignature = LocalShadowCasterSignature(
+                    shadowCommands,
+                    light,
+                    &kPointFaceDirections[faceIndex]
+                );
                 const u64 cacheKey = LocalShadowTileCacheKey(
                     light,
                     index,
-                    static_cast<u32>(faceIndex)
+                    static_cast<u32>(faceIndex),
+                    casterSignature
                 );
                 AddLocalShadowTile(
                     tileSet,
@@ -4448,6 +4515,7 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
         } else if (light.kind == RendererLightKind::Spot) {
             ++tileSet.spotLightCount;
             ++tileSet.spotTiles;
+            const u64 casterSignature = LocalShadowCasterSignature(shadowCommands, light);
             const f32 outerConeCos = std::clamp(light.outerConeCos, 0.0f, 0.999f);
             const f32 outerConeRadians = std::acos(outerConeCos);
             const f32 spotFov = std::clamp(
@@ -4455,7 +4523,7 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
                 glm::radians(5.0f),
                 glm::radians(175.0f)
             );
-            const u64 cacheKey = LocalShadowTileCacheKey(light, index, 0u);
+            const u64 cacheKey = LocalShadowTileCacheKey(light, index, 0u, casterSignature);
             AddLocalShadowTile(
                 tileSet,
                 LocalShadowViewProjection(
