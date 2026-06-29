@@ -1429,6 +1429,11 @@ void VulkanCommandBuffer::Record(
                     ++bindStats->localShadowVisibilityDebugFrameBinds;
                     ++bindStats->localShadowVisibilityDebugTextureBinds;
                 }
+                if (deferredPbrDebugView == 9) {
+                    ++bindStats->contactShadowDebugDraws;
+                    ++bindStats->contactShadowDebugFrameBinds;
+                    ++bindStats->contactShadowDebugGBufferBinds;
+                }
                 bindStats->pushConstantUpdates += deferredPushConstantUpdates;
                 bindStats->pushConstantBytes += deferredPushConstantBytes;
             }

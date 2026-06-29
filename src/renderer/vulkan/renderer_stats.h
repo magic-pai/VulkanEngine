@@ -147,6 +147,9 @@ struct RendererBindStats {
     u32 localShadowVisibilityDebugDraws = 0;
     u32 localShadowVisibilityDebugFrameBinds = 0;
     u32 localShadowVisibilityDebugTextureBinds = 0;
+    u32 contactShadowDebugDraws = 0;
+    u32 contactShadowDebugFrameBinds = 0;
+    u32 contactShadowDebugGBufferBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;

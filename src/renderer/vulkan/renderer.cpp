@@ -1251,6 +1251,8 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 7;
     case ForwardDebugView::LocalShadowVisibility:
         return 8;
+    case ForwardDebugView::ContactShadow:
+        return 9;
     default:
         return 0;
     }
@@ -1265,7 +1267,8 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::DeferredTileOccupancy ||
         view == ForwardDebugView::DeferredMaterialTable ||
         view == ForwardDebugView::LocalShadowAtlas ||
-        view == ForwardDebugView::LocalShadowVisibility;
+        view == ForwardDebugView::LocalShadowVisibility ||
+        view == ForwardDebugView::ContactShadow;
 }
 
 std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
@@ -1343,6 +1346,15 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "local-shadow-visibility-debug" ||
         value == "local_shadow_visibility_debug") {
         return ForwardDebugView::LocalShadowVisibility;
+    }
+    if (value == "contact-shadow" ||
+        value == "ContactShadow" ||
+        value == "contact_shadow" ||
+        value == "deferred-contact-shadow" ||
+        value == "deferred_contact_shadow" ||
+        value == "contact-shadow-debug" ||
+        value == "contact_shadow_debug") {
+        return ForwardDebugView::ContactShadow;
     }
     if (value == "gbuffer-albedo" || value == "GBufferAlbedo" || value == "gbuffer_albedo") {
         return ForwardDebugView::GBufferAlbedo;

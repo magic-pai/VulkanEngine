@@ -32,7 +32,8 @@ enum class ForwardDebugView : int {
     DeferredMaterialTable = 24,
     ShadowCascade = 25,
     LocalShadowAtlas = 26,
-    LocalShadowVisibility = 27
+    LocalShadowVisibility = 27,
+    ContactShadow = 28
 };
 
 struct VulkanRenderDebugSettings {

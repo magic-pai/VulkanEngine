@@ -265,6 +265,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.localShadowVisibilityDebugDraws << ','
         << binds.localShadowVisibilityDebugFrameBinds << ','
         << binds.localShadowVisibilityDebugTextureBinds << ','
+        << binds.contactShadowDebugDraws << ','
+        << binds.contactShadowDebugFrameBinds << ','
+        << binds.contactShadowDebugGBufferBinds << ','
         << binds.lightTileCullComputeDispatches << ','
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
@@ -424,6 +427,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_atlas_debug_texture_binds,"
         << "local_shadow_visibility_debug_draws,local_shadow_visibility_debug_frame_binds,"
         << "local_shadow_visibility_debug_texture_binds,"
+        << "contact_shadow_debug_draws,contact_shadow_debug_frame_binds,"
+        << "contact_shadow_debug_gbuffer_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"

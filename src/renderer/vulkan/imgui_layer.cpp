@@ -348,6 +348,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Local Shadow Atlas";
     case ForwardDebugView::LocalShadowVisibility:
         return "Local Shadow Visibility";
+    case ForwardDebugView::ContactShadow:
+        return "Contact Shadow";
     }
 
     return "Lit";
@@ -382,7 +384,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::DeferredMaterialTable,
         ForwardDebugView::ShadowCascade,
         ForwardDebugView::LocalShadowAtlas,
-        ForwardDebugView::LocalShadowVisibility
+        ForwardDebugView::LocalShadowVisibility,
+        ForwardDebugView::ContactShadow
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -619,6 +622,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.localShadowVisibilityDebugDraws,
         binds.localShadowVisibilityDebugFrameBinds,
         binds.localShadowVisibilityDebugTextureBinds
+    );
+    ImGui::Text(
+        "Contact shadow debug: %u draws / %u frame binds / %u gbuffer binds",
+        binds.contactShadowDebugDraws,
+        binds.contactShadowDebugFrameBinds,
+        binds.contactShadowDebugGBufferBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

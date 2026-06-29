@@ -1460,6 +1460,15 @@ void main() {
         outColor = vec4(visibilityColor, 1.0);
         return;
     }
+    if (deferredDebugView == 9) {
+        vec3 blocked = vec3(0.02, 0.06, 0.10);
+        vec3 partial = vec3(0.45, 0.72, 0.90);
+        vec3 lit = vec3(0.96, 0.98, 1.0);
+        vec3 contactColor = mix(blocked, partial, smoothstep(0.0, 0.72, contactShadowVisibility));
+        contactColor = mix(contactColor, lit, smoothstep(0.58, 1.0, contactShadowVisibility));
+        outColor = vec4(contactColor, 1.0);
+        return;
+    }
 
     outColor = vec4(ambient + direct + emissiveColor, 1.0);
 }
