@@ -147,6 +147,14 @@ struct RendererWeightedTranslucencyStats {
     u32 resolveDraws = 0;
 };
 
+struct RendererSsaoStats {
+    u32 enabled = 0;
+    f32 strength = 0.0f;
+    f32 radius = 0.0f;
+    f32 bias = 0.0f;
+    u32 sampleCount = 0;
+};
+
 struct RendererBindStats {
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
@@ -182,6 +190,9 @@ struct RendererBindStats {
     u32 contactShadowDebugDraws = 0;
     u32 contactShadowDebugFrameBinds = 0;
     u32 contactShadowDebugGBufferBinds = 0;
+    u32 ssaoDebugDraws = 0;
+    u32 ssaoDebugFrameBinds = 0;
+    u32 ssaoDebugGBufferBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;
@@ -290,6 +301,7 @@ struct RendererStats {
     RendererShadowCascadeStats shadowCascades;
     RendererLocalShadowAtlasStats localShadowAtlas;
     RendererWeightedTranslucencyStats weightedTranslucency;
+    RendererSsaoStats ssao;
     RendererBindStats binds;
     RendererGpuStats gpu;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();

@@ -38,6 +38,10 @@ struct VulkanShadowSettings {
     u32 contactShadowSteps = 4;
     f32 contactShadowJitterStrength = 0.35f;
     f32 contactShadowEdgeFadePixels = 18.0f;
+    f32 ssaoStrength = 0.45f;
+    f32 ssaoRadius = 1.2f;
+    f32 ssaoBias = 0.035f;
+    u32 ssaoSampleCount = 8;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
     f32 cascadeBlendRatio = 0.08f;
@@ -73,6 +77,10 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowSteps = 0;
         settings.contactShadowJitterStrength = 0.0f;
         settings.contactShadowEdgeFadePixels = 0.0f;
+        settings.ssaoStrength = 0.0f;
+        settings.ssaoRadius = 0.0f;
+        settings.ssaoBias = 0.0f;
+        settings.ssaoSampleCount = 0;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -100,6 +108,10 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowSteps = 0;
         settings.contactShadowJitterStrength = 0.0f;
         settings.contactShadowEdgeFadePixels = 0.0f;
+        settings.ssaoStrength = 0.22f;
+        settings.ssaoRadius = 0.75f;
+        settings.ssaoBias = 0.05f;
+        settings.ssaoSampleCount = 4;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -127,6 +139,10 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowSteps = 4;
         settings.contactShadowJitterStrength = 0.35f;
         settings.contactShadowEdgeFadePixels = 18.0f;
+        settings.ssaoStrength = 0.45f;
+        settings.ssaoRadius = 1.2f;
+        settings.ssaoBias = 0.035f;
+        settings.ssaoSampleCount = 8;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 250.0f;
@@ -154,6 +170,10 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowSteps = 6;
         settings.contactShadowJitterStrength = 0.55f;
         settings.contactShadowEdgeFadePixels = 24.0f;
+        settings.ssaoStrength = 0.58f;
+        settings.ssaoRadius = 1.7f;
+        settings.ssaoBias = 0.025f;
+        settings.ssaoSampleCount = 12;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 500.0f;
@@ -181,6 +201,10 @@ inline void ApplyShadowQualityPreset(
         settings.contactShadowSteps = 8;
         settings.contactShadowJitterStrength = 0.75f;
         settings.contactShadowEdgeFadePixels = 30.0f;
+        settings.ssaoStrength = 0.68f;
+        settings.ssaoRadius = 2.1f;
+        settings.ssaoBias = 0.02f;
+        settings.ssaoSampleCount = 16;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 1000.0f;

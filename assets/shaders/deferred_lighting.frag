@@ -15,6 +15,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadowFiltering;
     vec4 contactShadowControls;
     vec4 contactShadowStabilityControls;
+    vec4 ssaoControls;
 } frame;
 
 struct LocalLightRecord {
@@ -641,6 +642,97 @@ vec3 ReconstructWorldPosition(vec2 uv, float depth) {
     }
     viewPosition /= viewPosition.w;
     return (frame.invView * viewPosition).xyz;
+}
+
+vec3 ReconstructViewPosition(vec2 uv, float depth) {
+    vec4 clipPosition = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 viewPosition = frame.invProj * clipPosition;
+    if (abs(viewPosition.w) <= 0.000001) {
+        return vec3(0.0);
+    }
+    return viewPosition.xyz / viewPosition.w;
+}
+
+float SsaoVisibility(vec2 uv, float depth, vec3 normal) {
+    float strength = clamp(frame.ssaoControls.x, 0.0, 1.0);
+    float radius = clamp(frame.ssaoControls.y, 0.0, 8.0);
+    float bias = clamp(frame.ssaoControls.z, 0.0, 0.5);
+    int sampleCount = clamp(int(frame.ssaoControls.w + 0.5), 0, 16);
+    if (strength <= 0.0001 || radius <= 0.0001 || sampleCount <= 0 ||
+        depth >= 0.999999) {
+        return 1.0;
+    }
+
+    const vec2 directions[16] = vec2[](
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, -1.0),
+        vec2(0.7071, 0.7071),
+        vec2(-0.7071, 0.7071),
+        vec2(0.7071, -0.7071),
+        vec2(-0.7071, -0.7071),
+        vec2(0.9239, 0.3827),
+        vec2(-0.3827, 0.9239),
+        vec2(0.3827, -0.9239),
+        vec2(-0.9239, -0.3827),
+        vec2(0.3827, 0.9239),
+        vec2(-0.9239, 0.3827),
+        vec2(0.9239, -0.3827),
+        vec2(-0.3827, -0.9239)
+    );
+
+    vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
+    vec3 viewPosition = ReconstructViewPosition(uv, depth);
+    float viewDepth = max(abs(viewPosition.z), 0.0001);
+    float pixelRadius = clamp((radius / viewDepth) * 180.0, 1.0, 32.0);
+    float noise = InterleavedGradientNoise(gl_FragCoord.xy);
+    float angle = noise * 6.2831853;
+    mat2 rotation = mat2(
+        cos(angle),
+        -sin(angle),
+        sin(angle),
+        cos(angle)
+    );
+    vec3 viewNormal = normalize((frame.view * vec4(normal, 0.0)).xyz);
+
+    float occlusion = 0.0;
+    float weightSum = 0.0;
+    for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+        if (sampleIndex >= sampleCount) {
+            break;
+        }
+
+        float sampleScale = (float(sampleIndex) + 1.0) / float(sampleCount);
+        vec2 offset = rotation * directions[sampleIndex] *
+            texelSize *
+            pixelRadius *
+            mix(0.35, 1.0, sampleScale * sampleScale);
+        vec2 sampleUv = clamp(uv + offset, texelSize, vec2(1.0) - texelSize);
+        float sampleDepth = texture(sceneDepth, sampleUv).r;
+        if (sampleDepth >= 0.999999) {
+            continue;
+        }
+
+        vec3 sampleViewPosition = ReconstructViewPosition(sampleUv, sampleDepth);
+        vec3 delta = sampleViewPosition - viewPosition;
+        float distanceToSample = length(delta);
+        if (distanceToSample <= 0.0001 || distanceToSample > radius) {
+            continue;
+        }
+
+        vec3 sampleDirection = delta / distanceToSample;
+        float hemisphere = max(dot(viewNormal, sampleDirection), 0.0);
+        float depthOcclusion = step(bias, delta.z);
+        float rangeWeight = 1.0 - smoothstep(0.0, radius, distanceToSample);
+        occlusion += depthOcclusion * hemisphere * rangeWeight;
+        weightSum += rangeWeight;
+    }
+
+    float normalizedOcclusion = weightSum > 0.0001
+        ? clamp(occlusion / weightSum, 0.0, 1.0)
+        : 0.0;
+    return clamp(1.0 - normalizedOcclusion * strength, 0.0, 1.0);
 }
 
 float SampleShadowCascadeVisibility(
@@ -1455,6 +1547,8 @@ void main() {
     ) * ambientStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
+    float ssaoVisibility = SsaoVisibility(fragUv, depth, normal);
+    ambient *= ssaoVisibility;
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =
@@ -1656,6 +1750,15 @@ void main() {
         }
 
         outColor = vec4(faceColor, 1.0);
+        return;
+    }
+    if (deferredDebugView == 11) {
+        vec3 occluded = vec3(0.03, 0.055, 0.08);
+        vec3 mid = vec3(0.55, 0.72, 0.82);
+        vec3 open = vec3(0.96, 0.98, 1.0);
+        vec3 ssaoColor = mix(occluded, mid, smoothstep(0.0, 0.75, ssaoVisibility));
+        ssaoColor = mix(ssaoColor, open, smoothstep(0.55, 1.0, ssaoVisibility));
+        outColor = vec4(ssaoColor, 1.0);
         return;
     }
 

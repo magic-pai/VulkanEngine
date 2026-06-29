@@ -611,6 +611,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First compute-backed tiled light-list write feeding deferred lighting."
         );
     }
+    if (inputs.ssaoEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::ScreenSpaceAmbientOcclusion,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "SSAOIntegrated",
+            "GBufferNormalRoughness, SceneDepth, frame matrices",
+            "deferred ambient occlusion factor",
+            "First screen-space ambient occlusion tier integrated into deferred ambient with a debug view; a standalone AO target and temporal filter follow later."
+        );
+    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(

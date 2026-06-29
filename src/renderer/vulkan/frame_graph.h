@@ -25,6 +25,7 @@ enum class RenderFramePassKind {
     Shadow,
     GBuffer,
     DeferredLighting,
+    ScreenSpaceAmbientOcclusion,
     Forward,
     GlobalIllumination,
     Reflections,
@@ -104,6 +105,7 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat hdrSceneColorFormat = VK_FORMAT_UNDEFINED;
     bool hdrRenderPassAllocated = false;
     bool deferredLightingEnabled = false;
+    bool ssaoEnabled = false;
     bool lightTileCullComputeEnabled = false;
     bool hdrCompositeEnabled = false;
     bool gBufferDebugEnabled = false;

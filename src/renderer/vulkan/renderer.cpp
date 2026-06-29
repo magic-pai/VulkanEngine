@@ -1404,6 +1404,8 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 9;
     case ForwardDebugView::LocalShadowFace:
         return 10;
+    case ForwardDebugView::Ssao:
+        return 11;
     default:
         return 0;
     }
@@ -1434,6 +1436,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::LocalShadowVisibility ||
         view == ForwardDebugView::ContactShadow ||
         view == ForwardDebugView::LocalShadowFace ||
+        view == ForwardDebugView::Ssao ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1534,6 +1537,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "point-shadow-seam" ||
         value == "point_shadow_seam") {
         return ForwardDebugView::LocalShadowFace;
+    }
+    if (value == "ssao" ||
+        value == "SSAO" ||
+        value == "screen-space-ao" ||
+        value == "screen_space_ao" ||
+        value == "ambient-occlusion" ||
+        value == "ambient_occlusion") {
+        return ForwardDebugView::Ssao;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2026,6 +2037,20 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.contactShadowJitterStrength, 0.0f, 1.0f);
     frameStats.shadowCascades.contactShadowEdgeFadePixels =
         std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f);
+    frameStats.ssao.strength =
+        std::clamp(m_ShadowSettings.ssaoStrength, 0.0f, 1.0f);
+    frameStats.ssao.radius =
+        std::clamp(m_ShadowSettings.ssaoRadius, 0.0f, 8.0f);
+    frameStats.ssao.bias =
+        std::clamp(m_ShadowSettings.ssaoBias, 0.0f, 0.5f);
+    frameStats.ssao.sampleCount =
+        std::clamp<u32>(m_ShadowSettings.ssaoSampleCount, 0u, 16u);
+    frameStats.ssao.enabled =
+        frameStats.ssao.strength > 0.0001f &&
+        frameStats.ssao.radius > 0.0001f &&
+        frameStats.ssao.sampleCount > 0
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2288,6 +2313,10 @@ void VulkanRenderer::DrawFrame() {
                 : VK_FORMAT_UNDEFINED,
             m_HdrRenderPass != nullptr && m_HdrFramebuffer != nullptr,
             m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
+            frameStats.ssao.enabled > 0 &&
+                has3DMainPass &&
+                m_DeferredLightingPipeline != nullptr &&
+                m_GBufferDescriptorSets != nullptr,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -3985,6 +4014,16 @@ void VulkanRenderer::UpdateUniformBuffer(
         0.0f,
         0.0f
     );
+    uniformData.ssaoControls = glm::vec4(
+        std::clamp(m_ShadowSettings.ssaoStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.ssaoRadius, 0.0f, 8.0f),
+        std::clamp(m_ShadowSettings.ssaoBias, 0.0f, 0.5f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.ssaoSampleCount,
+            0u,
+            16u
+        ))
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4035,6 +4074,16 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f),
         0.0f,
         0.0f
+    );
+    uniformData.ssaoControls = glm::vec4(
+        std::clamp(m_ShadowSettings.ssaoStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.ssaoRadius, 0.0f, 8.0f),
+        std::clamp(m_ShadowSettings.ssaoBias, 0.0f, 0.5f),
+        static_cast<f32>(std::clamp<u32>(
+            m_ShadowSettings.ssaoSampleCount,
+            0u,
+            16u
+        ))
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

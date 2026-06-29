@@ -266,6 +266,15 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         96.0f,
         "%.1f"
     );
+    ImGui::SeparatorText("SSAO");
+    ImGui::SliderFloat("SSAO strength##Shadow", &settings.ssaoStrength, 0.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("SSAO radius##Shadow", &settings.ssaoRadius, 0.0f, 8.0f, "%.2f");
+    ImGui::SliderFloat("SSAO bias##Shadow", &settings.ssaoBias, 0.0f, 0.5f, "%.3f");
+    int ssaoSampleCount = static_cast<int>(settings.ssaoSampleCount);
+    if (ImGui::SliderInt("SSAO samples##Shadow", &ssaoSampleCount, 0, 16)) {
+        settings.ssaoSampleCount =
+            static_cast<u32>(std::clamp(ssaoSampleCount, 0, 16));
+    }
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -386,6 +395,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "WBOIT Revealage";
     case ForwardDebugView::WeightedTranslucencyWeight:
         return "WBOIT Weight";
+    case ForwardDebugView::Ssao:
+        return "SSAO";
     }
 
     return "Lit";
@@ -425,7 +436,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::LocalShadowFace,
         ForwardDebugView::WeightedTranslucencyAccum,
         ForwardDebugView::WeightedTranslucencyRevealage,
-        ForwardDebugView::WeightedTranslucencyWeight
+        ForwardDebugView::WeightedTranslucencyWeight,
+        ForwardDebugView::Ssao
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -600,6 +612,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         shadowCascades.contactShadowEdgeFadePixels
     );
     ImGui::Text(
+        "SSAO: %s, strength %.3f, radius %.2f, bias %.3f, samples %u",
+        stats.ssao.enabled ? "enabled" : "off",
+        stats.ssao.strength,
+        stats.ssao.radius,
+        stats.ssao.bias,
+        stats.ssao.sampleCount
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -714,6 +734,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.contactShadowDebugDraws,
         binds.contactShadowDebugFrameBinds,
         binds.contactShadowDebugGBufferBinds
+    );
+    ImGui::Text(
+        "SSAO debug: %u draws / %u frame binds / %u gbuffer binds",
+        binds.ssaoDebugDraws,
+        binds.ssaoDebugFrameBinds,
+        binds.ssaoDebugGBufferBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",
