@@ -564,10 +564,11 @@ void DrawPerformanceStats(const RendererStats& stats) {
         localShadowAtlas.recordedMeshBinds
     );
     ImGui::Text(
-        "Local shadow cache: %u eligible / %u hits / %u misses",
+        "Local shadow cache: %u eligible / %u hits / %u misses / %u skipped",
         localShadowAtlas.cacheEligibleTiles,
         localShadowAtlas.cacheHitTiles,
-        localShadowAtlas.cacheMissTiles
+        localShadowAtlas.cacheMissTiles,
+        localShadowAtlas.cacheSkippedTiles
     );
     ImGui::Text(
         "Local shadow filtering: bias %.5f / slope %.5f, PCF radius %.2f, kernel %ux%u, PCSS %.3f, face blend %.3f",

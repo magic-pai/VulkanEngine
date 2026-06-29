@@ -1800,6 +1800,13 @@ void VulkanRenderer::DrawFrame() {
     const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
     const bool shadowSamplingEnabled = shadowPassEnabled && !shadowCommands.empty();
     const u64 localShadowCommandSignature = LocalShadowCommandSignature(shadowCommands);
+    if (m_LocalShadowCacheStates.size() != m_Swapchain->Images().size()) {
+        m_LocalShadowCacheStates.assign(m_Swapchain->Images().size(), LocalShadowCacheState{});
+    }
+    const LocalShadowCacheState* localShadowCacheState =
+        imageIndex < m_LocalShadowCacheStates.size()
+            ? &m_LocalShadowCacheStates[imageIndex]
+            : nullptr;
     std::vector<RenderCommand> gBufferCommands;
     std::vector<RenderCommand> forwardResidualCommands;
     const bool has3DMainPass =
@@ -1819,12 +1826,14 @@ void VulkanRenderer::DrawFrame() {
             shadowSamplingEnabled
         );
     const bool allowLocalShadowCacheReuse =
-        m_HasPreviousLocalShadowCache &&
-        m_PreviousLocalShadowCommandSignature == localShadowCommandSignature;
+        localShadowCacheState != nullptr &&
+        localShadowCacheState->valid &&
+        localShadowCacheState->commandSignature == localShadowCommandSignature;
     const LocalShadowTileSet localShadowTiles = BuildLocalShadowTiles(
         frameLightSet,
         m_LocalShadowAtlas != nullptr ? m_LocalShadowAtlas->TileCapacity() : 0u,
-        allowLocalShadowCacheReuse
+        allowLocalShadowCacheReuse,
+        localShadowCacheState
     );
     UpdateUniformBuffer(
         imageIndex,
@@ -1937,6 +1946,8 @@ void VulkanRenderer::DrawFrame() {
         frameStats.localShadowAtlas.cacheEligibleTiles = localShadowTiles.cacheEligibleTiles;
         frameStats.localShadowAtlas.cacheHitTiles = localShadowTiles.cacheHitTiles;
         frameStats.localShadowAtlas.cacheMissTiles = localShadowTiles.cacheMissTiles;
+        frameStats.localShadowAtlas.cacheSkippedTiles =
+            localShadowTiles.cacheSkippedTiles;
         frameStats.localShadowAtlas.biasMin =
             std::clamp(m_ShadowSettings.localBiasMin, 0.0f, 0.02f);
         frameStats.localShadowAtlas.biasSlope =
@@ -2194,6 +2205,8 @@ void VulkanRenderer::DrawFrame() {
         &directionalShadowCascades,
         m_LocalShadowFramebuffer.get(),
         &localShadowTiles,
+        localShadowTiles.cacheSkippedTiles == localShadowTiles.assignedCount &&
+            localShadowTiles.assignedCount > 0,
         m_HdrRenderPass.get(),
         m_HdrFramebuffer.get(),
         m_DeferredLightingPipeline.get(),
@@ -2240,10 +2253,13 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.localShadowAtlasDraws;
     frameStats.localShadowAtlas.recordedMeshBinds =
         frameStats.binds.localShadowAtlasMeshBinds;
-    m_PreviousLocalShadowTileKeys = localShadowTiles.cacheKeys;
-    m_PreviousLocalShadowTileCount = localShadowTiles.assignedCount;
-    m_PreviousLocalShadowCommandSignature = localShadowCommandSignature;
-    m_HasPreviousLocalShadowCache = localShadowTiles.assignedCount > 0;
+    if (imageIndex < m_LocalShadowCacheStates.size()) {
+        LocalShadowCacheState& cacheState = m_LocalShadowCacheStates[imageIndex];
+        cacheState.tileKeys = localShadowTiles.cacheKeys;
+        cacheState.tileCount = localShadowTiles.assignedCount;
+        cacheState.commandSignature = localShadowCommandSignature;
+        cacheState.valid = localShadowTiles.assignedCount > 0;
+    }
     if (imageIndex < m_LightTileGpuReadbackReady.size()) {
         m_LightTileGpuReadbackReady[imageIndex] = recordLightTileCullCompute;
     }
@@ -2526,6 +2542,7 @@ void VulkanRenderer::CreateSwapchainResources() {
         LocalShadowAtlasTileSizeFor(m_ShadowSettings),
         LocalShadowAtlasTileCapacityFor(m_ShadowSettings)
     );
+    ResetLocalShadowCacheStates();
     m_ShadowRenderPass = std::make_unique<VulkanShadowRenderPass>(
         m_Device,
         *m_ShadowMap
@@ -3062,6 +3079,7 @@ void VulkanRenderer::RecreateSwapchain() {
             LocalShadowAtlasTileCapacityFor(m_ShadowSettings)
         );
     }
+    ResetLocalShadowCacheStates();
     if (m_ShadowFramebuffer != nullptr && m_ShadowRenderPass != nullptr && m_ShadowMap != nullptr) {
         m_ShadowFramebuffer->Recreate(
             m_Device,
@@ -3466,6 +3484,7 @@ void VulkanRenderer::ApplyShadowMapSettings() {
             LocalShadowAtlasTileCapacityFor(m_ShadowSettings)
         );
     }
+    ResetLocalShadowCacheStates();
     m_ShadowFramebuffer->Recreate(
         m_Device,
         *m_ShadowRenderPass,
@@ -3532,6 +3551,18 @@ void VulkanRenderer::ApplyShadowMapSettings() {
             PipelineSpec::DoubleSided(shadowSpec)
         );
     }
+}
+
+void VulkanRenderer::ResetLocalShadowCacheStates() {
+    if (m_Swapchain == nullptr) {
+        m_LocalShadowCacheStates.clear();
+        return;
+    }
+
+    m_LocalShadowCacheStates.assign(
+        m_Swapchain->Images().size(),
+        LocalShadowCacheState{}
+    );
 }
 
 void VulkanRenderer::HandleObjectPicking() {
@@ -4347,7 +4378,8 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
 LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
     const FrameLightSet& lights,
     u32 atlasTileCapacity,
-    bool allowCacheReuse
+    bool allowCacheReuse,
+    const LocalShadowCacheState* cacheState
 ) const {
     LocalShadowTileSet tileSet{};
     tileSet.tileCapacity = std::min<u32>(
@@ -4406,9 +4438,11 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
                     static_cast<u32>(faceIndex),
                     light.kind,
                     cacheKey,
-                    allowCacheReuse && LocalShadowTileCacheReusable(
-                        m_PreviousLocalShadowTileKeys,
-                        m_PreviousLocalShadowTileCount,
+                    allowCacheReuse &&
+                    cacheState != nullptr &&
+                    LocalShadowTileCacheReusable(
+                        cacheState->tileKeys,
+                        cacheState->tileCount,
                         cacheKey
                     )
                 );
@@ -4437,13 +4471,21 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
                 0u,
                 light.kind,
                 cacheKey,
-                allowCacheReuse && LocalShadowTileCacheReusable(
-                    m_PreviousLocalShadowTileKeys,
-                    m_PreviousLocalShadowTileCount,
+                allowCacheReuse &&
+                cacheState != nullptr &&
+                LocalShadowTileCacheReusable(
+                    cacheState->tileKeys,
+                    cacheState->tileCount,
                     cacheKey
                 )
             );
         }
+    }
+
+    if (tileSet.assignedCount > 0 &&
+        tileSet.cacheHitTiles == tileSet.assignedCount &&
+        tileSet.cacheMissTiles == 0) {
+        tileSet.cacheSkippedTiles = tileSet.assignedCount;
     }
 
     return tileSet;

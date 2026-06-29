@@ -235,6 +235,7 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.cacheEligibleTiles << ','
         << localShadowAtlas.cacheHitTiles << ','
         << localShadowAtlas.cacheMissTiles << ','
+        << localShadowAtlas.cacheSkippedTiles << ','
         << localShadowAtlas.biasMin << ','
         << localShadowAtlas.biasSlope << ','
         << localShadowAtlas.pcfRadius << ','
@@ -421,7 +422,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_dropped_tiles,local_shadow_recorded_tile_passes,"
         << "local_shadow_recorded_draws,local_shadow_recorded_mesh_binds,"
         << "local_shadow_cache_eligible_tiles,local_shadow_cache_hit_tiles,"
-        << "local_shadow_cache_miss_tiles,"
+        << "local_shadow_cache_miss_tiles,local_shadow_cache_skipped_tiles,"
         << "local_shadow_bias_min,local_shadow_bias_slope,"
         << "local_shadow_pcf_radius,local_shadow_pcf_kernel_radius,"
         << "local_shadow_pcss_strength,local_shadow_face_blend_strength,"

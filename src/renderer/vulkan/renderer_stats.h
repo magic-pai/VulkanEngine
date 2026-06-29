@@ -114,6 +114,7 @@ struct RendererLocalShadowAtlasStats {
     u32 cacheEligibleTiles = 0;
     u32 cacheHitTiles = 0;
     u32 cacheMissTiles = 0;
+    u32 cacheSkippedTiles = 0;
     u32 pcfKernelRadius = 0;
     f32 biasMin = 0.0f;
     f32 biasSlope = 0.0f;

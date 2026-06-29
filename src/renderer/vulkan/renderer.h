@@ -186,6 +186,14 @@ struct LocalShadowTileSet {
     u32 cacheEligibleTiles = 0;
     u32 cacheHitTiles = 0;
     u32 cacheMissTiles = 0;
+    u32 cacheSkippedTiles = 0;
+};
+
+struct LocalShadowCacheState {
+    std::array<u64, kMaxLocalShadowTiles> tileKeys{};
+    u32 tileCount = 0;
+    u64 commandSignature = 0;
+    bool valid = false;
 };
 
 struct RenderQueueContext {
@@ -241,6 +249,7 @@ private:
     void RecreateSwapchain();
     void ApplyEnvironmentRenderSettings();
     void ApplyShadowMapSettings();
+    void ResetLocalShadowCacheStates();
     void HandleObjectPicking();
     glm::vec2 CursorToWorldPosition(const VkExtent2D& extent) const;
     void UpdateUniformBuffer(
@@ -302,7 +311,8 @@ private:
     LocalShadowTileSet BuildLocalShadowTiles(
         const FrameLightSet& lights,
         u32 atlasTileCapacity,
-        bool allowCacheReuse
+        bool allowCacheReuse,
+        const LocalShadowCacheState* cacheState
     ) const;
     std::span<const RenderCommand> ShadowRenderCommands() const;
     const VulkanDescriptorSets* ShadowDescriptorSets() const;
@@ -334,10 +344,7 @@ private:
     RenderQueue m_RenderQueue;
     RenderQueue m_OverlayRenderQueue;
     RenderQueue m_ShadowRenderQueue;
-    std::array<u64, kMaxLocalShadowTiles> m_PreviousLocalShadowTileKeys{};
-    u32 m_PreviousLocalShadowTileCount = 0;
-    u64 m_PreviousLocalShadowCommandSignature = 0;
-    bool m_HasPreviousLocalShadowCache = false;
+    std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
     RendererStats m_LastStats;

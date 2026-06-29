@@ -72,6 +72,7 @@ public:
         const DirectionalShadowCascadeSet* directionalShadowCascades = nullptr,
         const VulkanShadowFramebuffer* localShadowFramebuffer = nullptr,
         const LocalShadowTileSet* localShadowTiles = nullptr,
+        bool skipCachedLocalShadowTiles = false,
         const VulkanHdrRenderPass* hdrRenderPass = nullptr,
         const VulkanHdrFramebuffer* hdrFramebuffer = nullptr,
         const VulkanGraphicsPipeline* deferredLightingPipeline = nullptr,

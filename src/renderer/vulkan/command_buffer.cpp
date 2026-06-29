@@ -879,6 +879,7 @@ void VulkanCommandBuffer::Record(
         const DirectionalShadowCascadeSet* directionalShadowCascades,
         const VulkanShadowFramebuffer* localShadowFramebuffer,
         const LocalShadowTileSet* localShadowTiles,
+        bool skipCachedLocalShadowTiles,
         const VulkanHdrRenderPass* hdrRenderPass,
         const VulkanHdrFramebuffer* hdrFramebuffer,
         const VulkanGraphicsPipeline* deferredLightingPipeline,
@@ -1127,7 +1128,8 @@ void VulkanCommandBuffer::Record(
         localShadowFramebuffer != nullptr &&
         shadowDescriptorSets != nullptr &&
         localShadowTiles != nullptr &&
-        localShadowTiles->assignedCount > 0) {
+        localShadowTiles->assignedCount > 0 &&
+        !skipCachedLocalShadowTiles) {
         VkClearValue localShadowClearValue{};
         localShadowClearValue.depthStencil = { 1.0f, 0 };
 
