@@ -193,6 +193,11 @@ struct RendererPostProcessStats {
     u32 toneMapMode = 0;
     f32 exposure = 1.0f;
     f32 toneMapWhitePoint = 4.0f;
+    u32 autoExposureEnabled = 0;
+    f32 autoExposureTargetLuminance = 0.18f;
+    f32 autoExposureMin = 0.25f;
+    f32 autoExposureMax = 4.0f;
+    f32 autoExposureAdaptation = 1.0f;
     u32 colorGradingEnabled = 0;
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
@@ -252,6 +257,9 @@ struct RendererBindStats {
     u32 toneMappingDebugDraws = 0;
     u32 toneMappingDebugFrameBinds = 0;
     u32 toneMappingDebugTextureBinds = 0;
+    u32 autoExposureDebugDraws = 0;
+    u32 autoExposureDebugFrameBinds = 0;
+    u32 autoExposureDebugTextureBinds = 0;
     u32 colorGradingDebugDraws = 0;
     u32 colorGradingDebugFrameBinds = 0;
     u32 colorGradingDebugTextureBinds = 0;

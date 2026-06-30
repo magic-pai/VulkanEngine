@@ -281,6 +281,11 @@ void BenchmarkRecorder::RecordFrame(
         << postProcess.toneMapMode << ','
         << postProcess.exposure << ','
         << postProcess.toneMapWhitePoint << ','
+        << postProcess.autoExposureEnabled << ','
+        << postProcess.autoExposureTargetLuminance << ','
+        << postProcess.autoExposureMin << ','
+        << postProcess.autoExposureMax << ','
+        << postProcess.autoExposureAdaptation << ','
         << postProcess.colorGradingEnabled << ','
         << postProcess.colorGradingSaturation << ','
         << postProcess.colorGradingContrast << ','
@@ -397,6 +402,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.toneMappingDebugDraws << ','
         << binds.toneMappingDebugFrameBinds << ','
         << binds.toneMappingDebugTextureBinds << ','
+        << binds.autoExposureDebugDraws << ','
+        << binds.autoExposureDebugFrameBinds << ','
+        << binds.autoExposureDebugTextureBinds << ','
         << binds.colorGradingDebugDraws << ','
         << binds.colorGradingDebugFrameBinds << ','
         << binds.colorGradingDebugTextureBinds << ','
@@ -574,6 +582,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "height_fog_start_distance,height_fog_max_opacity,"
         << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"
         << "tone_mapping_enabled,tone_map_mode,exposure,tone_map_white_point,"
+        << "auto_exposure_enabled,auto_exposure_target_luminance,"
+        << "auto_exposure_min,auto_exposure_max,auto_exposure_adaptation,"
         << "color_grading_enabled,color_grading_saturation,"
         << "color_grading_contrast,color_grading_gamma,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
@@ -632,6 +642,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "bloom_debug_texture_binds,"
         << "tone_mapping_debug_draws,tone_mapping_debug_frame_binds,"
         << "tone_mapping_debug_texture_binds,"
+        << "auto_exposure_debug_draws,auto_exposure_debug_frame_binds,"
+        << "auto_exposure_debug_texture_binds,"
         << "color_grading_debug_draws,color_grading_debug_frame_binds,"
         << "color_grading_debug_texture_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"

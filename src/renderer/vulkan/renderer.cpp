@@ -1492,6 +1492,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::Bloom ||
         view == ForwardDebugView::ColorGrading ||
         view == ForwardDebugView::ToneMapping ||
+        view == ForwardDebugView::AutoExposure ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1649,6 +1650,12 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "tone_mapping" ||
         value == "ToneMapping") {
         return ForwardDebugView::ToneMapping;
+    }
+    if (value == "auto-exposure" ||
+        value == "auto_exposure" ||
+        value == "autoexposure" ||
+        value == "AutoExposure") {
+        return ForwardDebugView::AutoExposure;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2261,6 +2268,19 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f);
     frameStats.postProcess.toneMappingEnabled =
         frameStats.postProcess.toneMapMode == 2u ? 0u : 1u;
+    frameStats.postProcess.autoExposureEnabled =
+        m_RenderDebugSettings.autoExposureEnabled ? 1u : 0u;
+    frameStats.postProcess.autoExposureTargetLuminance =
+        std::clamp(m_RenderDebugSettings.autoExposureTargetLuminance, 0.001f, 4.0f);
+    frameStats.postProcess.autoExposureMin =
+        std::clamp(m_RenderDebugSettings.autoExposureMin, 0.001f, 32.0f);
+    frameStats.postProcess.autoExposureMax =
+        std::max(
+            frameStats.postProcess.autoExposureMin,
+            std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)
+        );
+    frameStats.postProcess.autoExposureAdaptation =
+        std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f);
     frameStats.postProcess.colorGradingSaturation =
         std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f);
     frameStats.postProcess.colorGradingContrast =
@@ -2541,6 +2561,10 @@ void VulkanRenderer::DrawFrame() {
                 frameStats.reflectionProbe.fallbackEnabled > 0 &&
                 has3DMainPass,
             frameStats.heightFog.enabled > 0 && has3DMainPass,
+            frameStats.postProcess.autoExposureEnabled > 0 &&
+                showDeferredHdr &&
+                m_HdrCompositePipeline != nullptr &&
+                m_HdrDescriptorSets != nullptr,
             frameStats.postProcess.toneMappingEnabled > 0 &&
                 showDeferredHdr &&
                 m_HdrCompositePipeline != nullptr &&
@@ -2637,6 +2661,7 @@ void VulkanRenderer::DrawFrame() {
         showDeferredHdr,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ToneMapping,
+        m_RenderDebugSettings.forwardView == ForwardDebugView::AutoExposure,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ColorGrading,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
@@ -4064,6 +4089,31 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (toneMapWhitePoint.has_value()) {
         m_RenderDebugSettings.toneMapWhitePoint = *toneMapWhitePoint;
     }
+    const std::optional<bool> autoExposure =
+        EnvironmentFlagOverride("SE_AUTO_EXPOSURE");
+    if (autoExposure.has_value()) {
+        m_RenderDebugSettings.autoExposureEnabled = *autoExposure;
+    }
+    const std::optional<f32> autoExposureTarget =
+        EnvironmentFloatOverride("SE_AUTO_EXPOSURE_TARGET");
+    if (autoExposureTarget.has_value()) {
+        m_RenderDebugSettings.autoExposureTargetLuminance = *autoExposureTarget;
+    }
+    const std::optional<f32> autoExposureMin =
+        EnvironmentFloatOverride("SE_AUTO_EXPOSURE_MIN");
+    if (autoExposureMin.has_value()) {
+        m_RenderDebugSettings.autoExposureMin = *autoExposureMin;
+    }
+    const std::optional<f32> autoExposureMax =
+        EnvironmentFloatOverride("SE_AUTO_EXPOSURE_MAX");
+    if (autoExposureMax.has_value()) {
+        m_RenderDebugSettings.autoExposureMax = *autoExposureMax;
+    }
+    const std::optional<f32> autoExposureAdaptation =
+        EnvironmentFloatOverride("SE_AUTO_EXPOSURE_ADAPTATION");
+    if (autoExposureAdaptation.has_value()) {
+        m_RenderDebugSettings.autoExposureAdaptation = *autoExposureAdaptation;
+    }
     const std::optional<bool> colorGrading =
         EnvironmentFlagOverride("SE_COLOR_GRADING");
     if (colorGrading.has_value()) {
@@ -4405,7 +4455,14 @@ void VulkanRenderer::UpdateUniformBuffer(
         static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),
         std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f),
         std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f),
-        1.0f
+        m_RenderDebugSettings.autoExposureEnabled ? 1.0f : 0.0f
+    );
+    const f32 autoExposureMin = std::clamp(m_RenderDebugSettings.autoExposureMin, 0.001f, 32.0f);
+    uniformData.autoExposureControls = glm::vec4(
+        std::clamp(m_RenderDebugSettings.autoExposureTargetLuminance, 0.001f, 4.0f),
+        autoExposureMin,
+        std::max(autoExposureMin, std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)),
+        std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f)
     );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
@@ -4541,7 +4598,14 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),
         std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f),
         std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f),
-        1.0f
+        m_RenderDebugSettings.autoExposureEnabled ? 1.0f : 0.0f
+    );
+    const f32 autoExposureMin = std::clamp(m_RenderDebugSettings.autoExposureMin, 0.001f, 32.0f);
+    uniformData.autoExposureControls = glm::vec4(
+        std::clamp(m_RenderDebugSettings.autoExposureTargetLuminance, 0.001f, 4.0f),
+        autoExposureMin,
+        std::max(autoExposureMin, std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)),
+        std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

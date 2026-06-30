@@ -520,6 +520,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Color Grading";
     case ForwardDebugView::ToneMapping:
         return "Tone Mapping";
+    case ForwardDebugView::AutoExposure:
+        return "Auto Exposure";
     }
 
     return "Lit";
@@ -566,7 +568,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::HeightFog,
         ForwardDebugView::Bloom,
         ForwardDebugView::ColorGrading,
-        ForwardDebugView::ToneMapping
+        ForwardDebugView::ToneMapping,
+        ForwardDebugView::AutoExposure
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -592,6 +595,11 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         settings.toneMapMode = static_cast<u32>(std::clamp(toneMapMode, 0, 2));
     }
     ImGui::SliderFloat("Tone white point##Post", &settings.toneMapWhitePoint, 0.1f, 64.0f, "%.2f");
+    ImGui::Checkbox("Auto exposure##Post", &settings.autoExposureEnabled);
+    ImGui::SliderFloat("Auto target luminance##Post", &settings.autoExposureTargetLuminance, 0.001f, 4.0f, "%.3f");
+    ImGui::SliderFloat("Auto min exposure##Post", &settings.autoExposureMin, 0.001f, 32.0f, "%.3f");
+    ImGui::SliderFloat("Auto max exposure##Post", &settings.autoExposureMax, 0.001f, 32.0f, "%.3f");
+    ImGui::SliderFloat("Auto adaptation##Post", &settings.autoExposureAdaptation, 0.0f, 1.0f, "%.3f");
     ImGui::Checkbox("Bloom##Post", &settings.bloomEnabled);
     ImGui::SliderFloat("Bloom intensity##Post", &settings.bloomIntensity, 0.0f, 4.0f, "%.3f");
     ImGui::SliderFloat("Bloom threshold##Post", &settings.bloomThreshold, 0.0f, 8.0f, "%.3f");
@@ -810,6 +818,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.toneMapWhitePoint
     );
     ImGui::Text(
+        "Auto exposure: %s, target %.3f, range %.3f-%.3f, adapt %.3f",
+        stats.postProcess.autoExposureEnabled ? "enabled" : "off",
+        stats.postProcess.autoExposureTargetLuminance,
+        stats.postProcess.autoExposureMin,
+        stats.postProcess.autoExposureMax,
+        stats.postProcess.autoExposureAdaptation
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,
@@ -967,6 +983,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.toneMappingDebugDraws,
         binds.toneMappingDebugFrameBinds,
         binds.toneMappingDebugTextureBinds
+    );
+    ImGui::Text(
+        "Auto exposure debug: %u draws / %u frame binds / %u texture binds",
+        binds.autoExposureDebugDraws,
+        binds.autoExposureDebugFrameBinds,
+        binds.autoExposureDebugTextureBinds
     );
     ImGui::Text(
         "Color grading debug: %u draws / %u frame binds / %u texture binds",

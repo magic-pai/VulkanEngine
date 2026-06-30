@@ -706,6 +706,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
 
     if (inputs.hdrCompositeEnabled) {
+        if (inputs.autoExposureEnabled) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::PostProcess,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "AutoExposureIntegrated",
+                "HDRSceneColor, exposure controls",
+                "adapted exposure during composite",
+                "First sampled auto-exposure tier inside HDR composite; GPU histogram and eye-adaptation history can replace it later."
+            );
+        }
         if (inputs.toneMappingEnabled) {
             AppendPass(
                 plan,
@@ -748,21 +760,31 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "HDRComposite",
-            inputs.toneMappingEnabled && inputs.bloomEnabled && inputs.colorGradingEnabled
-                ? "HDRSceneColor, exposure, tone map, bloom, color grading"
-                : inputs.toneMappingEnabled && inputs.bloomEnabled
-                    ? "HDRSceneColor, exposure, tone map, bloom"
-                    : inputs.toneMappingEnabled && inputs.colorGradingEnabled
-                        ? "HDRSceneColor, exposure, tone map, color grading"
-                        : inputs.bloomEnabled && inputs.colorGradingEnabled
-                            ? "HDRSceneColor, exposure, bloom, color grading"
-                            : inputs.toneMappingEnabled
-                                ? "HDRSceneColor, exposure, tone map"
-                                : inputs.bloomEnabled
-                                    ? "HDRSceneColor, exposure, bloom"
-                                    : inputs.colorGradingEnabled
-                                        ? "HDRSceneColor, exposure, color grading"
-                                        : "HDRSceneColor, exposure",
+            inputs.autoExposureEnabled && inputs.toneMappingEnabled && inputs.bloomEnabled && inputs.colorGradingEnabled
+                ? "HDRSceneColor, auto exposure, tone map, bloom, color grading"
+                : inputs.autoExposureEnabled && inputs.toneMappingEnabled && inputs.bloomEnabled
+                    ? "HDRSceneColor, auto exposure, tone map, bloom"
+                    : inputs.autoExposureEnabled && inputs.toneMappingEnabled && inputs.colorGradingEnabled
+                        ? "HDRSceneColor, auto exposure, tone map, color grading"
+                        : inputs.toneMappingEnabled && inputs.bloomEnabled && inputs.colorGradingEnabled
+                            ? "HDRSceneColor, exposure, tone map, bloom, color grading"
+                            : inputs.autoExposureEnabled && inputs.toneMappingEnabled
+                                ? "HDRSceneColor, auto exposure, tone map"
+                                : inputs.toneMappingEnabled && inputs.bloomEnabled
+                                    ? "HDRSceneColor, exposure, tone map, bloom"
+                                    : inputs.toneMappingEnabled && inputs.colorGradingEnabled
+                                        ? "HDRSceneColor, exposure, tone map, color grading"
+                                        : inputs.bloomEnabled && inputs.colorGradingEnabled
+                                            ? "HDRSceneColor, exposure, bloom, color grading"
+                                            : inputs.autoExposureEnabled
+                                                ? "HDRSceneColor, auto exposure"
+                                                : inputs.toneMappingEnabled
+                                                    ? "HDRSceneColor, exposure, tone map"
+                                                    : inputs.bloomEnabled
+                                                        ? "HDRSceneColor, exposure, bloom"
+                                                        : inputs.colorGradingEnabled
+                                                            ? "HDRSceneColor, exposure, color grading"
+                                                            : "HDRSceneColor, exposure",
             "swapchain color",
             "Debug-visible HDR composite path for deferred output before it becomes the default present path."
         );

@@ -891,6 +891,7 @@ void VulkanCommandBuffer::Record(
     bool useHdrCompositeAsMain,
     bool bloomDebugView,
     bool toneMappingDebugView,
+    bool autoExposureDebugView,
     bool colorGradingDebugView,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
@@ -1919,6 +1920,11 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->toneMappingDebugDraws;
                 ++bindStats->toneMappingDebugFrameBinds;
                 ++bindStats->toneMappingDebugTextureBinds;
+            }
+            if (autoExposureDebugView) {
+                ++bindStats->autoExposureDebugDraws;
+                ++bindStats->autoExposureDebugFrameBinds;
+                ++bindStats->autoExposureDebugTextureBinds;
             }
             if (colorGradingDebugView) {
                 ++bindStats->colorGradingDebugDraws;

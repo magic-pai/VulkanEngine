@@ -26,6 +26,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 postProcessControls;
     vec4 colorGradingControls;
     vec4 toneMappingControls;
+    vec4 autoExposureControls;
 } frame;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
@@ -33,6 +34,7 @@ layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
 const int DEBUG_VIEW_TONE_MAPPING = 39;
+const int DEBUG_VIEW_AUTO_EXPOSURE = 40;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -59,6 +61,37 @@ vec3 ToneMapHdr(vec3 value) {
         return clamp(value, 0.0, 1.0);
     }
     return ToneMapAces(value);
+}
+
+float SceneAverageLuminance() {
+    vec2 texelSize = 1.0 / vec2(max(textureSize(hdrSceneColor, 0), ivec2(1)));
+    float luminanceSum = 0.0;
+    float sampleCount = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 offset = vec2(float(x), float(y)) * texelSize * 32.0;
+            vec3 sampleColor = max(texture(hdrSceneColor, clamp(vec2(0.5) + offset, vec2(0.0), vec2(1.0))).rgb, vec3(0.0));
+            luminanceSum += dot(sampleColor, vec3(0.2126, 0.7152, 0.0722));
+            sampleCount += 1.0;
+        }
+    }
+    return luminanceSum / max(sampleCount, 1.0);
+}
+
+float EffectiveExposure() {
+    float manualExposure = max(frame.toneMappingControls.y, 0.001);
+    float autoEnabled = clamp(frame.toneMappingControls.w, 0.0, 1.0);
+    if (autoEnabled <= 0.0001) {
+        return manualExposure;
+    }
+
+    float targetLuminance = max(frame.autoExposureControls.x, 0.001);
+    float minExposure = max(frame.autoExposureControls.y, 0.001);
+    float maxExposure = max(frame.autoExposureControls.z, minExposure);
+    float adaptation = clamp(frame.autoExposureControls.w, 0.0, 1.0);
+    float measuredLuminance = max(SceneAverageLuminance(), 0.001);
+    float adaptedExposure = clamp(targetLuminance / measuredLuminance, minExposure, maxExposure);
+    return mix(manualExposure, adaptedExposure, adaptation);
 }
 
 vec3 BloomPrefilter(vec3 color, float threshold) {
@@ -109,7 +142,7 @@ vec3 ApplyColorGrading(vec3 color) {
 }
 
 void main() {
-    float exposure = max(frame.toneMappingControls.y, 0.001);
+    float exposure = EffectiveExposure();
     vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
     vec3 bloom = BloomContribution(exposure);
     int debugView = int(frame.shadowFiltering.z + 0.5);
@@ -119,6 +152,11 @@ void main() {
     }
     hdrColor += bloom;
     vec3 ldrColor = ToneMapHdr(hdrColor);
+    if (debugView == DEBUG_VIEW_AUTO_EXPOSURE) {
+        float normalizedExposure = clamp(exposure / max(frame.autoExposureControls.z, 0.001), 0.0, 1.0);
+        outColor = vec4(vec3(normalizedExposure), 1.0);
+        return;
+    }
     if (debugView == DEBUG_VIEW_TONE_MAPPING) {
         outColor = vec4(ldrColor, 1.0);
         return;

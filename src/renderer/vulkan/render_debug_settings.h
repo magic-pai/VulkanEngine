@@ -44,7 +44,8 @@ enum class ForwardDebugView : int {
     HeightFog = 36,
     Bloom = 37,
     ColorGrading = 38,
-    ToneMapping = 39
+    ToneMapping = 39,
+    AutoExposure = 40
 };
 
 struct VulkanRenderDebugSettings {
@@ -52,6 +53,11 @@ struct VulkanRenderDebugSettings {
     f32 exposure = 1.0f;
     u32 toneMapMode = 0;
     f32 toneMapWhitePoint = 4.0f;
+    bool autoExposureEnabled = false;
+    f32 autoExposureTargetLuminance = 0.18f;
+    f32 autoExposureMin = 0.25f;
+    f32 autoExposureMax = 4.0f;
+    f32 autoExposureAdaptation = 1.0f;
     bool bloomEnabled = false;
     f32 bloomIntensity = 0.35f;
     f32 bloomThreshold = 1.0f;

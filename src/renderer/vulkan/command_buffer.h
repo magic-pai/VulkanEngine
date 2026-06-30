@@ -87,6 +87,7 @@ public:
         bool useHdrCompositeAsMain = false,
         bool bloomDebugView = false,
         bool toneMappingDebugView = false,
+        bool autoExposureDebugView = false,
         bool colorGradingDebugView = false,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
