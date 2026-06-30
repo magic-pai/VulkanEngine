@@ -4,6 +4,8 @@
 
 Bring SelfEngine from the current lean Forward 3D renderer toward a complete mainstream PC/console AAA rendering stack first. The current execution priority is renderer capability completion. Do not schedule new UE5 scene parsing, Unreal automation, project browser, bridge-manifest expansion, or UE viewport-parity work while the renderer gaps below remain open.
 
+Current directive: treat SelfEngine as a standalone renderer first. The next milestones must fill missing mainstream 3A rendering capabilities, not chase `D:\UEProject`, `.uasset/.umap` parsing, UE scene reconstruction, or UE viewport matching. UE-derived assets may only be used as optional imported-model stress content if they have already been exported into ordinary formats and do not require new bridge work.
+
 The renderer work now serves a renderer-completeness target: HDR deferred rendering with a forward residual/Forward+ path, tiled/clustered lighting, physically based materials, image-based lighting, reflection probes, production shadow atlases, screen-space AO/reflections, probe lighting, volumetrics, temporal anti-aliasing/upscaling, scalable post processing, order-independent translucency, visibility/LOD scalability, and production-grade diagnostics. Benchmark grids, imported standalone models, and hand-authored stress scenes are valid first-class validation targets while the renderer itself is being completed.
 
 UE5 project/content preview remains a later product-integration track. Existing bridge work can stay as frozen regression coverage, but current milestones must not be blocked on parsing `.uasset/.umap`, reconstructing UE levels, exporting Unreal scenes, or matching the UE editor viewport. Once the mainstream AAA renderer is feature-complete enough, the UE project bridge can return as a validation and content-ingestion layer on top of that renderer.
@@ -35,6 +37,13 @@ The current AAA renderer milestone is considered successful when SelfEngine has 
 - Diagnostics: every expensive feature must expose ImGui controls, render-debug views, frame-graph passes/resources, CSV metrics, quality preset state, and off/fallback behavior.
 - Third-party policy: importing a capable library is allowed when it accelerates renderer completion, keeps licensing acceptable for the project, and is wrapped behind a small SelfEngine interface. Prefer established tools for formats and rendering support work, such as Assimp/tinygltf or equivalent loaders, meshoptimizer, KTX-Software/Basis Universal, DirectXTex-style texture tooling when practical, SPIRV-Reflect/SPIRV-Cross, RenderDoc markers, FSR-style upscaling SDKs, ImGuizmo/editor widgets, and image-diff libraries. Do not block progress by reimplementing these systems prematurely.
 - UE bridge policy: existing UE bridge/project-preview code may remain, but it is frozen. Only keep it compiling when renderer work touches shared code. Do not add new UE scene parsing, export automation, manifest fields, project-browser behavior, or UE visual-parity gates until the renderer-first acceptance target above is substantially complete.
+
+UE work may re-enter the plan only after this renderer gate is met:
+
+- Deferred HDR is the default visible path for renderer-owned scenes, with forward residual/Forward+ used for transparency, special effects, water-like materials, and debug overlays.
+- PBR materials, IBL, reflection probes, shadows, SSAO/GTAO, SSR, volumetrics, post, temporal AA/upscaling, LOD/occlusion, and diagnostics all have on/off controls, fallback behavior, CSV/frame-graph evidence, and smoke coverage.
+- Imported generic assets (`.gltf/.glb/.fbx/.obj` or equivalent) render through the same material, lighting, shadow, post, and temporal paths as built-in benchmark scenes.
+- Quality presets and reference captures make visual regressions measurable without relying on UE editor screenshots.
 
 ## Target Frame Pipeline
 
@@ -73,7 +82,7 @@ Work can move between these bullets as dependencies require, but no new UE-speci
 
 ### Frozen Track: UE Project Asset Bridge And Visual Baseline
 
-This track is frozen until the renderer-first phases below are substantially complete. Existing bridge code and smoke tests may remain as regression coverage, but do not spend new implementation time on parsing UE5 projects, reconstructing UE levels, exporting Unreal scenes, expanding bridge manifests, or matching UE viewport screenshots while the core renderer still lacks mainstream 3A systems.
+This track is frozen until the renderer-first acceptance gate above is met. Existing bridge code and smoke tests may remain as regression coverage, but do not spend new implementation time on parsing UE5 projects, reconstructing UE levels, exporting Unreal scenes, expanding bridge manifests, or matching UE viewport screenshots while the core renderer still lacks mainstream 3A systems.
 
 - Keep existing bridge/project-preview code compiling and avoid breaking it during renderer work.
 - Do not add new `.uasset/.umap` parsing, UE automation, project browser, scene reconstruction, export-format plumbing, or UE visual parity gates in the current renderer-first track.
@@ -158,6 +167,13 @@ This track is frozen until the renderer-first phases below are substantially com
 - Add CSV columns per pass, per resource pool, GPU memory, shadow atlas occupancy, LOD/instance counts, light count, probe count, history resets, dynamic-resolution scale, source asset count where available, missing asset count, fallback material count, unsupported feature count, and visual-diff summary metrics.
 - Add quality presets: Cinematic, Epic, High, Medium, Low, and FPS-first. Every expensive system must have a measurable fallback.
 
+### Phase 8: Renderer Feature-Complete Stabilization
+
+- Promote deferred HDR to the default visible path only after the fallback/debug forward path, imported generic assets, material parity, lighting, shadows, probes, translucency, post, temporal stability, and diagnostics all pass smoke coverage.
+- Run feature-combination benchmarks instead of single-feature demos: many lights plus CSM plus SSAO/SSR/probes, volumetrics plus transparency plus bloom, TAA/upscaling plus motion vectors, and imported-model material grids under multiple quality presets.
+- Build renderer-owned reference captures and visual diffs for built-in stress scenes and generic imported scenes. These captures become the readiness proof for returning to UE integration later.
+- Produce a single missing-feature report that lists unsupported renderer features, degraded fallbacks, disabled quality tiers, and known visual mismatches before any UE project-preview work resumes.
+
 ### Advanced Research Backlog
 
 These systems are intentionally postponed until the mainstream AAA track above is usable, benchmarked, and debuggable:
@@ -186,18 +202,18 @@ These systems are intentionally postponed until the mainstream AAA track above i
 
 ## Current Slice
 
-Current execution is renderer-completion only. The next slices should close mainstream 3A renderer gaps in Phases 1-7: deferred/HDR completion, lighting/IBL, production shadows, SSR/AO/probes, visibility/LOD, temporal/post, volumetrics, and production diagnostics. The old Phase A UE project-discovery carrier exists only as frozen regression coverage; do not choose UE scene parsing, UE export, or UE visual parity as upcoming work.
+Current execution is renderer-completion only. The next slices should close mainstream 3A renderer gaps in Phases 1-8: deferred/HDR completion, lighting/IBL, production shadows, SSR/AO/probes, visibility/LOD, temporal/post, volumetrics, feature-combination stabilization, and production diagnostics. The old Phase A UE project-discovery carrier exists only as frozen regression coverage; do not choose UE scene parsing, UE export, UE asset-browser behavior, or UE visual parity as upcoming work.
 
 Active renderer backlog, in practical near-term order:
 
-- Deepen the completed first height/distance fog tier into volumetric fog, aerial perspective, fog history/stability, light scattering, and stronger visual baselines.
-- Deepen the first bloom/tone-map composite tier into a real post graph: downsample/upsample bloom pyramid, exposure, tone mapping, color grading, motion blur, DOF, sharpening, and off/fallback evidence.
-- Deepen IBL/probes beyond procedural fallback: BRDF LUT, prefiltered cubemaps, reflection-capture resources, local probe capture/blending, parallax/box projection, and irradiance/light-probe data.
+- Finish the post/temporal baseline: exposure, tone mapping, color grading, real bloom pyramid, motion blur, DOF, sharpening, velocity correctness, TAA, history reset diagnostics, and dynamic-resolution/upscaler scaffolding.
+- Deepen IBL/probes beyond procedural fallback: BRDF LUT, sky irradiance, prefiltered cubemaps, reflection-capture resources, local probe capture/blending, parallax/box projection, and irradiance/light-probe data.
+- Finish production shadow quality: CSM stability captures, local point/spot shadow atlas quality, cache invalidation, bias/filter/PCSS evidence, contact-shadow stability, and preset-level visual comparisons.
 - Deepen SSAO/SSR into production tiers: GTAO-style filtering, SSR hierarchical traversal, history accumulation, denoise/rejection controls, and reflection-probe fallback blending.
-- Finish shadow quality passes: stronger CSM stability captures, local-shadow cache invalidation, bias/filter/PCSS evidence, contact-shadow stability, and preset-level visual comparisons.
-- Build temporal infrastructure: velocity correctness, TAA, history reset diagnostics, TAAU/FSR-style upscaler boundary, dynamic resolution, and sharpening controls.
-- Build visibility/scalability: engine-native mesh cache, classic LODs, instance compaction, Hi-Z/occlusion, indirect draw preparation, and cost metrics.
-- Expand renderer tooling: renderer-owned benchmark scenes, RenderDoc markers, screenshot/reference capture, visual-diff tooling, and CSV coverage for every expensive system.
+- Deepen the completed first height/distance fog tier into volumetric fog, aerial perspective, fog history/stability, light scattering, volumetric shadow hooks, and stronger visual baselines.
+- Build visibility/scalability: engine-native mesh cache, classic LODs, instance compaction, Hi-Z/occlusion, indirect draw preparation, material bucketing, and cost metrics.
+- Complete forward residual/Forward+ feature carriers for weighted blended translucency/OIT, particles, water-like/special materials, hair-card style materials, and debug overlays.
+- Expand renderer tooling: renderer-owned benchmark scenes, RenderDoc markers, screenshot/reference capture, visual-diff tooling, quality presets, and CSV coverage for every expensive system.
 
 The parked bridge notes below are historical context only. They should not be used to select the next implementation slice.
 
