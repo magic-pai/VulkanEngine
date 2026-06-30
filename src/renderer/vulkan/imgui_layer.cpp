@@ -518,6 +518,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Bloom";
     case ForwardDebugView::ColorGrading:
         return "Color Grading";
+    case ForwardDebugView::ToneMapping:
+        return "Tone Mapping";
     }
 
     return "Lit";
@@ -563,7 +565,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::ReflectionProbe,
         ForwardDebugView::HeightFog,
         ForwardDebugView::Bloom,
-        ForwardDebugView::ColorGrading
+        ForwardDebugView::ColorGrading,
+        ForwardDebugView::ToneMapping
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -583,6 +586,12 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
 
     ImGui::SliderFloat("Debug exposure", &settings.exposure, 0.1f, 5.0f);
     ImGui::SeparatorText("Post");
+    static constexpr const char* kToneMapModes[] = { "ACES", "Reinhard", "Linear Clamp" };
+    int toneMapMode = static_cast<int>(std::clamp<u32>(settings.toneMapMode, 0u, 2u));
+    if (ImGui::Combo("Tone map##Post", &toneMapMode, kToneMapModes, 3)) {
+        settings.toneMapMode = static_cast<u32>(std::clamp(toneMapMode, 0, 2));
+    }
+    ImGui::SliderFloat("Tone white point##Post", &settings.toneMapWhitePoint, 0.1f, 64.0f, "%.2f");
     ImGui::Checkbox("Bloom##Post", &settings.bloomEnabled);
     ImGui::SliderFloat("Bloom intensity##Post", &settings.bloomIntensity, 0.0f, 4.0f, "%.3f");
     ImGui::SliderFloat("Bloom threshold##Post", &settings.bloomThreshold, 0.0f, 8.0f, "%.3f");
@@ -794,6 +803,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.bloomRadiusPixels
     );
     ImGui::Text(
+        "Tone mapping: %s, mode %u, exposure %.3f, white %.2f",
+        stats.postProcess.toneMappingEnabled ? "enabled" : "linear fallback",
+        stats.postProcess.toneMapMode,
+        stats.postProcess.exposure,
+        stats.postProcess.toneMapWhitePoint
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,
@@ -945,6 +961,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.bloomDebugDraws,
         binds.bloomDebugFrameBinds,
         binds.bloomDebugTextureBinds
+    );
+    ImGui::Text(
+        "Tone mapping debug: %u draws / %u frame binds / %u texture binds",
+        binds.toneMappingDebugDraws,
+        binds.toneMappingDebugFrameBinds,
+        binds.toneMappingDebugTextureBinds
     );
     ImGui::Text(
         "Color grading debug: %u draws / %u frame binds / %u texture binds",

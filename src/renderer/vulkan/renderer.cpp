@@ -1491,6 +1491,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::HeightFog ||
         view == ForwardDebugView::Bloom ||
         view == ForwardDebugView::ColorGrading ||
+        view == ForwardDebugView::ToneMapping ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1641,6 +1642,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "ColorGrading") {
         return ForwardDebugView::ColorGrading;
     }
+    if (value == "tone-map" ||
+        value == "tone_map" ||
+        value == "tonemap" ||
+        value == "tone-mapping" ||
+        value == "tone_mapping" ||
+        value == "ToneMapping") {
+        return ForwardDebugView::ToneMapping;
+    }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
         value == "weighted-translucency-accum" ||
@@ -1713,6 +1722,36 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
     }
     if (value == "light-depth" || value == "LightSpaceDepth") {
         return ForwardDebugView::LightSpaceDepth;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<u32> ToneMapModeFromEnvironment() {
+    std::string value = ReadEnvironmentString("SE_TONEMAP_MODE");
+    if (value.empty()) {
+        value = ReadEnvironmentString("SE_TONE_MAP_MODE");
+    }
+    if (value.empty()) {
+        value = ReadEnvironmentString("SE_TONEMAP");
+    }
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    if (value == "aces" || value == "ACES" || value == "0") {
+        return 0u;
+    }
+    if (value == "reinhard" || value == "Reinhard" || value == "1") {
+        return 1u;
+    }
+    if (value == "linear" ||
+        value == "Linear" ||
+        value == "linear-clamp" ||
+        value == "linear_clamp" ||
+        value == "off" ||
+        value == "2") {
+        return 2u;
     }
 
     return std::nullopt;
@@ -2214,6 +2253,14 @@ void VulkanRenderer::DrawFrame() {
             frameStats.postProcess.bloomRadiusPixels > 0.0001f
             ? 1u
             : 0u;
+    frameStats.postProcess.toneMapMode =
+        std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u);
+    frameStats.postProcess.exposure =
+        std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f);
+    frameStats.postProcess.toneMapWhitePoint =
+        std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f);
+    frameStats.postProcess.toneMappingEnabled =
+        frameStats.postProcess.toneMapMode == 2u ? 0u : 1u;
     frameStats.postProcess.colorGradingSaturation =
         std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f);
     frameStats.postProcess.colorGradingContrast =
@@ -2494,6 +2541,10 @@ void VulkanRenderer::DrawFrame() {
                 frameStats.reflectionProbe.fallbackEnabled > 0 &&
                 has3DMainPass,
             frameStats.heightFog.enabled > 0 && has3DMainPass,
+            frameStats.postProcess.toneMappingEnabled > 0 &&
+                showDeferredHdr &&
+                m_HdrCompositePipeline != nullptr &&
+                m_HdrDescriptorSets != nullptr,
             frameStats.postProcess.bloomEnabled > 0 &&
                 showDeferredHdr &&
                 m_HdrCompositePipeline != nullptr &&
@@ -2585,6 +2636,7 @@ void VulkanRenderer::DrawFrame() {
         m_HdrDescriptorSets.get(),
         showDeferredHdr,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
+        m_RenderDebugSettings.forwardView == ForwardDebugView::ToneMapping,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ColorGrading,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
@@ -3998,6 +4050,20 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (bloomRadius.has_value()) {
         m_RenderDebugSettings.bloomRadiusPixels = *bloomRadius;
     }
+    const std::optional<f32> exposure =
+        EnvironmentFloatOverride("SE_EXPOSURE");
+    if (exposure.has_value()) {
+        m_RenderDebugSettings.exposure = *exposure;
+    }
+    const std::optional<u32> toneMapMode = ToneMapModeFromEnvironment();
+    if (toneMapMode.has_value()) {
+        m_RenderDebugSettings.toneMapMode = *toneMapMode;
+    }
+    const std::optional<f32> toneMapWhitePoint =
+        EnvironmentFloatOverride("SE_TONEMAP_WHITE_POINT");
+    if (toneMapWhitePoint.has_value()) {
+        m_RenderDebugSettings.toneMapWhitePoint = *toneMapWhitePoint;
+    }
     const std::optional<bool> colorGrading =
         EnvironmentFlagOverride("SE_COLOR_GRADING");
     if (colorGrading.has_value()) {
@@ -4335,6 +4401,12 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
     );
+    uniformData.toneMappingControls = glm::vec4(
+        static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),
+        std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f),
+        std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f),
+        1.0f
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4464,6 +4536,12 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
+    );
+    uniformData.toneMappingControls = glm::vec4(
+        static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),
+        std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f),
+        std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f),
+        1.0f
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

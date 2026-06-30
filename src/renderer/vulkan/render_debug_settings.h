@@ -43,12 +43,15 @@ enum class ForwardDebugView : int {
     ReflectionProbe = 35,
     HeightFog = 36,
     Bloom = 37,
-    ColorGrading = 38
+    ColorGrading = 38,
+    ToneMapping = 39
 };
 
 struct VulkanRenderDebugSettings {
     ForwardDebugView forwardView = ForwardDebugView::Lit;
     f32 exposure = 1.0f;
+    u32 toneMapMode = 0;
+    f32 toneMapWhitePoint = 4.0f;
     bool bloomEnabled = false;
     f32 bloomIntensity = 0.35f;
     f32 bloomThreshold = 1.0f;

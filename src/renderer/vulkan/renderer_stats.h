@@ -189,6 +189,10 @@ struct RendererPostProcessStats {
     f32 bloomIntensity = 0.0f;
     f32 bloomThreshold = 0.0f;
     f32 bloomRadiusPixels = 0.0f;
+    u32 toneMappingEnabled = 1;
+    u32 toneMapMode = 0;
+    f32 exposure = 1.0f;
+    f32 toneMapWhitePoint = 4.0f;
     u32 colorGradingEnabled = 0;
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
@@ -245,6 +249,9 @@ struct RendererBindStats {
     u32 bloomDebugDraws = 0;
     u32 bloomDebugFrameBinds = 0;
     u32 bloomDebugTextureBinds = 0;
+    u32 toneMappingDebugDraws = 0;
+    u32 toneMappingDebugFrameBinds = 0;
+    u32 toneMappingDebugTextureBinds = 0;
     u32 colorGradingDebugDraws = 0;
     u32 colorGradingDebugFrameBinds = 0;
     u32 colorGradingDebugTextureBinds = 0;

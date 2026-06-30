@@ -25,12 +25,14 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 heightFogColor;
     vec4 postProcessControls;
     vec4 colorGradingControls;
+    vec4 toneMappingControls;
 } frame;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
+const int DEBUG_VIEW_TONE_MAPPING = 39;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -39,6 +41,24 @@ vec3 ToneMapAces(vec3 value) {
     const float d = 0.59;
     const float e = 0.14;
     return clamp((value * (a * value + b)) / (value * (c * value + d) + e), 0.0, 1.0);
+}
+
+vec3 ToneMapReinhard(vec3 value, float whitePoint) {
+    float whitePointSquared = max(whitePoint * whitePoint, 0.0001);
+    vec3 mapped = value * (vec3(1.0) + value / whitePointSquared) / (vec3(1.0) + value);
+    return clamp(mapped, 0.0, 1.0);
+}
+
+vec3 ToneMapHdr(vec3 value) {
+    int mode = int(frame.toneMappingControls.x + 0.5);
+    float whitePoint = max(frame.toneMappingControls.z, 0.001);
+    if (mode == 1) {
+        return ToneMapReinhard(value, whitePoint);
+    }
+    if (mode == 2) {
+        return clamp(value, 0.0, 1.0);
+    }
+    return ToneMapAces(value);
 }
 
 vec3 BloomPrefilter(vec3 color, float threshold) {
@@ -89,16 +109,20 @@ vec3 ApplyColorGrading(vec3 color) {
 }
 
 void main() {
-    float exposure = max(frame.shadowFiltering.w, 0.001);
+    float exposure = max(frame.toneMappingControls.y, 0.001);
     vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
     vec3 bloom = BloomContribution(exposure);
     int debugView = int(frame.shadowFiltering.z + 0.5);
     if (debugView == DEBUG_VIEW_BLOOM) {
-        outColor = vec4(ToneMapAces(bloom), 1.0);
+        outColor = vec4(ToneMapHdr(bloom), 1.0);
         return;
     }
     hdrColor += bloom;
-    vec3 ldrColor = ToneMapAces(hdrColor);
+    vec3 ldrColor = ToneMapHdr(hdrColor);
+    if (debugView == DEBUG_VIEW_TONE_MAPPING) {
+        outColor = vec4(ldrColor, 1.0);
+        return;
+    }
     vec3 gradedColor = ApplyColorGrading(ldrColor);
     if (debugView == DEBUG_VIEW_COLOR_GRADING) {
         outColor = vec4(gradedColor, 1.0);

@@ -706,6 +706,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
 
     if (inputs.hdrCompositeEnabled) {
+        if (inputs.toneMappingEnabled) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::PostProcess,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "ToneMappingIntegrated",
+                "HDRSceneColor, exposure, tone-map controls",
+                "tonemapped color during composite",
+                "First explicit tone-map control tier inside HDR composite; a dedicated post graph pass can replace it later."
+            );
+        }
         if (inputs.bloomEnabled) {
             AppendPass(
                 plan,
@@ -736,13 +748,21 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "HDRComposite",
-            inputs.bloomEnabled && inputs.colorGradingEnabled
-                ? "HDRSceneColor, exposure, bloom, color grading"
-                : inputs.bloomEnabled
-                    ? "HDRSceneColor, exposure, bloom"
-                    : inputs.colorGradingEnabled
-                        ? "HDRSceneColor, exposure, color grading"
-                        : "HDRSceneColor, exposure",
+            inputs.toneMappingEnabled && inputs.bloomEnabled && inputs.colorGradingEnabled
+                ? "HDRSceneColor, exposure, tone map, bloom, color grading"
+                : inputs.toneMappingEnabled && inputs.bloomEnabled
+                    ? "HDRSceneColor, exposure, tone map, bloom"
+                    : inputs.toneMappingEnabled && inputs.colorGradingEnabled
+                        ? "HDRSceneColor, exposure, tone map, color grading"
+                        : inputs.bloomEnabled && inputs.colorGradingEnabled
+                            ? "HDRSceneColor, exposure, bloom, color grading"
+                            : inputs.toneMappingEnabled
+                                ? "HDRSceneColor, exposure, tone map"
+                                : inputs.bloomEnabled
+                                    ? "HDRSceneColor, exposure, bloom"
+                                    : inputs.colorGradingEnabled
+                                        ? "HDRSceneColor, exposure, color grading"
+                                        : "HDRSceneColor, exposure",
             "swapchain color",
             "Debug-visible HDR composite path for deferred output before it becomes the default present path."
         );
