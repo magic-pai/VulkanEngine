@@ -1438,6 +1438,8 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 12;
     case ForwardDebugView::ReflectionProbe:
         return 13;
+    case ForwardDebugView::HeightFog:
+        return 14;
     default:
         return 0;
     }
@@ -1471,6 +1473,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::Ssao ||
         view == ForwardDebugView::Ssr ||
         view == ForwardDebugView::ReflectionProbe ||
+        view == ForwardDebugView::HeightFog ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1598,6 +1601,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "reflection-fallback" ||
         value == "reflection_fallback") {
         return ForwardDebugView::ReflectionProbe;
+    }
+    if (value == "height-fog" ||
+        value == "height_fog" ||
+        value == "HeightFog" ||
+        value == "distance-fog" ||
+        value == "distance_fog" ||
+        value == "fog") {
+        return ForwardDebugView::HeightFog;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2146,6 +2157,20 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f);
     frameStats.reflectionProbe.localFalloff =
         std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f);
+    frameStats.heightFog.density =
+        std::clamp(m_ShadowSettings.heightFogDensity, 0.0f, 1.0f);
+    frameStats.heightFog.heightFalloff =
+        std::clamp(m_ShadowSettings.heightFogHeightFalloff, 0.0f, 2.0f);
+    frameStats.heightFog.startDistance =
+        std::clamp(m_ShadowSettings.heightFogStartDistance, 0.0f, 1000.0f);
+    frameStats.heightFog.maxOpacity =
+        std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f);
+    frameStats.heightFog.enabled =
+        m_ShadowSettings.heightFogEnabled &&
+            frameStats.heightFog.density > 0.0001f &&
+            frameStats.heightFog.maxOpacity > 0.0001f
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2417,6 +2442,7 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.localEnabled > 0 &&
                 frameStats.reflectionProbe.fallbackEnabled > 0 &&
                 has3DMainPass,
+            frameStats.heightFog.enabled > 0 && has3DMainPass,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -3887,6 +3913,11 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (localReflectionProbe.has_value()) {
         m_ShadowSettings.localReflectionProbeEnabled = *localReflectionProbe;
     }
+    const std::optional<bool> heightFog =
+        EnvironmentFlagOverride("SE_HEIGHT_FOG");
+    if (heightFog.has_value()) {
+        m_ShadowSettings.heightFogEnabled = *heightFog;
+    }
 
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
@@ -4172,6 +4203,22 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
         0.0f
     );
+    const bool heightFogApplied =
+        m_ShadowSettings.heightFogEnabled &&
+        m_ShadowSettings.heightFogDensity > 0.0001f &&
+        m_ShadowSettings.heightFogMaxOpacity > 0.0001f;
+    uniformData.heightFogControls = glm::vec4(
+        heightFogApplied ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.heightFogDensity, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.heightFogHeightFalloff, 0.0f, 2.0f),
+        std::clamp(m_ShadowSettings.heightFogStartDistance, 0.0f, 1000.0f)
+    );
+    uniformData.heightFogColor = glm::vec4(
+        std::clamp(m_ShadowSettings.heightFogColorR, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogColorG, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogColorB, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f)
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4269,6 +4316,22 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_ShadowSettings.localReflectionProbeColorG, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
         0.0f
+    );
+    const bool heightFogApplied =
+        m_ShadowSettings.heightFogEnabled &&
+        m_ShadowSettings.heightFogDensity > 0.0001f &&
+        m_ShadowSettings.heightFogMaxOpacity > 0.0001f;
+    uniformData.heightFogControls = glm::vec4(
+        heightFogApplied ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.heightFogDensity, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.heightFogHeightFalloff, 0.0f, 2.0f),
+        std::clamp(m_ShadowSettings.heightFogStartDistance, 0.0f, 1000.0f)
+    );
+    uniformData.heightFogColor = glm::vec4(
+        std::clamp(m_ShadowSettings.heightFogColorR, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogColorG, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogColorB, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

@@ -176,6 +176,14 @@ struct RendererReflectionProbeStats {
     f32 localFalloff = 0.0f;
 };
 
+struct RendererHeightFogStats {
+    u32 enabled = 0;
+    f32 density = 0.0f;
+    f32 heightFalloff = 0.0f;
+    f32 startDistance = 0.0f;
+    f32 maxOpacity = 0.0f;
+};
+
 struct RendererBindStats {
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
@@ -220,6 +228,9 @@ struct RendererBindStats {
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;
+    u32 heightFogDebugDraws = 0;
+    u32 heightFogDebugFrameBinds = 0;
+    u32 heightFogDebugGBufferBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;
@@ -331,6 +342,7 @@ struct RendererStats {
     RendererSsaoStats ssao;
     RendererSsrStats ssr;
     RendererReflectionProbeStats reflectionProbe;
+    RendererHeightFogStats heightFog;
     RendererBindStats binds;
     RendererGpuStats gpu;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();

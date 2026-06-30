@@ -346,6 +346,46 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.localReflectionProbeColorG = localProbeColor[1];
         settings.localReflectionProbeColorB = localProbeColor[2];
     }
+    ImGui::SeparatorText("Height fog");
+    ImGui::Checkbox("Height fog##Shadow", &settings.heightFogEnabled);
+    ImGui::SliderFloat(
+        "Fog density##Shadow",
+        &settings.heightFogDensity,
+        0.0f,
+        0.25f,
+        "%.4f"
+    );
+    ImGui::SliderFloat(
+        "Fog height falloff##Shadow",
+        &settings.heightFogHeightFalloff,
+        0.0f,
+        0.6f,
+        "%.3f"
+    );
+    ImGui::SliderFloat(
+        "Fog start distance##Shadow",
+        &settings.heightFogStartDistance,
+        0.0f,
+        80.0f,
+        "%.1f"
+    );
+    ImGui::SliderFloat(
+        "Fog max opacity##Shadow",
+        &settings.heightFogMaxOpacity,
+        0.0f,
+        1.0f,
+        "%.3f"
+    );
+    float heightFogColor[3]{
+        settings.heightFogColorR,
+        settings.heightFogColorG,
+        settings.heightFogColorB
+    };
+    if (ImGui::ColorEdit3("Fog color##Shadow", heightFogColor)) {
+        settings.heightFogColorR = heightFogColor[0];
+        settings.heightFogColorG = heightFogColor[1];
+        settings.heightFogColorB = heightFogColor[2];
+    }
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -472,6 +512,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "SSR";
     case ForwardDebugView::ReflectionProbe:
         return "Reflection Probe";
+    case ForwardDebugView::HeightFog:
+        return "Height Fog";
     }
 
     return "Lit";
@@ -514,7 +556,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::WeightedTranslucencyWeight,
         ForwardDebugView::Ssao,
         ForwardDebugView::Ssr,
-        ForwardDebugView::ReflectionProbe
+        ForwardDebugView::ReflectionProbe,
+        ForwardDebugView::HeightFog
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -721,6 +764,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.localFalloff
     );
     ImGui::Text(
+        "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
+        stats.heightFog.enabled ? "enabled" : "off",
+        stats.heightFog.density,
+        stats.heightFog.heightFalloff,
+        stats.heightFog.startDistance,
+        stats.heightFog.maxOpacity
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -853,6 +904,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.reflectionProbeDebugDraws,
         binds.reflectionProbeDebugFrameBinds,
         binds.reflectionProbeDebugGBufferBinds
+    );
+    ImGui::Text(
+        "Height fog debug: %u draws / %u frame binds / %u gbuffer binds",
+        binds.heightFogDebugDraws,
+        binds.heightFogDebugFrameBinds,
+        binds.heightFogDebugGBufferBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

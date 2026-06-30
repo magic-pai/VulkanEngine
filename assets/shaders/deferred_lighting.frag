@@ -21,6 +21,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 localReflectionProbePositionRadius;
     vec4 localReflectionProbeControls;
     vec4 localReflectionProbeColor;
+    vec4 heightFogControls;
+    vec4 heightFogColor;
 } frame;
 
 struct LocalLightRecord {
@@ -724,6 +726,31 @@ vec3 ReconstructViewPosition(vec2 uv, float depth) {
         return vec3(0.0);
     }
     return viewPosition.xyz / viewPosition.w;
+}
+
+float HeightFogFactor(vec3 worldPosition, vec3 cameraPosition) {
+    float enabled = clamp(frame.heightFogControls.x, 0.0, 1.0);
+    float density = clamp(frame.heightFogControls.y, 0.0, 1.0);
+    float heightFalloff = clamp(frame.heightFogControls.z, 0.0, 2.0);
+    float startDistance = max(frame.heightFogControls.w, 0.0);
+    float maxOpacity = clamp(frame.heightFogColor.a, 0.0, 1.0);
+    if (enabled <= 0.0001 || density <= 0.0001 || maxOpacity <= 0.0001) {
+        return 0.0;
+    }
+
+    float viewDistance = length(worldPosition - cameraPosition);
+    float fogDistance = max(viewDistance - startDistance, 0.0);
+    float heightWeight = exp(-max(worldPosition.y, 0.0) * heightFalloff);
+    float fog = 1.0 - exp(-fogDistance * density * max(heightWeight, 0.08));
+    return clamp(fog, 0.0, maxOpacity);
+}
+
+vec3 HeightFogColor() {
+    return max(frame.heightFogColor.rgb, vec3(0.0));
+}
+
+vec3 ApplyHeightFog(vec3 color, vec3 worldPosition, vec3 cameraPosition) {
+    return mix(color, HeightFogColor(), HeightFogFactor(worldPosition, cameraPosition));
 }
 
 float SsaoVisibility(vec2 uv, float depth, vec3 normal) {
@@ -2016,6 +2043,20 @@ void main() {
         );
         return;
     }
+    if (deferredDebugView == 14) {
+        float fogFactor = HeightFogFactor(worldPosition, cameraPosition);
+        vec3 thin = vec3(0.02, 0.05, 0.08);
+        vec3 mid = mix(vec3(0.42, 0.60, 0.72), HeightFogColor(), 0.35);
+        vec3 fogDebug = mix(thin, mid, smoothstep(0.0, 0.55, fogFactor));
+        fogDebug = mix(fogDebug, HeightFogColor(), smoothstep(0.45, 1.0, fogFactor));
+        outColor = vec4(fogDebug + vec3(fogFactor) * 0.08, 1.0);
+        return;
+    }
 
-    outColor = vec4(ambient + direct + emissiveColor, 1.0);
+    vec3 finalColor = ApplyHeightFog(
+        ambient + direct + emissiveColor,
+        worldPosition,
+        cameraPosition
+    );
+    outColor = vec4(finalColor, 1.0);
 }

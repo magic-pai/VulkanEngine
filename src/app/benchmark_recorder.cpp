@@ -127,6 +127,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererSsaoStats& ssao = stats.ssao;
     const RendererSsrStats& ssr = stats.ssr;
     const RendererReflectionProbeStats& reflectionProbe = stats.reflectionProbe;
+    const RendererHeightFogStats& heightFog = stats.heightFog;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
     const BenchmarkSceneDiagnostics& sceneDiagnostics =
@@ -266,6 +267,11 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.localIntensity << ','
         << reflectionProbe.localBlendStrength << ','
         << reflectionProbe.localFalloff << ','
+        << heightFog.enabled << ','
+        << heightFog.density << ','
+        << heightFog.heightFalloff << ','
+        << heightFog.startDistance << ','
+        << heightFog.maxOpacity << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
         << shadowCascades.farDepth << ','
@@ -369,6 +375,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
+        << binds.heightFogDebugDraws << ','
+        << binds.heightFogDebugFrameBinds << ','
+        << binds.heightFogDebugGBufferBinds << ','
         << binds.lightTileCullComputeDispatches << ','
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
@@ -539,6 +548,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_local_enabled,reflection_probe_local_radius,"
         << "reflection_probe_local_intensity,reflection_probe_local_blend_strength,"
         << "reflection_probe_local_falloff,"
+        << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
+        << "height_fog_start_distance,height_fog_max_opacity,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"
@@ -589,6 +600,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_debug_draws,ssr_debug_frame_binds,ssr_debug_gbuffer_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
+        << "height_fog_debug_draws,height_fog_debug_frame_binds,"
+        << "height_fog_debug_gbuffer_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"

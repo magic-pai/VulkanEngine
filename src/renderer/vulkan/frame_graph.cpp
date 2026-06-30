@@ -659,6 +659,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture is added."
         );
     }
+    if (inputs.heightFogEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Volumetrics,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "HeightFogIntegrated",
+            "frame height-fog controls, camera position, shaded world position",
+            "fogged HDR/forward scene color",
+            "First analytic height/distance fog tier integrated into deferred, legacy forward, and WBOIT shading before a full volumetric fog volume is added."
+        );
+    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(
@@ -812,7 +824,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
 RenderFrameGraphPlan BuildAAAFrameGraphBlueprint() {
     RenderFrameGraphPlan plan{};
     plan.name = "SelfEngine AAA Blueprint";
-    plan.target = "Mainstream AAA hybrid renderer and UE5-content previewer";
+    plan.target = "Mainstream AAA hybrid renderer";
     AppendAAARoadmapPasses(plan);
     AppendAAAResourceBlueprint(plan);
     AppendPass(

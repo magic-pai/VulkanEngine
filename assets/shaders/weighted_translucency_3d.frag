@@ -40,6 +40,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 localReflectionProbePositionRadius;
     vec4 localReflectionProbeControls;
     vec4 localReflectionProbeColor;
+    vec4 heightFogControls;
+    vec4 heightFogColor;
 } frame;
 
 struct LocalLightRecord {
@@ -598,6 +600,28 @@ vec3 VolumeTransmittance(MaterialRecord materialRecord) {
     vec3 attenuationColor = clamp(materialRecord.materialCustom.rgb, vec3(0.0), vec3(1.0));
     vec3 absorption = -log(max(attenuationColor, vec3(0.001))) / attenuationDistance;
     return exp(-absorption * thickness);
+}
+
+float HeightFogFactor(vec3 worldPosition, vec3 cameraPosition) {
+    float enabled = clamp(frame.heightFogControls.x, 0.0, 1.0);
+    float density = clamp(frame.heightFogControls.y, 0.0, 1.0);
+    float heightFalloff = clamp(frame.heightFogControls.z, 0.0, 2.0);
+    float startDistance = max(frame.heightFogControls.w, 0.0);
+    float maxOpacity = clamp(frame.heightFogColor.a, 0.0, 1.0);
+    if (enabled <= 0.0001 || density <= 0.0001 || maxOpacity <= 0.0001) {
+        return 0.0;
+    }
+
+    float viewDistance = length(worldPosition - cameraPosition);
+    float fogDistance = max(viewDistance - startDistance, 0.0);
+    float heightWeight = exp(-max(worldPosition.y, 0.0) * heightFalloff);
+    float fog = 1.0 - exp(-fogDistance * density * max(heightWeight, 0.08));
+    return clamp(fog, 0.0, maxOpacity);
+}
+
+vec3 ApplyHeightFog(vec3 color, vec3 worldPosition, vec3 cameraPosition) {
+    vec3 fogColor = max(frame.heightFogColor.rgb, vec3(0.0));
+    return mix(color, fogColor, HeightFogFactor(worldPosition, cameraPosition));
 }
 
 vec3 DirectPbrContribution(
@@ -1471,6 +1495,11 @@ void main() {
             : emissiveTexture;
     }
     litColor += emissive;
+    litColor = ApplyHeightFog(
+        litColor,
+        fragWorldPosition,
+        objectData.cameraPosition.xyz
+    );
     float tintMix = clamp(objectData.tint.a, 0.0, 1.0);
     litColor = mix(litColor, objectData.tint.rgb, tintMix);
 

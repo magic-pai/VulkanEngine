@@ -40,7 +40,8 @@ enum class ForwardDebugView : int {
     WeightedTranslucencyWeight = 32,
     Ssao = 33,
     Ssr = 34,
-    ReflectionProbe = 35
+    ReflectionProbe = 35,
+    HeightFog = 36
 };
 
 struct VulkanRenderDebugSettings {
