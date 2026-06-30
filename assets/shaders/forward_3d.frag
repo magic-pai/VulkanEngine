@@ -35,6 +35,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 contactShadowStabilityControls;
     vec4 ssaoControls;
     vec4 ssrControls;
+    vec4 reflectionProbeControls;
 } frame;
 
 struct LocalLightRecord {
@@ -232,19 +233,28 @@ vec4 DebugColor(vec3 color) {
 }
 
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+    float enabled = clamp(frame.reflectionProbeControls.x, 0.0, 1.0);
+    if (enabled <= 0.0001) {
+        return vec3(0.0);
+    }
+
+    float diffuseIntensity = clamp(frame.reflectionProbeControls.y, 0.0, 4.0);
+    float specularIntensity = clamp(frame.reflectionProbeControls.z, 0.0, 4.0);
+    float horizonBlend = clamp(frame.reflectionProbeControls.w, 0.0, 1.0);
     float up = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 skyTop = vec3(0.37, 0.50, 0.72);
     vec3 skyHorizon = vec3(0.68, 0.71, 0.76);
     vec3 ground = vec3(0.09, 0.085, 0.08);
     vec3 base = mix(ground, skyTop, smoothstep(0.05, 1.0, up));
-    base = mix(base, skyHorizon, (1.0 - abs(direction.y)) * 0.22);
+    base = mix(base, skyHorizon, (1.0 - abs(direction.y)) * horizonBlend);
 
     float sunAmount = max(dot(direction, sunDirection), 0.0);
     float sunPower = mix(1024.0, 24.0, roughness);
     float sunDisk = pow(sunAmount, sunPower);
     vec3 sunTint = vec3(1.12, 1.08, 1.0);
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
-    return base + sun;
+    float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
+    return (base + sun) * intensity * enabled;
 }
 
 vec3 LocalShadowAtlasDebugColor(vec2 uv) {

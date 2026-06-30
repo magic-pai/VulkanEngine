@@ -46,6 +46,10 @@ struct VulkanShadowSettings {
     f32 ssrRayLength = 18.0f;
     f32 ssrThickness = 0.08f;
     u32 ssrStepCount = 12;
+    bool reflectionProbeFallbackEnabled = true;
+    f32 reflectionProbeDiffuseIntensity = 1.0f;
+    f32 reflectionProbeSpecularIntensity = 1.0f;
+    f32 reflectionProbeHorizonBlend = 0.22f;
     f32 cascadeSplitLambda = 0.68f;
     f32 cascadeMaxDistance = 250.0f;
     f32 cascadeBlendRatio = 0.08f;

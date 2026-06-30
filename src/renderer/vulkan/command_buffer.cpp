@@ -1566,6 +1566,11 @@ void VulkanCommandBuffer::Record(
                     ++bindStats->ssrDebugFrameBinds;
                     ++bindStats->ssrDebugGBufferBinds;
                 }
+                if (deferredPbrDebugView == 13) {
+                    ++bindStats->reflectionProbeDebugDraws;
+                    ++bindStats->reflectionProbeDebugFrameBinds;
+                    ++bindStats->reflectionProbeDebugGBufferBinds;
+                }
                 bindStats->pushConstantUpdates += deferredPushConstantUpdates;
                 bindStats->pushConstantBytes += deferredPushConstantBytes;
             }

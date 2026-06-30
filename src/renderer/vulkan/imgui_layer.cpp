@@ -284,6 +284,29 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.ssrStepCount =
             static_cast<u32>(std::clamp(ssrStepCount, 0, 32));
     }
+    ImGui::SeparatorText("Reflection fallback");
+    ImGui::Checkbox("Global reflection fallback##Shadow", &settings.reflectionProbeFallbackEnabled);
+    ImGui::SliderFloat(
+        "Probe diffuse intensity##Shadow",
+        &settings.reflectionProbeDiffuseIntensity,
+        0.0f,
+        4.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Probe specular intensity##Shadow",
+        &settings.reflectionProbeSpecularIntensity,
+        0.0f,
+        4.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Probe horizon blend##Shadow",
+        &settings.reflectionProbeHorizonBlend,
+        0.0f,
+        1.0f,
+        "%.2f"
+    );
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -408,6 +431,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "SSAO";
     case ForwardDebugView::Ssr:
         return "SSR";
+    case ForwardDebugView::ReflectionProbe:
+        return "Reflection Probe";
     }
 
     return "Lit";
@@ -449,7 +474,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::WeightedTranslucencyRevealage,
         ForwardDebugView::WeightedTranslucencyWeight,
         ForwardDebugView::Ssao,
-        ForwardDebugView::Ssr
+        ForwardDebugView::Ssr,
+        ForwardDebugView::ReflectionProbe
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -641,6 +667,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssr.stepCount
     );
     ImGui::Text(
+        "Reflection fallback: %s, diffuse %.2f, specular %.2f, horizon %.2f",
+        stats.reflectionProbe.fallbackEnabled ? "enabled" : "off",
+        stats.reflectionProbe.diffuseIntensity,
+        stats.reflectionProbe.specularIntensity,
+        stats.reflectionProbe.horizonBlend
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -767,6 +800,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.ssrDebugDraws,
         binds.ssrDebugFrameBinds,
         binds.ssrDebugGBufferBinds
+    );
+    ImGui::Text(
+        "Reflection probe debug: %u draws / %u frame binds / %u gbuffer binds",
+        binds.reflectionProbeDebugDraws,
+        binds.reflectionProbeDebugFrameBinds,
+        binds.reflectionProbeDebugGBufferBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

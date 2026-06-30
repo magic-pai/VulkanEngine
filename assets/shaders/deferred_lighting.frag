@@ -17,6 +17,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 contactShadowStabilityControls;
     vec4 ssaoControls;
     vec4 ssrControls;
+    vec4 reflectionProbeControls;
 } frame;
 
 struct LocalLightRecord {
@@ -218,17 +219,39 @@ vec3 DirectPbrContribution(
 }
 
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+    float enabled = clamp(frame.reflectionProbeControls.x, 0.0, 1.0);
+    if (enabled <= 0.0001) {
+        return vec3(0.0);
+    }
+
+    float diffuseIntensity = clamp(frame.reflectionProbeControls.y, 0.0, 4.0);
+    float specularIntensity = clamp(frame.reflectionProbeControls.z, 0.0, 4.0);
+    float horizonBlend = clamp(frame.reflectionProbeControls.w, 0.0, 1.0);
     float up = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 skyTop = vec3(0.37, 0.50, 0.72);
     vec3 skyHorizon = vec3(0.68, 0.71, 0.76);
     vec3 ground = vec3(0.09, 0.085, 0.08);
     vec3 base = mix(ground, skyTop, smoothstep(0.05, 1.0, up));
-    base = mix(base, skyHorizon, (1.0 - abs(direction.y)) * 0.22);
+    base = mix(base, skyHorizon, (1.0 - abs(direction.y)) * horizonBlend);
 
     float sunAmount = max(dot(direction, sunDirection), 0.0);
     float sunPower = mix(1024.0, 24.0, roughness);
     float sunDisk = pow(sunAmount, sunPower);
-    return base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness);
+    float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
+    return (base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness)) *
+        intensity *
+        enabled;
+}
+
+vec3 ReflectionProbeDebugColor(vec3 normal, vec3 reflection, vec3 lightDir, float roughness) {
+    if (frame.reflectionProbeControls.x <= 0.0001) {
+        return vec3(0.12, 0.025, 0.04);
+    }
+
+    vec3 diffuseProbe = EnvironmentRadiance(normal, lightDir, 1.0);
+    vec3 specularProbe = EnvironmentRadiance(reflection, lightDir, roughness);
+    vec3 horizon = vec3(frame.reflectionProbeControls.w);
+    return clamp(diffuseProbe * 0.45 + specularProbe * 0.65 + horizon * 0.08, vec3(0.0), vec3(8.0));
 }
 
 vec3 LocalShadowAtlasDebugColor(vec2 uv) {
@@ -1934,6 +1957,10 @@ void main() {
     }
     if (deferredDebugView == 12) {
         outColor = vec4(ssrDebugColor + vec3(ssrTrace.confidence) * 0.08, 1.0);
+        return;
+    }
+    if (deferredDebugView == 13) {
+        outColor = vec4(ReflectionProbeDebugColor(normal, reflection, lightDir, roughness), 1.0);
         return;
     }
 

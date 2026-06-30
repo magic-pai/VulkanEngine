@@ -635,6 +635,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First screen-space reflection color tier integrated into deferred environment specular with a debug view; hierarchy, temporal accumulation, denoising, and probe fallback follow later."
         );
     }
+    if (inputs.reflectionProbeFallbackEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Reflections,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "GlobalReflectionFallback",
+            "frame reflection-probe fallback controls, sky directional basis",
+            "diffuse and specular fallback radiance",
+            "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting until imported UE reflection captures and local probes are available."
+        );
+    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(

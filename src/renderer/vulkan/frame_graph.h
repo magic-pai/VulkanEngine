@@ -107,6 +107,7 @@ struct CurrentVulkanFrameGraphInputs {
     bool deferredLightingEnabled = false;
     bool ssaoEnabled = false;
     bool ssrEnabled = false;
+    bool reflectionProbeFallbackEnabled = false;
     bool lightTileCullComputeEnabled = false;
     bool hdrCompositeEnabled = false;
     bool gBufferDebugEnabled = false;

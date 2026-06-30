@@ -808,6 +808,34 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "YES";
 }
 
+std::optional<bool> EnvironmentFlagOverride(const char* name) {
+    const std::string value = ReadEnvironmentString(name);
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    if (value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES") {
+        return true;
+    }
+    if (value == "0" ||
+        value == "false" ||
+        value == "FALSE" ||
+        value == "off" ||
+        value == "OFF" ||
+        value == "no" ||
+        value == "NO") {
+        return false;
+    }
+
+    return std::nullopt;
+}
+
 bool WeightedTranslucencyAlphaReferenceEnabled() {
     return EnvironmentFlagEnabled("SE_WBOIT_REFERENCE_ALPHA") ||
         EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_ALPHA_REFERENCE");
@@ -1408,6 +1436,8 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 11;
     case ForwardDebugView::Ssr:
         return 12;
+    case ForwardDebugView::ReflectionProbe:
+        return 13;
     default:
         return 0;
     }
@@ -1440,6 +1470,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::LocalShadowFace ||
         view == ForwardDebugView::Ssao ||
         view == ForwardDebugView::Ssr ||
+        view == ForwardDebugView::ReflectionProbe ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1558,6 +1589,15 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "reflection-debug" ||
         value == "reflection_debug") {
         return ForwardDebugView::Ssr;
+    }
+    if (value == "reflection-probe" ||
+        value == "reflection_probe" ||
+        value == "ReflectionProbe" ||
+        value == "global-reflection-probe" ||
+        value == "global_reflection_probe" ||
+        value == "reflection-fallback" ||
+        value == "reflection_fallback") {
+        return ForwardDebugView::ReflectionProbe;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2085,6 +2125,14 @@ void VulkanRenderer::DrawFrame() {
         m_GBufferDescriptorSets != nullptr
             ? 1u
             : 0u;
+    frameStats.reflectionProbe.fallbackEnabled =
+        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1u : 0u;
+    frameStats.reflectionProbe.diffuseIntensity =
+        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f);
+    frameStats.reflectionProbe.specularIntensity =
+        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f);
+    frameStats.reflectionProbe.horizonBlend =
+        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f);
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2352,6 +2400,7 @@ void VulkanRenderer::DrawFrame() {
                 m_DeferredLightingPipeline != nullptr &&
                 m_GBufferDescriptorSets != nullptr,
             frameStats.ssr.colorResolveEnabled > 0,
+            frameStats.reflectionProbe.fallbackEnabled > 0 && has3DMainPass,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -3812,6 +3861,12 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
         ApplyShadowQualityPreset(m_ShadowSettings, *shadowQuality);
     }
 
+    const std::optional<bool> reflectionProbeFallback =
+        EnvironmentFlagOverride("SE_REFLECTION_PROBE_FALLBACK");
+    if (reflectionProbeFallback.has_value()) {
+        m_ShadowSettings.reflectionProbeFallbackEnabled = *reflectionProbeFallback;
+    }
+
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
     if (forwardDebugView.has_value()) {
@@ -4069,6 +4124,12 @@ void VulkanRenderer::UpdateUniformBuffer(
             32u
         ))
     );
+    uniformData.reflectionProbeControls = glm::vec4(
+        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4139,6 +4200,12 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
             0u,
             32u
         ))
+    );
+    uniformData.reflectionProbeControls = glm::vec4(
+        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }
