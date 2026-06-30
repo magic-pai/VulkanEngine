@@ -18,6 +18,9 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssaoControls;
     vec4 ssrControls;
     vec4 reflectionProbeControls;
+    vec4 localReflectionProbePositionRadius;
+    vec4 localReflectionProbeControls;
+    vec4 localReflectionProbeColor;
 } frame;
 
 struct LocalLightRecord {
@@ -218,7 +221,7 @@ vec3 DirectPbrContribution(
     return (diffuse + specular + coatSpecular) * radiance * nDotL;
 }
 
-vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     float enabled = clamp(frame.reflectionProbeControls.x, 0.0, 1.0);
     if (enabled <= 0.0001) {
         return vec3(0.0);
@@ -243,15 +246,61 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
         enabled;
 }
 
-vec3 ReflectionProbeDebugColor(vec3 normal, vec3 reflection, vec3 lightDir, float roughness) {
+float LocalReflectionProbeWeight(vec3 worldPosition) {
+    float enabled = clamp(frame.localReflectionProbeControls.x, 0.0, 1.0);
+    if (enabled <= 0.0001) {
+        return 0.0;
+    }
+
+    float radius = max(frame.localReflectionProbePositionRadius.w, 0.001);
+    float normalizedDistance =
+        length(worldPosition - frame.localReflectionProbePositionRadius.xyz) / radius;
+    float falloff = clamp(frame.localReflectionProbeControls.w, 0.25, 8.0);
+    float influence = pow(clamp(1.0 - normalizedDistance, 0.0, 1.0), falloff);
+    return influence * clamp(frame.localReflectionProbeControls.z, 0.0, 1.0);
+}
+
+vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+    return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+}
+
+vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec3 worldPosition) {
+    vec3 globalRadiance = GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+    float localWeight = LocalReflectionProbeWeight(worldPosition);
+    if (localWeight <= 0.0001) {
+        return globalRadiance;
+    }
+
+    vec3 localTint = max(frame.localReflectionProbeColor.rgb, vec3(0.0));
+    float localIntensity = clamp(frame.localReflectionProbeControls.y, 0.0, 4.0);
+    float glossBoost = mix(1.18, 0.88, clamp(roughness, 0.0, 1.0));
+    vec3 localRadiance = globalRadiance * localTint * localIntensity * glossBoost;
+    return mix(globalRadiance, localRadiance, localWeight);
+}
+
+vec3 ReflectionProbeDebugColor(
+    vec3 normal,
+    vec3 reflection,
+    vec3 lightDir,
+    float roughness,
+    vec3 worldPosition
+) {
     if (frame.reflectionProbeControls.x <= 0.0001) {
         return vec3(0.12, 0.025, 0.04);
     }
 
-    vec3 diffuseProbe = EnvironmentRadiance(normal, lightDir, 1.0);
-    vec3 specularProbe = EnvironmentRadiance(reflection, lightDir, roughness);
+    vec3 diffuseProbe = EnvironmentRadiance(normal, lightDir, 1.0, worldPosition);
+    vec3 specularProbe = EnvironmentRadiance(reflection, lightDir, roughness, worldPosition);
     vec3 horizon = vec3(frame.reflectionProbeControls.w);
-    return clamp(diffuseProbe * 0.45 + specularProbe * 0.65 + horizon * 0.08, vec3(0.0), vec3(8.0));
+    vec3 localDebug = vec3(LocalReflectionProbeWeight(worldPosition));
+    return clamp(
+        diffuseProbe * 0.45 +
+            specularProbe * 0.65 +
+            horizon * 0.08 +
+            localDebug * vec3(0.12, 0.08, 0.02),
+        vec3(0.0),
+        vec3(8.0)
+    );
 }
 
 vec3 LocalShadowAtlasDebugColor(vec2 uv) {
@@ -1726,7 +1775,8 @@ void main() {
         normal,
         roughness
     );
-    vec3 environmentReflection = EnvironmentRadiance(reflection, lightDir, roughness);
+    vec3 environmentReflection =
+        EnvironmentRadiance(reflection, lightDir, roughness, worldPosition);
     vec3 ssrReflection = ScreenSpaceReflectionRadiance(
         ssrTrace,
         environmentReflection,
@@ -1735,7 +1785,7 @@ void main() {
         directIntensity
     );
     vec3 ambient = (
-        baseColor * EnvironmentRadiance(normal, lightDir, 1.0) * 0.45 +
+        baseColor * EnvironmentRadiance(normal, lightDir, 1.0, worldPosition) * 0.45 +
         ssrReflection * f0 * 0.16
     ) * ambientStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
@@ -1746,7 +1796,7 @@ void main() {
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =
-            EnvironmentRadiance(-normal, lightDir, roughness) *
+            EnvironmentRadiance(-normal, lightDir, roughness, worldPosition) *
             baseColor *
             volumeTransmittance *
             ambientStrength *
@@ -1960,7 +2010,10 @@ void main() {
         return;
     }
     if (deferredDebugView == 13) {
-        outColor = vec4(ReflectionProbeDebugColor(normal, reflection, lightDir, roughness), 1.0);
+        outColor = vec4(
+            ReflectionProbeDebugColor(normal, reflection, lightDir, roughness, worldPosition),
+            1.0
+        );
         return;
     }
 

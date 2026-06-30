@@ -2133,6 +2133,19 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f);
     frameStats.reflectionProbe.horizonBlend =
         std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f);
+    frameStats.reflectionProbe.localEnabled =
+        m_ShadowSettings.reflectionProbeFallbackEnabled &&
+            m_ShadowSettings.localReflectionProbeEnabled
+            ? 1u
+            : 0u;
+    frameStats.reflectionProbe.localRadius =
+        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f);
+    frameStats.reflectionProbe.localIntensity =
+        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f);
+    frameStats.reflectionProbe.localBlendStrength =
+        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f);
+    frameStats.reflectionProbe.localFalloff =
+        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f);
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2401,6 +2414,9 @@ void VulkanRenderer::DrawFrame() {
                 m_GBufferDescriptorSets != nullptr,
             frameStats.ssr.colorResolveEnabled > 0,
             frameStats.reflectionProbe.fallbackEnabled > 0 && has3DMainPass,
+            frameStats.reflectionProbe.localEnabled > 0 &&
+                frameStats.reflectionProbe.fallbackEnabled > 0 &&
+                has3DMainPass,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -3866,6 +3882,11 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (reflectionProbeFallback.has_value()) {
         m_ShadowSettings.reflectionProbeFallbackEnabled = *reflectionProbeFallback;
     }
+    const std::optional<bool> localReflectionProbe =
+        EnvironmentFlagOverride("SE_LOCAL_REFLECTION_PROBE");
+    if (localReflectionProbe.has_value()) {
+        m_ShadowSettings.localReflectionProbeEnabled = *localReflectionProbe;
+    }
 
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
@@ -4130,6 +4151,27 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
     );
+    const bool localReflectionProbeApplied =
+        m_ShadowSettings.reflectionProbeFallbackEnabled &&
+        m_ShadowSettings.localReflectionProbeEnabled;
+    uniformData.localReflectionProbePositionRadius = glm::vec4(
+        m_ShadowSettings.localReflectionProbeCenterX,
+        m_ShadowSettings.localReflectionProbeCenterY,
+        m_ShadowSettings.localReflectionProbeCenterZ,
+        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f)
+    );
+    uniformData.localReflectionProbeControls = glm::vec4(
+        localReflectionProbeApplied ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f)
+    );
+    uniformData.localReflectionProbeColor = glm::vec4(
+        std::clamp(m_ShadowSettings.localReflectionProbeColorR, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeColorG, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
+        0.0f
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4206,6 +4248,27 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
+    );
+    const bool localReflectionProbeApplied =
+        m_ShadowSettings.reflectionProbeFallbackEnabled &&
+        m_ShadowSettings.localReflectionProbeEnabled;
+    uniformData.localReflectionProbePositionRadius = glm::vec4(
+        m_ShadowSettings.localReflectionProbeCenterX,
+        m_ShadowSettings.localReflectionProbeCenterY,
+        m_ShadowSettings.localReflectionProbeCenterZ,
+        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f)
+    );
+    uniformData.localReflectionProbeControls = glm::vec4(
+        localReflectionProbeApplied ? 1.0f : 0.0f,
+        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f)
+    );
+    uniformData.localReflectionProbeColor = glm::vec4(
+        std::clamp(m_ShadowSettings.localReflectionProbeColorR, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeColorG, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
+        0.0f
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

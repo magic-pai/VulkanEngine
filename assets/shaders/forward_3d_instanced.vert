@@ -32,6 +32,9 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssaoControls;
     vec4 ssrControls;
     vec4 reflectionProbeControls;
+    vec4 localReflectionProbePositionRadius;
+    vec4 localReflectionProbeControls;
+    vec4 localReflectionProbeColor;
 } frame;
 
 layout(push_constant) uniform ObjectPushConstants {

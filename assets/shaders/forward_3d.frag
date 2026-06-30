@@ -36,6 +36,9 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssaoControls;
     vec4 ssrControls;
     vec4 reflectionProbeControls;
+    vec4 localReflectionProbePositionRadius;
+    vec4 localReflectionProbeControls;
+    vec4 localReflectionProbeColor;
 } frame;
 
 struct LocalLightRecord {
@@ -232,7 +235,7 @@ vec4 DebugColor(vec3 color) {
     return vec4(clamp(color * DebugExposure(), 0.0, 1.0), objectData.materialBaseColorFactor.a);
 }
 
-vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     float enabled = clamp(frame.reflectionProbeControls.x, 0.0, 1.0);
     if (enabled <= 0.0001) {
         return vec3(0.0);
@@ -255,6 +258,38 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
     float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
     return (base + sun) * intensity * enabled;
+}
+
+float LocalReflectionProbeWeight(vec3 worldPosition) {
+    float enabled = clamp(frame.localReflectionProbeControls.x, 0.0, 1.0);
+    if (enabled <= 0.0001) {
+        return 0.0;
+    }
+
+    float radius = max(frame.localReflectionProbePositionRadius.w, 0.001);
+    float normalizedDistance =
+        length(worldPosition - frame.localReflectionProbePositionRadius.xyz) / radius;
+    float falloff = clamp(frame.localReflectionProbeControls.w, 0.25, 8.0);
+    float influence = pow(clamp(1.0 - normalizedDistance, 0.0, 1.0), falloff);
+    return influence * clamp(frame.localReflectionProbeControls.z, 0.0, 1.0);
+}
+
+vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
+    return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+}
+
+vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec3 worldPosition) {
+    vec3 globalRadiance = GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+    float localWeight = LocalReflectionProbeWeight(worldPosition);
+    if (localWeight <= 0.0001) {
+        return globalRadiance;
+    }
+
+    vec3 localTint = max(frame.localReflectionProbeColor.rgb, vec3(0.0));
+    float localIntensity = clamp(frame.localReflectionProbeControls.y, 0.0, 4.0);
+    float glossBoost = mix(1.18, 0.88, clamp(roughness, 0.0, 1.0));
+    vec3 localRadiance = globalRadiance * localTint * localIntensity * glossBoost;
+    return mix(globalRadiance, localRadiance, localWeight);
 }
 
 vec3 LocalShadowAtlasDebugColor(vec2 uv) {
@@ -1430,8 +1465,9 @@ void main() {
     }
 
     vec3 reflection = reflect(-viewDir, normal);
-    vec3 diffuseEnv = EnvironmentRadiance(normal, lightDir, 1.0);
-    vec3 specularEnv = EnvironmentRadiance(reflection, lightDir, roughness);
+    vec3 diffuseEnv = EnvironmentRadiance(normal, lightDir, 1.0, fragWorldPosition);
+    vec3 specularEnv =
+        EnvironmentRadiance(reflection, lightDir, roughness, fragWorldPosition);
     vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
     f0 = mix(dielectricF0, baseColor, metallic);
     vec3 envFresnel = FresnelSchlickRoughness(nDotV, f0, roughness);
@@ -1446,7 +1482,7 @@ void main() {
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =
-            EnvironmentRadiance(-normal, lightDir, roughness) *
+            EnvironmentRadiance(-normal, lightDir, roughness, fragWorldPosition) *
             baseColor *
             volumeTransmittance *
             envStrength *

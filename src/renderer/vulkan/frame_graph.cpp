@@ -647,6 +647,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting until imported UE reflection captures and local probes are available."
         );
     }
+    if (inputs.localReflectionProbeEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Reflections,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "LocalReflectionProbeBlend",
+            "frame local reflection probe center/radius/color controls",
+            "world-position weighted reflection fallback blend",
+            "First local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture is added."
+        );
+    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(

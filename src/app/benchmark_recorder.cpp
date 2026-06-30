@@ -261,6 +261,11 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
         << reflectionProbe.horizonBlend << ','
+        << reflectionProbe.localEnabled << ','
+        << reflectionProbe.localRadius << ','
+        << reflectionProbe.localIntensity << ','
+        << reflectionProbe.localBlendStrength << ','
+        << reflectionProbe.localFalloff << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
         << shadowCascades.farDepth << ','
@@ -531,6 +536,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ray_length,ssr_thickness,ssr_step_count,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
+        << "reflection_probe_local_enabled,reflection_probe_local_radius,"
+        << "reflection_probe_local_intensity,reflection_probe_local_blend_strength,"
+        << "reflection_probe_local_falloff,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"

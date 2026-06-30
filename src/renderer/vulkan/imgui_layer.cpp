@@ -307,6 +307,45 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         1.0f,
         "%.2f"
     );
+    ImGui::Checkbox("Local reflection probe##Shadow", &settings.localReflectionProbeEnabled);
+    ImGui::SliderFloat(
+        "Local probe radius##Shadow",
+        &settings.localReflectionProbeRadius,
+        0.1f,
+        64.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Local probe intensity##Shadow",
+        &settings.localReflectionProbeIntensity,
+        0.0f,
+        4.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Local probe blend##Shadow",
+        &settings.localReflectionProbeBlendStrength,
+        0.0f,
+        1.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Local probe falloff##Shadow",
+        &settings.localReflectionProbeFalloff,
+        0.25f,
+        8.0f,
+        "%.2f"
+    );
+    float localProbeColor[3]{
+        settings.localReflectionProbeColorR,
+        settings.localReflectionProbeColorG,
+        settings.localReflectionProbeColorB
+    };
+    if (ImGui::ColorEdit3("Local probe color##Shadow", localProbeColor)) {
+        settings.localReflectionProbeColorR = localProbeColor[0];
+        settings.localReflectionProbeColorG = localProbeColor[1];
+        settings.localReflectionProbeColorB = localProbeColor[2];
+    }
     ImGui::SeparatorText("Local shadows");
     ImGui::SliderFloat(
         "Local bias min##Shadow",
@@ -672,6 +711,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.diffuseIntensity,
         stats.reflectionProbe.specularIntensity,
         stats.reflectionProbe.horizonBlend
+    );
+    ImGui::Text(
+        "Local reflection probe: %s, radius %.2f, intensity %.2f, blend %.2f, falloff %.2f",
+        stats.reflectionProbe.localEnabled ? "enabled" : "off",
+        stats.reflectionProbe.localRadius,
+        stats.reflectionProbe.localIntensity,
+        stats.reflectionProbe.localBlendStrength,
+        stats.reflectionProbe.localFalloff
     );
     ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
