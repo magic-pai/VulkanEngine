@@ -47,6 +47,7 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 colorGradingControls{ 0.0f, 1.0f, 1.0f, 1.0f };
     alignas(16) glm::vec4 toneMappingControls{ 0.0f, 1.0f, 4.0f, 1.0f };
     alignas(16) glm::vec4 autoExposureControls{ 0.18f, 0.25f, 4.0f, 1.0f };
+    alignas(16) glm::vec4 sharpeningControls{ 0.0f, 0.35f, 1.0f, 0.0f };
 };
 
 struct GpuLocalLightRecord {
@@ -145,7 +146,7 @@ struct ObjectPushConstants {
 };
 
 static_assert(
-    sizeof(UniformBufferObject) == sizeof(glm::mat4) * 5 + sizeof(glm::vec4) * 18,
+    sizeof(UniformBufferObject) == sizeof(glm::mat4) * 5 + sizeof(glm::vec4) * 19,
     "UniformBufferObject layout must match the shader uniform block"
 );
 

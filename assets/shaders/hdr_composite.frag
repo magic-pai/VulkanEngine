@@ -27,6 +27,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 colorGradingControls;
     vec4 toneMappingControls;
     vec4 autoExposureControls;
+    vec4 sharpeningControls;
 } frame;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
@@ -35,6 +36,7 @@ const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
 const int DEBUG_VIEW_TONE_MAPPING = 39;
 const int DEBUG_VIEW_AUTO_EXPOSURE = 40;
+const int DEBUG_VIEW_SHARPENING = 41;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -141,6 +143,32 @@ vec3 ApplyColorGrading(vec3 color) {
     return clamp(graded, 0.0, 1.0);
 }
 
+vec3 CompositeLdrAt(vec2 uv, float exposure) {
+    vec3 hdrColor = texture(hdrSceneColor, clamp(uv, vec2(0.0), vec2(1.0))).rgb * exposure;
+    return ApplyColorGrading(ToneMapHdr(hdrColor));
+}
+
+vec3 ApplySharpening(vec3 color, float exposure, out vec3 sharpeningDelta) {
+    float enabled = clamp(frame.sharpeningControls.x, 0.0, 1.0);
+    float strength = clamp(frame.sharpeningControls.y, 0.0, 2.0);
+    float radiusPixels = clamp(frame.sharpeningControls.z, 0.0, 4.0);
+    sharpeningDelta = vec3(0.0);
+    if (enabled <= 0.0001 || strength <= 0.0001 || radiusPixels <= 0.0001) {
+        return color;
+    }
+
+    vec2 texelSize = 1.0 / vec2(max(textureSize(hdrSceneColor, 0), ivec2(1)));
+    vec2 radius = texelSize * radiusPixels;
+    vec3 neighborAverage =
+        CompositeLdrAt(fragUv + vec2(radius.x, 0.0), exposure) +
+        CompositeLdrAt(fragUv - vec2(radius.x, 0.0), exposure) +
+        CompositeLdrAt(fragUv + vec2(0.0, radius.y), exposure) +
+        CompositeLdrAt(fragUv - vec2(0.0, radius.y), exposure);
+    neighborAverage *= 0.25;
+    sharpeningDelta = (color - neighborAverage) * strength;
+    return clamp(color + sharpeningDelta, 0.0, 1.0);
+}
+
 void main() {
     float exposure = EffectiveExposure();
     vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
@@ -166,5 +194,11 @@ void main() {
         outColor = vec4(gradedColor, 1.0);
         return;
     }
-    outColor = vec4(gradedColor, 1.0);
+    vec3 sharpeningDelta = vec3(0.0);
+    vec3 sharpenedColor = ApplySharpening(gradedColor, exposure, sharpeningDelta);
+    if (debugView == DEBUG_VIEW_SHARPENING) {
+        outColor = vec4(clamp(abs(sharpeningDelta) * 4.0, 0.0, 1.0), 1.0);
+        return;
+    }
+    outColor = vec4(sharpenedColor, 1.0);
 }

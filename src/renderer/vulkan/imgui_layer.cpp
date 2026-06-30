@@ -522,6 +522,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Tone Mapping";
     case ForwardDebugView::AutoExposure:
         return "Auto Exposure";
+    case ForwardDebugView::Sharpening:
+        return "Sharpening";
     }
 
     return "Lit";
@@ -569,7 +571,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::Bloom,
         ForwardDebugView::ColorGrading,
         ForwardDebugView::ToneMapping,
-        ForwardDebugView::AutoExposure
+        ForwardDebugView::AutoExposure,
+        ForwardDebugView::Sharpening
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -608,6 +611,9 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
     ImGui::SliderFloat("Saturation##Post", &settings.colorGradingSaturation, 0.0f, 2.5f, "%.3f");
     ImGui::SliderFloat("Contrast##Post", &settings.colorGradingContrast, 0.0f, 2.5f, "%.3f");
     ImGui::SliderFloat("Gamma##Post", &settings.colorGradingGamma, 0.25f, 4.0f, "%.3f");
+    ImGui::Checkbox("Sharpening##Post", &settings.sharpeningEnabled);
+    ImGui::SliderFloat("Sharpen strength##Post", &settings.sharpeningStrength, 0.0f, 2.0f, "%.3f");
+    ImGui::SliderFloat("Sharpen radius px##Post", &settings.sharpeningRadiusPixels, 0.0f, 4.0f, "%.2f");
     if (ImGui::Button("Reset render debug")) {
         ResetRenderDebugSettings(settings);
     }
@@ -833,6 +839,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.colorGradingGamma
     );
     ImGui::Text(
+        "Sharpening: %s, strength %.3f, radius %.2f px",
+        stats.postProcess.sharpeningEnabled ? "enabled" : "off",
+        stats.postProcess.sharpeningStrength,
+        stats.postProcess.sharpeningRadiusPixels
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -995,6 +1007,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.colorGradingDebugDraws,
         binds.colorGradingDebugFrameBinds,
         binds.colorGradingDebugTextureBinds
+    );
+    ImGui::Text(
+        "Sharpening debug: %u draws / %u frame binds / %u texture binds",
+        binds.sharpeningDebugDraws,
+        binds.sharpeningDebugFrameBinds,
+        binds.sharpeningDebugTextureBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

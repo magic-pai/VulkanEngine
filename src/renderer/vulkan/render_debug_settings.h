@@ -45,7 +45,8 @@ enum class ForwardDebugView : int {
     Bloom = 37,
     ColorGrading = 38,
     ToneMapping = 39,
-    AutoExposure = 40
+    AutoExposure = 40,
+    Sharpening = 41
 };
 
 struct VulkanRenderDebugSettings {
@@ -66,6 +67,9 @@ struct VulkanRenderDebugSettings {
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
     f32 colorGradingGamma = 1.0f;
+    bool sharpeningEnabled = false;
+    f32 sharpeningStrength = 0.35f;
+    f32 sharpeningRadiusPixels = 1.0f;
 };
 
 inline void ResetRenderDebugSettings(VulkanRenderDebugSettings& settings) {

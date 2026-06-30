@@ -114,6 +114,7 @@ struct CurrentVulkanFrameGraphInputs {
     bool toneMappingEnabled = false;
     bool bloomEnabled = false;
     bool colorGradingEnabled = false;
+    bool sharpeningEnabled = false;
     bool lightTileCullComputeEnabled = false;
     bool hdrCompositeEnabled = false;
     bool gBufferDebugEnabled = false;

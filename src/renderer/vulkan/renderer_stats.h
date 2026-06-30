@@ -202,6 +202,9 @@ struct RendererPostProcessStats {
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
     f32 colorGradingGamma = 1.0f;
+    u32 sharpeningEnabled = 0;
+    f32 sharpeningStrength = 0.0f;
+    f32 sharpeningRadiusPixels = 0.0f;
 };
 
 struct RendererBindStats {
@@ -263,6 +266,9 @@ struct RendererBindStats {
     u32 colorGradingDebugDraws = 0;
     u32 colorGradingDebugFrameBinds = 0;
     u32 colorGradingDebugTextureBinds = 0;
+    u32 sharpeningDebugDraws = 0;
+    u32 sharpeningDebugFrameBinds = 0;
+    u32 sharpeningDebugTextureBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;

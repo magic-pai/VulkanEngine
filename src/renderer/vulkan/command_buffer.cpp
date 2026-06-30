@@ -893,6 +893,7 @@ void VulkanCommandBuffer::Record(
     bool toneMappingDebugView,
     bool autoExposureDebugView,
     bool colorGradingDebugView,
+    bool sharpeningDebugView,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -1930,6 +1931,11 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->colorGradingDebugDraws;
                 ++bindStats->colorGradingDebugFrameBinds;
                 ++bindStats->colorGradingDebugTextureBinds;
+            }
+            if (sharpeningDebugView) {
+                ++bindStats->sharpeningDebugDraws;
+                ++bindStats->sharpeningDebugFrameBinds;
+                ++bindStats->sharpeningDebugTextureBinds;
             }
         }
         u32 residualMaterialBinds = 0;

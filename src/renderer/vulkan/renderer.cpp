@@ -1493,6 +1493,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::ColorGrading ||
         view == ForwardDebugView::ToneMapping ||
         view == ForwardDebugView::AutoExposure ||
+        view == ForwardDebugView::Sharpening ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1656,6 +1657,12 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "autoexposure" ||
         value == "AutoExposure") {
         return ForwardDebugView::AutoExposure;
+    }
+    if (value == "sharpening" ||
+        value == "sharpen" ||
+        value == "sharpness" ||
+        value == "Sharpening") {
+        return ForwardDebugView::Sharpening;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2289,6 +2296,16 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f);
     frameStats.postProcess.colorGradingEnabled =
         m_RenderDebugSettings.colorGradingEnabled ? 1u : 0u;
+    frameStats.postProcess.sharpeningStrength =
+        std::clamp(m_RenderDebugSettings.sharpeningStrength, 0.0f, 2.0f);
+    frameStats.postProcess.sharpeningRadiusPixels =
+        std::clamp(m_RenderDebugSettings.sharpeningRadiusPixels, 0.0f, 4.0f);
+    frameStats.postProcess.sharpeningEnabled =
+        m_RenderDebugSettings.sharpeningEnabled &&
+            frameStats.postProcess.sharpeningStrength > 0.0001f &&
+            frameStats.postProcess.sharpeningRadiusPixels > 0.0001f
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2577,6 +2594,10 @@ void VulkanRenderer::DrawFrame() {
                 showDeferredHdr &&
                 m_HdrCompositePipeline != nullptr &&
                 m_HdrDescriptorSets != nullptr,
+            frameStats.postProcess.sharpeningEnabled > 0 &&
+                showDeferredHdr &&
+                m_HdrCompositePipeline != nullptr &&
+                m_HdrDescriptorSets != nullptr,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -2663,6 +2684,7 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::ToneMapping,
         m_RenderDebugSettings.forwardView == ForwardDebugView::AutoExposure,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ColorGrading,
+        m_RenderDebugSettings.forwardView == ForwardDebugView::Sharpening,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -4134,6 +4156,21 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (colorGradingGamma.has_value()) {
         m_RenderDebugSettings.colorGradingGamma = *colorGradingGamma;
     }
+    const std::optional<bool> sharpening =
+        EnvironmentFlagOverride("SE_SHARPENING");
+    if (sharpening.has_value()) {
+        m_RenderDebugSettings.sharpeningEnabled = *sharpening;
+    }
+    const std::optional<f32> sharpeningStrength =
+        EnvironmentFloatOverride("SE_SHARPENING_STRENGTH");
+    if (sharpeningStrength.has_value()) {
+        m_RenderDebugSettings.sharpeningStrength = *sharpeningStrength;
+    }
+    const std::optional<f32> sharpeningRadius =
+        EnvironmentFloatOverride("SE_SHARPENING_RADIUS");
+    if (sharpeningRadius.has_value()) {
+        m_RenderDebugSettings.sharpeningRadiusPixels = *sharpeningRadius;
+    }
 
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
@@ -4464,6 +4501,16 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::max(autoExposureMin, std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)),
         std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f)
     );
+    const bool sharpeningApplied =
+        m_RenderDebugSettings.sharpeningEnabled &&
+        m_RenderDebugSettings.sharpeningStrength > 0.0001f &&
+        m_RenderDebugSettings.sharpeningRadiusPixels > 0.0001f;
+    uniformData.sharpeningControls = glm::vec4(
+        sharpeningApplied ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.sharpeningStrength, 0.0f, 2.0f),
+        std::clamp(m_RenderDebugSettings.sharpeningRadiusPixels, 0.0f, 4.0f),
+        0.0f
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4606,6 +4653,16 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         autoExposureMin,
         std::max(autoExposureMin, std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)),
         std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f)
+    );
+    const bool sharpeningApplied =
+        m_RenderDebugSettings.sharpeningEnabled &&
+        m_RenderDebugSettings.sharpeningStrength > 0.0001f &&
+        m_RenderDebugSettings.sharpeningRadiusPixels > 0.0001f;
+    uniformData.sharpeningControls = glm::vec4(
+        sharpeningApplied ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.sharpeningStrength, 0.0f, 2.0f),
+        std::clamp(m_RenderDebugSettings.sharpeningRadiusPixels, 0.0f, 4.0f),
+        0.0f
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

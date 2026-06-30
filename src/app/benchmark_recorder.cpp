@@ -290,6 +290,9 @@ void BenchmarkRecorder::RecordFrame(
         << postProcess.colorGradingSaturation << ','
         << postProcess.colorGradingContrast << ','
         << postProcess.colorGradingGamma << ','
+        << postProcess.sharpeningEnabled << ','
+        << postProcess.sharpeningStrength << ','
+        << postProcess.sharpeningRadiusPixels << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
         << shadowCascades.farDepth << ','
@@ -408,6 +411,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.colorGradingDebugDraws << ','
         << binds.colorGradingDebugFrameBinds << ','
         << binds.colorGradingDebugTextureBinds << ','
+        << binds.sharpeningDebugDraws << ','
+        << binds.sharpeningDebugFrameBinds << ','
+        << binds.sharpeningDebugTextureBinds << ','
         << binds.lightTileCullComputeDispatches << ','
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
@@ -586,6 +592,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "auto_exposure_min,auto_exposure_max,auto_exposure_adaptation,"
         << "color_grading_enabled,color_grading_saturation,"
         << "color_grading_contrast,color_grading_gamma,"
+        << "sharpening_enabled,sharpening_strength,sharpening_radius_pixels,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"
@@ -646,6 +653,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "auto_exposure_debug_texture_binds,"
         << "color_grading_debug_draws,color_grading_debug_frame_binds,"
         << "color_grading_debug_texture_binds,"
+        << "sharpening_debug_draws,sharpening_debug_frame_binds,"
+        << "sharpening_debug_texture_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"

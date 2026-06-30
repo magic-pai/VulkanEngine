@@ -89,6 +89,7 @@ public:
         bool toneMappingDebugView = false,
         bool autoExposureDebugView = false,
         bool colorGradingDebugView = false,
+        bool sharpeningDebugView = false,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
         int gBufferDebugView = -1,
