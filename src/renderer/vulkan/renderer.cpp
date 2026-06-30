@@ -2078,6 +2078,13 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.stepCount > 0
             ? 1u
             : 0u;
+    frameStats.ssr.colorResolveEnabled =
+        frameStats.ssr.enabled > 0 &&
+        has3DMainPass &&
+        m_DeferredLightingPipeline != nullptr &&
+        m_GBufferDescriptorSets != nullptr
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2344,10 +2351,7 @@ void VulkanRenderer::DrawFrame() {
                 has3DMainPass &&
                 m_DeferredLightingPipeline != nullptr &&
                 m_GBufferDescriptorSets != nullptr,
-            frameStats.ssr.enabled > 0 &&
-                has3DMainPass &&
-                m_DeferredLightingPipeline != nullptr &&
-                m_GBufferDescriptorSets != nullptr,
+            frameStats.ssr.colorResolveEnabled > 0,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,

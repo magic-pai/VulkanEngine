@@ -157,6 +157,7 @@ struct RendererSsaoStats {
 
 struct RendererSsrStats {
     u32 enabled = 0;
+    u32 colorResolveEnabled = 0;
     f32 strength = 0.0f;
     f32 rayLength = 0.0f;
     f32 thickness = 0.0f;

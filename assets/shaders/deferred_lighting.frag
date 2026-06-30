@@ -736,30 +736,43 @@ float SsaoVisibility(vec2 uv, float depth, vec3 normal) {
     return clamp(1.0 - normalizedOcclusion * strength, 0.0, 1.0);
 }
 
-vec3 ScreenSpaceReflectionDebug(
+struct SsrTraceResult {
+    vec2 hitUv;
+    float confidence;
+    float validRay;
+    float travel;
+    float facing;
+};
+
+SsrTraceResult TraceScreenSpaceReflection(
     vec2 uv,
     float depth,
     vec3 normal,
-    float roughness,
-    out float hitConfidence
+    float roughness
 ) {
+    SsrTraceResult result;
+    result.hitUv = uv;
+    result.confidence = 0.0;
+    result.validRay = 0.0;
+    result.travel = 0.0;
+    result.facing = 0.0;
+
     float strength = clamp(frame.ssrControls.x, 0.0, 1.0);
     float rayLength = clamp(frame.ssrControls.y, 0.0, 64.0);
     float thickness = clamp(frame.ssrControls.z, 0.0, 0.5);
     int stepCount = clamp(int(frame.ssrControls.w + 0.5), 0, 32);
-    hitConfidence = 0.0;
     if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0 ||
         depth >= 0.999999) {
-        return vec3(0.02, 0.025, 0.035);
+        return result;
     }
 
     vec3 viewPosition = ReconstructViewPosition(uv, depth);
     vec3 viewNormal = normalize((frame.view * vec4(normal, 0.0)).xyz);
     vec3 viewDirFromCamera = normalize(viewPosition);
     vec3 reflectionDir = normalize(reflect(viewDirFromCamera, viewNormal));
+    result.facing = smoothstep(0.0, 0.45, max(dot(-viewDirFromCamera, viewNormal), 0.0));
     if (reflectionDir.z >= -0.0001) {
-        float facing = smoothstep(0.0, 0.45, max(dot(-viewDirFromCamera, viewNormal), 0.0));
-        return mix(vec3(0.16, 0.035, 0.045), vec3(0.28, 0.10, 0.055), facing);
+        return result;
     }
 
     vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
@@ -816,14 +829,66 @@ vec3 ScreenSpaceReflectionDebug(
         }
     }
 
-    hitConfidence = clamp(bestConfidence, 0.0, 1.0);
-    vec3 miss = validRay > 0.5 ? vec3(0.03, 0.09, 0.16) : vec3(0.13, 0.03, 0.055);
+    result.confidence = clamp(bestConfidence, 0.0, 1.0);
+    result.validRay = validRay;
+    result.hitUv = bestUv;
+    result.travel = clamp(length(bestUv - uv) * 3.5, 0.0, 1.0);
+    return result;
+}
+
+vec3 ScreenSpaceReflectionDebug(
+    SsrTraceResult trace,
+    float roughness
+) {
+    vec3 miss = trace.validRay > 0.5
+        ? vec3(0.03, 0.09, 0.16)
+        : mix(vec3(0.02, 0.025, 0.035), vec3(0.28, 0.10, 0.055), trace.facing);
     vec3 rough = vec3(0.18, 0.11, 0.035);
-    vec3 hit = mix(vec3(0.08, 0.46, 0.72), vec3(0.85, 0.98, 1.0), hitConfidence);
-    vec2 hitDelta = abs(bestUv - uv);
-    float travel = clamp(length(hitDelta) * 3.5, 0.0, 1.0);
-    hit = mix(hit, vec3(0.26, 0.96, 0.78), travel * 0.35);
-    return mix(mix(miss, rough, smoothstep(0.45, 0.95, roughness)), hit, hitConfidence);
+    vec3 hit = mix(vec3(0.08, 0.46, 0.72), vec3(0.85, 0.98, 1.0), trace.confidence);
+    hit = mix(hit, vec3(0.26, 0.96, 0.78), trace.travel * 0.35);
+    return mix(mix(miss, rough, smoothstep(0.45, 0.95, roughness)), hit, trace.confidence);
+}
+
+vec3 ScreenSpaceReflectionRadiance(
+    SsrTraceResult trace,
+    vec3 fallbackRadiance,
+    vec3 lightDir,
+    float ambientStrength,
+    float directIntensity
+) {
+    if (trace.confidence <= 0.0001) {
+        return fallbackRadiance;
+    }
+
+    float hitDepth = texture(sceneDepth, trace.hitUv).r;
+    if (hitDepth >= 0.999999 || hitDepth <= 0.0) {
+        return fallbackRadiance;
+    }
+
+    vec4 hitAlbedo = texture(gBufferAlbedo, trace.hitUv);
+    if (hitAlbedo.a <= 0.001) {
+        return fallbackRadiance;
+    }
+
+    vec4 hitNormalRoughness = texture(gBufferNormalRoughness, trace.hitUv);
+    vec4 hitMaterial = texture(gBufferMaterial, trace.hitUv);
+    vec3 hitNormal = normalize(hitNormalRoughness.xyz * 2.0 - 1.0);
+    float hitRoughness = clamp(hitNormalRoughness.w, 0.04, 1.0);
+    float hitOcclusion = clamp(hitMaterial.g, 0.0, 1.0);
+    vec3 hitEmissive = max(texture(gBufferEmissive, trace.hitUv).rgb, vec3(0.0));
+    vec3 hitBaseColor = hitAlbedo.rgb;
+    float hitNDotL = max(dot(hitNormal, lightDir), 0.0);
+    vec3 diffuseApprox =
+        hitBaseColor *
+        (
+            EnvironmentRadiance(hitNormal, lightDir, 1.0) * 0.38 * ambientStrength * hitOcclusion +
+            vec3(hitNDotL * directIntensity * 0.22)
+        );
+    vec3 glossyApprox =
+        EnvironmentRadiance(reflect(-lightDir, hitNormal), lightDir, hitRoughness) *
+        mix(0.04, 0.18, 1.0 - hitRoughness);
+    vec3 hitRadiance = max(diffuseApprox + glossyApprox + hitEmissive, vec3(0.0));
+    return mix(fallbackRadiance, hitRadiance, trace.confidence);
 }
 
 float SampleShadowCascadeVisibility(
@@ -1632,22 +1697,29 @@ void main() {
     vec3 reflection = reflect(-viewDir, normal);
     vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
     f0 = mix(dielectricF0, baseColor, metallic);
+    SsrTraceResult ssrTrace = TraceScreenSpaceReflection(
+        fragUv,
+        depth,
+        normal,
+        roughness
+    );
+    vec3 environmentReflection = EnvironmentRadiance(reflection, lightDir, roughness);
+    vec3 ssrReflection = ScreenSpaceReflectionRadiance(
+        ssrTrace,
+        environmentReflection,
+        lightDir,
+        ambientStrength,
+        directIntensity
+    );
     vec3 ambient = (
         baseColor * EnvironmentRadiance(normal, lightDir, 1.0) * 0.45 +
-        EnvironmentRadiance(reflection, lightDir, roughness) * f0 * 0.16
+        ssrReflection * f0 * 0.16
     ) * ambientStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
     float ssaoVisibility = SsaoVisibility(fragUv, depth, normal);
     ambient *= ssaoVisibility;
-    float ssrHitConfidence = 0.0;
-    vec3 ssrDebugColor = ScreenSpaceReflectionDebug(
-        fragUv,
-        depth,
-        normal,
-        roughness,
-        ssrHitConfidence
-    );
+    vec3 ssrDebugColor = ScreenSpaceReflectionDebug(ssrTrace, roughness);
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =
@@ -1861,7 +1933,7 @@ void main() {
         return;
     }
     if (deferredDebugView == 12) {
-        outColor = vec4(ssrDebugColor + vec3(ssrHitConfidence) * 0.08, 1.0);
+        outColor = vec4(ssrDebugColor + vec3(ssrTrace.confidence) * 0.08, 1.0);
         return;
     }
 

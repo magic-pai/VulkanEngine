@@ -629,10 +629,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassKind::Reflections,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            "SSRDiagnostic",
+            "SSRIntegrated",
             "GBufferNormalRoughness, SceneDepth, frame matrices",
-            "screen-space reflection hit confidence",
-            "First screen-space reflection tracing diagnostic integrated into deferred lighting; color resolve, hierarchy, temporal accumulation, and probe fallback follow later."
+            "deferred reflection radiance and screen-space hit confidence",
+            "First screen-space reflection color tier integrated into deferred environment specular with a debug view; hierarchy, temporal accumulation, denoising, and probe fallback follow later."
         );
     }
     if (inputs.weightedTranslucencyRenderPassAllocated &&

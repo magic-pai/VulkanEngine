@@ -249,6 +249,7 @@ void BenchmarkRecorder::RecordFrame(
         << ssao.bias << ','
         << ssao.sampleCount << ','
         << ssr.enabled << ','
+        << ssr.colorResolveEnabled << ','
         << ssr.strength << ','
         << ssr.rayLength << ','
         << ssr.thickness << ','
@@ -515,7 +516,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_contact_thickness,shadow_contact_steps,"
         << "shadow_contact_jitter_strength,shadow_contact_edge_fade_pixels,"
         << "ssao_enabled,ssao_strength,ssao_radius,ssao_bias,ssao_sample_count,"
-        << "ssr_enabled,ssr_strength,ssr_ray_length,ssr_thickness,ssr_step_count,"
+        << "ssr_enabled,ssr_color_resolve_enabled,ssr_strength,"
+        << "ssr_ray_length,ssr_thickness,ssr_step_count,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"

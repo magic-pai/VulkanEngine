@@ -632,8 +632,9 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssao.sampleCount
     );
     ImGui::Text(
-        "SSR: %s, strength %.3f, ray %.1f, thickness %.3f, steps %u",
+        "SSR: %s, color %s, strength %.3f, ray %.1f, thickness %.3f, steps %u",
         stats.ssr.enabled ? "enabled" : "off",
+        stats.ssr.colorResolveEnabled ? "on" : "off",
         stats.ssr.strength,
         stats.ssr.rayLength,
         stats.ssr.thickness,
