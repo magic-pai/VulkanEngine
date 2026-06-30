@@ -111,6 +111,7 @@ struct CurrentVulkanFrameGraphInputs {
     bool localReflectionProbeEnabled = false;
     bool heightFogEnabled = false;
     bool bloomEnabled = false;
+    bool colorGradingEnabled = false;
     bool lightTileCullComputeEnabled = false;
     bool hdrCompositeEnabled = false;
     bool gBufferDebugEnabled = false;

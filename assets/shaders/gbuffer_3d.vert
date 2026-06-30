@@ -33,6 +33,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 heightFogControls;
     vec4 heightFogColor;
     vec4 postProcessControls;
+    vec4 colorGradingControls;
 } frame;
 
 layout(push_constant) uniform ObjectPushConstants {

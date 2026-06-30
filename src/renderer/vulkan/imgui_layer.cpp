@@ -516,6 +516,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Height Fog";
     case ForwardDebugView::Bloom:
         return "Bloom";
+    case ForwardDebugView::ColorGrading:
+        return "Color Grading";
     }
 
     return "Lit";
@@ -560,7 +562,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::Ssr,
         ForwardDebugView::ReflectionProbe,
         ForwardDebugView::HeightFog,
-        ForwardDebugView::Bloom
+        ForwardDebugView::Bloom,
+        ForwardDebugView::ColorGrading
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -584,6 +587,10 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
     ImGui::SliderFloat("Bloom intensity##Post", &settings.bloomIntensity, 0.0f, 4.0f, "%.3f");
     ImGui::SliderFloat("Bloom threshold##Post", &settings.bloomThreshold, 0.0f, 8.0f, "%.3f");
     ImGui::SliderFloat("Bloom radius px##Post", &settings.bloomRadiusPixels, 0.0f, 24.0f, "%.2f");
+    ImGui::Checkbox("Color grading##Post", &settings.colorGradingEnabled);
+    ImGui::SliderFloat("Saturation##Post", &settings.colorGradingSaturation, 0.0f, 2.5f, "%.3f");
+    ImGui::SliderFloat("Contrast##Post", &settings.colorGradingContrast, 0.0f, 2.5f, "%.3f");
+    ImGui::SliderFloat("Gamma##Post", &settings.colorGradingGamma, 0.25f, 4.0f, "%.3f");
     if (ImGui::Button("Reset render debug")) {
         ResetRenderDebugSettings(settings);
     }
@@ -787,6 +794,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.bloomRadiusPixels
     );
     ImGui::Text(
+        "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f",
+        stats.postProcess.colorGradingEnabled ? "enabled" : "off",
+        stats.postProcess.colorGradingSaturation,
+        stats.postProcess.colorGradingContrast,
+        stats.postProcess.colorGradingGamma
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -931,6 +945,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.bloomDebugDraws,
         binds.bloomDebugFrameBinds,
         binds.bloomDebugTextureBinds
+    );
+    ImGui::Text(
+        "Color grading debug: %u draws / %u frame binds / %u texture binds",
+        binds.colorGradingDebugDraws,
+        binds.colorGradingDebugFrameBinds,
+        binds.colorGradingDebugTextureBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",

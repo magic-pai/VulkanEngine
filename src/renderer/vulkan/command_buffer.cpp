@@ -890,6 +890,7 @@ void VulkanCommandBuffer::Record(
     const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
     bool useHdrCompositeAsMain,
     bool bloomDebugView,
+    bool colorGradingDebugView,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -1912,6 +1913,11 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->bloomDebugDraws;
                 ++bindStats->bloomDebugFrameBinds;
                 ++bindStats->bloomDebugTextureBinds;
+            }
+            if (colorGradingDebugView) {
+                ++bindStats->colorGradingDebugDraws;
+                ++bindStats->colorGradingDebugFrameBinds;
+                ++bindStats->colorGradingDebugTextureBinds;
             }
         }
         u32 residualMaterialBinds = 0;

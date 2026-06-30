@@ -718,13 +718,31 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 "First screen-space bloom tier sampled inside HDR composite; a downsample/upsample bloom pyramid can replace it later."
             );
         }
+        if (inputs.colorGradingEnabled) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::PostProcess,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "ColorGradingIntegrated",
+                "HDRSceneColor, exposure, tone map, color grading controls",
+                "tonemapped graded color during composite",
+                "First display-referred color grading tier inside HDR composite; LUT grading can replace it later."
+            );
+        }
         AppendPass(
             plan,
             RenderFramePassKind::PostProcess,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "HDRComposite",
-            inputs.bloomEnabled ? "HDRSceneColor, exposure, bloom" : "HDRSceneColor, exposure",
+            inputs.bloomEnabled && inputs.colorGradingEnabled
+                ? "HDRSceneColor, exposure, bloom, color grading"
+                : inputs.bloomEnabled
+                    ? "HDRSceneColor, exposure, bloom"
+                    : inputs.colorGradingEnabled
+                        ? "HDRSceneColor, exposure, color grading"
+                        : "HDRSceneColor, exposure",
             "swapchain color",
             "Debug-visible HDR composite path for deferred output before it becomes the default present path."
         );

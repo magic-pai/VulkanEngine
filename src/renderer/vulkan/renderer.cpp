@@ -1490,6 +1490,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::ReflectionProbe ||
         view == ForwardDebugView::HeightFog ||
         view == ForwardDebugView::Bloom ||
+        view == ForwardDebugView::ColorGrading ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1631,6 +1632,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "bloom-debug" ||
         value == "bloom_debug") {
         return ForwardDebugView::Bloom;
+    }
+    if (value == "color-grading" ||
+        value == "color_grading" ||
+        value == "color-grade" ||
+        value == "color_grade" ||
+        value == "grading" ||
+        value == "ColorGrading") {
+        return ForwardDebugView::ColorGrading;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2205,6 +2214,14 @@ void VulkanRenderer::DrawFrame() {
             frameStats.postProcess.bloomRadiusPixels > 0.0001f
             ? 1u
             : 0u;
+    frameStats.postProcess.colorGradingSaturation =
+        std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f);
+    frameStats.postProcess.colorGradingContrast =
+        std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f);
+    frameStats.postProcess.colorGradingGamma =
+        std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f);
+    frameStats.postProcess.colorGradingEnabled =
+        m_RenderDebugSettings.colorGradingEnabled ? 1u : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2481,6 +2498,10 @@ void VulkanRenderer::DrawFrame() {
                 showDeferredHdr &&
                 m_HdrCompositePipeline != nullptr &&
                 m_HdrDescriptorSets != nullptr,
+            frameStats.postProcess.colorGradingEnabled > 0 &&
+                showDeferredHdr &&
+                m_HdrCompositePipeline != nullptr &&
+                m_HdrDescriptorSets != nullptr,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -2564,6 +2585,7 @@ void VulkanRenderer::DrawFrame() {
         m_HdrDescriptorSets.get(),
         showDeferredHdr,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
+        m_RenderDebugSettings.forwardView == ForwardDebugView::ColorGrading,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -3976,6 +3998,26 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (bloomRadius.has_value()) {
         m_RenderDebugSettings.bloomRadiusPixels = *bloomRadius;
     }
+    const std::optional<bool> colorGrading =
+        EnvironmentFlagOverride("SE_COLOR_GRADING");
+    if (colorGrading.has_value()) {
+        m_RenderDebugSettings.colorGradingEnabled = *colorGrading;
+    }
+    const std::optional<f32> colorGradingSaturation =
+        EnvironmentFloatOverride("SE_COLOR_GRADING_SATURATION");
+    if (colorGradingSaturation.has_value()) {
+        m_RenderDebugSettings.colorGradingSaturation = *colorGradingSaturation;
+    }
+    const std::optional<f32> colorGradingContrast =
+        EnvironmentFloatOverride("SE_COLOR_GRADING_CONTRAST");
+    if (colorGradingContrast.has_value()) {
+        m_RenderDebugSettings.colorGradingContrast = *colorGradingContrast;
+    }
+    const std::optional<f32> colorGradingGamma =
+        EnvironmentFloatOverride("SE_COLOR_GRADING_GAMMA");
+    if (colorGradingGamma.has_value()) {
+        m_RenderDebugSettings.colorGradingGamma = *colorGradingGamma;
+    }
 
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
@@ -4287,6 +4329,12 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f),
         std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f)
     );
+    uniformData.colorGradingControls = glm::vec4(
+        m_RenderDebugSettings.colorGradingEnabled ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f),
+        std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
+        std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4410,6 +4458,12 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f),
         std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f),
         std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f)
+    );
+    uniformData.colorGradingControls = glm::vec4(
+        m_RenderDebugSettings.colorGradingEnabled ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f),
+        std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
+        std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

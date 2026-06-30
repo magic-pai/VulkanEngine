@@ -24,11 +24,13 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 heightFogControls;
     vec4 heightFogColor;
     vec4 postProcessControls;
+    vec4 colorGradingControls;
 } frame;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 
 const int DEBUG_VIEW_BLOOM = 37;
+const int DEBUG_VIEW_COLOR_GRADING = 38;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -68,6 +70,24 @@ vec3 BloomContribution(float exposure) {
     return bloom * intensity;
 }
 
+vec3 ApplyColorGrading(vec3 color) {
+    float enabled = clamp(frame.colorGradingControls.x, 0.0, 1.0);
+    if (enabled <= 0.0001) {
+        return color;
+    }
+
+    float saturation = clamp(frame.colorGradingControls.y, 0.0, 2.5);
+    float contrast = clamp(frame.colorGradingControls.z, 0.0, 2.5);
+    float gamma = clamp(frame.colorGradingControls.w, 0.25, 4.0);
+
+    float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    vec3 graded = mix(vec3(luminance), color, saturation);
+    graded = (graded - vec3(0.5)) * contrast + vec3(0.5);
+    graded = clamp(graded, 0.0, 1.0);
+    graded = pow(graded, vec3(1.0 / gamma));
+    return clamp(graded, 0.0, 1.0);
+}
+
 void main() {
     float exposure = max(frame.shadowFiltering.w, 0.001);
     vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
@@ -78,5 +98,11 @@ void main() {
         return;
     }
     hdrColor += bloom;
-    outColor = vec4(ToneMapAces(hdrColor), 1.0);
+    vec3 ldrColor = ToneMapAces(hdrColor);
+    vec3 gradedColor = ApplyColorGrading(ldrColor);
+    if (debugView == DEBUG_VIEW_COLOR_GRADING) {
+        outColor = vec4(gradedColor, 1.0);
+        return;
+    }
+    outColor = vec4(gradedColor, 1.0);
 }
