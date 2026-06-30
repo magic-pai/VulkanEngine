@@ -153,6 +153,8 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.ueBridgeCameraApplied << ','
         << sceneDiagnostics.ueBridgeLightCount << ','
         << sceneDiagnostics.ueBridgeLightsApplied << ','
+        << sceneDiagnostics.ueBridgeSkyLightCount << ','
+        << sceneDiagnostics.ueBridgeSkyLightApplied << ','
         << sceneDiagnostics.ueBridgeReferenceCaptureCount << ','
         << sceneDiagnostics.ueBridgeVisualParityReady << ','
         << sceneDiagnostics.ueBridgeBlockedMissingManifest << ','
@@ -483,6 +485,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "ue_bridge_manifest_mesh_export_missing_count,"
         << "ue_bridge_camera_count,ue_bridge_camera_applied,"
         << "ue_bridge_light_count,ue_bridge_lights_applied,"
+        << "ue_bridge_sky_light_count,ue_bridge_sky_light_applied,"
         << "ue_bridge_reference_capture_count,ue_bridge_visual_parity_ready,"
         << "ue_bridge_blocked_missing_manifest,ue_bridge_blocked_scene_missing,"
         << "ue_bridge_blocked_no_mesh_instances,"

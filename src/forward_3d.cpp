@@ -80,6 +80,17 @@ struct StartupBridgeScene {
     std::vector<se::UnrealProjectBridgeMessage> messages;
 };
 
+struct BridgeSceneLightApplyResult {
+    bool anyApplied = false;
+    bool directionalApplied = false;
+    se::u32 pointCount = 0;
+    se::u32 spotCount = 0;
+    se::u32 rectCount = 0;
+    se::u32 skyLightCount = 0;
+    bool skyLightApplied = false;
+    se::f32 skyLightIntensity = 1.0f;
+};
+
 PickRay CursorPickRay(
     const se::Window& window,
     const se::Camera3D& camera
@@ -503,6 +514,17 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "YES";
 }
 
+bool EnvironmentFlagDisabled(const char* name) {
+    const std::string value = ReadEnvironmentString(name);
+    return value == "0" ||
+        value == "false" ||
+        value == "FALSE" ||
+        value == "off" ||
+        value == "OFF" ||
+        value == "no" ||
+        value == "NO";
+}
+
 std::filesystem::path UnrealProjectRootPath() {
     const std::string overridePath = ReadEnvironmentString("SE_UE_PROJECT_ROOT");
     return overridePath.empty() ?
@@ -827,7 +849,7 @@ se::BenchmarkSceneDiagnostics BenchmarkDiagnosticsForStartupBridgeScene(
     const StartupBridgeScene& startup,
     se::u32 loadedBridgeMeshInstances,
     bool bridgeCameraApplied,
-    bool bridgeLightsApplied
+    const BridgeSceneLightApplyResult& bridgeLights
 ) {
     se::BenchmarkSceneDiagnostics diagnostics{};
     diagnostics.ueBridgeRequested = startup.requested ? 1u : 0u;
@@ -850,7 +872,9 @@ se::BenchmarkSceneDiagnostics BenchmarkDiagnosticsForStartupBridgeScene(
     diagnostics.ueBridgeCameraApplied = bridgeCameraApplied ? 1u : 0u;
     diagnostics.ueBridgeLightCount =
         static_cast<se::u32>(startup.lights.size());
-    diagnostics.ueBridgeLightsApplied = bridgeLightsApplied ? 1u : 0u;
+    diagnostics.ueBridgeLightsApplied = bridgeLights.anyApplied ? 1u : 0u;
+    diagnostics.ueBridgeSkyLightCount = bridgeLights.skyLightCount;
+    diagnostics.ueBridgeSkyLightApplied = bridgeLights.skyLightApplied ? 1u : 0u;
     diagnostics.ueBridgeReferenceCaptureCount = startup.referenceCaptureCount;
     diagnostics.ueBridgeBlockedMissingManifest =
         startup.requested && !startup.manifestLoaded ? 1u : 0u;
@@ -873,7 +897,7 @@ se::BenchmarkSceneDiagnostics BenchmarkDiagnosticsForStartupBridgeScene(
     diagnostics.ueBridgeBlockedCamera =
         startup.sceneFound && !bridgeCameraApplied ? 1u : 0u;
     diagnostics.ueBridgeBlockedLights =
-        startup.sceneFound && !bridgeLightsApplied ? 1u : 0u;
+        startup.sceneFound && !bridgeLights.anyApplied ? 1u : 0u;
     diagnostics.ueBridgeBlockedReferenceCapture =
         startup.sceneFound && startup.referenceCaptureCount == 0 ? 1u : 0u;
     diagnostics.ueBridgeVisualParityReady =
@@ -882,7 +906,7 @@ se::BenchmarkSceneDiagnostics BenchmarkDiagnosticsForStartupBridgeScene(
         !startup.meshInstances.empty() &&
         loadedBridgeMeshInstances == startup.meshInstances.size() &&
         bridgeCameraApplied &&
-        bridgeLightsApplied &&
+        bridgeLights.anyApplied &&
         startup.referenceCaptureCount > 0
             ? 1u
             : 0u;
@@ -1314,17 +1338,25 @@ se::f32 PreviewRectIntensity(se::f32 unrealIntensity) {
     return std::clamp(scaled, 0.0f, 32.0f);
 }
 
+se::f32 PreviewSkyLightIntensity(se::f32 unrealIntensity, glm::vec3 color) {
+    const se::f32 sourceIntensity = unrealIntensity > 0.0f ? unrealIntensity : 1.0f;
+    const se::f32 luminance =
+        color.x * 0.2126f + color.y * 0.7152f + color.z * 0.0722f;
+    return std::clamp(sourceIntensity * std::max(luminance, 0.05f), 0.0f, 4.0f);
+}
+
 se::f32 PositiveOrFallback(se::f32 value, se::f32 fallback) {
     return value > 0.0f ? value : fallback;
 }
 
-bool ApplyBridgeSceneLights(
+BridgeSceneLightApplyResult ApplyBridgeSceneLights(
     const StartupBridgeScene& startup,
     se::Scene3D& scene,
     const se::Camera3D& camera
 ) {
+    BridgeSceneLightApplyResult result{};
     if (!startup.sceneFound || startup.lights.empty()) {
-        return false;
+        return result;
     }
 
     bool appliedDirectional = false;
@@ -1343,6 +1375,16 @@ bool ApplyBridgeSceneLights(
         const std::string name = light.actorName.empty() ?
             (light.componentName.empty() ? light.id : light.componentName) :
             light.actorName;
+
+        if (lightClass.find("skylight") != std::string::npos ||
+            LowerAscii(light.actorName).find("skylight") != std::string::npos) {
+            if (result.skyLightCount == 0) {
+                result.skyLightIntensity =
+                    PreviewSkyLightIntensity(light.intensity, light.color);
+            }
+            ++result.skyLightCount;
+            continue;
+        }
 
         if (lightClass.find("directional") != std::string::npos) {
             if (!appliedDirectional) {
@@ -1434,9 +1476,40 @@ bool ApplyBridgeSceneLights(
         << " point=" << appliedPointCount
         << " spot=" << appliedSpotCount
         << " rect=" << appliedRectCount
+        << " skylight=" << result.skyLightCount
         << " skipped=" << skippedCount
         << std::endl;
 
+    result.directionalApplied = appliedDirectional;
+    result.pointCount = appliedPointCount;
+    result.spotCount = appliedSpotCount;
+    result.rectCount = appliedRectCount;
+    result.anyApplied =
+        appliedDirectional ||
+        appliedPointCount > 0 ||
+        appliedSpotCount > 0 ||
+        appliedRectCount > 0 ||
+        result.skyLightCount > 0;
+    return result;
+}
+
+bool ApplyBridgeSkyLightToRenderer(
+    const BridgeSceneLightApplyResult& bridgeLights,
+    se::VulkanRenderer& renderer
+) {
+    if (bridgeLights.skyLightCount == 0 ||
+        EnvironmentFlagDisabled("SE_REFLECTION_PROBE_FALLBACK")) {
+        return false;
+    }
+
+    se::VulkanShadowSettings& settings = renderer.ShadowSettings();
+    settings.reflectionProbeFallbackEnabled = true;
+    settings.reflectionProbeDiffuseIntensity = bridgeLights.skyLightIntensity;
+    settings.reflectionProbeSpecularIntensity = bridgeLights.skyLightIntensity;
+
+    std::cout << "UE bridge SkyLight applied to reflection fallback: intensity="
+        << bridgeLights.skyLightIntensity
+        << std::endl;
     return true;
 }
 
@@ -1850,19 +1923,13 @@ int main() {
     if (!useBenchmarkScene) {
         ApplyBridgeSceneClipPlanes(startupBridgeScene, camera);
     }
-    const bool bridgeLightsApplied =
-        !useBenchmarkScene && ApplyBridgeSceneLights(startupBridgeScene, scene, camera);
-    if (!bridgeLightsApplied) {
+    BridgeSceneLightApplyResult bridgeLights =
+        !useBenchmarkScene
+            ? ApplyBridgeSceneLights(startupBridgeScene, scene, camera)
+            : BridgeSceneLightApplyResult{};
+    if (!bridgeLights.anyApplied) {
         ApplySceneDirectionalLight(scene, camera);
     }
-    se::SetBenchmarkSceneDiagnostics(
-        BenchmarkDiagnosticsForStartupBridgeScene(
-            startupBridgeScene,
-            loadedBridgeMeshInstances,
-            bridgeCameraApplied,
-            bridgeLightsApplied
-        )
-    );
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
         1.1f,
@@ -1873,6 +1940,16 @@ int main() {
 
     app.CreateRenderer();
     SE_ASSERT(app.Renderer() != nullptr, "Forward 3D demo needs a renderer");
+    bridgeLights.skyLightApplied =
+        ApplyBridgeSkyLightToRenderer(bridgeLights, *app.Renderer());
+    se::SetBenchmarkSceneDiagnostics(
+        BenchmarkDiagnosticsForStartupBridgeScene(
+            startupBridgeScene,
+            loadedBridgeMeshInstances,
+            bridgeCameraApplied,
+            bridgeLights
+        )
+    );
     app.Renderer()->SetFrameMatricesProvider([&](se::f32 aspectRatio) {
         return se::FrameMatrices{
             camera.ViewMatrix(),
@@ -1921,7 +1998,7 @@ int main() {
                 clampedDeltaSeconds,
                 pickClickState
             );
-            if (!bridgeLightsApplied) {
+            if (!bridgeLights.anyApplied) {
                 ApplySceneDirectionalLight(scene, camera);
             }
         } else if (animateBenchmarkPartialLocalShadowCache) {

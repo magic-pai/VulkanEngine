@@ -30,6 +30,8 @@ struct BenchmarkSceneDiagnostics {
     u32 ueBridgeCameraApplied = 0;
     u32 ueBridgeLightCount = 0;
     u32 ueBridgeLightsApplied = 0;
+    u32 ueBridgeSkyLightCount = 0;
+    u32 ueBridgeSkyLightApplied = 0;
     u32 ueBridgeReferenceCaptureCount = 0;
     u32 ueBridgeVisualParityReady = 0;
     u32 ueBridgeBlockedMissingManifest = 0;
