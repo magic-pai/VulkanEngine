@@ -889,6 +889,7 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* hdrCompositePipeline,
     const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
     bool useHdrCompositeAsMain,
+    bool bloomDebugView,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -1907,6 +1908,11 @@ void VulkanCommandBuffer::Record(
             ++bindStats->hdrCompositeDraws;
             ++bindStats->hdrCompositeFrameBinds;
             ++bindStats->hdrCompositeTextureBinds;
+            if (bloomDebugView) {
+                ++bindStats->bloomDebugDraws;
+                ++bindStats->bloomDebugFrameBinds;
+                ++bindStats->bloomDebugTextureBinds;
+            }
         }
         u32 residualMaterialBinds = 0;
         u32 residualMeshBinds = 0;

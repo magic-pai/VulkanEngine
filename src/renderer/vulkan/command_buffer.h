@@ -85,6 +85,7 @@ public:
         const VulkanGraphicsPipeline* hdrCompositePipeline = nullptr,
         const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets = nullptr,
         bool useHdrCompositeAsMain = false,
+        bool bloomDebugView = false,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
         int gBufferDebugView = -1,

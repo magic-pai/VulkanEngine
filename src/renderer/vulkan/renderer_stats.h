@@ -184,6 +184,13 @@ struct RendererHeightFogStats {
     f32 maxOpacity = 0.0f;
 };
 
+struct RendererPostProcessStats {
+    u32 bloomEnabled = 0;
+    f32 bloomIntensity = 0.0f;
+    f32 bloomThreshold = 0.0f;
+    f32 bloomRadiusPixels = 0.0f;
+};
+
 struct RendererBindStats {
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
@@ -231,6 +238,9 @@ struct RendererBindStats {
     u32 heightFogDebugDraws = 0;
     u32 heightFogDebugFrameBinds = 0;
     u32 heightFogDebugGBufferBinds = 0;
+    u32 bloomDebugDraws = 0;
+    u32 bloomDebugFrameBinds = 0;
+    u32 bloomDebugTextureBinds = 0;
     u32 lightTileCullComputeDispatches = 0;
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;
@@ -343,6 +353,7 @@ struct RendererStats {
     RendererSsrStats ssr;
     RendererReflectionProbeStats reflectionProbe;
     RendererHeightFogStats heightFog;
+    RendererPostProcessStats postProcess;
     RendererBindStats binds;
     RendererGpuStats gpu;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();

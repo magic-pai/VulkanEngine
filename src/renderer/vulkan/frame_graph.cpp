@@ -706,13 +706,25 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
 
     if (inputs.hdrCompositeEnabled) {
+        if (inputs.bloomEnabled) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::PostProcess,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "BloomIntegrated",
+                "HDRSceneColor, exposure, bloom controls",
+                "HDRSceneColor contribution during composite",
+                "First screen-space bloom tier sampled inside HDR composite; a downsample/upsample bloom pyramid can replace it later."
+            );
+        }
         AppendPass(
             plan,
             RenderFramePassKind::PostProcess,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "HDRComposite",
-            "HDRSceneColor, exposure",
+            inputs.bloomEnabled ? "HDRSceneColor, exposure, bloom" : "HDRSceneColor, exposure",
             "swapchain color",
             "Debug-visible HDR composite path for deferred output before it becomes the default present path."
         );

@@ -128,6 +128,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererSsrStats& ssr = stats.ssr;
     const RendererReflectionProbeStats& reflectionProbe = stats.reflectionProbe;
     const RendererHeightFogStats& heightFog = stats.heightFog;
+    const RendererPostProcessStats& postProcess = stats.postProcess;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
     const BenchmarkSceneDiagnostics& sceneDiagnostics =
@@ -272,6 +273,10 @@ void BenchmarkRecorder::RecordFrame(
         << heightFog.heightFalloff << ','
         << heightFog.startDistance << ','
         << heightFog.maxOpacity << ','
+        << postProcess.bloomEnabled << ','
+        << postProcess.bloomIntensity << ','
+        << postProcess.bloomThreshold << ','
+        << postProcess.bloomRadiusPixels << ','
         << shadowCascades.maxDistance << ','
         << shadowCascades.nearDepth << ','
         << shadowCascades.farDepth << ','
@@ -378,6 +383,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.heightFogDebugDraws << ','
         << binds.heightFogDebugFrameBinds << ','
         << binds.heightFogDebugGBufferBinds << ','
+        << binds.bloomDebugDraws << ','
+        << binds.bloomDebugFrameBinds << ','
+        << binds.bloomDebugTextureBinds << ','
         << binds.lightTileCullComputeDispatches << ','
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
@@ -550,6 +558,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_local_falloff,"
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
         << "height_fog_start_distance,height_fog_max_opacity,"
+        << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"
         << "shadow_cascade_split2,shadow_cascade_split3,"
@@ -602,6 +611,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"
         << "height_fog_debug_gbuffer_binds,"
+        << "bloom_debug_draws,bloom_debug_frame_binds,"
+        << "bloom_debug_texture_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"

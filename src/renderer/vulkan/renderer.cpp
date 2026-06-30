@@ -836,6 +836,21 @@ std::optional<bool> EnvironmentFlagOverride(const char* name) {
     return std::nullopt;
 }
 
+std::optional<f32> EnvironmentFloatOverride(const char* name) {
+    const std::string value = ReadEnvironmentString(name);
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    char* end = nullptr;
+    const f32 parsed = std::strtof(value.c_str(), &end);
+    if (end == value.c_str()) {
+        return std::nullopt;
+    }
+
+    return parsed;
+}
+
 bool WeightedTranslucencyAlphaReferenceEnabled() {
     return EnvironmentFlagEnabled("SE_WBOIT_REFERENCE_ALPHA") ||
         EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_ALPHA_REFERENCE");
@@ -1474,6 +1489,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::Ssr ||
         view == ForwardDebugView::ReflectionProbe ||
         view == ForwardDebugView::HeightFog ||
+        view == ForwardDebugView::Bloom ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -1609,6 +1625,12 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "distance_fog" ||
         value == "fog") {
         return ForwardDebugView::HeightFog;
+    }
+    if (value == "bloom" ||
+        value == "Bloom" ||
+        value == "bloom-debug" ||
+        value == "bloom_debug") {
+        return ForwardDebugView::Bloom;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2171,6 +2193,18 @@ void VulkanRenderer::DrawFrame() {
             frameStats.heightFog.maxOpacity > 0.0001f
             ? 1u
             : 0u;
+    frameStats.postProcess.bloomIntensity =
+        std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f);
+    frameStats.postProcess.bloomThreshold =
+        std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f);
+    frameStats.postProcess.bloomRadiusPixels =
+        std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f);
+    frameStats.postProcess.bloomEnabled =
+        m_RenderDebugSettings.bloomEnabled &&
+            frameStats.postProcess.bloomIntensity > 0.0001f &&
+            frameStats.postProcess.bloomRadiusPixels > 0.0001f
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2443,6 +2477,10 @@ void VulkanRenderer::DrawFrame() {
                 frameStats.reflectionProbe.fallbackEnabled > 0 &&
                 has3DMainPass,
             frameStats.heightFog.enabled > 0 && has3DMainPass,
+            frameStats.postProcess.bloomEnabled > 0 &&
+                showDeferredHdr &&
+                m_HdrCompositePipeline != nullptr &&
+                m_HdrDescriptorSets != nullptr,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
             showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
@@ -2525,6 +2563,7 @@ void VulkanRenderer::DrawFrame() {
         m_HdrCompositePipeline.get(),
         m_HdrDescriptorSets.get(),
         showDeferredHdr,
+        m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -3918,6 +3957,25 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (heightFog.has_value()) {
         m_ShadowSettings.heightFogEnabled = *heightFog;
     }
+    const std::optional<bool> bloom = EnvironmentFlagOverride("SE_BLOOM");
+    if (bloom.has_value()) {
+        m_RenderDebugSettings.bloomEnabled = *bloom;
+    }
+    const std::optional<f32> bloomIntensity =
+        EnvironmentFloatOverride("SE_BLOOM_INTENSITY");
+    if (bloomIntensity.has_value()) {
+        m_RenderDebugSettings.bloomIntensity = *bloomIntensity;
+    }
+    const std::optional<f32> bloomThreshold =
+        EnvironmentFloatOverride("SE_BLOOM_THRESHOLD");
+    if (bloomThreshold.has_value()) {
+        m_RenderDebugSettings.bloomThreshold = *bloomThreshold;
+    }
+    const std::optional<f32> bloomRadius =
+        EnvironmentFloatOverride("SE_BLOOM_RADIUS");
+    if (bloomRadius.has_value()) {
+        m_RenderDebugSettings.bloomRadiusPixels = *bloomRadius;
+    }
 
     const std::optional<ForwardDebugView> forwardDebugView =
         ForwardDebugViewFromEnvironment();
@@ -4219,6 +4277,16 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_ShadowSettings.heightFogColorB, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f)
     );
+    const bool bloomApplied =
+        m_RenderDebugSettings.bloomEnabled &&
+        m_RenderDebugSettings.bloomIntensity > 0.0001f &&
+        m_RenderDebugSettings.bloomRadiusPixels > 0.0001f;
+    uniformData.postProcessControls = glm::vec4(
+        bloomApplied ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f),
+        std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f),
+        std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f)
+    );
 
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
@@ -4332,6 +4400,16 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_ShadowSettings.heightFogColorG, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.heightFogColorB, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f)
+    );
+    const bool bloomApplied =
+        m_RenderDebugSettings.bloomEnabled &&
+        m_RenderDebugSettings.bloomIntensity > 0.0001f &&
+        m_RenderDebugSettings.bloomRadiusPixels > 0.0001f;
+    uniformData.postProcessControls = glm::vec4(
+        bloomApplied ? 1.0f : 0.0f,
+        std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f),
+        std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f),
+        std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f)
     );
     m_OverlayUniformBuffer->Update(imageIndex, uniformData);
 }

@@ -41,12 +41,17 @@ enum class ForwardDebugView : int {
     Ssao = 33,
     Ssr = 34,
     ReflectionProbe = 35,
-    HeightFog = 36
+    HeightFog = 36,
+    Bloom = 37
 };
 
 struct VulkanRenderDebugSettings {
     ForwardDebugView forwardView = ForwardDebugView::Lit;
     f32 exposure = 1.0f;
+    bool bloomEnabled = false;
+    f32 bloomIntensity = 0.35f;
+    f32 bloomThreshold = 1.0f;
+    f32 bloomRadiusPixels = 2.5f;
 };
 
 inline void ResetRenderDebugSettings(VulkanRenderDebugSettings& settings) {

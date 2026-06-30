@@ -514,6 +514,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Reflection Probe";
     case ForwardDebugView::HeightFog:
         return "Height Fog";
+    case ForwardDebugView::Bloom:
+        return "Bloom";
     }
 
     return "Lit";
@@ -557,7 +559,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::Ssao,
         ForwardDebugView::Ssr,
         ForwardDebugView::ReflectionProbe,
-        ForwardDebugView::HeightFog
+        ForwardDebugView::HeightFog,
+        ForwardDebugView::Bloom
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -576,6 +579,11 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
     }
 
     ImGui::SliderFloat("Debug exposure", &settings.exposure, 0.1f, 5.0f);
+    ImGui::SeparatorText("Post");
+    ImGui::Checkbox("Bloom##Post", &settings.bloomEnabled);
+    ImGui::SliderFloat("Bloom intensity##Post", &settings.bloomIntensity, 0.0f, 4.0f, "%.3f");
+    ImGui::SliderFloat("Bloom threshold##Post", &settings.bloomThreshold, 0.0f, 8.0f, "%.3f");
+    ImGui::SliderFloat("Bloom radius px##Post", &settings.bloomRadiusPixels, 0.0f, 24.0f, "%.2f");
     if (ImGui::Button("Reset render debug")) {
         ResetRenderDebugSettings(settings);
     }
@@ -772,6 +780,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.heightFog.maxOpacity
     );
     ImGui::Text(
+        "Bloom: %s, intensity %.3f, threshold %.3f, radius %.2f px",
+        stats.postProcess.bloomEnabled ? "enabled" : "off",
+        stats.postProcess.bloomIntensity,
+        stats.postProcess.bloomThreshold,
+        stats.postProcess.bloomRadiusPixels
+    );
+    ImGui::Text(
         "Local shadow atlas: %s, tile %u, extent %ux%u, grid %ux%u, capacity %u",
         localShadowAtlas.allocated ? "yes" : "no",
         localShadowAtlas.tileSize,
@@ -910,6 +925,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.heightFogDebugDraws,
         binds.heightFogDebugFrameBinds,
         binds.heightFogDebugGBufferBinds
+    );
+    ImGui::Text(
+        "Bloom debug: %u draws / %u frame binds / %u texture binds",
+        binds.bloomDebugDraws,
+        binds.bloomDebugFrameBinds,
+        binds.bloomDebugTextureBinds
     );
     ImGui::Text(
         "Light tile compute: %u dispatches / %u frame binds / groups %ux%u",
