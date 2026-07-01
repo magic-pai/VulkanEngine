@@ -270,39 +270,3 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
 
 }
 
-// ---- Hi-Z Descriptor Set Layout ----
-VulkanHiZDescriptorSetLayout::VulkanHiZDescriptorSetLayout(const VulkanDevice& device)
-    : m_Device(device.Handle()) { CreateDescriptorSetLayout(device); }
-VulkanHiZDescriptorSetLayout::~VulkanHiZDescriptorSetLayout() { Release(); }
-VkDescriptorSetLayout VulkanHiZDescriptorSetLayout::Handle() const { return m_DescriptorSetLayout; }
-void VulkanHiZDescriptorSetLayout::Release() {
-    if (m_DescriptorSetLayout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(m_Device,m_DescriptorSetLayout,nullptr); m_DescriptorSetLayout=VK_NULL_HANDLE; }
-}
-void VulkanHiZDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& device) {
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0; binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    binding.descriptorCount = 1; binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutCreateInfo ci{}; ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.bindingCount = 1; ci.pBindings = &binding;
-    if (vkCreateDescriptorSetLayout(device.Handle(), &ci, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
-        throw std::runtime_error("Failed to create Hi-Z descriptor set layout");
-}
-
-// ---- Occlusion Cull Descriptor Set Layout ----
-VulkanOcclusionCullDescriptorSetLayout::VulkanOcclusionCullDescriptorSetLayout(const VulkanDevice& device)
-    : m_Device(device.Handle()) { CreateDescriptorSetLayout(device); }
-VulkanOcclusionCullDescriptorSetLayout::~VulkanOcclusionCullDescriptorSetLayout() { Release(); }
-VkDescriptorSetLayout VulkanOcclusionCullDescriptorSetLayout::Handle() const { return m_DescriptorSetLayout; }
-void VulkanOcclusionCullDescriptorSetLayout::Release() {
-    if (m_DescriptorSetLayout != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(m_Device,m_DescriptorSetLayout,nullptr); m_DescriptorSetLayout=VK_NULL_HANDLE; }
-}
-void VulkanOcclusionCullDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& device) {
-    VkDescriptorSetLayoutBinding bs[3]{};
-    bs[0].binding=0; bs[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; bs[0].descriptorCount=1; bs[0].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
-    bs[1].binding=1; bs[1].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; bs[1].descriptorCount=1; bs[1].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
-    bs[2].binding=2; bs[2].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; bs[2].descriptorCount=1; bs[2].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
-    VkDescriptorSetLayoutCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ci.bindingCount=3; ci.pBindings=bs;
-    if (vkCreateDescriptorSetLayout(device.Handle(),&ci,nullptr,&m_DescriptorSetLayout)!=VK_SUCCESS)
-        throw std::runtime_error("Failed to create occlusion cull descriptor set layout");
-}

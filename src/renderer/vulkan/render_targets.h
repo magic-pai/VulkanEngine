@@ -20,9 +20,6 @@ public:
     VkRenderPass Handle() const;
 
     void Recreate(const VulkanDevice& device, VkFormat hdrColorFormat);
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -50,9 +47,6 @@ public:
         const VulkanDevice& device,
         const VulkanSceneRenderTargets& renderTargets
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -83,9 +77,6 @@ public:
         const VulkanDevice& device,
         const VulkanSceneRenderTargets& renderTargets
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -139,9 +130,6 @@ public:
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanSwapchain& swapchain
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
     static constexpr VkFormat kHdrSceneColorFormat =
@@ -180,8 +168,6 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferNormalRoughnessImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
-    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
-    std::vector<std::array<VkImageView, 4>> m_HiZMipViews;
     VkExtent2D m_Extent{};
 };
 
@@ -207,9 +193,6 @@ public:
         const VulkanHdrRenderPass& renderPass,
         const VulkanSceneRenderTargets& renderTargets
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -222,8 +205,6 @@ private:
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> m_Framebuffers;
-    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
-    std::vector<std::array<VkImageView, 4>> m_HiZMipViews;
     VkExtent2D m_Extent{};
 };
 
@@ -249,9 +230,6 @@ public:
         const VulkanWeightedTranslucencyRenderPass& renderPass,
         const VulkanSceneRenderTargets& renderTargets
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -264,8 +242,6 @@ private:
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> m_Framebuffers;
-    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
-    std::vector<std::array<VkImageView, 4>> m_HiZMipViews;
     VkExtent2D m_Extent{};
 };
 
@@ -291,9 +267,6 @@ public:
         const VulkanGBufferRenderPass& renderPass,
         const VulkanSceneRenderTargets& renderTargets
     );
-    VkImageView HiZView(std::size_t index, u32 mip) const;
-    VkImage HiZImage(std::size_t index) const;
-    static constexpr VkFormat kHiZFormat = VK_FORMAT_R32_SFLOAT;
     void Release();
 
 private:
@@ -306,8 +279,6 @@ private:
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     std::vector<VkFramebuffer> m_Framebuffers;
-    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
-    std::vector<std::array<VkImageView, 4>> m_HiZMipViews;
     VkExtent2D m_Extent{};
 };
 

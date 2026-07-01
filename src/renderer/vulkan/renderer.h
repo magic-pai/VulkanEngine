@@ -20,6 +20,8 @@ namespace se {
 class VulkanCommandBuffer;
 class VulkanCommandPool;
 class VulkanComputePipeline;
+class VulkanHiZDescriptorSetLayout;
+class VulkanImage;
 class VulkanDepthBuffer;
 class VulkanDescriptorSetLayout;
 class VulkanDescriptorSets;
@@ -400,11 +402,12 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
-n    // Hi-Z depth pyramid
+    // Hi-Z depth pyramid
     std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
     std::vector<std::array<VkImageView,4>> m_HiZMipViews;
     std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
-    std::unique_ptr<VulkanComputePipeline> m_HiZBuildComputePipeline;
+    VkPipeline m_HiZBuildPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_HiZBuildLayout = VK_NULL_HANDLE;
     // IBL textures
         std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;

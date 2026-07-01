@@ -359,15 +359,6 @@ VkImageView VulkanSceneRenderTargets::GBufferEmissiveView(std::size_t index) con
     return m_GBufferEmissiveImages[index]->View();
 }
 
-VkImageView VulkanSceneRenderTargets::HiZView(std::size_t index, u32 mip) const {
-    SE_ASSERT(index < m_HiZMipViews.size() && mip < 4, "HiZ index/mip out of range");
-    return m_HiZMipViews[index][mip];
-}
-VkImage VulkanSceneRenderTargets::HiZImage(std::size_t index) const {
-    SE_ASSERT(index < m_HiZImages.size(), "HiZ image index out of range");
-    return m_HiZImages[index]->Handle();
-}
-
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
     return kHdrSceneColorFormat;
 }
@@ -520,26 +511,6 @@ void VulkanSceneRenderTargets::Recreate(
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_GBufferEmissiveImages
     );
-
-    // Hi-Z depth pyramid (R32_SFLOAT, 4 mips, per-swapchain-image)
-    const u32 hizMips = 4;
-    m_HiZImages.reserve(count); m_HiZMipViews.resize(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        m_HiZImages.push_back(std::make_unique<VulkanImage>(device, physicalDevice,
-            m_Extent, kHiZFormat, VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT, hizMips));
-        m_HiZImages.back()->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_GENERAL, hizMips);
-        for (u32 m = 0; m < hizMips; ++m) {
-            VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            vi.image = m_HiZImages[i]->Handle(); vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            vi.format = kHiZFormat; vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            vi.subresourceRange.baseMipLevel = m; vi.subresourceRange.levelCount = 1;
-            vi.subresourceRange.layerCount = 1;
-            vkCreateImageView(device.Handle(), &vi, nullptr, &m_HiZMipViews[i][m]);
-        }
-    }
 }
 
 void VulkanSceneRenderTargets::Release() {
@@ -552,8 +523,6 @@ void VulkanSceneRenderTargets::Release() {
     m_GBufferNormalRoughnessImages.clear();
     m_GBufferMaterialImages.clear();
     m_GBufferEmissiveImages.clear();
-    for (auto& views : m_HiZMipViews) for (auto& v : views) if(v) { vkDestroyImageView(m_Device,v,nullptr); v=VK_NULL_HANDLE; }
-    m_HiZMipViews.clear(); m_HiZImages.clear();
     m_Extent = {};
 }
 

@@ -1848,7 +1848,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_LightClusterCullComputePipeline.reset();
-    m_HiZBuildComputePipeline.reset();
+    if(m_HiZBuildLayout){vkDestroyPipelineLayout(m_Device.Handle(),m_HiZBuildLayout,nullptr);m_HiZBuildLayout=VK_NULL_HANDLE;}
     m_HiZDescriptorSetLayout.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
@@ -2721,8 +2721,6 @@ void VulkanRenderer::DrawFrame() {
         lightTileCullGroupCountY,
         4, // lightTileCullGroupCountZ (clustered: 4 depth slices)
         m_LightClusterCullComputePipeline.get(),
-        m_HiZBuildComputePipeline.get(),
-        m_SceneRenderTargets.get(),
         has3DMainPass ? m_ForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(forwardResidualCommands.data(), forwardResidualCommands.size()) : std::span<const RenderCommand>{},
@@ -3388,13 +3386,12 @@ void VulkanRenderer::CreateSwapchainResources() {
             m_Device, *m_DescriptorSetLayout,
             std::string(SE_SHADER_DIR) + "/light_cluster_cull.comp.spv");
         // Hi-Z build compute pipeline
-        m_HiZBuildComputePipeline = std::make_unique<VulkanComputePipeline>(
             m_Device, *m_HiZDescriptorSetLayout,
             std::string(SE_SHADER_DIR) + "/build_hiz.comp.spv");
     } else {
         m_LightTileCullComputePipeline.reset();
         m_LightClusterCullComputePipeline.reset();
-    m_HiZBuildComputePipeline.reset();
+    if(m_HiZBuildLayout){vkDestroyPipelineLayout(m_Device.Handle(),m_HiZBuildLayout,nullptr);m_HiZBuildLayout=VK_NULL_HANDLE;}
     m_HiZDescriptorSetLayout.reset();
     }
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
