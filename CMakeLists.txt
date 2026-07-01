@@ -34,6 +34,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+FetchContent_Declare(
+    meshoptimizer
+    GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+    GIT_TAG v1.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(meshoptimizer)
+
 find_program(GLSLC_EXECUTABLE glslc
     HINTS "$ENV{VULKAN_SDK}/Bin"
     REQUIRED
@@ -152,6 +160,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/mesh.cpp
     src/renderer/vulkan/texture_cache.cpp
     src/renderer/vulkan/ibl_generator.cpp
+    src/renderer/vulkan/mesh_lod.cpp
 )
 
 add_executable(SelfEngine
@@ -189,6 +198,7 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
     target_link_libraries(${SELFENGINE_TARGET} PRIVATE
         assimp
         nlohmann_json::nlohmann_json
+        meshoptimizer
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/lib/glfw3.lib
         $ENV{VULKAN_SDK}/Lib/vulkan-1.lib
         user32
