@@ -2,7 +2,9 @@
 #include "renderer/vulkan/image.h"
 #include "renderer/vulkan/buffer.h"
 #include "renderer/vulkan/command_pool.h"
+#include "renderer/vulkan/compute_pipeline.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/shader_module.h"
 #include "renderer/vulkan/physical_device.h"
 #include <glm/glm.hpp>
 
@@ -50,16 +52,32 @@ void GenerateIblTextures(const VulkanDevice& device,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     staging.Upload(std::as_bytes(std::span<const u8>(srcPx)));
 
-    // Prefiltered cubemap
+    // Source cubemap (for GPU prefilter sampling)
+    auto srcCubemap = std::make_unique<VulkanImage>(device, physicalDevice,
+        VkExtent2D{srcFace, srcFace}, fmt, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+        1, faceCount, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, VK_IMAGE_VIEW_TYPE_CUBE);
+    srcCubemap->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
+    srcCubemap->CopyFromBuffer(device, commandPool, staging.Handle(), faceCount);
+    srcCubemap->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
+    VkImageView srcView = VK_NULL_HANDLE;
+    { VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      vi.image = srcCubemap->Handle(); vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE; vi.format = fmt;
+      vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      vi.subresourceRange.levelCount = 1; vi.subresourceRange.layerCount = faceCount;
+      vkCreateImageView(device.Handle(), &vi, nullptr, &srcView); }
+
+    // Prefiltered cubemap (filled by GPU GGX prefilter instead of box-filter mips)
     prefilteredImage = std::make_unique<VulkanImage>(device, physicalDevice,
         VkExtent2D{srcFace, srcFace}, fmt, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
         mipCount, faceCount, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, VK_IMAGE_VIEW_TYPE_CUBE);
     prefilteredImage->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipCount);
-    prefilteredImage->CopyFromBuffer(device, commandPool, staging.Handle(), faceCount);
-    prefilteredImage->GenerateMipmaps(physicalDevice, device, commandPool, faceCount);
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipCount);
     { VkImageViewCreateInfo vi{}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
       vi.image = prefilteredImage->Handle(); vi.viewType = VK_IMAGE_VIEW_TYPE_CUBE; vi.format = fmt;
       vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -108,7 +126,7 @@ void GenerateIblTextures(const VulkanDevice& device,
     irrStaging.Upload(std::as_bytes(std::span<const u8>(irrPx)));
     irradianceImage = std::make_unique<VulkanImage>(device, physicalDevice,
         VkExtent2D{irrFace, irrFace}, fmt, VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
         1, faceCount, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT, VK_IMAGE_VIEW_TYPE_CUBE);
     irradianceImage->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -121,6 +139,16 @@ void GenerateIblTextures(const VulkanDevice& device,
       vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
       vi.subresourceRange.levelCount = 1; vi.subresourceRange.layerCount = faceCount;
       vkCreateImageView(device.Handle(), &vi, nullptr, &irradianceView); }
+
+    // ---- GPU prefilter (GGX importance sampling) ----
+    RunGpuIblPrefilter(device, commandPool, srcView,
+        irradianceImage->Handle(), irradianceView,
+        prefilteredImage->Handle(), prefilteredView,
+        srcFace, irrFace, mipCount);
+
+    // Cleanup source cubemap (not needed after prefilter)
+    vkDestroyImageView(device.Handle(), srcView, nullptr);
+    srcCubemap.reset();
 
     // BRDF LUT
     const u32 lutSize = 128;
@@ -154,6 +182,191 @@ void GenerateIblTextures(const VulkanDevice& device,
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.maxLod = float(mipCount);
     vkCreateSampler(device.Handle(), &si, nullptr, &sampler);
+}
+
+void RunGpuIblPrefilter(const VulkanDevice& device, const VulkanCommandPool& commandPool,
+    VkImageView sourceCubemapView,
+    VkImage irradianceImage, VkImageView irradianceView,
+    VkImage prefilteredImage, VkImageView prefilteredView,
+    u32 faceSize, u32 irrFaceSize, u32 mipCount)
+{
+    // Descriptor set layout: samplerCube + storage imageCube
+    VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+    { VkDescriptorSetLayoutBinding bs[2]{};
+      bs[0].binding=0; bs[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      bs[0].descriptorCount=1; bs[0].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
+      bs[1].binding=1; bs[1].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      bs[1].descriptorCount=1; bs[1].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
+      VkDescriptorSetLayoutCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      ci.bindingCount=2; ci.pBindings=bs;
+      vkCreateDescriptorSetLayout(device.Handle(), &ci, nullptr, &dsl); }
+
+    // Sampler for source cubemap
+    VkSampler samp = VK_NULL_HANDLE;
+    { VkSamplerCreateInfo si{}; si.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+      si.magFilter=VK_FILTER_LINEAR; si.minFilter=VK_FILTER_LINEAR;
+      si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_LINEAR;
+      si.addressModeU=si.addressModeV=si.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+      si.maxLod=1.0f; vkCreateSampler(device.Handle(),&si,nullptr,&samp); }
+
+    // Create compute pipelines manually
+    auto buildPipe = [&device,&dsl](const std::string& path, VkPipeline& pipe, VkPipelineLayout& layout) {
+        VulkanShaderModule sm(device, path);
+        VkPipelineShaderStageCreateInfo ssi{};
+        ssi.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        ssi.stage=VK_SHADER_STAGE_COMPUTE_BIT; ssi.module=sm.Handle(); ssi.pName="main";
+        VkPushConstantRange pcr{}; pcr.stageFlags=VK_SHADER_STAGE_COMPUTE_BIT; pcr.offset=0; pcr.size=16;
+        VkPipelineLayoutCreateInfo pli{}; pli.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pli.setLayoutCount=1; pli.pSetLayouts=&dsl; pli.pushConstantRangeCount=1; pli.pPushConstantRanges=&pcr;
+        vkCreatePipelineLayout(device.Handle(),&pli,nullptr,&layout);
+        VkComputePipelineCreateInfo cpi{}; cpi.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        cpi.stage=ssi; cpi.layout=layout;
+        vkCreateComputePipelines(device.Handle(),VK_NULL_HANDLE,1,&cpi,nullptr,&pipe);
+    };
+    VkPipeline irrPipe=VK_NULL_HANDLE, prePipe=VK_NULL_HANDLE;
+    VkPipelineLayout irrLayout=VK_NULL_HANDLE, preLayout=VK_NULL_HANDLE;
+    buildPipe(std::string(SE_SHADER_DIR)+"/irradiance_map.comp.spv", irrPipe, irrLayout);
+    buildPipe(std::string(SE_SHADER_DIR)+"/prefilter_env.comp.spv", prePipe, preLayout);
+
+    // Pool + descriptor sets (1 for irradiance, mipCount for prefilter)
+    const u32 setCount = 1 + mipCount;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    { VkDescriptorPoolSize ps[2]{{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,setCount},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,setCount}};
+      VkDescriptorPoolCreateInfo pi{}; pi.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      pi.poolSizeCount=2; pi.pPoolSizes=ps; pi.maxSets=setCount;
+      vkCreateDescriptorPool(device.Handle(),&pi,nullptr,&pool); }
+    std::vector<VkDescriptorSetLayout> layouts(setCount, dsl);
+    std::vector<VkDescriptorSet> dSets(setCount);
+    { VkDescriptorSetAllocateInfo ai{}; ai.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      ai.descriptorPool=pool; ai.descriptorSetCount=setCount; ai.pSetLayouts=layouts.data();
+      vkAllocateDescriptorSets(device.Handle(),&ai,dSets.data()); }
+
+    // Write irradiance descriptor
+    { VkDescriptorImageInfo si{}; si.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      si.imageView=sourceCubemapView; si.sampler=samp;
+      VkDescriptorImageInfo di{}; di.imageLayout=VK_IMAGE_LAYOUT_GENERAL;
+      di.imageView=irradianceView; di.sampler=VK_NULL_HANDLE;
+      VkWriteDescriptorSet ws[2]{{},{}};
+      ws[0].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[0].dstSet=dSets[0]; ws[0].dstBinding=0;
+      ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[0].descriptorCount=1; ws[0].pImageInfo=&si;
+      ws[1].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[1].dstSet=dSets[0]; ws[1].dstBinding=1;
+      ws[1].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; ws[1].descriptorCount=1; ws[1].pImageInfo=&di;
+      vkUpdateDescriptorSets(device.Handle(),2,ws,0,nullptr); }
+
+    // Per-mip views for prefiltered output
+    std::vector<VkImageView> mipViews(mipCount);
+    for (u32 m = 0; m < mipCount; ++m) {
+        VkImageViewCreateInfo mvi{}; mvi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        mvi.image=prefilteredImage; mvi.viewType=VK_IMAGE_VIEW_TYPE_CUBE;
+        mvi.format=VK_FORMAT_R16G16B16A16_SFLOAT;
+        mvi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        mvi.subresourceRange.baseMipLevel=m; mvi.subresourceRange.levelCount=1;
+        mvi.subresourceRange.layerCount=6;
+        vkCreateImageView(device.Handle(),&mvi,nullptr,&mipViews[m]);
+    }
+
+    // Write prefilter descriptors (one per mip with per-mip view)
+    for (u32 m = 0; m < mipCount; ++m) {
+        VkDescriptorImageInfo si{}; si.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        si.imageView=sourceCubemapView; si.sampler=samp;
+        VkDescriptorImageInfo di{}; di.imageLayout=VK_IMAGE_LAYOUT_GENERAL;
+        di.imageView=mipViews[m]; di.sampler=VK_NULL_HANDLE;
+        VkWriteDescriptorSet ws[2]{{},{}};
+        ws[0].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[0].dstSet=dSets[1+m]; ws[0].dstBinding=0;
+        ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; ws[0].descriptorCount=1; ws[0].pImageInfo=&si;
+        ws[1].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[1].dstSet=dSets[1+m]; ws[1].dstBinding=1;
+        ws[1].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; ws[1].descriptorCount=1; ws[1].pImageInfo=&di;
+        vkUpdateDescriptorSets(device.Handle(),2,ws,0,nullptr); }
+
+    // One-shot command buffer
+    VkCommandBuffer cb = VK_NULL_HANDLE;
+    { VkCommandBufferAllocateInfo cai{}; cai.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      cai.commandPool=commandPool.Handle(); cai.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+      cai.commandBufferCount=1; vkAllocateCommandBuffers(device.Handle(),&cai,&cb); }
+    VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cb,&bi);
+
+    // Transition irradiance to GENERAL
+    { VkImageMemoryBarrier bar{}; bar.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      bar.image=irradianceImage; bar.oldLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      bar.newLayout=VK_IMAGE_LAYOUT_GENERAL; bar.srcAccessMask=VK_ACCESS_SHADER_READ_BIT;
+      bar.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
+      bar.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,6};
+      vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,0,nullptr,0,nullptr,1,&bar); }
+
+    // Irradiance convolution
+    vkCmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_COMPUTE,irrPipe);
+    vkCmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_COMPUTE,irrLayout,0,1,&dSets[0],0,nullptr);
+    for (u32 face=0; face<6; ++face) {
+        struct { u32 f; u32 _p[3]; } pc{face,{0,0,0}};
+        vkCmdPushConstants(cb,irrLayout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(pc),&pc);
+        vkCmdDispatch(cb,(irrFaceSize+7)/8,(irrFaceSize+7)/8,1);
+        VkMemoryBarrier fb{}; fb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        fb.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; fb.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,1,&fb,0,nullptr,0,nullptr); }
+
+    // Transition irradiance back
+    { VkImageMemoryBarrier bar{}; bar.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      bar.image=irradianceImage; bar.oldLayout=VK_IMAGE_LAYOUT_GENERAL;
+      bar.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      bar.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; bar.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+      bar.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,6};
+      vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,nullptr,0,nullptr,1,&bar); }
+
+    // GGX prefilter per mip
+    vkCmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_COMPUTE,prePipe);
+    for (u32 m=0; m<mipCount; ++m) {
+        { VkImageMemoryBarrier bar{}; bar.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          bar.image=prefilteredImage; bar.oldLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+          bar.newLayout=VK_IMAGE_LAYOUT_GENERAL;
+          bar.srcAccessMask=VK_ACCESS_SHADER_READ_BIT; bar.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
+          bar.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,m,1,0,6};
+          vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,0,nullptr,0,nullptr,1,&bar); }
+
+        vkCmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_COMPUTE,preLayout,
+            0,1,&dSets[1+m],0,nullptr);
+        const float roughness = float(m)/float(std::max(mipCount-1u,1u));
+        for (u32 face=0; face<6; ++face) {
+            struct { float r; u32 f; u32 _p[2]; } pc{roughness,face,{0,0}};
+            vkCmdPushConstants(cb,preLayout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(pc),&pc);
+            u32 ms=std::max(faceSize>>m,1u);
+            vkCmdDispatch(cb,(ms+7)/8,(ms+7)/8,1);
+            VkMemoryBarrier fb{}; fb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            fb.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; fb.dstAccessMask=VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,0,1,&fb,0,nullptr,0,nullptr); }
+
+        { VkImageMemoryBarrier bar{}; bar.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          bar.image=prefilteredImage; bar.oldLayout=VK_IMAGE_LAYOUT_GENERAL;
+          bar.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+          bar.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; bar.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+          bar.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,m,1,0,6};
+          vkCmdPipelineBarrier(cb,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+              VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,0,0,nullptr,0,nullptr,1,&bar); }
+    }
+
+    vkEndCommandBuffer(cb);
+    { VkSubmitInfo si{}; si.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO;
+      si.commandBufferCount=1; si.pCommandBuffers=&cb;
+      vkQueueSubmit(device.GraphicsQueue(),1,&si,VK_NULL_HANDLE);
+      vkQueueWaitIdle(device.GraphicsQueue()); }
+
+    // Cleanup
+    vkFreeCommandBuffers(device.Handle(),commandPool.Handle(),1,&cb);
+    for (auto& v : mipViews) if(v) vkDestroyImageView(device.Handle(),v,nullptr);
+    vkDestroyDescriptorPool(device.Handle(),pool,nullptr);
+    vkDestroyDescriptorSetLayout(device.Handle(),dsl,nullptr);
+    vkDestroySampler(device.Handle(),samp,nullptr);
+    vkDestroyPipeline(device.Handle(), irrPipe, nullptr);
+    vkDestroyPipeline(device.Handle(), prePipe, nullptr);
+    vkDestroyPipelineLayout(device.Handle(), irrLayout, nullptr);
+    vkDestroyPipelineLayout(device.Handle(), preLayout, nullptr);
 }
 
 }

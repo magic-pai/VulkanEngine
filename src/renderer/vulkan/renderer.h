@@ -400,7 +400,7 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
-n    // IBL textures
+    // IBL textures
         std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;
     std::unique_ptr<VulkanImage> m_IblPrefilteredImage;
