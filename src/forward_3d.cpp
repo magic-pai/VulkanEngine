@@ -1551,30 +1551,29 @@ int main() {
         se::PipelineSpec::DefaultForward3D(vertexShaderPath, fragmentShaderPath)
     );
 
-    se::MeshData3D cubeMeshData = se::MeshFactory::CreateCube();
-    se::VulkanMesh cubeMesh(
-        app.Device(),
-        app.PhysicalDevice(),
-        app.CommandPool(),
-        std::move(cubeMeshData.vertices),
-        std::move(cubeMeshData.indices)
-    );
-    se::MeshData3D planeMeshData = se::MeshFactory::CreatePlane();
-    se::VulkanMesh planeMesh(
-        app.Device(),
-        app.PhysicalDevice(),
-        app.CommandPool(),
-        std::move(planeMeshData.vertices),
-        std::move(planeMeshData.indices)
-    );
-    se::MeshData3D gridMeshData = se::MeshFactory::CreateGrid(16, 0.25f, 0.012f);
-    se::VulkanMesh gridMesh(
-        app.Device(),
-        app.PhysicalDevice(),
-        app.CommandPool(),
-        std::move(gridMeshData.vertices),
-        std::move(gridMeshData.indices)
-    );
+    // Create procedural meshes on heap (persistent), skip if already cached
+    static std::unique_ptr<se::VulkanMesh> s_cubeMesh, s_planeMesh, s_gridMesh;
+    if (!s_cubeMesh) {
+        se::MeshData3D d = se::MeshFactory::CreateCube();
+        s_cubeMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
+            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
+    }
+    if (!app.RenderResources().ContainsMesh("Cube"))
+        app.RenderResources().RegisterMesh("Cube", *s_cubeMesh);
+    if (!s_planeMesh) {
+        se::MeshData3D d = se::MeshFactory::CreatePlane();
+        s_planeMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
+            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
+    }
+    if (!app.RenderResources().ContainsMesh("Plane"))
+        app.RenderResources().RegisterMesh("Plane", *s_planeMesh);
+    if (!s_gridMesh) {
+        se::MeshData3D d = se::MeshFactory::CreateGrid(16, 0.25f, 0.012f);
+        s_gridMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
+            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
+    }
+    if (!app.RenderResources().ContainsMesh("Grid"))
+        app.RenderResources().RegisterMesh("Grid", *s_gridMesh);
 
     se::VulkanMaterial& cubeMaterial = app.MaterialLibrary().Create(
         "WarmCubeMaterial",
@@ -1767,9 +1766,6 @@ int main() {
         opacityProperties.cameraControls[3] += se::kMaterialTextureFlagOpacity;
     }
 
-    app.RenderResources().RegisterMesh("Cube", cubeMesh);
-    app.RenderResources().RegisterMesh("Plane", planeMesh);
-    app.RenderResources().RegisterMesh("Grid", gridMesh);
     app.RenderResources().RegisterMaterial("WarmCubeMaterial", cubeMaterial);
     app.RenderResources().RegisterMaterial("BlueCubeMaterial", blueCubeMaterial);
     app.RenderResources().RegisterMaterial("GreenCubeMaterial", greenCubeMaterial);
