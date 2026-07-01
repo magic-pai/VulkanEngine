@@ -46,4 +46,35 @@ private:
     VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
 };
 
+// Hi-Z depth pyramid: one storage image per mip level
+class VulkanHiZDescriptorSetLayout {
+public:
+    explicit VulkanHiZDescriptorSetLayout(const VulkanDevice& device);
+    ~VulkanHiZDescriptorSetLayout();
+    SE_DISABLE_COPY(VulkanHiZDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanHiZDescriptorSetLayout);
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+// Occlusion culling: Hi-Z texture + instance bounds SSBO + visibility SSBO
+class VulkanOcclusionCullDescriptorSetLayout {
+public:
+    static constexpr u32 kMaxInstances = 4096;
+    explicit VulkanOcclusionCullDescriptorSetLayout(const VulkanDevice& device);
+    ~VulkanOcclusionCullDescriptorSetLayout();
+    SE_DISABLE_COPY(VulkanOcclusionCullDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanOcclusionCullDescriptorSetLayout);
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
 }

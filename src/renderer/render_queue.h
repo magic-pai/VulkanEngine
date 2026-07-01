@@ -45,10 +45,16 @@ struct RenderQueueCacheStats {
     u32 queueCacheMisses = 0;
 };
 
+struct RenderQueueLodOptions {
+    bool enabled = false;
+    glm::vec3 cameraPosition{0.0f}; f32 screenHeight=1080.0f; f32 fovYRadians=1.0472f;
+};
+
 struct RenderQueueBuildOptions {
     const Frustum* frustum = nullptr;
     RenderQueueCullingStats* cullingStats = nullptr;
     RenderQueueCacheStats* cacheStats = nullptr;
+    RenderQueueLodOptions lodOptions{};
     bool shadowCastersOnly = false;
     const void* sceneIdentity = nullptr;
     u64 sceneMembershipRevision = 0;
@@ -81,6 +87,8 @@ struct RenderCommand {
     RenderBounds worldBounds{};
     RenderMaterialPushConstants materialPushConstants{};
     bool castShadow = false;
+    u32 lodLevel = 0;
+    f32 lodScreenFraction = 1.0f;
     i32 drawOrder = 0;
     std::uintptr_t materialSortKey = 0;
     std::uintptr_t meshSortKey = 0;

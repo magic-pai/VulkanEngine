@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
+#include "renderer/vulkan/mesh_lod.h"
 #include "renderer/vulkan/render_resources_2d.h"
 #include "scene/renderable_2d.h"
 #include "scene/renderable_3d.h"
@@ -350,6 +351,17 @@ void RenderQueue::BuildFromScene3D(
 
         if (visible) {
             command.materialPushConstants = MaterialPushConstantsFor(*command.material);
+            // LOD selection based on screen-space size
+            if (options.lodOptions.enabled && command.worldBounds.valid) {
+                glm::vec3 extent = command.worldBounds.max - command.worldBounds.min;
+                f32 radius = glm::length(extent) * 0.5f;
+                glm::vec3 center = (command.worldBounds.min + command.worldBounds.max) * 0.5f;
+                f32 dist = glm::distance(center, options.lodOptions.cameraPosition);
+                command.lodScreenFraction = MeshLodGenerator::ComputeScreenFraction(
+                    radius, dist, options.lodOptions.screenHeight, options.lodOptions.fovYRadians);
+                command.lodLevel = MeshLodGenerator::SelectLod(command.lodScreenFraction,
+                    MeshLodChain{}, 0);
+            }
             Submit(command);
             ++cullingStats.visible;
         } else {
