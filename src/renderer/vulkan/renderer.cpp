@@ -3613,6 +3613,28 @@ void VulkanRenderer::RecreateSwapchain() {
         *m_DirectionalShadowCascadeBuffer,
         *m_LocalShadowBuffer
     );
+    // Rebind IBL textures after descriptor pool recreation
+    if (m_IblSampler && m_IblBrdfImage) {
+        for (u32 i = 0; i < m_Swapchain->Images().size(); ++i) {
+            VkWriteDescriptorSet ws[3]{};
+            VkDescriptorImageInfo bi{}; bi.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            bi.imageView=m_IblBrdfImage->View(); bi.sampler=m_IblSampler;
+            ws[0].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[0].dstSet=m_DescriptorSets->Handle(i);
+            ws[0].dstBinding=6; ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            ws[0].descriptorCount=1; ws[0].pImageInfo=&bi;
+            VkDescriptorImageInfo ii{}; ii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            ii.imageView=m_IblIrradianceView; ii.sampler=m_IblSampler;
+            ws[1].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[1].dstSet=m_DescriptorSets->Handle(i);
+            ws[1].dstBinding=7; ws[1].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            ws[1].descriptorCount=1; ws[1].pImageInfo=&ii;
+            VkDescriptorImageInfo pi{}; pi.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            pi.imageView=m_IblPrefilteredView; pi.sampler=m_IblSampler;
+            ws[2].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[2].dstSet=m_DescriptorSets->Handle(i);
+            ws[2].dstBinding=8; ws[2].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            ws[2].descriptorCount=1; ws[2].pImageInfo=&pi;
+            vkUpdateDescriptorSets(m_Device.Handle(), 3, ws, 0, nullptr);
+        }
+    }
     m_SyncObjects->RecreateSwapchainSyncObjects(m_Swapchain->Images().size());
     m_DepthBuffer->Recreate(m_Device, m_PhysicalDevice, *m_Swapchain);
     if (m_SceneRenderTargets != nullptr) {
