@@ -919,6 +919,8 @@ void VulkanCommandBuffer::Record(
     const VulkanDescriptorSets* lightTileCullDescriptorSets,
     u32 lightTileCullGroupCountX,
     u32 lightTileCullGroupCountY,
+    u32 lightTileCullGroupCountZ,
+    const VulkanComputePipeline* lightClusterCullComputePipeline,
     const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline,
     std::span<const RenderCommand> forwardResidualRenderCommands,
@@ -1351,31 +1353,20 @@ void VulkanCommandBuffer::Record(
         lightTileCullDescriptorSets != nullptr &&
         lightTileCullGroupCountX > 0 &&
         lightTileCullGroupCountY > 0) {
-        vkCmdBindPipeline(
-            commandBuffer,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            lightTileCullComputePipeline->Handle()
-        );
+        const bool useClustered = lightClusterCullComputePipeline != nullptr;
+        const VulkanComputePipeline& cullPipeline = useClustered
+            ? *lightClusterCullComputePipeline : *lightTileCullComputePipeline;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline.Handle());
 
         const VkDescriptorSet frameDescriptorSet =
             lightTileCullDescriptorSets->Handle(imageIndex);
-        vkCmdBindDescriptorSets(
-            commandBuffer,
-            VK_PIPELINE_BIND_POINT_COMPUTE,
-            lightTileCullComputePipeline->Layout(),
-            0,
-            1,
-            &frameDescriptorSet,
-            0,
-            nullptr
-        );
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            cullPipeline.Layout(), 0, 1, &frameDescriptorSet, 0, nullptr);
 
-        vkCmdDispatch(
-            commandBuffer,
+        vkCmdDispatch(commandBuffer,
             lightTileCullGroupCountX,
             lightTileCullGroupCountY,
-            1
-        );
+            lightTileCullGroupCountZ);
         BarrierComputeLightTilesForFragmentRead(commandBuffer);
 
         if (bindStats != nullptr) {

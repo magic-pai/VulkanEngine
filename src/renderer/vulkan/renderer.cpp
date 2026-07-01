@@ -1846,6 +1846,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_WeightedTranslucencyResolvePipeline.reset();
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
+    m_LightClusterCullComputePipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
@@ -2715,6 +2716,8 @@ void VulkanRenderer::DrawFrame() {
         recordLightTileCullCompute ? m_DescriptorSets.get() : nullptr,
         lightTileCullGroupCountX,
         lightTileCullGroupCountY,
+        4, // lightTileCullGroupCountZ (clustered: 4 depth slices)
+        m_LightClusterCullComputePipeline.get(),
         has3DMainPass ? m_ForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(forwardResidualCommands.data(), forwardResidualCommands.size()) : std::span<const RenderCommand>{},
@@ -3334,8 +3337,12 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_DescriptorSetLayout,
             lightTileCullShaderPath
         );
+        m_LightClusterCullComputePipeline = std::make_unique<VulkanComputePipeline>(
+            m_Device, *m_DescriptorSetLayout,
+            std::string(SE_SHADER_DIR) + "/light_cluster_cull.comp.spv");
     } else {
         m_LightTileCullComputePipeline.reset();
+        m_LightClusterCullComputePipeline.reset();
     }
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
     const PipelineSpec shadowSpec =

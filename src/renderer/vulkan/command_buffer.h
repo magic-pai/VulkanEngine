@@ -115,6 +115,8 @@ public:
         const VulkanDescriptorSets* lightTileCullDescriptorSets = nullptr,
         u32 lightTileCullGroupCountX = 0,
         u32 lightTileCullGroupCountY = 0,
+        u32 lightTileCullGroupCountZ = 1,
+        const VulkanComputePipeline* lightClusterCullComputePipeline = nullptr,
         const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline = nullptr,
         std::span<const RenderCommand> forwardResidualRenderCommands = {},
