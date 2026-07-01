@@ -400,6 +400,11 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
+n    // Hi-Z depth pyramid
+    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
+    std::vector<std::array<VkImageView,4>> m_HiZMipViews;
+    std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
+    std::unique_ptr<VulkanComputePipeline> m_HiZBuildComputePipeline;
     // IBL textures
         std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;

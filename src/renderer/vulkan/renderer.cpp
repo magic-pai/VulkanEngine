@@ -1848,6 +1848,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_LightClusterCullComputePipeline.reset();
+    m_HiZBuildComputePipeline.reset();
+    m_HiZDescriptorSetLayout.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
@@ -3008,6 +3010,7 @@ void VulkanRenderer::CreateSwapchainResources() {
     }
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_DepthBuffer = std::make_unique<VulkanDepthBuffer>(m_Device, m_PhysicalDevice, *m_Swapchain);
+    m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
     m_SceneRenderTargets = std::make_unique<VulkanSceneRenderTargets>(
         m_Device,
         m_PhysicalDevice,
@@ -3021,6 +3024,22 @@ void VulkanRenderer::CreateSwapchainResources() {
     GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
         m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
         m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);
+    // Hi-Z depth pyramid (4 mips, per-swapchain-image, R32_SFLOAT)
+    const u32 hizMips = 4, sc = m_Swapchain->Images().size();
+    m_HiZImages.clear(); m_HiZMipViews.resize(sc);
+    for (u32 i=0;i<sc;++i) {
+        m_HiZImages.push_back(std::make_unique<VulkanImage>(m_Device,m_PhysicalDevice,
+            m_SceneRenderTargets->Extent(), VK_FORMAT_R32_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT, hizMips));
+        for (u32 m=0;m<hizMips;++m) {
+            VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            vi.image=m_HiZImages[i]->Handle(); vi.viewType=VK_IMAGE_VIEW_TYPE_2D;
+            vi.format=VK_FORMAT_R32_SFLOAT; vi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+            vi.subresourceRange.baseMipLevel=m; vi.subresourceRange.levelCount=1; vi.subresourceRange.layerCount=1;
+            vkCreateImageView(m_Device.Handle(),&vi,nullptr,&m_HiZMipViews[i][m]);
+        }
+    }
     m_HdrRenderPass = std::make_unique<VulkanHdrRenderPass>(
         m_Device,
         m_SceneRenderTargets->HdrSceneColorFormat()
@@ -3366,9 +3385,15 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_LightClusterCullComputePipeline = std::make_unique<VulkanComputePipeline>(
             m_Device, *m_DescriptorSetLayout,
             std::string(SE_SHADER_DIR) + "/light_cluster_cull.comp.spv");
+        // Hi-Z build compute pipeline
+        m_HiZBuildComputePipeline = std::make_unique<VulkanComputePipeline>(
+            m_Device, *m_HiZDescriptorSetLayout,
+            std::string(SE_SHADER_DIR) + "/build_hiz.comp.spv");
     } else {
         m_LightTileCullComputePipeline.reset();
         m_LightClusterCullComputePipeline.reset();
+    m_HiZBuildComputePipeline.reset();
+    m_HiZDescriptorSetLayout.reset();
     }
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
     const PipelineSpec shadowSpec =
