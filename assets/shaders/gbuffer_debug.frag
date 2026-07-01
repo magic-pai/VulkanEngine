@@ -27,6 +27,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 colorGradingControls;
     vec4 toneMappingControls;
     vec4 autoExposureControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
     vec4 sharpeningControls;
 } frame;
 

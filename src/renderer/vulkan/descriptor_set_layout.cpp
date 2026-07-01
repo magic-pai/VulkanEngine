@@ -91,7 +91,13 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
     prefilteredMapBinding.descriptorCount = 1;
     prefilteredMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    const std::array<VkDescriptorSetLayoutBinding, 9> bindings = {
+    VkDescriptorSetLayoutBinding probeGridBinding{};
+    probeGridBinding.binding = 9;
+    probeGridBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    probeGridBinding.descriptorCount = 1;
+    probeGridBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+
+    const std::array<VkDescriptorSetLayoutBinding, 10> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
@@ -100,7 +106,8 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         localShadowLayoutBinding,
         brdfLutLayoutBinding,
         irradianceMapBinding,
-        prefilteredMapBinding
+        prefilteredMapBinding,
+        probeGridBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

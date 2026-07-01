@@ -45,6 +45,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 colorGradingControls;
     vec4 toneMappingControls;
     vec4 autoExposureControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
     vec4 sharpeningControls;
 } frame;
 
@@ -116,6 +118,7 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
 layout(set = 0, binding = 6) uniform sampler2D brdfLut;
 layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
+layout(std430, set = 0, binding = 9) readonly buffer ProbeGridData { vec4 probes[]; } probeGrid;
 
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 layout(set = 1, binding = 1) uniform sampler2D materialAuxSampler;
@@ -269,6 +272,31 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
     float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
     return (base + sun) * intensity * enabled;
+}
+
+vec3 SampleProbeGridIrradiance(vec3 worldPos) {
+    vec3 origin = frame.probeGridOriginSpacing.xyz;
+    float spacing = frame.probeGridOriginSpacing.w;
+    vec3 gs = frame.probeGridSizeBlend.xyz;
+    if (spacing <= 0.0 || gs.x < 1.0) return vec3(0.0);
+    vec3 lp = (worldPos - origin) / spacing;
+    ivec3 bc = ivec3(floor(lp));
+    vec3 frac = fract(lp);
+    bc = clamp(bc, ivec3(0), ivec3(gs) - 2);
+    frac = clamp(frac, 0.0, 1.0);
+    int gx=int(gs.x), gy=int(gs.y);
+    vec3 c000=probeGrid.probes[uint(bc.z*gy*gx+bc.y*gx+bc.x)*7u].rgb;
+    vec3 c100=probeGrid.probes[uint(bc.z*gy*gx+bc.y*gx+bc.x+1)*7u].rgb;
+    vec3 c010=probeGrid.probes[uint(bc.z*gy*gx+(bc.y+1)*gx+bc.x)*7u].rgb;
+    vec3 c110=probeGrid.probes[uint(bc.z*gy*gx+(bc.y+1)*gx+bc.x+1)*7u].rgb;
+    vec3 c001=probeGrid.probes[uint((bc.z+1)*gy*gx+bc.y*gx+bc.x)*7u].rgb;
+    vec3 c101=probeGrid.probes[uint((bc.z+1)*gy*gx+bc.y*gx+bc.x+1)*7u].rgb;
+    vec3 c011=probeGrid.probes[uint((bc.z+1)*gy*gx+(bc.y+1)*gx+bc.x)*7u].rgb;
+    vec3 c111=probeGrid.probes[uint((bc.z+1)*gy*gx+(bc.y+1)*gx+bc.x+1)*7u].rgb;
+    vec3 c00=mix(c000,c100,frac.x); vec3 c10=mix(c010,c110,frac.x);
+    vec3 c01=mix(c001,c101,frac.x); vec3 c11=mix(c011,c111,frac.x);
+    vec3 c0=mix(c00,c10,frac.y); vec3 c1=mix(c01,c11,frac.y);
+    return mix(c0,c1,frac.z);
 }
 
 float LocalReflectionProbeWeight(vec3 worldPosition) {
@@ -1512,6 +1540,7 @@ void main() {
         envSpecular * (0.55 + specularStrength)) * envStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
+    ambient += SampleProbeGridIrradiance(fragWorldPosition) * baseColor * occlusion * (1.0 - metallic) * 0.5;
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =

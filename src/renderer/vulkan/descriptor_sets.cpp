@@ -105,7 +105,7 @@ void VulkanDescriptorSets::CreateDescriptorPool(
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<u32>(count);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[1].descriptorCount = static_cast<u32>(count * 6);
+    poolSizes[1].descriptorCount = static_cast<u32>(count * 7); // 7 storage bindings
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[2].descriptorCount = static_cast<u32>(count * 5);
 
@@ -218,6 +218,13 @@ void VulkanDescriptorSets::CreateDescriptorSets(
         descriptorWrites[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         descriptorWrites[5].descriptorCount = 1;
         descriptorWrites[5].pBufferInfo = &localShadowBufferInfo;
+
+        // Binding 9 (probe grid): placeholder, updated when probe grid buffer is active
+        { VkWriteDescriptorSet w{}; w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+          w.dstSet=m_DescriptorSets[index]; w.dstBinding=9;
+          w.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.descriptorCount=1;
+          w.pBufferInfo=&localShadowBufferInfo;
+          vkUpdateDescriptorSets(device.Handle(), 1, &w, 0, nullptr); }
 
         vkUpdateDescriptorSets(
             device.Handle(),

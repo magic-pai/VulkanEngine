@@ -47,6 +47,8 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 colorGradingControls{ 0.0f, 1.0f, 1.0f, 1.0f };
     alignas(16) glm::vec4 toneMappingControls{ 0.0f, 1.0f, 4.0f, 1.0f };
     alignas(16) glm::vec4 autoExposureControls{ 0.18f, 0.25f, 4.0f, 1.0f };
+    alignas(16) glm::vec4 probeGridOriginSpacing{ -80.0f, -5.0f, -80.0f, 10.0f };
+    alignas(16) glm::vec4 probeGridSizeBlend{ 0.0f, 0.0f, 0.0f, 0.85f };
     alignas(16) glm::vec4 sharpeningControls{ 0.0f, 0.35f, 1.0f, 0.0f };
 };
 
