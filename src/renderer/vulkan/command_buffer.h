@@ -129,7 +129,9 @@ public:
         const VulkanInstanceBuffer* instanceBuffer = nullptr,
         std::span<const RenderInstanceBatch> instanceBatches = {},
         const VulkanGpuTimer* gpuTimer = nullptr,
-        RendererBindStats* bindStats = nullptr
+        RendererBindStats* bindStats = nullptr,
+        const VulkanComputePipeline* hizBuildPipeline = nullptr,
+        const VulkanSceneRenderTargets* hizTargets = nullptr
     ) const;
     void Recreate(
         const VulkanDevice& device,

@@ -2721,6 +2721,8 @@ void VulkanRenderer::DrawFrame() {
         lightTileCullGroupCountY,
         4, // lightTileCullGroupCountZ (clustered: 4 depth slices)
         m_LightClusterCullComputePipeline.get(),
+        m_HiZBuildComputePipeline.get(),
+        m_SceneRenderTargets.get(),
         has3DMainPass ? m_ForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(forwardResidualCommands.data(), forwardResidualCommands.size()) : std::span<const RenderCommand>{},

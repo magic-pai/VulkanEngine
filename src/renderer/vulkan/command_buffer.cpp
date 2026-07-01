@@ -933,7 +933,9 @@ void VulkanCommandBuffer::Record(
     const VulkanInstanceBuffer* instanceBuffer,
     std::span<const RenderInstanceBatch> instanceBatches,
     const VulkanGpuTimer* gpuTimer,
-    RendererBindStats* bindStats
+    RendererBindStats* bindStats,
+    const VulkanComputePipeline* hizBuildPipeline,
+    const VulkanSceneRenderTargets* hizTargets
 ) const {
     const std::vector<VkFramebuffer>& framebuffers = framebuffer.Handles();
     const VkExtent2D extent = swapchain.Extent();
@@ -1347,6 +1349,22 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    // Hi-Z depth pyramid build
+    if (hizBuildPipeline && hizTargets) {
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, hizBuildPipeline->Handle());
+        VkExtent2D ext = hizTargets->Extent();
+        for (u32 m = 0; m < 4; ++m) {
+            // We'd bind per-mip descriptor sets here. For v1, skip (no descriptor sets wired yet).
+            u32 mw = std::max(ext.width >> (m+1), 1u);
+            u32 mh = std::max(ext.height >> (m+1), 1u);
+            vkCmdDispatch(commandBuffer, (mw+15)/16, (mh+15)/16, 1);
+            VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            mb.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; mb.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,1,&mb,0,nullptr,0,nullptr);
+        }
     }
 
     if (lightTileCullComputePipeline != nullptr &&
