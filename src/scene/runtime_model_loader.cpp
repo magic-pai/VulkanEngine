@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/material_library.h"
+#include "renderer/vulkan/mesh_lod.h"
 #include "renderer/vulkan/render_resources_2d.h"
 #include "renderer/vulkan/upload_batch.h"
 
@@ -423,7 +424,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
 
         loadedModel->meshes.reserve(importedModelData.meshes.size());
         loadedModel->meshIds.reserve(importedModelData.meshes.size());
+        loadedModel->lodChains.reserve(importedModelData.meshes.size());
         for (ImportedMesh3D& importedMeshData : importedModelData.meshes) {
+            // Save a copy of vertex/index data for LOD generation before move
+            std::vector<Vertex3D> vCopy = importedMeshData.mesh.vertices;
+            std::vector<u32> iCopy = importedMeshData.mesh.indices;
             loadedModel->meshes.push_back(std::make_unique<VulkanMesh>(
                 m_Device,
                 m_PhysicalDevice,
@@ -432,6 +437,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 std::move(importedMeshData.mesh.indices),
                 &uploadBatch
             ));
+            // Generate LOD chain
+            loadedModel->lodChains.push_back(MeshLodGenerator::Generate(vCopy, iCopy));
         }
 
         loadedModel->materialIds.reserve(importedModelData.materials.size());
@@ -928,6 +935,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             const std::string meshId = idPrefix + "_Mesh" + std::to_string(meshIndex);
             loadedModel->meshIds.push_back(meshId);
             m_RenderResources.RegisterMesh(meshId, *loadedModel->meshes[meshIndex]);
+            // Register LOD chain if generated
+            if (meshIndex < loadedModel->lodChains.size() && !loadedModel->lodChains[meshIndex].Empty()) {
+                m_RenderResources.RegisterMeshLodChain(meshId, loadedModel->lodChains[meshIndex]);
+            }
         }
 
         for (std::size_t meshIndex = 0; meshIndex < importedModelData.meshes.size(); ++meshIndex) {

@@ -84,4 +84,18 @@ std::vector<const VulkanMaterial*> VulkanRenderResources2D::Materials() const {
     return materials;
 }
 
+void VulkanRenderResources2D::RegisterMeshLodChain(std::string_view id, const MeshLodChain& chain) {
+    m_LodChains[std::string(id)] = chain;
+}
+
+u32 VulkanRenderResources2D::SelectLod(std::string_view id, f32 sf, u32 prev) const {
+    auto it = m_LodChains.find(id);
+    if (it == m_LodChains.end()) return 0;
+    return MeshLodGenerator::SelectLod(sf, it->second, prev);
+}
+
+bool VulkanRenderResources2D::HasLodChain(std::string_view id) const {
+    return m_LodChains.find(id) != m_LodChains.end();
+}
+
 }

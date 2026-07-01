@@ -3,6 +3,7 @@
 #include "assets/model_importer.h"
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
+#include "renderer/vulkan/mesh_lod.h"
 #include "scene/scene_3d.h"
 
 #include <functional>
@@ -50,6 +51,7 @@ private:
         std::vector<VulkanMaterial*> materials;
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
+        std::vector<MeshLodChain> lodChains;
     };
 
     VulkanDevice& m_Device;

@@ -359,8 +359,8 @@ void RenderQueue::BuildFromScene3D(
                 f32 dist = glm::distance(center, options.lodOptions.cameraPosition);
                 command.lodScreenFraction = MeshLodGenerator::ComputeScreenFraction(
                     radius, dist, options.lodOptions.screenHeight, options.lodOptions.fovYRadians);
-                command.lodLevel = MeshLodGenerator::SelectLod(command.lodScreenFraction,
-                    MeshLodChain{}, 0);
+                command.lodLevel = renderResources.SelectLod(
+                    renderable->MeshId(), command.lodScreenFraction, 0);
             }
             Submit(command);
             ++cullingStats.visible;
