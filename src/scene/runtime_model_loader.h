@@ -6,6 +6,7 @@
 #include "scene/scene_3d.h"
 
 #include <functional>
+#include <unordered_map>
 
 namespace se {
 
@@ -18,6 +19,7 @@ class VulkanRenderResources2D;
 struct RuntimeModelLoadResult {
     bool loaded = false;
     std::string message;
+    bool cacheHit = false;
 };
 
 class RuntimeModelLoader {
@@ -58,6 +60,7 @@ private:
     Scene3D& m_Scene;
     std::string m_FallbackTexturePath;
     std::vector<std::unique_ptr<LoadedRuntimeModel>> m_LoadedModels;
+    std::unordered_map<std::string, std::size_t> m_ModelCache;
     u32 m_NextModelId = 0;
 };
 

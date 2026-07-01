@@ -368,6 +368,46 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
     glm::vec3 scale
 ) {
     try {
+        std::error_code ec;
+        const std::string cacheKey = std::filesystem::canonical(modelPath, ec).string();
+        const std::string lookupKey = ec ? modelPath.string() : cacheKey;
+
+        auto cacheIt = m_ModelCache.find(lookupKey);
+        if (cacheIt != m_ModelCache.end()) {
+            LoadedRuntimeModel& cached = *m_LoadedModels[cacheIt->second];
+            const u32 modelId = m_NextModelId++;
+            const std::string idPrefix = "RuntimeModel" + std::to_string(modelId);
+
+            for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
+                m_RenderResources.RegisterMesh(idPrefix + "_Mesh" + std::to_string(mi),
+                    *cached.meshes[mi]);
+            }
+            for (std::size_t mi = 0; mi < cached.materials.size(); ++mi) {
+                m_RenderResources.RegisterMaterial(idPrefix + "_Material" + std::to_string(mi),
+                    *cached.materials[mi]);
+            }
+
+            u32 partIdx = 0;
+            for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
+                const std::size_t matIdx = std::min(mi,
+                    cached.materialIds.empty() ? size_t(0) : cached.materialIds.size() - 1);
+                Renderable3D& part = m_Scene.CreateRenderable(
+                    "Cached " + PathLabel(modelPath) + " part" + std::to_string(partIdx++),
+                    idPrefix + "_Mesh" + std::to_string(mi),
+                    idPrefix + "_Material" + std::to_string(matIdx));
+                part.Transform().SetPosition(position);
+                part.Transform().SetRotationDegrees(rotationDegrees);
+                part.Transform().SetScale(scale);
+                part.Transform().SetAnimateRotation(false);
+            }
+
+            return RuntimeModelLoadResult{true,
+                "Loaded (cached) " + PathLabel(modelPath) + " (" +
+                    std::to_string(cached.meshes.size()) + " meshes, " +
+                    std::to_string(cached.materials.size()) + " materials)",
+                true};
+        }
+
         ModelImportOptions importOptions{};
         importOptions.fastImport = true;
         importOptions.validateScene = false;
@@ -913,13 +953,15 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
 
         const std::size_t meshCount = importedModelData.meshes.size();
         const std::size_t materialCount = importedModelData.materials.size();
+        m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
         return RuntimeModelLoadResult{
             true,
             "Loaded " + PathLabel(modelPath) + " (" +
                 std::to_string(meshCount) + " mesh(es), " +
-                std::to_string(materialCount) + " material(s))"
+                std::to_string(materialCount) + " material(s))",
+            false
         };
     } catch (const std::exception& error) {
         return RuntimeModelLoadResult{
