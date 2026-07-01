@@ -25,6 +25,7 @@ int main() {
 
     se::SampleScene2D sampleScene(
         app.Device(),
+        
         app.PhysicalDevice(),
         app.CommandPool(),
         app.MaterialLibrary(),

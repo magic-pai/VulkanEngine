@@ -259,8 +259,8 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     base = mix(base, skyHorizon, (1.0 - abs(direction.y)) * horizonBlend);
 
     float sunAmount = max(dot(direction, sunDirection), 0.0);
-    float sunPower = mix(1024.0, 24.0, roughness);
-    float sunDisk = pow(sunAmount, sunPower);
+    float sunPower = mix(128.0, 24.0, roughness);
+    float sunDisk = pow(max(sunAmount, 0.0001), sunPower);
     vec3 sunTint = vec3(1.12, 1.08, 1.0);
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
     float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));

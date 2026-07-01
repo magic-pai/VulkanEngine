@@ -981,8 +981,7 @@ void VulkanCommandBuffer::Record(
         descriptorSets.Count() == m_CommandBuffers.size(),
         "Descriptor set count must match command buffer count"
     );
-    SE_ASSERT(!renderCommands.empty(), "A command buffer record pass needs at least one render command");
-
+    // Allow empty render commands (e.g., looking at sky with no geometry visible)
     VkCommandBuffer commandBuffer = m_CommandBuffers[imageIndex];
     vkResetCommandBuffer(commandBuffer, 0);
 
