@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer/vulkan/material.h"
+#include "renderer/vulkan/texture_cache.h"
 
 namespace se {
 
@@ -56,6 +57,7 @@ public:
 
     VulkanMaterial& Get(std::string_view name);
     const VulkanMaterial& Get(std::string_view name) const;
+    VulkanTextureCache& TextureCache();
     bool Contains(std::string_view name) const;
     std::size_t Count() const;
 
@@ -72,6 +74,7 @@ private:
     const VulkanPhysicalDevice& m_PhysicalDevice;
     const VulkanCommandPool& m_CommandPool;
     std::vector<MaterialEntry> m_Materials;
+    VulkanTextureCache m_TextureCache;
 };
 
 }

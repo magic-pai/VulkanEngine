@@ -149,6 +149,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/vertex_buffer.cpp
     src/renderer/vulkan/index_buffer.cpp
     src/renderer/vulkan/mesh.cpp
+    src/renderer/vulkan/texture_cache.cpp
 )
 
 add_executable(SelfEngine

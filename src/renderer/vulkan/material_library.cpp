@@ -14,7 +14,12 @@ VulkanMaterialLibrary::VulkanMaterialLibrary(
     const VulkanCommandPool& commandPool
 ) : m_Device(device),
     m_PhysicalDevice(physicalDevice),
-    m_CommandPool(commandPool) {
+    m_CommandPool(commandPool),
+    m_TextureCache(device, physicalDevice, commandPool) {
+}
+
+VulkanTextureCache& VulkanMaterialLibrary::TextureCache() {
+    return m_TextureCache;
 }
 
 VulkanMaterial& VulkanMaterialLibrary::Create(
