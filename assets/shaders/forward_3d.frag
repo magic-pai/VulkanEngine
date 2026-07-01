@@ -113,6 +113,10 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
     LocalShadowTileRecord tiles[64];
 } localShadows;
 
+layout(set = 0, binding = 6) uniform sampler2D brdfLut;
+layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
+
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 layout(set = 1, binding = 1) uniform sampler2D materialAuxSampler;
 layout(set = 1, binding = 3) uniform sampler2D normalSampler;

@@ -73,13 +73,34 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     localShadowLayoutBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 6> bindings = {
+    VkDescriptorSetLayoutBinding brdfLutLayoutBinding{};
+    brdfLutLayoutBinding.binding = 6;
+    brdfLutLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    brdfLutLayoutBinding.descriptorCount = 1;
+    brdfLutLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding irradianceMapBinding{};
+    irradianceMapBinding.binding = 7;
+    irradianceMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    irradianceMapBinding.descriptorCount = 1;
+    irradianceMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding prefilteredMapBinding{};
+    prefilteredMapBinding.binding = 8;
+    prefilteredMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    prefilteredMapBinding.descriptorCount = 1;
+    prefilteredMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    const std::array<VkDescriptorSetLayoutBinding, 9> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
         lightTileDiagnosticsLayoutBinding,
         directionalShadowCascadeLayoutBinding,
-        localShadowLayoutBinding
+        localShadowLayoutBinding,
+        brdfLutLayoutBinding,
+        irradianceMapBinding,
+        prefilteredMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

@@ -107,6 +107,10 @@ layout(push_constant) uniform ObjectPushConstants {
     vec4 cameraDirection;
 } objectData;
 
+layout(set = 0, binding = 6) uniform sampler2D brdfLut;
+layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
+
 layout(set = 1, binding = 0) uniform sampler2D gBufferAlbedo;
 layout(set = 1, binding = 1) uniform sampler2D gBufferNormalRoughness;
 layout(set = 1, binding = 2) uniform sampler2D gBufferMaterial;

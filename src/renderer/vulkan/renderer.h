@@ -400,6 +400,13 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
+n    // IBL textures
+        std::unique_ptr<VulkanImage> m_IblBrdfImage;
+    std::unique_ptr<VulkanImage> m_IblIrradianceImage;
+    std::unique_ptr<VulkanImage> m_IblPrefilteredImage;
+    VkImageView m_IblIrradianceView = VK_NULL_HANDLE;
+    VkImageView m_IblPrefilteredView = VK_NULL_HANDLE;
+    VkSampler m_IblSampler = VK_NULL_HANDLE;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;

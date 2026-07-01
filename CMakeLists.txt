@@ -151,6 +151,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/index_buffer.cpp
     src/renderer/vulkan/mesh.cpp
     src/renderer/vulkan/texture_cache.cpp
+    src/renderer/vulkan/ibl_generator.cpp
 )
 
 add_executable(SelfEngine
