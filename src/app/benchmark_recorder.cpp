@@ -316,6 +316,9 @@ void BenchmarkRecorder::RecordFrame(
         << postProcess.bloomIntensity << ','
         << postProcess.bloomThreshold << ','
         << postProcess.bloomRadiusPixels << ','
+        << postProcess.bloomPyramidEnabled << ','
+        << postProcess.bloomPyramidMipCount << ','
+        << postProcess.bloomPyramidFallbacks << ','
         << postProcess.toneMappingEnabled << ','
         << postProcess.toneMapMode << ','
         << postProcess.exposure << ','
@@ -447,6 +450,12 @@ void BenchmarkRecorder::RecordFrame(
         << binds.bloomDebugDraws << ','
         << binds.bloomDebugFrameBinds << ','
         << binds.bloomDebugTextureBinds << ','
+        << binds.bloomDownsampleDraws << ','
+        << binds.bloomDownsampleFrameBinds << ','
+        << binds.bloomDownsampleTextureBinds << ','
+        << binds.bloomUpsampleDraws << ','
+        << binds.bloomUpsampleFrameBinds << ','
+        << binds.bloomUpsampleTextureBinds << ','
         << binds.toneMappingDebugDraws << ','
         << binds.toneMappingDebugFrameBinds << ','
         << binds.toneMappingDebugTextureBinds << ','
@@ -667,6 +676,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
         << "height_fog_start_distance,height_fog_max_opacity,"
         << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"
+        << "bloom_pyramid_enabled,bloom_pyramid_mip_count,bloom_pyramid_fallbacks,"
         << "tone_mapping_enabled,tone_map_mode,exposure,tone_map_white_point,"
         << "auto_exposure_enabled,auto_exposure_target_luminance,"
         << "auto_exposure_min,auto_exposure_max,auto_exposure_adaptation,"
@@ -730,6 +740,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "height_fog_debug_gbuffer_binds,"
         << "bloom_debug_draws,bloom_debug_frame_binds,"
         << "bloom_debug_texture_binds,"
+        << "bloom_downsample_draws,bloom_downsample_frame_binds,"
+        << "bloom_downsample_texture_binds,bloom_upsample_draws,"
+        << "bloom_upsample_frame_binds,bloom_upsample_texture_binds,"
         << "tone_mapping_debug_draws,tone_mapping_debug_frame_binds,"
         << "tone_mapping_debug_texture_binds,"
         << "auto_exposure_debug_draws,auto_exposure_debug_frame_binds,"

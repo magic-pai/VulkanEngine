@@ -1882,6 +1882,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_CommandBuffer.reset();
     m_InstanceBuffer.reset();
     m_Framebuffer.reset();
+    m_BloomUpsamplePipeline.reset();
+    m_BloomDownsamplePipeline.reset();
     m_OverlayGraphicsPipeline.reset();
     m_InstancedGraphicsPipeline.reset();
     m_DoubleSidedInstancedGraphicsPipeline.reset();
@@ -1920,10 +1922,16 @@ VulkanRenderer::~VulkanRenderer() {
     m_LocalShadowAtlas.reset();
     m_DirectionalShadowCascadeAtlas.reset();
     m_ShadowMap.reset();
+    m_BloomUpsampleFramebuffer.reset();
+    m_BloomDownsampleFramebuffer.reset();
+    m_BloomUpsampleRenderPass.reset();
+    m_BloomDownsampleRenderPass.reset();
     m_HdrDescriptorSets.reset();
+    m_BloomDescriptorSets.reset();
     m_WeightedTranslucencyDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
     m_SceneTargetSampler.reset();
+    m_BloomPyramid.reset();
     m_SceneRenderTargets.reset();
     if (m_IblSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_Device.Handle(), m_IblSampler, nullptr);
@@ -2281,6 +2289,23 @@ void VulkanRenderer::DrawFrame() {
             !recordAutoExposureCompute
             ? 1u
             : 0u;
+    const bool recordBloomPyramid =
+        frameStats.postProcess.bloomEnabled > 0 &&
+        hdrCompositeAvailable &&
+        m_BloomPyramid != nullptr &&
+        m_BloomDescriptorSets != nullptr &&
+        m_BloomDownsampleRenderPass != nullptr &&
+        m_BloomUpsampleRenderPass != nullptr &&
+        m_BloomDownsampleFramebuffer != nullptr &&
+        m_BloomUpsampleFramebuffer != nullptr &&
+        m_BloomDownsamplePipeline != nullptr &&
+        m_BloomUpsamplePipeline != nullptr;
+    frameStats.postProcess.bloomPyramidEnabled =
+        recordBloomPyramid ? 1u : 0u;
+    frameStats.postProcess.bloomPyramidMipCount =
+        m_BloomPyramid != nullptr ? m_BloomPyramid->MipCount() : 0u;
+    frameStats.postProcess.bloomPyramidFallbacks =
+        frameStats.postProcess.bloomEnabled > 0 && !recordBloomPyramid ? 1u : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2547,6 +2572,11 @@ void VulkanRenderer::DrawFrame() {
                 ? m_SceneRenderTargets->HdrSceneColorFormat()
                 : VK_FORMAT_UNDEFINED,
             m_HdrRenderPass != nullptr && m_HdrFramebuffer != nullptr,
+            recordBloomPyramid,
+            m_BloomPyramid != nullptr
+                ? m_BloomPyramid->BloomFormat()
+                : VK_FORMAT_UNDEFINED,
+            m_BloomPyramid != nullptr ? m_BloomPyramid->MipCount() : 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,
@@ -2633,6 +2663,14 @@ void VulkanRenderer::DrawFrame() {
         deferredPbrDebugView,
         m_HdrCompositePipeline.get(),
         m_HdrDescriptorSets.get(),
+        m_BloomDownsampleRenderPass.get(),
+        m_BloomUpsampleRenderPass.get(),
+        m_BloomDownsampleFramebuffer.get(),
+        m_BloomUpsampleFramebuffer.get(),
+        recordBloomPyramid ? m_BloomDownsamplePipeline.get() : nullptr,
+        recordBloomPyramid ? m_BloomUpsamplePipeline.get() : nullptr,
+        recordBloomPyramid ? m_BloomDescriptorSets.get() : nullptr,
+        recordBloomPyramid,
         showDeferredHdr,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ToneMapping,
@@ -2980,6 +3018,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         *m_Swapchain
     );
+    m_BloomPyramid = std::make_unique<VulkanBloomPyramid>(
+        m_Device,
+        m_PhysicalDevice,
+        *m_Swapchain
+    );
     m_SceneTargetSampler = std::make_unique<VulkanSampler>(
         m_Device,
         m_PhysicalDevice,
@@ -2988,6 +3031,16 @@ void VulkanRenderer::CreateSwapchainResources() {
     m_HdrRenderPass = std::make_unique<VulkanHdrRenderPass>(
         m_Device,
         m_SceneRenderTargets->HdrSceneColorFormat()
+    );
+    m_BloomDownsampleRenderPass = std::make_unique<VulkanBloomRenderPass>(
+        m_Device,
+        m_BloomPyramid->BloomFormat(),
+        false
+    );
+    m_BloomUpsampleRenderPass = std::make_unique<VulkanBloomRenderPass>(
+        m_Device,
+        m_BloomPyramid->BloomFormat(),
+        true
     );
     m_WeightedTranslucencyRenderPass =
         std::make_unique<VulkanWeightedTranslucencyRenderPass>(
@@ -3002,6 +3055,16 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_Device,
         *m_HdrRenderPass,
         *m_SceneRenderTargets
+    );
+    m_BloomDownsampleFramebuffer = std::make_unique<VulkanBloomFramebuffer>(
+        m_Device,
+        *m_BloomDownsampleRenderPass,
+        *m_BloomPyramid
+    );
+    m_BloomUpsampleFramebuffer = std::make_unique<VulkanBloomFramebuffer>(
+        m_Device,
+        *m_BloomUpsampleRenderPass,
+        *m_BloomPyramid
     );
     m_WeightedTranslucencyFramebuffer =
         std::make_unique<VulkanWeightedTranslucencyFramebuffer>(
@@ -3080,6 +3143,14 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_Device,
         *m_MaterialDescriptorSetLayout,
         *m_SceneRenderTargets,
+        m_BloomPyramid.get(),
+        *m_SceneTargetSampler
+    );
+    m_BloomDescriptorSets = std::make_unique<VulkanBloomDescriptorSets>(
+        m_Device,
+        *m_MaterialDescriptorSetLayout,
+        *m_SceneRenderTargets,
+        *m_BloomPyramid,
         *m_SceneTargetSampler
     );
     m_WeightedTranslucencyDescriptorSets =
@@ -3200,6 +3271,32 @@ void VulkanRenderer::CreateSwapchainResources() {
         std::string(SE_SHADER_DIR) + "/hdr_composite.vert.spv";
     const std::string hdrCompositeFragmentShaderPath =
         std::string(SE_SHADER_DIR) + "/hdr_composite.frag.spv";
+    const std::string bloomDownsampleFragmentShaderPath =
+        std::string(SE_SHADER_DIR) + "/bloom_downsample.frag.spv";
+    const std::string bloomUpsampleFragmentShaderPath =
+        std::string(SE_SHADER_DIR) + "/bloom_upsample.frag.spv";
+    m_BloomDownsamplePipeline = std::make_unique<VulkanGraphicsPipeline>(
+        m_Device,
+        *m_DescriptorSetLayout,
+        *m_MaterialDescriptorSetLayout,
+        m_BloomDownsampleRenderPass->Handle(),
+        *m_Swapchain,
+        PipelineSpec::BloomPyramid(
+            hdrCompositeVertexShaderPath,
+            bloomDownsampleFragmentShaderPath
+        )
+    );
+    m_BloomUpsamplePipeline = std::make_unique<VulkanGraphicsPipeline>(
+        m_Device,
+        *m_DescriptorSetLayout,
+        *m_MaterialDescriptorSetLayout,
+        m_BloomUpsampleRenderPass->Handle(),
+        *m_Swapchain,
+        PipelineSpec::BloomUpsample(
+            hdrCompositeVertexShaderPath,
+            bloomUpsampleFragmentShaderPath
+        )
+    );
     m_HdrCompositePipeline = std::make_unique<VulkanGraphicsPipeline>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3418,6 +3515,12 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_GBufferDebugPipeline != nullptr) {
         m_GBufferDebugPipeline->Release();
     }
+    if (m_BloomUpsamplePipeline != nullptr) {
+        m_BloomUpsamplePipeline->Release();
+    }
+    if (m_BloomDownsamplePipeline != nullptr) {
+        m_BloomDownsamplePipeline->Release();
+    }
     if (m_WeightedTranslucencyResolvePipeline != nullptr) {
         m_WeightedTranslucencyResolvePipeline->Release();
     }
@@ -3484,6 +3587,18 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_HdrRenderPass != nullptr) {
         m_HdrRenderPass->Release();
     }
+    if (m_BloomUpsampleFramebuffer != nullptr) {
+        m_BloomUpsampleFramebuffer->Release();
+    }
+    if (m_BloomDownsampleFramebuffer != nullptr) {
+        m_BloomDownsampleFramebuffer->Release();
+    }
+    if (m_BloomUpsampleRenderPass != nullptr) {
+        m_BloomUpsampleRenderPass->Release();
+    }
+    if (m_BloomDownsampleRenderPass != nullptr) {
+        m_BloomDownsampleRenderPass->Release();
+    }
     if (m_WeightedTranslucencyFramebuffer != nullptr) {
         m_WeightedTranslucencyFramebuffer->Release();
     }
@@ -3509,6 +3624,9 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_SceneRenderTargets != nullptr) {
         m_SceneRenderTargets->Release();
     }
+    if (m_BloomPyramid != nullptr) {
+        m_BloomPyramid->Release();
+    }
     if (m_MaterialDescriptorSets != nullptr) {
         m_MaterialDescriptorSets->Release();
     }
@@ -3517,6 +3635,9 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_HdrDescriptorSets != nullptr) {
         m_HdrDescriptorSets->Release();
+    }
+    if (m_BloomDescriptorSets != nullptr) {
+        m_BloomDescriptorSets->Release();
     }
     if (m_WeightedTranslucencyDescriptorSets != nullptr) {
         m_WeightedTranslucencyDescriptorSets->Release();
@@ -3628,10 +3749,31 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_Swapchain
         );
     }
+    if (m_BloomPyramid != nullptr) {
+        m_BloomPyramid->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            *m_Swapchain
+        );
+    }
     if (m_HdrRenderPass != nullptr && m_SceneRenderTargets != nullptr) {
         m_HdrRenderPass->Recreate(
             m_Device,
             m_SceneRenderTargets->HdrSceneColorFormat()
+        );
+    }
+    if (m_BloomDownsampleRenderPass != nullptr && m_BloomPyramid != nullptr) {
+        m_BloomDownsampleRenderPass->Recreate(
+            m_Device,
+            m_BloomPyramid->BloomFormat(),
+            false
+        );
+    }
+    if (m_BloomUpsampleRenderPass != nullptr && m_BloomPyramid != nullptr) {
+        m_BloomUpsampleRenderPass->Recreate(
+            m_Device,
+            m_BloomPyramid->BloomFormat(),
+            true
         );
     }
     if (m_WeightedTranslucencyRenderPass != nullptr &&
@@ -3654,6 +3796,24 @@ void VulkanRenderer::RecreateSwapchain() {
             m_Device,
             *m_HdrRenderPass,
             *m_SceneRenderTargets
+        );
+    }
+    if (m_BloomDownsampleFramebuffer != nullptr &&
+        m_BloomDownsampleRenderPass != nullptr &&
+        m_BloomPyramid != nullptr) {
+        m_BloomDownsampleFramebuffer->Recreate(
+            m_Device,
+            *m_BloomDownsampleRenderPass,
+            *m_BloomPyramid
+        );
+    }
+    if (m_BloomUpsampleFramebuffer != nullptr &&
+        m_BloomUpsampleRenderPass != nullptr &&
+        m_BloomPyramid != nullptr) {
+        m_BloomUpsampleFramebuffer->Recreate(
+            m_Device,
+            *m_BloomUpsampleRenderPass,
+            *m_BloomPyramid
         );
     }
     if (m_WeightedTranslucencyFramebuffer != nullptr &&
@@ -3752,11 +3912,25 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_HdrDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&
+        m_BloomPyramid != nullptr &&
         m_SceneTargetSampler != nullptr) {
         m_HdrDescriptorSets->Recreate(
             m_Device,
             *m_MaterialDescriptorSetLayout,
             *m_SceneRenderTargets,
+            m_BloomPyramid.get(),
+            *m_SceneTargetSampler
+        );
+    }
+    if (m_BloomDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_BloomPyramid != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_BloomDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_BloomPyramid,
             *m_SceneTargetSampler
         );
     }
@@ -3881,6 +4055,42 @@ void VulkanRenderer::RecreateSwapchain() {
                 PipelineSpec::DoubleSided(depthPrefillSpec)
             );
         }
+    }
+    if (m_BloomDownsamplePipeline != nullptr &&
+        m_BloomDownsampleRenderPass != nullptr) {
+        const std::string hdrCompositeVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/hdr_composite.vert.spv";
+        const std::string bloomDownsampleFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/bloom_downsample.frag.spv";
+        m_BloomDownsamplePipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_BloomDownsampleRenderPass->Handle(),
+            *m_Swapchain,
+            PipelineSpec::BloomPyramid(
+                hdrCompositeVertexShaderPath,
+                bloomDownsampleFragmentShaderPath
+            )
+        );
+    }
+    if (m_BloomUpsamplePipeline != nullptr &&
+        m_BloomUpsampleRenderPass != nullptr) {
+        const std::string hdrCompositeVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/hdr_composite.vert.spv";
+        const std::string bloomUpsampleFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/bloom_upsample.frag.spv";
+        m_BloomUpsamplePipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_BloomUpsampleRenderPass->Handle(),
+            *m_Swapchain,
+            PipelineSpec::BloomUpsample(
+                hdrCompositeVertexShaderPath,
+                bloomUpsampleFragmentShaderPath
+            )
+        );
     }
     if (m_HdrCompositePipeline != nullptr) {
         const std::string hdrCompositeVertexShaderPath =

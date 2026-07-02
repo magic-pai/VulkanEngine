@@ -288,6 +288,100 @@ void VulkanGBufferRenderPass::Release() {
     }
 }
 
+VulkanBloomRenderPass::VulkanBloomRenderPass(
+    const VulkanDevice& device,
+    VkFormat bloomFormat,
+    bool loadExistingColor
+) : m_Device(device.Handle()) {
+    CreateRenderPass(device, bloomFormat, loadExistingColor);
+}
+
+VulkanBloomRenderPass::~VulkanBloomRenderPass() {
+    Release();
+}
+
+VkRenderPass VulkanBloomRenderPass::Handle() const {
+    return m_RenderPass;
+}
+
+void VulkanBloomRenderPass::Recreate(
+    const VulkanDevice& device,
+    VkFormat bloomFormat,
+    bool loadExistingColor
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateRenderPass(device, bloomFormat, loadExistingColor);
+}
+
+void VulkanBloomRenderPass::CreateRenderPass(
+    const VulkanDevice& device,
+    VkFormat bloomFormat,
+    bool loadExistingColor
+) {
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = bloomFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp =
+        loadExistingColor ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = loadExistingColor
+        ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        : VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference colorAttachmentReference{};
+    colorAttachmentReference.attachment = 0;
+    colorAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorAttachmentReference;
+
+    std::array<VkSubpassDependency, 2> dependencies{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = loadExistingColor
+        ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].srcAccessMask = loadExistingColor
+        ? VK_ACCESS_SHADER_READ_BIT
+        : 0;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        (loadExistingColor ? VK_ACCESS_COLOR_ATTACHMENT_READ_BIT : 0);
+
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.attachmentCount = 1;
+    createInfo.pAttachments = &colorAttachment;
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = static_cast<u32>(dependencies.size());
+    createInfo.pDependencies = dependencies.data();
+
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan bloom render pass");
+    }
+}
+
+void VulkanBloomRenderPass::Release() {
+    if (m_RenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+        m_RenderPass = VK_NULL_HANDLE;
+    }
+}
+
 VulkanSceneRenderTargets::VulkanSceneRenderTargets(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
@@ -548,6 +642,199 @@ void VulkanSceneRenderTargets::CreateImageArray(
             aspectFlags
         ));
     }
+}
+
+VulkanBloomPyramid::VulkanBloomPyramid(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanSwapchain& swapchain
+) {
+    Recreate(device, physicalDevice, swapchain);
+}
+
+VulkanBloomPyramid::~VulkanBloomPyramid() {
+    Release();
+}
+
+VkImageView VulkanBloomPyramid::BloomMipView(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    SE_ASSERT(mipIndex < m_BloomMipImages.size(), "Bloom mip index is out of range");
+    SE_ASSERT(
+        imageIndex < m_BloomMipImages[mipIndex].size(),
+        "Bloom image index is out of range"
+    );
+    return m_BloomMipImages[mipIndex][imageIndex]->View();
+}
+
+VkFormat VulkanBloomPyramid::BloomFormat() const {
+    return kBloomFormat;
+}
+
+VkExtent2D VulkanBloomPyramid::MipExtent(u32 mipIndex) const {
+    SE_ASSERT(mipIndex < m_MipExtents.size(), "Bloom mip extent index is out of range");
+    return m_MipExtents[mipIndex];
+}
+
+std::size_t VulkanBloomPyramid::Count() const {
+    return m_BloomMipImages.empty() ? 0 : m_BloomMipImages.front().size();
+}
+
+u32 VulkanBloomPyramid::MipCount() const {
+    return static_cast<u32>(m_BloomMipImages.size());
+}
+
+void VulkanBloomPyramid::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanSwapchain& swapchain
+) {
+    Release();
+    CreateImages(
+        device,
+        physicalDevice,
+        swapchain.Images().size(),
+        swapchain.Extent()
+    );
+}
+
+void VulkanBloomPyramid::Release() {
+    m_BloomMipImages.clear();
+    m_MipExtents = {};
+}
+
+void VulkanBloomPyramid::CreateImages(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count,
+    VkExtent2D swapchainExtent
+) {
+    m_BloomMipImages.resize(kBloomPyramidMipCount);
+
+    u32 mipWidth = std::max(swapchainExtent.width / 2, 1u);
+    u32 mipHeight = std::max(swapchainExtent.height / 2, 1u);
+    for (u32 mipIndex = 0; mipIndex < kBloomPyramidMipCount; ++mipIndex) {
+        VkExtent2D mipExtent{ mipWidth, mipHeight };
+        m_MipExtents[mipIndex] = mipExtent;
+        std::vector<std::unique_ptr<VulkanImage>>& mipImages =
+            m_BloomMipImages[mipIndex];
+        mipImages.reserve(count);
+        for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
+            mipImages.push_back(std::make_unique<VulkanImage>(
+                device,
+                physicalDevice,
+                mipExtent,
+                kBloomFormat,
+                VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            ));
+        }
+        mipWidth = std::max(mipWidth / 2, 1u);
+        mipHeight = std::max(mipHeight / 2, 1u);
+    }
+}
+
+VulkanBloomFramebuffer::VulkanBloomFramebuffer(
+    const VulkanDevice& device,
+    const VulkanBloomRenderPass& renderPass,
+    const VulkanBloomPyramid& bloomPyramid
+) : m_Device(device.Handle()) {
+    CreateFramebuffers(device, renderPass, bloomPyramid);
+}
+
+VulkanBloomFramebuffer::~VulkanBloomFramebuffer() {
+    Release();
+}
+
+VkFramebuffer VulkanBloomFramebuffer::Handle(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    SE_ASSERT(mipIndex < m_Framebuffers.size(), "Bloom framebuffer mip index is out of range");
+    SE_ASSERT(
+        imageIndex < m_Framebuffers[mipIndex].size(),
+        "Bloom framebuffer image index is out of range"
+    );
+    return m_Framebuffers[mipIndex][imageIndex];
+}
+
+VkExtent2D VulkanBloomFramebuffer::MipExtent(u32 mipIndex) const {
+    SE_ASSERT(mipIndex < m_MipExtents.size(), "Bloom framebuffer mip extent index is out of range");
+    return m_MipExtents[mipIndex];
+}
+
+std::size_t VulkanBloomFramebuffer::Count() const {
+    return m_Framebuffers.empty() ? 0 : m_Framebuffers.front().size();
+}
+
+u32 VulkanBloomFramebuffer::MipCount() const {
+    return static_cast<u32>(m_Framebuffers.size());
+}
+
+void VulkanBloomFramebuffer::Recreate(
+    const VulkanDevice& device,
+    const VulkanBloomRenderPass& renderPass,
+    const VulkanBloomPyramid& bloomPyramid
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateFramebuffers(device, renderPass, bloomPyramid);
+}
+
+void VulkanBloomFramebuffer::CreateFramebuffers(
+    const VulkanDevice& device,
+    const VulkanBloomRenderPass& renderPass,
+    const VulkanBloomPyramid& bloomPyramid
+) {
+    const u32 mipCount = bloomPyramid.MipCount();
+    m_Framebuffers.resize(mipCount);
+    for (u32 mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
+        const VkExtent2D mipExtent = bloomPyramid.MipExtent(mipIndex);
+        m_MipExtents[mipIndex] = mipExtent;
+        std::vector<VkFramebuffer>& mipFramebuffers = m_Framebuffers[mipIndex];
+        mipFramebuffers.resize(bloomPyramid.Count());
+
+        for (std::size_t imageIndex = 0; imageIndex < bloomPyramid.Count(); ++imageIndex) {
+            const VkImageView attachment =
+                bloomPyramid.BloomMipView(imageIndex, mipIndex);
+
+            VkFramebufferCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            createInfo.renderPass = renderPass.Handle();
+            createInfo.attachmentCount = 1;
+            createInfo.pAttachments = &attachment;
+            createInfo.width = mipExtent.width;
+            createInfo.height = mipExtent.height;
+            createInfo.layers = 1;
+
+            if (vkCreateFramebuffer(
+                    device.Handle(),
+                    &createInfo,
+                    nullptr,
+                    &mipFramebuffers[imageIndex]
+                ) != VK_SUCCESS) {
+                Release();
+                throw std::runtime_error("Failed to create Vulkan bloom framebuffer");
+            }
+        }
+    }
+}
+
+void VulkanBloomFramebuffer::Release() {
+    for (std::vector<VkFramebuffer>& mipFramebuffers : m_Framebuffers) {
+        for (VkFramebuffer framebuffer : mipFramebuffers) {
+            if (framebuffer != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+            }
+        }
+    }
+
+    m_Framebuffers.clear();
+    m_MipExtents = {};
 }
 
 VulkanHdrFramebuffer::VulkanHdrFramebuffer(

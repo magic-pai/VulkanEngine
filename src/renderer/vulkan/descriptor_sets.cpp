@@ -803,10 +803,11 @@ VulkanHdrDescriptorSets::VulkanHdrDescriptorSets(
     const VulkanDevice& device,
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid* bloomPyramid,
     const VulkanSampler& sampler
 ) : m_Device(device.Handle()) {
     try {
-        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, sampler);
+        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, bloomPyramid, sampler);
     } catch (...) {
         Release();
         throw;
@@ -830,13 +831,14 @@ void VulkanHdrDescriptorSets::Recreate(
     const VulkanDevice& device,
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid* bloomPyramid,
     const VulkanSampler& sampler
 ) {
     Release();
     m_Device = device.Handle();
 
     try {
-        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, sampler);
+        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, bloomPyramid, sampler);
     } catch (...) {
         Release();
         throw;
@@ -877,6 +879,7 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     const VulkanDevice& device,
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid* bloomPyramid,
     const VulkanSampler& sampler
 ) {
     const std::size_t count = renderTargets.Count();
@@ -897,10 +900,19 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     }
 
     for (std::size_t index = 0; index < count; ++index) {
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = renderTargets.HdrSceneColorView(index);
-        imageInfo.sampler = sampler.Handle();
+        VkDescriptorImageInfo hdrImageInfo{};
+        hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        hdrImageInfo.imageView = renderTargets.HdrSceneColorView(index);
+        hdrImageInfo.sampler = sampler.Handle();
+
+        VkDescriptorImageInfo bloomImageInfo = hdrImageInfo;
+        if (bloomPyramid != nullptr &&
+            bloomPyramid->Count() == count &&
+            bloomPyramid->MipCount() > 0) {
+            bloomImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            bloomImageInfo.imageView = bloomPyramid->BloomMipView(index, 0);
+            bloomImageInfo.sampler = sampler.Handle();
+        }
 
         std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
         for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
@@ -910,7 +922,8 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
             descriptorWrites[binding].dstArrayElement = 0;
             descriptorWrites[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[binding].descriptorCount = 1;
-            descriptorWrites[binding].pImageInfo = &imageInfo;
+            descriptorWrites[binding].pImageInfo =
+                binding == 1 ? &bloomImageInfo : &hdrImageInfo;
         }
 
         vkUpdateDescriptorSets(
@@ -921,6 +934,257 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
             nullptr
         );
     }
+}
+
+VulkanBloomDescriptorSets::VulkanBloomDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid& bloomPyramid,
+    const VulkanSampler& sampler
+) : m_Device(device.Handle()) {
+    try {
+        CreateDescriptorSets(
+            device,
+            descriptorSetLayout,
+            renderTargets,
+            bloomPyramid,
+            sampler
+        );
+    } catch (...) {
+        Release();
+        throw;
+    }
+}
+
+VulkanBloomDescriptorSets::~VulkanBloomDescriptorSets() {
+    Release();
+}
+
+VkDescriptorSet VulkanBloomDescriptorSets::DownsampleHandle(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    const std::size_t descriptorIndex = DescriptorIndex(imageIndex, mipIndex);
+    SE_ASSERT(
+        descriptorIndex < m_DownsampleDescriptorSets.size(),
+        "Bloom downsample descriptor index is out of range"
+    );
+    return m_DownsampleDescriptorSets[descriptorIndex];
+}
+
+VkDescriptorSet VulkanBloomDescriptorSets::UpsampleHandle(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    const std::size_t descriptorIndex = DescriptorIndex(imageIndex, mipIndex);
+    SE_ASSERT(
+        descriptorIndex < m_UpsampleDescriptorSets.size(),
+        "Bloom upsample descriptor index is out of range"
+    );
+    return m_UpsampleDescriptorSets[descriptorIndex];
+}
+
+std::size_t VulkanBloomDescriptorSets::Count() const {
+    return m_Count;
+}
+
+u32 VulkanBloomDescriptorSets::MipCount() const {
+    return m_MipCount;
+}
+
+void VulkanBloomDescriptorSets::Recreate(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid& bloomPyramid,
+    const VulkanSampler& sampler
+) {
+    Release();
+    m_Device = device.Handle();
+
+    try {
+        CreateDescriptorSets(
+            device,
+            descriptorSetLayout,
+            renderTargets,
+            bloomPyramid,
+            sampler
+        );
+    } catch (...) {
+        Release();
+        throw;
+    }
+}
+
+void VulkanBloomDescriptorSets::Release() {
+    m_DownsampleDescriptorSets.clear();
+    m_UpsampleDescriptorSets.clear();
+    m_Count = 0;
+    m_MipCount = 0;
+
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        m_DescriptorPool = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanBloomDescriptorSets::CreateDescriptorPool(
+    const VulkanDevice& device,
+    std::size_t swapchainCount,
+    u32 mipCount
+) {
+    SE_ASSERT(
+        swapchainCount > 0,
+        "Bloom descriptor swapchain count must be greater than zero"
+    );
+    SE_ASSERT(mipCount > 0, "Bloom descriptor mip count must be greater than zero");
+
+    const std::size_t setCount = swapchainCount * mipCount * 2;
+    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = static_cast<u32>(setCount * 13);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<u32>(setCount);
+
+    if (vkCreateDescriptorPool(
+            device.Handle(),
+            &poolInfo,
+            nullptr,
+            &m_DescriptorPool
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan bloom descriptor pool");
+    }
+}
+
+void VulkanBloomDescriptorSets::CreateDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanBloomPyramid& bloomPyramid,
+    const VulkanSampler& sampler
+) {
+    m_Count = renderTargets.Count();
+    m_MipCount = bloomPyramid.MipCount();
+    SE_ASSERT(
+        bloomPyramid.Count() == m_Count,
+        "Bloom pyramid image count must match scene render target count"
+    );
+    CreateDescriptorPool(device, m_Count, m_MipCount);
+
+    const std::size_t descriptorSetCount = m_Count * m_MipCount;
+    std::vector<VkDescriptorSetLayout> layouts(
+        descriptorSetCount,
+        descriptorSetLayout.Handle()
+    );
+    m_DownsampleDescriptorSets.resize(descriptorSetCount);
+    m_UpsampleDescriptorSets.resize(descriptorSetCount);
+
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_DescriptorPool;
+    allocateInfo.descriptorSetCount = static_cast<u32>(descriptorSetCount);
+    allocateInfo.pSetLayouts = layouts.data();
+
+    if (vkAllocateDescriptorSets(
+            device.Handle(),
+            &allocateInfo,
+            m_DownsampleDescriptorSets.data()
+        ) != VK_SUCCESS) {
+        Release();
+        throw std::runtime_error("Failed to allocate Vulkan bloom downsample descriptor sets");
+    }
+    if (vkAllocateDescriptorSets(
+            device.Handle(),
+            &allocateInfo,
+            m_UpsampleDescriptorSets.data()
+        ) != VK_SUCCESS) {
+        Release();
+        throw std::runtime_error("Failed to allocate Vulkan bloom upsample descriptor sets");
+    }
+
+    for (std::size_t imageIndex = 0; imageIndex < m_Count; ++imageIndex) {
+        for (u32 mipIndex = 0; mipIndex < m_MipCount; ++mipIndex) {
+            VkDescriptorImageInfo downsampleSourceInfo{};
+            downsampleSourceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            downsampleSourceInfo.imageView = mipIndex == 0
+                ? renderTargets.HdrSceneColorView(imageIndex)
+                : bloomPyramid.BloomMipView(imageIndex, mipIndex - 1);
+            downsampleSourceInfo.sampler = sampler.Handle();
+
+            VkDescriptorImageInfo currentMipInfo{};
+            currentMipInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            currentMipInfo.imageView = bloomPyramid.BloomMipView(imageIndex, mipIndex);
+            currentMipInfo.sampler = sampler.Handle();
+
+            VkDescriptorImageInfo lowerMipInfo = currentMipInfo;
+            if (mipIndex + 1 < m_MipCount) {
+                lowerMipInfo.imageView =
+                    bloomPyramid.BloomMipView(imageIndex, mipIndex + 1);
+            }
+
+            std::array<VkDescriptorImageInfo, 13> downsampleInfos{};
+            downsampleInfos.fill(downsampleSourceInfo);
+            downsampleInfos[1] = currentMipInfo;
+            downsampleInfos[2] = lowerMipInfo;
+
+            std::array<VkDescriptorImageInfo, 13> upsampleInfos{};
+            upsampleInfos.fill(currentMipInfo);
+            upsampleInfos[1] = currentMipInfo;
+            upsampleInfos[2] = lowerMipInfo;
+
+            std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
+            for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
+                descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[binding].dstBinding = static_cast<u32>(binding);
+                descriptorWrites[binding].dstArrayElement = 0;
+                descriptorWrites[binding].descriptorType =
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[binding].descriptorCount = 1;
+            }
+
+            const std::size_t descriptorIndex =
+                DescriptorIndex(imageIndex, mipIndex);
+            for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
+                descriptorWrites[binding].dstSet =
+                    m_DownsampleDescriptorSets[descriptorIndex];
+                descriptorWrites[binding].pImageInfo = &downsampleInfos[binding];
+            }
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                static_cast<u32>(descriptorWrites.size()),
+                descriptorWrites.data(),
+                0,
+                nullptr
+            );
+
+            for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
+                descriptorWrites[binding].dstSet =
+                    m_UpsampleDescriptorSets[descriptorIndex];
+                descriptorWrites[binding].pImageInfo = &upsampleInfos[binding];
+            }
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                static_cast<u32>(descriptorWrites.size()),
+                descriptorWrites.data(),
+                0,
+                nullptr
+            );
+        }
+    }
+}
+
+std::size_t VulkanBloomDescriptorSets::DescriptorIndex(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    SE_ASSERT(imageIndex < m_Count, "Bloom descriptor image index is out of range");
+    SE_ASSERT(mipIndex < m_MipCount, "Bloom descriptor mip index is out of range");
+    return imageIndex * m_MipCount + mipIndex;
 }
 
 VulkanWeightedTranslucencyDescriptorSets::VulkanWeightedTranslucencyDescriptorSets(

@@ -90,6 +90,39 @@ private:
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
 };
 
+class VulkanBloomRenderPass {
+public:
+    VulkanBloomRenderPass(
+        const VulkanDevice& device,
+        VkFormat bloomFormat,
+        bool loadExistingColor
+    );
+    ~VulkanBloomRenderPass();
+
+    SE_DISABLE_COPY(VulkanBloomRenderPass);
+    SE_DISABLE_MOVE(VulkanBloomRenderPass);
+
+    VkRenderPass Handle() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        VkFormat bloomFormat,
+        bool loadExistingColor
+    );
+    void Release();
+
+private:
+    void CreateRenderPass(
+        const VulkanDevice& device,
+        VkFormat bloomFormat,
+        bool loadExistingColor
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+};
+
 class VulkanSceneRenderTargets {
 public:
     VulkanSceneRenderTargets(
@@ -169,6 +202,85 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
     VkExtent2D m_Extent{};
+};
+
+inline constexpr u32 kBloomPyramidMipCount = 4;
+
+class VulkanBloomPyramid {
+public:
+    VulkanBloomPyramid(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanSwapchain& swapchain
+    );
+    ~VulkanBloomPyramid();
+
+    SE_DISABLE_COPY(VulkanBloomPyramid);
+    SE_DISABLE_MOVE(VulkanBloomPyramid);
+
+    VkImageView BloomMipView(std::size_t imageIndex, u32 mipIndex) const;
+    VkFormat BloomFormat() const;
+    VkExtent2D MipExtent(u32 mipIndex) const;
+    std::size_t Count() const;
+    u32 MipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanSwapchain& swapchain
+    );
+    void Release();
+
+    static constexpr VkFormat kBloomFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+private:
+    void CreateImages(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count,
+        VkExtent2D swapchainExtent
+    );
+
+private:
+    std::vector<std::vector<std::unique_ptr<VulkanImage>>> m_BloomMipImages;
+    std::array<VkExtent2D, kBloomPyramidMipCount> m_MipExtents{};
+};
+
+class VulkanBloomFramebuffer {
+public:
+    VulkanBloomFramebuffer(
+        const VulkanDevice& device,
+        const VulkanBloomRenderPass& renderPass,
+        const VulkanBloomPyramid& bloomPyramid
+    );
+    ~VulkanBloomFramebuffer();
+
+    SE_DISABLE_COPY(VulkanBloomFramebuffer);
+    SE_DISABLE_MOVE(VulkanBloomFramebuffer);
+
+    VkFramebuffer Handle(std::size_t imageIndex, u32 mipIndex) const;
+    VkExtent2D MipExtent(u32 mipIndex) const;
+    std::size_t Count() const;
+    u32 MipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanBloomRenderPass& renderPass,
+        const VulkanBloomPyramid& bloomPyramid
+    );
+    void Release();
+
+private:
+    void CreateFramebuffers(
+        const VulkanDevice& device,
+        const VulkanBloomRenderPass& renderPass,
+        const VulkanBloomPyramid& bloomPyramid
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    std::vector<std::vector<VkFramebuffer>> m_Framebuffers;
+    std::array<VkExtent2D, kBloomPyramidMipCount> m_MipExtents{};
 };
 
 class VulkanHdrFramebuffer {

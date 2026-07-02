@@ -38,6 +38,7 @@ layout(set = 0, binding = 10) readonly buffer AutoExposureState {
 } autoExposure;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
+layout(set = 1, binding = 1) uniform sampler2D bloomTexture;
 
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
@@ -107,33 +108,13 @@ float EffectiveExposure() {
     return mix(manualExposure, adaptedExposure, adaptation);
 }
 
-vec3 BloomPrefilter(vec3 color, float threshold) {
-    float brightness = max(max(color.r, color.g), color.b);
-    float contribution = max(brightness - threshold, 0.0) / max(brightness, 0.0001);
-    return color * contribution;
-}
-
-vec3 BloomContribution(float exposure) {
+vec3 BloomContribution() {
     float enabled = clamp(frame.postProcessControls.x, 0.0, 1.0);
     float intensity = clamp(frame.postProcessControls.y, 0.0, 4.0);
-    float threshold = max(frame.postProcessControls.z, 0.0);
-    float radiusPixels = clamp(frame.postProcessControls.w, 0.0, 24.0);
-    if (enabled <= 0.0001 || intensity <= 0.0001 || radiusPixels <= 0.0001) {
+    if (enabled <= 0.0001 || intensity <= 0.0001) {
         return vec3(0.0);
     }
-
-    vec2 texelSize = 1.0 / vec2(max(textureSize(hdrSceneColor, 0), ivec2(1)));
-    vec2 radius = texelSize * radiusPixels;
-    vec3 bloom = BloomPrefilter(texture(hdrSceneColor, fragUv).rgb * exposure, threshold) * 0.24;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv + vec2(radius.x, 0.0)).rgb * exposure, threshold) * 0.12;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv - vec2(radius.x, 0.0)).rgb * exposure, threshold) * 0.12;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv + vec2(0.0, radius.y)).rgb * exposure, threshold) * 0.12;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv - vec2(0.0, radius.y)).rgb * exposure, threshold) * 0.12;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv + radius).rgb * exposure, threshold) * 0.07;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv - radius).rgb * exposure, threshold) * 0.07;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv + vec2(radius.x, -radius.y)).rgb * exposure, threshold) * 0.07;
-    bloom += BloomPrefilter(texture(hdrSceneColor, fragUv + vec2(-radius.x, radius.y)).rgb * exposure, threshold) * 0.07;
-    return bloom * intensity;
+    return max(texture(bloomTexture, fragUv).rgb, vec3(0.0)) * intensity;
 }
 
 vec3 ApplyColorGrading(vec3 color) {
@@ -183,7 +164,7 @@ vec3 ApplySharpening(vec3 color, float exposure, out vec3 sharpeningDelta) {
 void main() {
     float exposure = EffectiveExposure();
     vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
-    vec3 bloom = BloomContribution(exposure);
+    vec3 bloom = BloomContribution();
     int debugView = int(frame.shadowFiltering.z + 0.5);
     if (debugView == DEBUG_VIEW_BLOOM) {
         outColor = vec4(ToneMapHdr(bloom), 1.0);

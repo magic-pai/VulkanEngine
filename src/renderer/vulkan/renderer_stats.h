@@ -189,6 +189,9 @@ struct RendererPostProcessStats {
     f32 bloomIntensity = 0.0f;
     f32 bloomThreshold = 0.0f;
     f32 bloomRadiusPixels = 0.0f;
+    u32 bloomPyramidEnabled = 0;
+    u32 bloomPyramidMipCount = 0;
+    u32 bloomPyramidFallbacks = 0;
     u32 toneMappingEnabled = 1;
     u32 toneMapMode = 0;
     f32 exposure = 1.0f;
@@ -263,6 +266,12 @@ struct RendererBindStats {
     u32 bloomDebugDraws = 0;
     u32 bloomDebugFrameBinds = 0;
     u32 bloomDebugTextureBinds = 0;
+    u32 bloomDownsampleDraws = 0;
+    u32 bloomDownsampleFrameBinds = 0;
+    u32 bloomDownsampleTextureBinds = 0;
+    u32 bloomUpsampleDraws = 0;
+    u32 bloomUpsampleFrameBinds = 0;
+    u32 bloomUpsampleTextureBinds = 0;
     u32 toneMappingDebugDraws = 0;
     u32 toneMappingDebugFrameBinds = 0;
     u32 toneMappingDebugTextureBinds = 0;

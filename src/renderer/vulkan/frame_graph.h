@@ -273,6 +273,9 @@ struct CurrentVulkanFrameGraphInputs {
     bool hdrSceneColorAllocated = false;
     VkFormat hdrSceneColorFormat = VK_FORMAT_UNDEFINED;
     bool hdrRenderPassAllocated = false;
+    bool bloomPyramidAllocated = false;
+    VkFormat bloomPyramidFormat = VK_FORMAT_UNDEFINED;
+    u32 bloomPyramidMipCount = 0;
     bool autoExposureHistogramEnabled = false;
     bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;

@@ -9,6 +9,7 @@ class VulkanMaterialDescriptorSetLayout;
 class VulkanDevice;
 class VulkanMaterial;
 class VulkanSampler;
+class VulkanBloomPyramid;
 class VulkanSceneRenderTargets;
 class VulkanDirectionalShadowCascadeAtlas;
 class VulkanLocalShadowAtlas;
@@ -180,6 +181,7 @@ public:
         const VulkanDevice& device,
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid* bloomPyramid,
         const VulkanSampler& sampler
     );
 
@@ -195,6 +197,7 @@ public:
         const VulkanDevice& device,
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid* bloomPyramid,
         const VulkanSampler& sampler
     );
     void Release();
@@ -205,6 +208,7 @@ private:
         const VulkanDevice& device,
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid* bloomPyramid,
         const VulkanSampler& sampler
     );
 
@@ -212,6 +216,59 @@ private:
     VkDevice m_Device = VK_NULL_HANDLE;
     VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanBloomDescriptorSets {
+public:
+    VulkanBloomDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid& bloomPyramid,
+        const VulkanSampler& sampler
+    );
+
+    ~VulkanBloomDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanBloomDescriptorSets);
+    SE_DISABLE_MOVE(VulkanBloomDescriptorSets);
+
+    VkDescriptorSet DownsampleHandle(std::size_t imageIndex, u32 mipIndex) const;
+    VkDescriptorSet UpsampleHandle(std::size_t imageIndex, u32 mipIndex) const;
+    std::size_t Count() const;
+    u32 MipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid& bloomPyramid,
+        const VulkanSampler& sampler
+    );
+    void Release();
+
+private:
+    void CreateDescriptorPool(
+        const VulkanDevice& device,
+        std::size_t swapchainCount,
+        u32 mipCount
+    );
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanBloomPyramid& bloomPyramid,
+        const VulkanSampler& sampler
+    );
+    std::size_t DescriptorIndex(std::size_t imageIndex, u32 mipIndex) const;
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DownsampleDescriptorSets;
+    std::vector<VkDescriptorSet> m_UpsampleDescriptorSets;
+    std::size_t m_Count = 0;
+    u32 m_MipCount = 0;
 };
 
 class VulkanWeightedTranslucencyDescriptorSets {

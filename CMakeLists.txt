@@ -64,6 +64,8 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/deferred_lighting.frag
     ${SHADER_SOURCE_DIR}/hdr_composite.vert
     ${SHADER_SOURCE_DIR}/hdr_composite.frag
+    ${SHADER_SOURCE_DIR}/bloom_downsample.frag
+    ${SHADER_SOURCE_DIR}/bloom_upsample.frag
     ${SHADER_SOURCE_DIR}/gbuffer_debug.vert
     ${SHADER_SOURCE_DIR}/gbuffer_debug.frag
     ${SHADER_SOURCE_DIR}/auto_exposure_histogram.comp

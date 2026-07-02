@@ -67,6 +67,14 @@ struct PipelineSpec {
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );
+    static PipelineSpec BloomPyramid(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
+    static PipelineSpec BloomUpsample(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
     static PipelineSpec WeightedTranslucencyResolve(
         std::string vertexShaderPath,
         std::string fragmentShaderPath

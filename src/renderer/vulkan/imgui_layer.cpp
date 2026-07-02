@@ -810,11 +810,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.heightFog.maxOpacity
     );
     ImGui::Text(
-        "Bloom: %s, intensity %.3f, threshold %.3f, radius %.2f px",
+        "Bloom: %s, pyramid %s, mips %u, intensity %.3f, threshold %.3f, radius %.2f px, fallbacks %u",
         stats.postProcess.bloomEnabled ? "enabled" : "off",
+        stats.postProcess.bloomPyramidEnabled ? "enabled" : "off",
+        stats.postProcess.bloomPyramidMipCount,
         stats.postProcess.bloomIntensity,
         stats.postProcess.bloomThreshold,
-        stats.postProcess.bloomRadiusPixels
+        stats.postProcess.bloomRadiusPixels,
+        stats.postProcess.bloomPyramidFallbacks
     );
     ImGui::Text(
         "Tone mapping: %s, mode %u, exposure %.3f, white %.2f",
@@ -998,6 +1001,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.bloomDebugDraws,
         binds.bloomDebugFrameBinds,
         binds.bloomDebugTextureBinds
+    );
+    ImGui::Text(
+        "Bloom pyramid: down %u / up %u draws, frame binds %u/%u, texture binds %u/%u",
+        binds.bloomDownsampleDraws,
+        binds.bloomUpsampleDraws,
+        binds.bloomDownsampleFrameBinds,
+        binds.bloomUpsampleFrameBinds,
+        binds.bloomDownsampleTextureBinds,
+        binds.bloomUpsampleTextureBinds
     );
     ImGui::Text(
         "Tone mapping debug: %u draws / %u frame binds / %u texture binds",

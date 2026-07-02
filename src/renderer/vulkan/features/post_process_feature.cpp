@@ -12,7 +12,13 @@ namespace {
 
 std::string_view HdrCompositeReads(const RendererPostProcessStats& postProcess) {
     if (postProcess.autoExposureHistogramEnabled > 0) {
+        if (postProcess.bloomPyramidEnabled > 0) {
+            return "HDRSceneColor, BloomPyramid, AutoExposureHistory";
+        }
         return "HDRSceneColor, AutoExposureHistory";
+    }
+    if (postProcess.bloomPyramidEnabled > 0) {
+        return "HDRSceneColor, BloomPyramid";
     }
     return "HDRSceneColor";
 }
@@ -63,16 +69,26 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             "First explicit tone-map control tier inside HDR composite; a dedicated post graph pass can replace it later."
         );
     }
-    if (postProcess.bloomEnabled > 0) {
+    if (postProcess.bloomPyramidEnabled > 0) {
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::PostProcess,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            "BloomIntegrated",
+            "BloomDownsample",
             "HDRSceneColor",
-            "HDRSceneColor",
-            "First screen-space bloom tier sampled inside HDR composite; a downsample/upsample bloom pyramid can replace it later."
+            "BloomPyramid",
+            "Builds the thresholded half-resolution bloom pyramid from HDR scene color."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::PostProcess,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "BloomUpsample",
+            "BloomPyramid",
+            "BloomPyramid",
+            "Upsamples and accumulates the bloom pyramid into the final bloom texture sampled by HDR composite."
         );
     }
     if (postProcess.colorGradingEnabled > 0) {

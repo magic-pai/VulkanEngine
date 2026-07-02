@@ -1551,6 +1551,17 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "window extent"
         );
     }
+    if (inputs.bloomPyramidAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "BloomPyramid",
+            VulkanFormatName(inputs.bloomPyramidFormat),
+            "sampled color attachments, downsample/upsample chain",
+            inputs.bloomPyramidMipCount > 0 ? "half-res mip chain" : "unknown mips"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,

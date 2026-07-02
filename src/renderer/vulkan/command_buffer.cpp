@@ -658,6 +658,124 @@ void BarrierComputeAutoExposureForFragmentRead(VkCommandBuffer commandBuffer) {
     );
 }
 
+void RecordBloomFullscreenPass(
+    VkCommandBuffer commandBuffer,
+    const VulkanBloomRenderPass& renderPass,
+    const VulkanBloomFramebuffer& framebuffer,
+    const VulkanGraphicsPipeline& pipeline,
+    const VulkanDescriptorSets& frameDescriptorSets,
+    const VulkanBloomDescriptorSets& bloomDescriptorSets,
+    std::size_t imageIndex,
+    u32 mipIndex,
+    bool upsample,
+    RendererBindStats* bindStats
+) {
+    VkClearValue clearValue{};
+    clearValue.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+
+    VkRenderPassBeginInfo passInfo{};
+    passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    passInfo.renderPass = renderPass.Handle();
+    passInfo.framebuffer = framebuffer.Handle(imageIndex, mipIndex);
+    passInfo.renderArea.offset = { 0, 0 };
+    passInfo.renderArea.extent = framebuffer.MipExtent(mipIndex);
+    passInfo.clearValueCount = 1;
+    passInfo.pClearValues = &clearValue;
+
+    vkCmdBeginRenderPass(commandBuffer, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Handle());
+
+    VkViewport viewport{};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = static_cast<f32>(passInfo.renderArea.extent.width);
+    viewport.height = static_cast<f32>(passInfo.renderArea.extent.height);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor{};
+    scissor.offset = { 0, 0 };
+    scissor.extent = passInfo.renderArea.extent;
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    const VkDescriptorSet frameDescriptorSet = frameDescriptorSets.Handle(imageIndex);
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.Layout(),
+        0,
+        1,
+        &frameDescriptorSet,
+        0,
+        nullptr
+    );
+
+    const VkDescriptorSet bloomDescriptorSet = upsample
+        ? bloomDescriptorSets.UpsampleHandle(imageIndex, mipIndex)
+        : bloomDescriptorSets.DownsampleHandle(imageIndex, mipIndex);
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.Layout(),
+        1,
+        1,
+        &bloomDescriptorSet,
+        0,
+        nullptr
+    );
+
+    ObjectPushConstants passConstants{};
+    passConstants.materialControls.x = static_cast<f32>(mipIndex);
+    vkCmdPushConstants(
+        commandBuffer,
+        pipeline.Layout(),
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(ObjectPushConstants),
+        &passConstants
+    );
+
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    vkCmdEndRenderPass(commandBuffer);
+
+    if (bindStats != nullptr) {
+        ++bindStats->pushConstantUpdates;
+        bindStats->pushConstantBytes += sizeof(ObjectPushConstants);
+        if (upsample) {
+            ++bindStats->bloomUpsampleDraws;
+            ++bindStats->bloomUpsampleFrameBinds;
+            ++bindStats->bloomUpsampleTextureBinds;
+        } else {
+            ++bindStats->bloomDownsampleDraws;
+            ++bindStats->bloomDownsampleFrameBinds;
+            ++bindStats->bloomDownsampleTextureBinds;
+        }
+    }
+}
+
+void ClearBloomMipForSampledRead(
+    VkCommandBuffer commandBuffer,
+    const VulkanBloomRenderPass& renderPass,
+    const VulkanBloomFramebuffer& framebuffer,
+    std::size_t imageIndex
+) {
+    VkClearValue clearValue{};
+    clearValue.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+
+    VkRenderPassBeginInfo passInfo{};
+    passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    passInfo.renderPass = renderPass.Handle();
+    passInfo.framebuffer = framebuffer.Handle(imageIndex, 0);
+    passInfo.renderArea.offset = { 0, 0 };
+    passInfo.renderArea.extent = framebuffer.MipExtent(0);
+    passInfo.clearValueCount = 1;
+    passInfo.pClearValues = &clearValue;
+
+    vkCmdBeginRenderPass(commandBuffer, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(commandBuffer);
+}
+
 bool CopySceneDepthToSwapchainDepth(
     VkCommandBuffer commandBuffer,
     const VulkanSceneRenderTargets* sceneRenderTargets,
@@ -909,6 +1027,14 @@ void VulkanCommandBuffer::Record(
     int deferredPbrDebugView,
     const VulkanGraphicsPipeline* hdrCompositePipeline,
     const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
+    const VulkanBloomRenderPass* bloomDownsampleRenderPass,
+    const VulkanBloomRenderPass* bloomUpsampleRenderPass,
+    const VulkanBloomFramebuffer* bloomDownsampleFramebuffer,
+    const VulkanBloomFramebuffer* bloomUpsampleFramebuffer,
+    const VulkanGraphicsPipeline* bloomDownsamplePipeline,
+    const VulkanGraphicsPipeline* bloomUpsamplePipeline,
+    const VulkanBloomDescriptorSets* bloomDescriptorSets,
+    bool recordBloomPyramid,
     bool useHdrCompositeAsMain,
     bool bloomDebugView,
     bool toneMappingDebugView,
@@ -1749,6 +1875,59 @@ void VulkanCommandBuffer::Record(
             bindStats->autoExposureHistogramGroupsX = 1;
             bindStats->autoExposureHistogramGroupsY = 1;
         }
+    }
+
+    if (recordBloomPyramid &&
+        bloomDownsampleRenderPass != nullptr &&
+        bloomUpsampleRenderPass != nullptr &&
+        bloomDownsampleFramebuffer != nullptr &&
+        bloomUpsampleFramebuffer != nullptr &&
+        bloomDownsamplePipeline != nullptr &&
+        bloomUpsamplePipeline != nullptr &&
+        bloomDescriptorSets != nullptr &&
+        bloomDescriptorSets->MipCount() > 0) {
+        const u32 mipCount = bloomDescriptorSets->MipCount();
+        for (u32 mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
+            RecordBloomFullscreenPass(
+                commandBuffer,
+                *bloomDownsampleRenderPass,
+                *bloomDownsampleFramebuffer,
+                *bloomDownsamplePipeline,
+                descriptorSets,
+                *bloomDescriptorSets,
+                imageIndex,
+                mipIndex,
+                false,
+                bindStats
+            );
+        }
+        if (mipCount > 1) {
+            for (u32 mipIndex = mipCount - 1; mipIndex > 0; --mipIndex) {
+                RecordBloomFullscreenPass(
+                    commandBuffer,
+                    *bloomUpsampleRenderPass,
+                    *bloomUpsampleFramebuffer,
+                    *bloomUpsamplePipeline,
+                    descriptorSets,
+                    *bloomDescriptorSets,
+                    imageIndex,
+                    mipIndex - 1,
+                    true,
+                    bindStats
+                );
+            }
+        }
+    } else if (useHdrCompositeAsMain &&
+        hdrCompositePipeline != nullptr &&
+        hdrCompositeDescriptorSets != nullptr &&
+        bloomDownsampleRenderPass != nullptr &&
+        bloomDownsampleFramebuffer != nullptr) {
+        ClearBloomMipForSampledRead(
+            commandBuffer,
+            *bloomDownsampleRenderPass,
+            *bloomDownsampleFramebuffer,
+            imageIndex
+        );
     }
 
     std::array<VkClearValue, 2> clearValues{};

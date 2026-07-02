@@ -131,6 +131,31 @@ PipelineSpec PipelineSpec::HdrComposite(
     return spec;
 }
 
+PipelineSpec PipelineSpec::BloomPyramid(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DeferredLighting(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.dynamicViewportScissor = true;
+    return spec;
+}
+
+PipelineSpec PipelineSpec::BloomUpsample(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = BloomPyramid(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.alphaBlendEnabled = true;
+    spec.colorBlendModes[0] = ColorBlendMode::Additive;
+    return spec;
+}
+
 PipelineSpec PipelineSpec::WeightedTranslucencyResolve(
     std::string vertexShaderPath,
     std::string fragmentShaderPath

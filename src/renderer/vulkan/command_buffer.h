@@ -21,6 +21,9 @@ class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
 class VulkanMaterialDescriptorSets;
 class VulkanComputePipeline;
+class VulkanBloomDescriptorSets;
+class VulkanBloomFramebuffer;
+class VulkanBloomRenderPass;
 class VulkanRenderPass;
 class VulkanRenderResources2D;
 class VulkanSceneRenderTargets;
@@ -85,6 +88,14 @@ public:
         int deferredPbrDebugView = 0,
         const VulkanGraphicsPipeline* hdrCompositePipeline = nullptr,
         const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets = nullptr,
+        const VulkanBloomRenderPass* bloomDownsampleRenderPass = nullptr,
+        const VulkanBloomRenderPass* bloomUpsampleRenderPass = nullptr,
+        const VulkanBloomFramebuffer* bloomDownsampleFramebuffer = nullptr,
+        const VulkanBloomFramebuffer* bloomUpsampleFramebuffer = nullptr,
+        const VulkanGraphicsPipeline* bloomDownsamplePipeline = nullptr,
+        const VulkanGraphicsPipeline* bloomUpsamplePipeline = nullptr,
+        const VulkanBloomDescriptorSets* bloomDescriptorSets = nullptr,
+        bool recordBloomPyramid = false,
         bool useHdrCompositeAsMain = false,
         bool bloomDebugView = false,
         bool toneMappingDebugView = false,
