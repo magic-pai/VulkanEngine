@@ -48,6 +48,15 @@ enum class RenderGraphResourceLifetime {
     PersistentCache
 };
 
+enum class RenderFrameGraphResourceAccess {
+    ReadSampled,
+    ReadAttachment,
+    WriteColorAttachment,
+    WriteDepthAttachment,
+    WriteStorage,
+    Present
+};
+
 struct RenderGraphResource {
     u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
@@ -61,6 +70,8 @@ struct RenderGraphResource {
 struct RenderFrameGraphResourceRef {
     u32 resourceId = 0;
     std::string_view name;
+    RenderFrameGraphResourceAccess access =
+        RenderFrameGraphResourceAccess::ReadSampled;
 };
 
 struct RenderFramePass {
@@ -87,6 +98,12 @@ struct RenderFrameGraphValidation {
 struct RenderFrameGraphReferenceStats {
     u32 readCount = 0;
     u32 writeCount = 0;
+    u32 readSampledCount = 0;
+    u32 readAttachmentCount = 0;
+    u32 writeColorAttachmentCount = 0;
+    u32 writeDepthAttachmentCount = 0;
+    u32 writeStorageCount = 0;
+    u32 presentCount = 0;
     u32 unstructuredReadTokenCount = 0;
     u32 unstructuredWriteTokenCount = 0;
 };
@@ -161,6 +178,9 @@ std::string_view RenderFramePassStatusName(RenderFramePassStatus status);
 std::string_view RenderFramePassQueueName(RenderFramePassQueue queue);
 std::string_view RenderGraphResourceStatusName(RenderGraphResourceStatus status);
 std::string_view RenderGraphResourceLifetimeName(RenderGraphResourceLifetime lifetime);
+std::string_view RenderFrameGraphResourceAccessName(
+    RenderFrameGraphResourceAccess access
+);
 
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     CurrentVulkanFrameGraphInputs inputs

@@ -1152,6 +1152,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.references.unstructuredReadTokenCount,
         stats.frameGraph.references.unstructuredWriteTokenCount
     );
+    ImGui::Text(
+        "Graph access: sampled %u / attachment reads %u / color writes %u / depth writes %u / storage writes %u / presents %u",
+        stats.frameGraph.references.readSampledCount,
+        stats.frameGraph.references.readAttachmentCount,
+        stats.frameGraph.references.writeColorAttachmentCount,
+        stats.frameGraph.references.writeDepthAttachmentCount,
+        stats.frameGraph.references.writeStorageCount,
+        stats.frameGraph.references.presentCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1209,9 +1218,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
                 if (!pass.readResources.empty()) {
                     ImGui::Text("Read refs:");
                     for (const RenderFrameGraphResourceRef& ref : pass.readResources) {
+                        const std::string_view access =
+                            RenderFrameGraphResourceAccessName(ref.access);
                         ImGui::BulletText(
-                            "#%08X %.*s",
+                            "#%08X [%.*s] %.*s",
                             ref.resourceId,
+                            static_cast<int>(access.size()),
+                            access.data(),
                             static_cast<int>(ref.name.size()),
                             ref.name.data()
                         );
@@ -1225,9 +1238,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
                 if (!pass.writeResources.empty()) {
                     ImGui::Text("Write refs:");
                     for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+                        const std::string_view access =
+                            RenderFrameGraphResourceAccessName(ref.access);
                         ImGui::BulletText(
-                            "#%08X %.*s",
+                            "#%08X [%.*s] %.*s",
                             ref.resourceId,
+                            static_cast<int>(access.size()),
+                            access.data(),
                             static_cast<int>(ref.name.size()),
                             ref.name.data()
                         );

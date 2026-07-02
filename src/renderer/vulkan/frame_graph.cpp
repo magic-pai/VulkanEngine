@@ -100,6 +100,50 @@ const RenderGraphResource* FindResourceByName(
     return nullptr;
 }
 
+bool ContainsWord(std::string_view text, std::string_view word) {
+    return text.find(word) != std::string_view::npos;
+}
+
+RenderFrameGraphResourceAccess InferReadAccess(
+    const RenderGraphResource& resource,
+    const RenderFramePass& pass
+) {
+    if (pass.kind == RenderFramePassKind::Present &&
+        resource.lifetime == RenderGraphResourceLifetime::Swapchain) {
+        return RenderFrameGraphResourceAccess::Present;
+    }
+    if (resource.lifetime == RenderGraphResourceLifetime::Swapchain) {
+        return RenderFrameGraphResourceAccess::ReadAttachment;
+    }
+    if (ContainsWord(resource.usage, "depth attachment") ||
+        ContainsWord(resource.usage, "color attachment")) {
+        return RenderFrameGraphResourceAccess::ReadAttachment;
+    }
+    return RenderFrameGraphResourceAccess::ReadSampled;
+}
+
+RenderFrameGraphResourceAccess InferWriteAccess(
+    const RenderGraphResource& resource,
+    const RenderFramePass& pass
+) {
+    if (pass.kind == RenderFramePassKind::Present) {
+        return RenderFrameGraphResourceAccess::Present;
+    }
+    if (resource.lifetime == RenderGraphResourceLifetime::Swapchain) {
+        return RenderFrameGraphResourceAccess::WriteColorAttachment;
+    }
+    if (ContainsWord(resource.usage, "depth attachment")) {
+        return RenderFrameGraphResourceAccess::WriteDepthAttachment;
+    }
+    if (ContainsWord(resource.usage, "storage")) {
+        return RenderFrameGraphResourceAccess::WriteStorage;
+    }
+    if (ContainsWord(resource.usage, "color attachment")) {
+        return RenderFrameGraphResourceAccess::WriteColorAttachment;
+    }
+    return RenderFrameGraphResourceAccess::WriteStorage;
+}
+
 bool ContainsResourceRef(
     const std::vector<RenderFrameGraphResourceRef>& refs,
     u32 resourceId
@@ -115,7 +159,9 @@ bool ContainsResourceRef(
 u32 ResolveResourceRefs(
     const RenderFrameGraphPlan& plan,
     std::string_view description,
-    std::vector<RenderFrameGraphResourceRef>& refs
+    std::vector<RenderFrameGraphResourceRef>& refs,
+    const RenderFramePass& pass,
+    bool writeAccess
 ) {
     u32 unresolvedTokenCount = 0;
     std::size_t tokenStart = 0;
@@ -132,7 +178,10 @@ u32 ResolveResourceRefs(
                 if (!ContainsResourceRef(refs, resource->id)) {
                     refs.push_back(RenderFrameGraphResourceRef{
                         resource->id,
-                        resource->name
+                        resource->name,
+                        writeAccess
+                            ? InferWriteAccess(*resource, pass)
+                            : InferReadAccess(*resource, pass)
                     });
                 }
             } else {
@@ -148,17 +197,49 @@ u32 ResolveResourceRefs(
     return unresolvedTokenCount;
 }
 
+void CountAccess(
+    RenderFrameGraphReferenceStats& stats,
+    RenderFrameGraphResourceAccess access
+) {
+    switch (access) {
+    case RenderFrameGraphResourceAccess::ReadSampled:
+        ++stats.readSampledCount;
+        return;
+    case RenderFrameGraphResourceAccess::ReadAttachment:
+        ++stats.readAttachmentCount;
+        return;
+    case RenderFrameGraphResourceAccess::WriteColorAttachment:
+        ++stats.writeColorAttachmentCount;
+        return;
+    case RenderFrameGraphResourceAccess::WriteDepthAttachment:
+        ++stats.writeDepthAttachmentCount;
+        return;
+    case RenderFrameGraphResourceAccess::WriteStorage:
+        ++stats.writeStorageCount;
+        return;
+    case RenderFrameGraphResourceAccess::Present:
+        ++stats.presentCount;
+        return;
+    }
+}
+
 void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     RenderFrameGraphReferenceStats stats{};
     for (RenderFramePass& pass : plan.passes) {
         pass.readResources.clear();
         pass.writeResources.clear();
         stats.unstructuredReadTokenCount +=
-            ResolveResourceRefs(plan, pass.reads, pass.readResources);
+            ResolveResourceRefs(plan, pass.reads, pass.readResources, pass, false);
         stats.unstructuredWriteTokenCount +=
-            ResolveResourceRefs(plan, pass.writes, pass.writeResources);
+            ResolveResourceRefs(plan, pass.writes, pass.writeResources, pass, true);
         stats.readCount += static_cast<u32>(pass.readResources.size());
         stats.writeCount += static_cast<u32>(pass.writeResources.size());
+        for (const RenderFrameGraphResourceRef& ref : pass.readResources) {
+            CountAccess(stats, ref.access);
+        }
+        for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+            CountAccess(stats, ref.access);
+        }
     }
     plan.references = stats;
 }
@@ -587,6 +668,27 @@ std::string_view RenderGraphResourceLifetimeName(RenderGraphResourceLifetime lif
         return "history";
     case RenderGraphResourceLifetime::PersistentCache:
         return "cache";
+    }
+
+    return "unknown";
+}
+
+std::string_view RenderFrameGraphResourceAccessName(
+    RenderFrameGraphResourceAccess access
+) {
+    switch (access) {
+    case RenderFrameGraphResourceAccess::ReadSampled:
+        return "read sampled";
+    case RenderFrameGraphResourceAccess::ReadAttachment:
+        return "read attachment";
+    case RenderFrameGraphResourceAccess::WriteColorAttachment:
+        return "write color";
+    case RenderFrameGraphResourceAccess::WriteDepthAttachment:
+        return "write depth";
+    case RenderFrameGraphResourceAccess::WriteStorage:
+        return "write storage";
+    case RenderFrameGraphResourceAccess::Present:
+        return "present";
     }
 
     return "unknown";
