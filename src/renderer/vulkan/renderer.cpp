@@ -1891,6 +1891,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_LightClusterCullComputePipeline.reset();
+    m_AutoExposureComputePipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
@@ -1940,6 +1941,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_OverlayUniformBuffer.reset();
     m_LightBuffer.reset();
     m_LightTileDiagnosticsBuffer.reset();
+    m_AutoExposureBuffer.reset();
     m_MaterialBuffer.reset();
     m_DirectionalShadowCascadeBuffer.reset();
     m_LocalShadowBuffer.reset();
@@ -2001,6 +2003,8 @@ void VulkanRenderer::DrawFrame() {
     }
     const FrameLightTileGpuReadbackStats lightTileGpuStats =
         ReadPreviousLightTileGpuStats(imageIndex);
+    const FrameAutoExposureReadbackStats autoExposureStats =
+        ReadPreviousAutoExposureStats(imageIndex);
 
     FrameClock::time_point sectionEnd = FrameClock::now();
     frameStats.cpu.waitAcquireMs = ElapsedMilliseconds(sectionStart, sectionEnd);
@@ -2256,6 +2260,27 @@ void VulkanRenderer::DrawFrame() {
             renderFeatureContext
         }
     );
+    const bool recordAutoExposureCompute =
+        frameStats.postProcess.autoExposureEnabled > 0 &&
+        hdrCompositeAvailable &&
+        m_AutoExposureComputePipeline != nullptr &&
+        m_AutoExposureBuffer != nullptr &&
+        m_HdrDescriptorSets != nullptr;
+    frameStats.postProcess.autoExposureHistogramEnabled =
+        recordAutoExposureCompute ? 1u : 0u;
+    frameStats.postProcess.autoExposureHistoryValid =
+        autoExposureStats.valid ? 1u : 0u;
+    frameStats.postProcess.autoExposureGpuExposure =
+        autoExposureStats.exposure;
+    frameStats.postProcess.autoExposureGpuTargetExposure =
+        autoExposureStats.targetExposure;
+    frameStats.postProcess.autoExposureGpuAverageLuminance =
+        autoExposureStats.averageLuminance;
+    frameStats.postProcess.autoExposureFallbacks =
+        frameStats.postProcess.autoExposureEnabled > 0 &&
+            !recordAutoExposureCompute
+            ? 1u
+            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2522,6 +2547,9 @@ void VulkanRenderer::DrawFrame() {
                 ? m_SceneRenderTargets->HdrSceneColorFormat()
                 : VK_FORMAT_UNDEFINED,
             m_HdrRenderPass != nullptr && m_HdrFramebuffer != nullptr,
+            frameStats.postProcess.autoExposureHistogramEnabled > 0,
+            frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
+                m_AutoExposureBuffer != nullptr,
             m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
             AppendRenderFeaturesToCurrentFrameGraph,
             &renderFeatureFrameGraphAppendData,
@@ -2643,6 +2671,10 @@ void VulkanRenderer::DrawFrame() {
         lightTileCullGroupCountY,
         4, // lightTileCullGroupCountZ (clustered: 4 depth slices)
         m_LightClusterCullComputePipeline.get(),
+        recordAutoExposureCompute ? m_AutoExposureComputePipeline.get() : nullptr,
+        recordAutoExposureCompute ? m_DescriptorSets.get() : nullptr,
+        recordAutoExposureCompute ? m_HdrDescriptorSets.get() : nullptr,
+        recordAutoExposureCompute,
         has3DMainPass ? m_ForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(forwardResidualCommands.data(), forwardResidualCommands.size()) : std::span<const RenderCommand>{},
@@ -2800,7 +2832,8 @@ void VulkanRenderer::SetOverlay3DContext(
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
         *m_DirectionalShadowCascadeBuffer,
-        *m_LocalShadowBuffer
+        *m_LocalShadowBuffer,
+        *m_AutoExposureBuffer
     );
     m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
         m_Device,
@@ -2882,6 +2915,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         m_Swapchain->Images().size()
     );
+    m_AutoExposureBuffer = std::make_unique<VulkanAutoExposureBuffer>(
+        m_Device,
+        m_PhysicalDevice,
+        m_Swapchain->Images().size()
+    );
     m_LightTileGpuReadbackReady.assign(m_Swapchain->Images().size(), false);
     m_MaterialBuffer = std::make_unique<VulkanMaterialBuffer>(
         m_Device,
@@ -2910,7 +2948,8 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
         *m_DirectionalShadowCascadeBuffer,
-        *m_LocalShadowBuffer
+        *m_LocalShadowBuffer,
+        *m_AutoExposureBuffer
     );
     // Bind IBL textures to descriptor sets (bindings 6-8)
     if (m_IblSampler && m_IblBrdfImage) {
@@ -3295,6 +3334,12 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_LightTileCullComputePipeline.reset();
         m_LightClusterCullComputePipeline.reset();
     }
+    m_AutoExposureComputePipeline = std::make_unique<VulkanComputePipeline>(
+        m_Device,
+        *m_DescriptorSetLayout,
+        *m_MaterialDescriptorSetLayout,
+        std::string(SE_SHADER_DIR) + "/auto_exposure_histogram.comp.spv"
+    );
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
     const PipelineSpec shadowSpec =
         PipelineSpec::ShadowDepth(shadowShaderPath, m_ShadowMap->Extent());
@@ -3403,6 +3448,9 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_LightTileCullComputePipeline != nullptr) {
         m_LightTileCullComputePipeline->Release();
     }
+    if (m_AutoExposureComputePipeline != nullptr) {
+        m_AutoExposureComputePipeline->Release();
+    }
     if (m_GBufferGraphicsPipeline != nullptr) {
         m_GBufferGraphicsPipeline->Release();
     }
@@ -3487,6 +3535,9 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_LightTileDiagnosticsBuffer != nullptr) {
         m_LightTileDiagnosticsBuffer->Release();
     }
+    if (m_AutoExposureBuffer != nullptr) {
+        m_AutoExposureBuffer->Release();
+    }
     if (m_MaterialBuffer != nullptr) {
         m_MaterialBuffer->Release();
     }
@@ -3505,6 +3556,13 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_LightTileDiagnosticsBuffer != nullptr) {
         m_LightTileDiagnosticsBuffer->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_Swapchain->Images().size()
+        );
+    }
+    if (m_AutoExposureBuffer != nullptr) {
+        m_AutoExposureBuffer->Recreate(
             m_Device,
             m_PhysicalDevice,
             m_Swapchain->Images().size()
@@ -3536,7 +3594,8 @@ void VulkanRenderer::RecreateSwapchain() {
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
         *m_DirectionalShadowCascadeBuffer,
-        *m_LocalShadowBuffer
+        *m_LocalShadowBuffer,
+        *m_AutoExposureBuffer
     );
     // Rebind IBL textures after descriptor pool recreation
     if (m_IblSampler && m_IblBrdfImage) {
@@ -3961,6 +4020,14 @@ void VulkanRenderer::RecreateSwapchain() {
             lightTileCullShaderPath
         );
     }
+    if (m_AutoExposureComputePipeline != nullptr) {
+        m_AutoExposureComputePipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            std::string(SE_SHADER_DIR) + "/auto_exposure_histogram.comp.spv"
+        );
+    }
     if (m_ShadowGraphicsPipeline != nullptr && m_ShadowRenderPass != nullptr && m_ShadowMap != nullptr) {
         const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
         const PipelineSpec shadowSpec =
@@ -3998,7 +4065,8 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_LightTileDiagnosticsBuffer,
             *m_MaterialBuffer,
             *m_DirectionalShadowCascadeBuffer,
-            *m_LocalShadowBuffer
+            *m_LocalShadowBuffer,
+            *m_AutoExposureBuffer
         );
         m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
@@ -4742,6 +4810,24 @@ FrameLightTileGpuReadbackStats VulkanRenderer::ReadPreviousLightTileGpuStats(
             ? diagnostics.overflowCounters.z - diagnostics.overflowCounters.w
             : 0u;
 
+    return stats;
+}
+
+FrameAutoExposureReadbackStats VulkanRenderer::ReadPreviousAutoExposureStats(
+    std::size_t imageIndex
+) const {
+    FrameAutoExposureReadbackStats stats{};
+    if (m_AutoExposureBuffer == nullptr ||
+        imageIndex >= m_AutoExposureBuffer->Count()) {
+        return stats;
+    }
+
+    const AutoExposureBufferObject exposure =
+        m_AutoExposureBuffer->Download(imageIndex);
+    stats.valid = exposure.exposure.w > 0.5f;
+    stats.exposure = std::max(exposure.exposure.x, 0.001f);
+    stats.targetExposure = std::max(exposure.exposure.y, 0.001f);
+    stats.averageLuminance = std::max(exposure.exposure.z, 0.001f);
     return stats;
 }
 

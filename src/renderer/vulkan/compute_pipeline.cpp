@@ -9,9 +9,25 @@ namespace se {
 VulkanComputePipeline::VulkanComputePipeline(
     const VulkanDevice& device,
     const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+    const VulkanMaterialDescriptorSetLayout& sampledImageDescriptorSetLayout,
     const std::string& computeShaderPath
 ) : m_Device(device.Handle()) {
-    CreateComputePipeline(device, frameDescriptorSetLayout, computeShaderPath);
+    const VkDescriptorSetLayout descriptorSetLayouts[] = {
+        frameDescriptorSetLayout.Handle(),
+        sampledImageDescriptorSetLayout.Handle()
+    };
+    CreateComputePipeline(device, descriptorSetLayouts, computeShaderPath);
+}
+
+VulkanComputePipeline::VulkanComputePipeline(
+    const VulkanDevice& device,
+    const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+    const std::string& computeShaderPath
+) : m_Device(device.Handle()) {
+    const VkDescriptorSetLayout descriptorSetLayouts[] = {
+        frameDescriptorSetLayout.Handle()
+    };
+    CreateComputePipeline(device, descriptorSetLayouts, computeShaderPath);
 }
 
 VulkanComputePipeline::~VulkanComputePipeline() {
@@ -29,31 +45,42 @@ VkPipelineLayout VulkanComputePipeline::Layout() const {
 void VulkanComputePipeline::Recreate(
     const VulkanDevice& device,
     const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+    const VulkanMaterialDescriptorSetLayout& sampledImageDescriptorSetLayout,
     const std::string& computeShaderPath
 ) {
     Release();
-    CreateComputePipeline(device, frameDescriptorSetLayout, computeShaderPath);
+    const VkDescriptorSetLayout descriptorSetLayouts[] = {
+        frameDescriptorSetLayout.Handle(),
+        sampledImageDescriptorSetLayout.Handle()
+    };
+    CreateComputePipeline(device, descriptorSetLayouts, computeShaderPath);
+}
+
+void VulkanComputePipeline::Recreate(
+    const VulkanDevice& device,
+    const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+    const std::string& computeShaderPath
+) {
+    Release();
+    const VkDescriptorSetLayout descriptorSetLayouts[] = {
+        frameDescriptorSetLayout.Handle()
+    };
+    CreateComputePipeline(device, descriptorSetLayouts, computeShaderPath);
 }
 
 void VulkanComputePipeline::CreateComputePipeline(
     const VulkanDevice& device,
-    const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+    std::span<const VkDescriptorSetLayout> descriptorSetLayouts,
     const std::string& computeShaderPath
 ) {
     m_Device = device.Handle();
 
     VulkanShaderModule computeShader(device, computeShaderPath);
 
-    const VkDescriptorSetLayout descriptorSetLayouts[] = {
-        frameDescriptorSetLayout.Handle()
-    };
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = static_cast<u32>(
-        sizeof(descriptorSetLayouts) / sizeof(descriptorSetLayouts[0])
-    );
-    pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts;
+    pipelineLayoutInfo.setLayoutCount = static_cast<u32>(descriptorSetLayouts.size());
+    pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
 
     if (vkCreatePipelineLayout(
             device.Handle(),

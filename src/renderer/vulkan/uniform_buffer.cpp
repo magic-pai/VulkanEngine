@@ -20,6 +20,10 @@ std::span<const std::byte> AsBytes(const LightTileDiagnosticsBufferObject& diagn
     return std::as_bytes(std::span<const LightTileDiagnosticsBufferObject>(&diagnosticsData, 1));
 }
 
+std::span<const std::byte> AsBytes(const AutoExposureBufferObject& exposureData) {
+    return std::as_bytes(std::span<const AutoExposureBufferObject>(&exposureData, 1));
+}
+
 std::span<const std::byte> AsBytes(
     const DirectionalShadowCascadeBufferObject& cascadeData
 ) {
@@ -257,6 +261,88 @@ void VulkanLightTileDiagnosticsBuffer::CreateBuffers(
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         ));
+    }
+}
+
+VulkanAutoExposureBuffer::VulkanAutoExposureBuffer(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    CreateBuffers(device, physicalDevice, count);
+}
+
+VulkanAutoExposureBuffer::~VulkanAutoExposureBuffer() {
+    Release();
+}
+
+std::size_t VulkanAutoExposureBuffer::Count() const {
+    return m_Buffers.size();
+}
+
+VkDescriptorBufferInfo VulkanAutoExposureBuffer::DescriptorInfo(std::size_t index) const {
+    SE_ASSERT(index < m_Buffers.size(), "Auto exposure buffer index is out of range");
+
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = m_Buffers[index]->Handle();
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(AutoExposureBufferObject);
+
+    return bufferInfo;
+}
+
+void VulkanAutoExposureBuffer::Update(
+    std::size_t index,
+    const AutoExposureBufferObject& data
+) const {
+    SE_ASSERT(index < m_Buffers.size(), "Auto exposure buffer index is out of range");
+    m_Buffers[index]->Upload(AsBytes(data));
+}
+
+AutoExposureBufferObject VulkanAutoExposureBuffer::Download(
+    std::size_t index
+) const {
+    SE_ASSERT(index < m_Buffers.size(), "Auto exposure buffer index is out of range");
+
+    AutoExposureBufferObject data{};
+    m_Buffers[index]->Download(
+        std::as_writable_bytes(std::span<AutoExposureBufferObject>(&data, 1))
+    );
+    return data;
+}
+
+void VulkanAutoExposureBuffer::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    Release();
+    CreateBuffers(device, physicalDevice, count);
+}
+
+void VulkanAutoExposureBuffer::Release() {
+    m_Buffers.clear();
+}
+
+void VulkanAutoExposureBuffer::CreateBuffers(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    SE_ASSERT(count > 0, "Auto exposure buffer count must be greater than zero");
+
+    m_Buffers.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        auto buffer = std::make_unique<VulkanBuffer>(
+            device,
+            physicalDevice,
+            sizeof(AutoExposureBufferObject),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        AutoExposureBufferObject initialData{};
+        buffer->Upload(AsBytes(initialData));
+        m_Buffers.push_back(std::move(buffer));
     }
 }
 

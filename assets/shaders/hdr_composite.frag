@@ -26,9 +26,16 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 postProcessControls;
     vec4 colorGradingControls;
     vec4 toneMappingControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
     vec4 autoExposureControls;
     vec4 sharpeningControls;
 } frame;
+
+layout(set = 0, binding = 10) readonly buffer AutoExposureState {
+    vec4 exposure;
+    uvec4 histogram[16];
+} autoExposure;
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 
@@ -85,6 +92,10 @@ float EffectiveExposure() {
     float autoEnabled = clamp(frame.toneMappingControls.w, 0.0, 1.0);
     if (autoEnabled <= 0.0001) {
         return manualExposure;
+    }
+
+    if (autoExposure.exposure.w > 0.5) {
+        return max(autoExposure.exposure.x, 0.001);
     }
 
     float targetLuminance = max(frame.autoExposureControls.x, 0.001);

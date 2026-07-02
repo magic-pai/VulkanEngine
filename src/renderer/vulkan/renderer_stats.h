@@ -198,6 +198,12 @@ struct RendererPostProcessStats {
     f32 autoExposureMin = 0.25f;
     f32 autoExposureMax = 4.0f;
     f32 autoExposureAdaptation = 1.0f;
+    u32 autoExposureHistogramEnabled = 0;
+    u32 autoExposureHistoryValid = 0;
+    u32 autoExposureFallbacks = 0;
+    f32 autoExposureGpuExposure = 1.0f;
+    f32 autoExposureGpuTargetExposure = 1.0f;
+    f32 autoExposureGpuAverageLuminance = 1.0f;
     u32 colorGradingEnabled = 0;
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
@@ -273,6 +279,11 @@ struct RendererBindStats {
     u32 lightTileCullComputeFrameBinds = 0;
     u32 lightTileCullComputeGroupsX = 0;
     u32 lightTileCullComputeGroupsY = 0;
+    u32 autoExposureHistogramDispatches = 0;
+    u32 autoExposureHistogramFrameBinds = 0;
+    u32 autoExposureHistogramTextureBinds = 0;
+    u32 autoExposureHistogramGroupsX = 0;
+    u32 autoExposureHistogramGroupsY = 0;
     u32 depthCopyOps = 0;
     u32 depthPrefillDraws = 0;
     u32 depthPrefillMeshBinds = 0;

@@ -557,6 +557,16 @@ bool MatchesBarrierBridge(
             transition.producerQueue == RenderFramePassQueue::Compute &&
             transition.consumerQueue == RenderFramePassQueue::Graphics &&
             !transition.writeDependency;
+    case RenderFrameGraphBarrierBridge::AutoExposureHistoryFragmentRead:
+        return transition.producerPassName == "AutoExposureHistogramBuild" &&
+            transition.consumerPassName == "HDRComposite" &&
+            transition.resourceName == "AutoExposureHistory" &&
+            transition.resourceKind == RenderFrameGraphBarrierResourceKind::Buffer &&
+            transition.srcAccess == RenderFrameGraphResourceAccess::WriteStorage &&
+            transition.dstAccess == RenderFrameGraphResourceAccess::ReadSampled &&
+            transition.producerQueue == RenderFramePassQueue::Compute &&
+            transition.consumerQueue == RenderFramePassQueue::Graphics &&
+            !transition.writeDependency;
     }
 
     return false;
@@ -670,6 +680,10 @@ void RebuildFrameGraphBarrierPlan(RenderFrameGraphPlan& plan) {
         CountBarrierBridgeTransitions(
             plan,
             RenderFrameGraphBarrierBridge::LightTileCullFragmentRead
+        ) +
+        CountBarrierBridgeTransitions(
+            plan,
+            RenderFrameGraphBarrierBridge::AutoExposureHistoryFragmentRead
         );
 }
 
@@ -863,6 +877,7 @@ void RebuildFrameGraphValidation(RenderFrameGraphPlan& plan) {
                 FindResourceById(plan, ref.resourceId);
             if (resource != nullptr &&
                 HasActiveWriter(plan, ref.resourceId) &&
+                resource->lifetime != RenderGraphResourceLifetime::PersistentHistory &&
                 !ContainsId(activeWrittenResourceIds, ref.resourceId)) {
                 AppendValidationIssue(
                     validation,
@@ -1414,6 +1429,8 @@ std::string_view RenderFrameGraphBarrierBridgeName(
     switch (bridge) {
     case RenderFrameGraphBarrierBridge::LightTileCullFragmentRead:
         return "LightTileCull fragment read";
+    case RenderFrameGraphBarrierBridge::AutoExposureHistoryFragmentRead:
+        return "AutoExposureHistory fragment read";
     }
 
     return "unknown";
@@ -1440,6 +1457,10 @@ RenderFrameGraphBarrierExecutionResult RecordRenderFrameGraphBarrierExecution(
         CountBarrierBridgeTransitions(
             plan,
             RenderFrameGraphBarrierBridge::LightTileCullFragmentRead
+        ) +
+        CountBarrierBridgeTransitions(
+            plan,
+            RenderFrameGraphBarrierBridge::AutoExposureHistoryFragmentRead
         );
     return result;
 }
@@ -1528,6 +1549,28 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             VulkanFormatName(inputs.hdrSceneColorFormat),
             "color attachment, sampled, storage",
             "window extent"
+        );
+    }
+    if (inputs.autoExposureHistogramEnabled) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "AutoExposureHistogram",
+            "64-bin structured buffer",
+            "storage buffer, compute-written luminance histogram",
+            "per frame"
+        );
+    }
+    if (inputs.autoExposureHistoryAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentHistory,
+            "AutoExposureHistory",
+            "structured buffer",
+            "storage buffer, exposure history and resolved exposure",
+            "swapchain history"
         );
     }
     if (inputs.weightedTranslucencyTargetsAllocated) {

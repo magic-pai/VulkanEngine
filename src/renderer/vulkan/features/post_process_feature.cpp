@@ -10,7 +10,10 @@ namespace se {
 
 namespace {
 
-std::string_view HdrCompositeReads(const RendererPostProcessStats&) {
+std::string_view HdrCompositeReads(const RendererPostProcessStats& postProcess) {
+    if (postProcess.autoExposureHistogramEnabled > 0) {
+        return "HDRSceneColor, AutoExposureHistory";
+    }
     return "HDRSceneColor";
 }
 
@@ -25,7 +28,18 @@ void VulkanPostProcessFeature::AppendFrameGraph(
     }
 
     const RendererPostProcessStats& postProcess = context.stats.postProcess;
-    if (postProcess.autoExposureEnabled > 0) {
+    if (postProcess.autoExposureHistogramEnabled > 0) {
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::PostProcess,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Compute,
+            "AutoExposureHistogramBuild",
+            "HDRSceneColor, AutoExposureHistory",
+            "AutoExposureHistogram, AutoExposureHistory",
+            "GPU luminance histogram and eye-adaptation history feeding HDR composite exposure."
+        );
+    } else if (postProcess.autoExposureEnabled > 0) {
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::PostProcess,

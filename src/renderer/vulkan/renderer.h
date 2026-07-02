@@ -55,6 +55,7 @@ class VulkanShadowRenderPass;
 class VulkanSurface;
 class VulkanSwapchain;
 class VulkanSyncObjects;
+class VulkanAutoExposureBuffer;
 class VulkanLightBuffer;
 class VulkanLightTileDiagnosticsBuffer;
 class VulkanMaterialBuffer;
@@ -141,6 +142,13 @@ struct FrameLightTileGpuReadbackStats {
     u32 overflowDroppedTileCount = 0;
     u32 overflowStoredCount = 0;
     u32 overflowDroppedCount = 0;
+};
+
+struct FrameAutoExposureReadbackStats {
+    bool valid = false;
+    f32 exposure = 1.0f;
+    f32 targetExposure = 1.0f;
+    f32 averageLuminance = 1.0f;
 };
 
 struct DirectionalShadowCascade {
@@ -280,6 +288,9 @@ private:
     FrameLightTileGpuReadbackStats ReadPreviousLightTileGpuStats(
         std::size_t imageIndex
     ) const;
+    FrameAutoExposureReadbackStats ReadPreviousAutoExposureStats(
+        std::size_t imageIndex
+    ) const;
     void UpdateMaterialBuffer(
         std::size_t imageIndex,
         const FrameMaterialSet& materials
@@ -370,6 +381,7 @@ private:
     std::unique_ptr<VulkanWeightedTranslucencyDescriptorSets> m_WeightedTranslucencyDescriptorSets;
     std::unique_ptr<VulkanLightBuffer> m_LightBuffer;
     std::unique_ptr<VulkanLightTileDiagnosticsBuffer> m_LightTileDiagnosticsBuffer;
+    std::unique_ptr<VulkanAutoExposureBuffer> m_AutoExposureBuffer;
     std::unique_ptr<VulkanMaterialBuffer> m_MaterialBuffer;
     std::unique_ptr<VulkanDirectionalShadowCascadeBuffer> m_DirectionalShadowCascadeBuffer;
     std::unique_ptr<VulkanLocalShadowBuffer> m_LocalShadowBuffer;
@@ -403,6 +415,7 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_AutoExposureComputePipeline;
     // IBL textures
         std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;

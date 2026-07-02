@@ -66,6 +66,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/hdr_composite.frag
     ${SHADER_SOURCE_DIR}/gbuffer_debug.vert
     ${SHADER_SOURCE_DIR}/gbuffer_debug.frag
+    ${SHADER_SOURCE_DIR}/auto_exposure_histogram.comp
     ${SHADER_SOURCE_DIR}/light_tile_cull.comp
     ${SHADER_SOURCE_DIR}/light_cluster_cull.comp
     ${SHADER_SOURCE_DIR}/depth_prefill_3d.vert

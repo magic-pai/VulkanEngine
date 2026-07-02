@@ -1,0 +1,110 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform FrameData {
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+    mat4 lightViewProj;
+    vec4 directionalLight;
+    vec4 ambientLight;
+    vec4 shadowControls;
+    vec4 shadowFiltering;
+    vec4 contactShadowControls;
+    vec4 contactShadowStabilityControls;
+    vec4 ssaoControls;
+    vec4 ssrControls;
+    vec4 reflectionProbeControls;
+    vec4 localReflectionProbePositionRadius;
+    vec4 localReflectionProbeControls;
+    vec4 localReflectionProbeColor;
+    vec4 heightFogControls;
+    vec4 heightFogColor;
+    vec4 postProcessControls;
+    vec4 colorGradingControls;
+    vec4 toneMappingControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
+    vec4 autoExposureControls;
+    vec4 sharpeningControls;
+} frame;
+
+layout(set = 0, binding = 10) buffer AutoExposureState {
+    vec4 exposure;
+    uvec4 histogram[16];
+} autoExposure;
+
+layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
+
+shared uint sharedBins[64];
+
+float Luminance(vec3 color) {
+    return dot(max(color, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+}
+
+uint LuminanceBin(float luminance) {
+    float logLum = log2(max(luminance, 0.0001));
+    float normalized = clamp((logLum + 10.0) / 16.0, 0.0, 0.999);
+    return uint(normalized * 64.0);
+}
+
+float BinCenterLuminance(uint binIndex) {
+    float normalized = (float(binIndex) + 0.5) / 64.0;
+    return exp2(normalized * 16.0 - 10.0);
+}
+
+void main() {
+    uint localIndex = gl_LocalInvocationIndex;
+    if (localIndex < 64u) {
+        sharedBins[localIndex] = 0u;
+    }
+    barrier();
+
+    ivec2 textureExtent = max(textureSize(hdrSceneColor, 0), ivec2(1));
+    uvec2 localId = gl_LocalInvocationID.xy;
+    vec2 sampleUv = (vec2(localId) + vec2(0.5)) / vec2(gl_WorkGroupSize.xy);
+    ivec2 sampleCoord = clamp(
+        ivec2(sampleUv * vec2(textureExtent)),
+        ivec2(0),
+        textureExtent - ivec2(1)
+    );
+    vec3 hdrColor = texelFetch(hdrSceneColor, sampleCoord, 0).rgb;
+    float luminance = Luminance(hdrColor);
+    atomicAdd(sharedBins[LuminanceBin(luminance)], 1u);
+    barrier();
+
+    if (localIndex == 0u) {
+        uint sampleCount = 0u;
+        float weightedLuminance = 0.0;
+        for (uint binIndex = 0u; binIndex < 64u; ++binIndex) {
+            uint binCount = sharedBins[binIndex];
+            sampleCount += binCount;
+            weightedLuminance += BinCenterLuminance(binIndex) * float(binCount);
+        }
+
+        float avgLuminance = weightedLuminance / max(float(sampleCount), 1.0);
+        float manualExposure = max(frame.toneMappingControls.y, 0.001);
+        float targetLuminance = max(frame.autoExposureControls.x, 0.001);
+        float minExposure = max(frame.autoExposureControls.y, 0.001);
+        float maxExposure = max(frame.autoExposureControls.z, minExposure);
+        float adaptation = clamp(frame.autoExposureControls.w, 0.0, 1.0);
+        float targetExposure = clamp(targetLuminance / max(avgLuminance, 0.001), minExposure, maxExposure);
+        float previousExposure = autoExposure.exposure.w > 0.5
+            ? max(autoExposure.exposure.x, 0.001)
+            : manualExposure;
+        float adaptedExposure = mix(previousExposure, targetExposure, adaptation);
+        autoExposure.exposure = vec4(adaptedExposure, targetExposure, avgLuminance, 1.0);
+
+        for (uint groupIndex = 0u; groupIndex < 16u; ++groupIndex) {
+            uint baseIndex = groupIndex * 4u;
+            autoExposure.histogram[groupIndex] = uvec4(
+                sharedBins[baseIndex + 0u],
+                sharedBins[baseIndex + 1u],
+                sharedBins[baseIndex + 2u],
+                sharedBins[baseIndex + 3u]
+            );
+        }
+    }
+}

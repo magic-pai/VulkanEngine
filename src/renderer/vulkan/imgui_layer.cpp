@@ -832,6 +832,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureAdaptation
     );
     ImGui::Text(
+        "Auto exposure GPU: %s, history %s, exposure %.3f, target %.3f, avg lum %.3f, fallbacks %u",
+        stats.postProcess.autoExposureHistogramEnabled ? "histogram" : "fallback",
+        stats.postProcess.autoExposureHistoryValid ? "valid" : "cold",
+        stats.postProcess.autoExposureGpuExposure,
+        stats.postProcess.autoExposureGpuTargetExposure,
+        stats.postProcess.autoExposureGpuAverageLuminance,
+        stats.postProcess.autoExposureFallbacks
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,
@@ -1020,6 +1029,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         binds.lightTileCullComputeFrameBinds,
         binds.lightTileCullComputeGroupsX,
         binds.lightTileCullComputeGroupsY
+    );
+    ImGui::Text(
+        "Auto exposure compute: %u dispatches / %u frame binds / %u texture binds / groups %ux%u",
+        binds.autoExposureHistogramDispatches,
+        binds.autoExposureHistogramFrameBinds,
+        binds.autoExposureHistogramTextureBinds,
+        binds.autoExposureHistogramGroupsX,
+        binds.autoExposureHistogramGroupsY
     );
     ImGui::Text(
         "Mesh binds: %u main / %u gbuffer / %u overlay / %u shadow",

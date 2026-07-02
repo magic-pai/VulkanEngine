@@ -97,7 +97,14 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
     probeGridBinding.descriptorCount = 1;
     probeGridBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-    const std::array<VkDescriptorSetLayoutBinding, 10> bindings = {
+    VkDescriptorSetLayoutBinding autoExposureBinding{};
+    autoExposureBinding.binding = 10;
+    autoExposureBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    autoExposureBinding.descriptorCount = 1;
+    autoExposureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    autoExposureBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
@@ -107,7 +114,8 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         brdfLutLayoutBinding,
         irradianceMapBinding,
         prefilteredMapBinding,
-        probeGridBinding
+        probeGridBinding,
+        autoExposureBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};
@@ -150,7 +158,8 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
     albedoSamplerLayoutBinding.binding = 0;
     albedoSamplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     albedoSamplerLayoutBinding.descriptorCount = 1;
-    albedoSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    albedoSamplerLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
     albedoSamplerLayoutBinding.pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutBinding colorMapSamplerLayoutBinding{};

@@ -325,6 +325,12 @@ void BenchmarkRecorder::RecordFrame(
         << postProcess.autoExposureMin << ','
         << postProcess.autoExposureMax << ','
         << postProcess.autoExposureAdaptation << ','
+        << postProcess.autoExposureHistogramEnabled << ','
+        << postProcess.autoExposureHistoryValid << ','
+        << postProcess.autoExposureGpuExposure << ','
+        << postProcess.autoExposureGpuTargetExposure << ','
+        << postProcess.autoExposureGpuAverageLuminance << ','
+        << postProcess.autoExposureFallbacks << ','
         << postProcess.colorGradingEnabled << ','
         << postProcess.colorGradingSaturation << ','
         << postProcess.colorGradingContrast << ','
@@ -457,6 +463,11 @@ void BenchmarkRecorder::RecordFrame(
         << binds.lightTileCullComputeFrameBinds << ','
         << binds.lightTileCullComputeGroupsX << ','
         << binds.lightTileCullComputeGroupsY << ','
+        << binds.autoExposureHistogramDispatches << ','
+        << binds.autoExposureHistogramFrameBinds << ','
+        << binds.autoExposureHistogramTextureBinds << ','
+        << binds.autoExposureHistogramGroupsX << ','
+        << binds.autoExposureHistogramGroupsY << ','
         << binds.depthCopyOps << ','
         << binds.depthPrefillDraws << ','
         << binds.depthPrefillMeshBinds << ','
@@ -659,6 +670,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "tone_mapping_enabled,tone_map_mode,exposure,tone_map_white_point,"
         << "auto_exposure_enabled,auto_exposure_target_luminance,"
         << "auto_exposure_min,auto_exposure_max,auto_exposure_adaptation,"
+        << "auto_exposure_histogram_enabled,auto_exposure_history_valid,"
+        << "auto_exposure_gpu_exposure,auto_exposure_gpu_target_exposure,"
+        << "auto_exposure_gpu_average_luminance,auto_exposure_gpu_fallbacks,"
         << "color_grading_enabled,color_grading_saturation,"
         << "color_grading_contrast,color_grading_gamma,"
         << "sharpening_enabled,sharpening_strength,sharpening_radius_pixels,"
@@ -726,6 +740,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "sharpening_debug_texture_binds,"
         << "light_tile_cull_compute_dispatches,light_tile_cull_compute_frame_binds,"
         << "light_tile_cull_compute_groups_x,light_tile_cull_compute_groups_y,"
+        << "auto_exposure_histogram_dispatches,auto_exposure_histogram_frame_binds,"
+        << "auto_exposure_histogram_texture_binds,"
+        << "auto_exposure_histogram_groups_x,auto_exposure_histogram_groups_y,"
         << "depth_copy_ops,depth_prefill_draws,depth_prefill_mesh_binds,"
         << "weighted_translucency_bind_clear_passes,"
         << "weighted_translucency_bind_draws,"

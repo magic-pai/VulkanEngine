@@ -13,6 +13,7 @@ class VulkanSceneRenderTargets;
 class VulkanDirectionalShadowCascadeAtlas;
 class VulkanLocalShadowAtlas;
 class VulkanShadowMap;
+class VulkanAutoExposureBuffer;
 class VulkanLightBuffer;
 class VulkanLightTileDiagnosticsBuffer;
 class VulkanMaterialBuffer;
@@ -30,7 +31,8 @@ public:
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
-        const VulkanLocalShadowBuffer& localShadowBuffer
+        const VulkanLocalShadowBuffer& localShadowBuffer,
+        const VulkanAutoExposureBuffer& autoExposureBuffer
     );
 
     ~VulkanDescriptorSets();
@@ -49,7 +51,8 @@ public:
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
-        const VulkanLocalShadowBuffer& localShadowBuffer
+        const VulkanLocalShadowBuffer& localShadowBuffer,
+        const VulkanAutoExposureBuffer& autoExposureBuffer
     );
     void Release();
 
@@ -63,7 +66,8 @@ private:
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
-        const VulkanLocalShadowBuffer& localShadowBuffer
+        const VulkanLocalShadowBuffer& localShadowBuffer,
+        const VulkanAutoExposureBuffer& autoExposureBuffer
     );
 
 private:

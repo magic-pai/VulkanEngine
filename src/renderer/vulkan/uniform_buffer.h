@@ -22,6 +22,9 @@ inline constexpr std::size_t kLightIndexGroupsPerTile =
 inline constexpr std::size_t kMaxFrameLightTileOverflowIndices = 65536;
 inline constexpr std::size_t kMaxFrameMaterials = 256;
 inline constexpr std::size_t kMaxFrameLocalShadowTiles = 64;
+inline constexpr std::size_t kAutoExposureHistogramBinCount = 64;
+inline constexpr std::size_t kAutoExposureHistogramGroupCount =
+    kAutoExposureHistogramBinCount / 4;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 view{ 1.0f };
@@ -86,6 +89,11 @@ struct LightBufferObject {
 struct LightTileDiagnosticsBufferObject {
     alignas(16) glm::uvec4 counters{};
     alignas(16) glm::uvec4 overflowCounters{};
+};
+
+struct AutoExposureBufferObject {
+    alignas(16) glm::vec4 exposure{ 1.0f, 1.0f, 1.0f, 0.0f };
+    alignas(16) std::array<glm::uvec4, kAutoExposureHistogramGroupCount> histogram{};
 };
 
 struct DirectionalShadowCascadeBufferObject {
@@ -175,6 +183,13 @@ static_assert(
 static_assert(
     sizeof(LightTileDiagnosticsBufferObject) == sizeof(glm::uvec4) * 2,
     "LightTileDiagnosticsBufferObject layout must match the shader storage buffer"
+);
+
+static_assert(
+    sizeof(AutoExposureBufferObject) ==
+        sizeof(glm::vec4) +
+            sizeof(glm::uvec4) * kAutoExposureHistogramGroupCount,
+    "AutoExposureBufferObject layout must match the shader storage buffer"
 );
 
 static_assert(
@@ -304,6 +319,42 @@ public:
 
     void Update(std::size_t index, const LightTileDiagnosticsBufferObject& data) const;
     LightTileDiagnosticsBufferObject Download(std::size_t index) const;
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+    void Release();
+
+private:
+    void CreateBuffers(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+
+private:
+    std::vector<std::unique_ptr<VulkanBuffer>> m_Buffers;
+};
+
+class VulkanAutoExposureBuffer {
+public:
+    VulkanAutoExposureBuffer(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+
+    ~VulkanAutoExposureBuffer();
+
+    SE_DISABLE_COPY(VulkanAutoExposureBuffer);
+    SE_DISABLE_MOVE(VulkanAutoExposureBuffer);
+
+    std::size_t Count() const;
+    VkDescriptorBufferInfo DescriptorInfo(std::size_t index) const;
+
+    void Update(std::size_t index, const AutoExposureBufferObject& data) const;
+    AutoExposureBufferObject Download(std::size_t index) const;
     void Recreate(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,

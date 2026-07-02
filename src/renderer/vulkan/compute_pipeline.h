@@ -2,13 +2,23 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <span>
+
 namespace se {
 
 class VulkanDescriptorSetLayout;
+class VulkanMaterialDescriptorSetLayout;
 class VulkanDevice;
 
 class VulkanComputePipeline {
 public:
+    VulkanComputePipeline(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const VulkanMaterialDescriptorSetLayout& sampledImageDescriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+
     VulkanComputePipeline(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
@@ -26,6 +36,12 @@ public:
     void Recreate(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const VulkanMaterialDescriptorSetLayout& sampledImageDescriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
         const std::string& computeShaderPath
     );
     void Release();
@@ -33,7 +49,7 @@ public:
 private:
     void CreateComputePipeline(
         const VulkanDevice& device,
-        const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        std::span<const VkDescriptorSetLayout> descriptorSetLayouts,
         const std::string& computeShaderPath
     );
 

@@ -75,7 +75,8 @@ enum class RenderFrameGraphBarrierResourceKind {
 };
 
 enum class RenderFrameGraphBarrierBridge {
-    LightTileCullFragmentRead
+    LightTileCullFragmentRead,
+    AutoExposureHistoryFragmentRead
 };
 
 struct RenderGraphResource {
@@ -272,6 +273,8 @@ struct CurrentVulkanFrameGraphInputs {
     bool hdrSceneColorAllocated = false;
     VkFormat hdrSceneColorFormat = VK_FORMAT_UNDEFINED;
     bool hdrRenderPassAllocated = false;
+    bool autoExposureHistogramEnabled = false;
+    bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;
     RenderFrameGraphAppendCallback appendRenderFeatures = nullptr;
     const void* appendRenderFeaturesUserData = nullptr;

@@ -638,6 +638,26 @@ void BarrierComputeLightTilesForFragmentRead(VkCommandBuffer commandBuffer) {
     );
 }
 
+void BarrierComputeAutoExposureForFragmentRead(VkCommandBuffer commandBuffer) {
+    VkMemoryBarrier memoryBarrier{};
+    memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        1,
+        &memoryBarrier,
+        0,
+        nullptr,
+        0,
+        nullptr
+    );
+}
+
 bool CopySceneDepthToSwapchainDepth(
     VkCommandBuffer commandBuffer,
     const VulkanSceneRenderTargets* sceneRenderTargets,
@@ -922,6 +942,10 @@ void VulkanCommandBuffer::Record(
     u32 lightTileCullGroupCountY,
     u32 lightTileCullGroupCountZ,
     const VulkanComputePipeline* lightClusterCullComputePipeline,
+    const VulkanComputePipeline* autoExposureComputePipeline,
+    const VulkanDescriptorSets* autoExposureFrameDescriptorSets,
+    const VulkanHdrDescriptorSets* autoExposureHdrDescriptorSets,
+    bool recordAutoExposureCompute,
     const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline,
     std::span<const RenderCommand> forwardResidualRenderCommands,
@@ -1671,6 +1695,60 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    if (recordAutoExposureCompute &&
+        autoExposureComputePipeline != nullptr &&
+        autoExposureFrameDescriptorSets != nullptr &&
+        autoExposureHdrDescriptorSets != nullptr) {
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            autoExposureComputePipeline->Handle()
+        );
+
+        const VkDescriptorSet frameDescriptorSet =
+            autoExposureFrameDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            autoExposureComputePipeline->Layout(),
+            0,
+            1,
+            &frameDescriptorSet,
+            0,
+            nullptr
+        );
+
+        const VkDescriptorSet hdrDescriptorSet =
+            autoExposureHdrDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            autoExposureComputePipeline->Layout(),
+            1,
+            1,
+            &hdrDescriptorSet,
+            0,
+            nullptr
+        );
+
+        vkCmdDispatch(commandBuffer, 1, 1, 1);
+        BarrierComputeAutoExposureForFragmentRead(commandBuffer);
+        if (frameGraph != nullptr) {
+            RecordRenderFrameGraphBarrierExecution(
+                *frameGraph,
+                RenderFrameGraphBarrierBridge::AutoExposureHistoryFragmentRead
+            );
+        }
+
+        if (bindStats != nullptr) {
+            ++bindStats->autoExposureHistogramDispatches;
+            ++bindStats->autoExposureHistogramFrameBinds;
+            ++bindStats->autoExposureHistogramTextureBinds;
+            bindStats->autoExposureHistogramGroupsX = 1;
+            bindStats->autoExposureHistogramGroupsY = 1;
+        }
     }
 
     std::array<VkClearValue, 2> clearValues{};
