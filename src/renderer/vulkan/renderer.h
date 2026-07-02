@@ -124,6 +124,25 @@ struct FrameLightSet {
     FrameLightConstants Constants() const;
 };
 
+struct RendererReflectionProbe {
+    glm::vec3 center{ 0.0f, 1.2f, 0.0f };
+    f32 radius = 5.5f;
+    glm::vec3 boxExtents{ 5.5f };
+    glm::vec3 color{ 1.0f, 0.82f, 0.62f };
+    f32 intensity = 1.25f;
+    f32 blendStrength = 0.65f;
+    f32 falloff = 2.0f;
+    bool enabled = false;
+    bool sceneOwned = false;
+};
+
+struct FrameReflectionProbeSet {
+    RendererReflectionProbe localProbe{};
+    u32 sceneProbeCount = 0;
+    u32 activeLocalProbeCount = 0;
+    bool fallbackEnabled = false;
+};
+
 struct FrameLightTileStats {
     u32 tileSize = 0;
     u32 tileCountX = 0;
@@ -274,6 +293,7 @@ private:
         const FrameMatrices* matrices,
         const glm::mat4& lightViewProjection,
         const FrameLightConstants& lights,
+        const FrameReflectionProbeSet& reflectionProbes,
         bool shadowSamplingEnabled
     ) const;
     void UpdateOverlayUniformBuffer(
@@ -281,6 +301,7 @@ private:
         const FrameMatrices* matrices,
         const glm::mat4& lightViewProjection,
         const FrameLightConstants& lights,
+        const FrameReflectionProbeSet& reflectionProbes,
         bool shadowSamplingEnabled
     ) const;
     void UpdateLightBuffer(
@@ -310,6 +331,7 @@ private:
         const LocalShadowTileSet& localShadowTiles
     ) const;
     FrameLightSet BuildFrameLightSet(std::span<const RenderCommand> renderCommands) const;
+    FrameReflectionProbeSet BuildFrameReflectionProbeSet() const;
     FrameMaterialSet BuildFrameMaterialSet(std::span<const RenderCommand> renderCommands) const;
     void BuildGBufferCommandList(
         std::span<const RenderCommand> renderCommands,

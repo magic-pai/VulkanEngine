@@ -967,6 +967,61 @@ RendererLocalLight RectLocalLight(
     return light;
 }
 
+RendererReflectionProbe ClampReflectionProbe(RendererReflectionProbe probe) {
+    probe.radius = std::clamp(probe.radius, 0.01f, 256.0f);
+    probe.boxExtents = glm::max(probe.boxExtents, glm::vec3(0.01f));
+    probe.color = glm::max(probe.color, glm::vec3(0.0f));
+    probe.intensity = std::clamp(probe.intensity, 0.0f, 4.0f);
+    probe.blendStrength = std::clamp(probe.blendStrength, 0.0f, 1.0f);
+    probe.falloff = std::clamp(probe.falloff, 0.25f, 8.0f);
+    return probe;
+}
+
+RendererReflectionProbe SceneReflectionProbe(const ReflectionProbe3D& source) {
+    RendererReflectionProbe probe{};
+    probe.center = source.center;
+    probe.radius = source.radius;
+    probe.boxExtents = source.boxExtents;
+    probe.color = source.color;
+    probe.intensity = source.intensity;
+    probe.blendStrength = source.blendStrength;
+    probe.falloff = source.falloff;
+    probe.enabled = source.enabled;
+    probe.sceneOwned = true;
+    return ClampReflectionProbe(probe);
+}
+
+RendererReflectionProbe SettingsReflectionProbe(
+    const VulkanShadowSettings& settings
+) {
+    RendererReflectionProbe probe{};
+    probe.center = {
+        settings.localReflectionProbeCenterX,
+        settings.localReflectionProbeCenterY,
+        settings.localReflectionProbeCenterZ
+    };
+    probe.radius = settings.localReflectionProbeRadius;
+    probe.boxExtents = glm::vec3(settings.localReflectionProbeRadius);
+    probe.color = {
+        settings.localReflectionProbeColorR,
+        settings.localReflectionProbeColorG,
+        settings.localReflectionProbeColorB
+    };
+    probe.intensity = settings.localReflectionProbeIntensity;
+    probe.blendStrength = settings.localReflectionProbeBlendStrength;
+    probe.falloff = settings.localReflectionProbeFalloff;
+    probe.enabled = settings.localReflectionProbeEnabled;
+    probe.sceneOwned = false;
+    return ClampReflectionProbe(probe);
+}
+
+bool ReflectionProbeContributes(const RendererReflectionProbe& probe) {
+    return probe.enabled &&
+        probe.radius > 0.001f &&
+        probe.intensity > 0.0001f &&
+        probe.blendStrength > 0.0001f;
+}
+
 void AddDebugLocalLights(FrameLightSet& lights) {
     if (!EnvironmentFlagEnabled("SE_DEBUG_LOCAL_LIGHTS")) {
         return;
@@ -1007,6 +1062,28 @@ void AddDebugLocalLights(FrameLightSet& lights) {
         lights.localLights[lights.localCount + index] = debugLights[index];
     }
     lights.localCount += copyCount;
+}
+
+void WriteFrameReflectionProbeStats(
+    const FrameReflectionProbeSet& frameProbes,
+    RendererReflectionProbeStats& stats
+) {
+    const RendererReflectionProbe& localProbe = frameProbes.localProbe;
+    stats.sceneProbeCount = frameProbes.sceneProbeCount;
+    stats.activeProbeCount = frameProbes.activeLocalProbeCount;
+    stats.localEnabled =
+        frameProbes.activeLocalProbeCount > 0 && ReflectionProbeContributes(localProbe)
+            ? 1u
+            : 0u;
+    stats.localSceneOwned =
+        stats.localEnabled > 0 && localProbe.sceneOwned ? 1u : 0u;
+    stats.localRadius = localProbe.radius;
+    stats.localBoxExtentX = localProbe.boxExtents.x;
+    stats.localBoxExtentY = localProbe.boxExtents.y;
+    stats.localBoxExtentZ = localProbe.boxExtents.z;
+    stats.localIntensity = localProbe.intensity;
+    stats.localBlendStrength = localProbe.blendStrength;
+    stats.localFalloff = localProbe.falloff;
 }
 
 struct ScreenTileBounds {
@@ -2155,14 +2232,19 @@ void VulkanRenderer::DrawFrame() {
         showDeferredHdr &&
         m_HdrCompositePipeline != nullptr &&
         m_HdrDescriptorSets != nullptr;
+    const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
+    const FrameReflectionProbeSet frameReflectionProbes =
+        BuildFrameReflectionProbeSet();
     const VulkanRenderFeatureContext renderFeatureContext{
         m_ShadowSettings,
         m_RenderDebugSettings,
         has3DMainPass,
         m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
-        hdrCompositeAvailable
+        hdrCompositeAvailable,
+        frameReflectionProbes.sceneProbeCount,
+        frameReflectionProbes.activeLocalProbeCount,
+        frameReflectionProbes.localProbe.sceneOwned
     };
-    const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
         : FrameMaterialSet{};
@@ -2186,6 +2268,7 @@ void VulkanRenderer::DrawFrame() {
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         lightViewProjection,
         frameLights,
+        frameReflectionProbes,
         shadowSamplingEnabled
     );
     UpdateOverlayUniformBuffer(
@@ -2193,6 +2276,7 @@ void VulkanRenderer::DrawFrame() {
         overlayFrameMatrices.has_value() ? &*overlayFrameMatrices : nullptr,
         lightViewProjection,
         frameLights,
+        frameReflectionProbes,
         shadowSamplingEnabled
     );
     FrameLightTileStats lightTileStats{};
@@ -2268,6 +2352,10 @@ void VulkanRenderer::DrawFrame() {
             frameStats,
             renderFeatureContext
         }
+    );
+    WriteFrameReflectionProbeStats(
+        frameReflectionProbes,
+        frameStats.reflectionProbe
     );
     const bool recordAutoExposureCompute =
         frameStats.postProcess.autoExposureEnabled > 0 &&
@@ -2642,6 +2730,9 @@ void VulkanRenderer::DrawFrame() {
             frameStats.ibl.prefilteredFormat,
             frameStats.ibl.prefilteredFaceSize,
             frameStats.ibl.prefilteredMipCount,
+            frameReflectionProbes.activeLocalProbeCount > 0 &&
+                frameReflectionProbes.localProbe.sceneOwned,
+            frameReflectionProbes.sceneProbeCount,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,
@@ -4714,6 +4805,7 @@ void VulkanRenderer::UpdateUniformBuffer(
     const FrameMatrices* matrices,
     const glm::mat4& lightViewProjection,
     const FrameLightConstants& lights,
+    const FrameReflectionProbeSet& reflectionProbes,
     bool shadowSamplingEnabled
 ) const {
     UniformBufferObject uniformData{};
@@ -4780,25 +4872,23 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
     );
+    const RendererReflectionProbe& localProbe = reflectionProbes.localProbe;
     const bool localReflectionProbeApplied =
-        m_ShadowSettings.reflectionProbeFallbackEnabled &&
-        m_ShadowSettings.localReflectionProbeEnabled;
+        reflectionProbes.fallbackEnabled &&
+        reflectionProbes.activeLocalProbeCount > 0 &&
+        ReflectionProbeContributes(localProbe);
     uniformData.localReflectionProbePositionRadius = glm::vec4(
-        m_ShadowSettings.localReflectionProbeCenterX,
-        m_ShadowSettings.localReflectionProbeCenterY,
-        m_ShadowSettings.localReflectionProbeCenterZ,
-        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f)
+        localProbe.center,
+        localProbe.radius
     );
     uniformData.localReflectionProbeControls = glm::vec4(
         localReflectionProbeApplied ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f)
+        localProbe.intensity,
+        localProbe.blendStrength,
+        localProbe.falloff
     );
     uniformData.localReflectionProbeColor = glm::vec4(
-        std::clamp(m_ShadowSettings.localReflectionProbeColorR, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeColorG, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
+        glm::clamp(localProbe.color, glm::vec3(0.0f), glm::vec3(4.0f)),
         0.0f
     );
     const bool heightFogApplied =
@@ -4879,6 +4969,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
     const FrameMatrices* matrices,
     const glm::mat4& lightViewProjection,
     const FrameLightConstants& lights,
+    const FrameReflectionProbeSet& reflectionProbes,
     bool shadowSamplingEnabled
 ) const {
     if (m_OverlayUniformBuffer == nullptr || matrices == nullptr) {
@@ -4947,25 +5038,23 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
         std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
     );
+    const RendererReflectionProbe& localProbe = reflectionProbes.localProbe;
     const bool localReflectionProbeApplied =
-        m_ShadowSettings.reflectionProbeFallbackEnabled &&
-        m_ShadowSettings.localReflectionProbeEnabled;
+        reflectionProbes.fallbackEnabled &&
+        reflectionProbes.activeLocalProbeCount > 0 &&
+        ReflectionProbeContributes(localProbe);
     uniformData.localReflectionProbePositionRadius = glm::vec4(
-        m_ShadowSettings.localReflectionProbeCenterX,
-        m_ShadowSettings.localReflectionProbeCenterY,
-        m_ShadowSettings.localReflectionProbeCenterZ,
-        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f)
+        localProbe.center,
+        localProbe.radius
     );
     uniformData.localReflectionProbeControls = glm::vec4(
         localReflectionProbeApplied ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f)
+        localProbe.intensity,
+        localProbe.blendStrength,
+        localProbe.falloff
     );
     uniformData.localReflectionProbeColor = glm::vec4(
-        std::clamp(m_ShadowSettings.localReflectionProbeColorR, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeColorG, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.localReflectionProbeColorB, 0.0f, 4.0f),
+        glm::clamp(localProbe.color, glm::vec3(0.0f), glm::vec3(4.0f)),
         0.0f
     );
     const bool heightFogApplied =
@@ -5268,6 +5357,43 @@ FrameLightSet VulkanRenderer::BuildFrameLightSet(std::span<const RenderCommand> 
     AddSceneRectLights(m_MainScene3D, lights);
     AddDebugLocalLights(lights);
     return lights;
+}
+
+FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet() const {
+    FrameReflectionProbeSet probes{};
+    probes.fallbackEnabled = m_ShadowSettings.reflectionProbeFallbackEnabled;
+    std::span<const ReflectionProbe3D> sceneProbes{};
+    if (m_MainScene3D != nullptr) {
+        sceneProbes = m_MainScene3D->ReflectionProbes();
+        probes.sceneProbeCount = static_cast<u32>(std::min<std::size_t>(
+            sceneProbes.size(),
+            std::numeric_limits<u32>::max()
+        ));
+    }
+    if (!probes.fallbackEnabled) {
+        return probes;
+    }
+
+    if (!sceneProbes.empty()) {
+        for (const ReflectionProbe3D& sceneProbe : sceneProbes) {
+            RendererReflectionProbe candidate = SceneReflectionProbe(sceneProbe);
+            if (!ReflectionProbeContributes(candidate)) {
+                continue;
+            }
+
+            probes.localProbe = candidate;
+            probes.activeLocalProbeCount = 1;
+            return probes;
+        }
+    }
+
+    RendererReflectionProbe settingsProbe =
+        SettingsReflectionProbe(m_ShadowSettings);
+    if (ReflectionProbeContributes(settingsProbe)) {
+        probes.localProbe = settingsProbe;
+        probes.activeLocalProbeCount = 1;
+    }
+    return probes;
 }
 
 FrameMaterialSet VulkanRenderer::BuildFrameMaterialSet(

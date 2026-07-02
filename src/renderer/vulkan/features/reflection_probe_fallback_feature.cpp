@@ -37,10 +37,16 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             RenderFramePassKind::Reflections,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            "LocalReflectionProbeBlend",
+            context.renderer.sceneReflectionProbeOwned
+                ? "SceneReflectionProbeBlend"
+                : "LocalReflectionProbeBlend",
+            context.renderer.sceneReflectionProbeOwned
+                ? "SceneReflectionProbes, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : "BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
-            "",
-            "First local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture is added."
+            context.renderer.sceneReflectionProbeOwned
+                ? "Scene-owned reflection probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
+                : "Debug local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
         );
     }
 }
@@ -65,8 +71,16 @@ void VulkanReflectionProbeFallbackFeature::WriteStats(
             settings.localReflectionProbeEnabled
             ? 1u
             : 0u;
+    reflectionProbe.sceneProbeCount = context.renderer.reflectionProbeCount;
+    reflectionProbe.activeProbeCount =
+        context.renderer.activeReflectionProbeCount;
+    reflectionProbe.localSceneOwned =
+        context.renderer.sceneReflectionProbeOwned ? 1u : 0u;
     reflectionProbe.localRadius =
         std::clamp(settings.localReflectionProbeRadius, 0.01f, 256.0f);
+    reflectionProbe.localBoxExtentX = reflectionProbe.localRadius;
+    reflectionProbe.localBoxExtentY = reflectionProbe.localRadius;
+    reflectionProbe.localBoxExtentZ = reflectionProbe.localRadius;
     reflectionProbe.localIntensity =
         std::clamp(settings.localReflectionProbeIntensity, 0.0f, 4.0f);
     reflectionProbe.localBlendStrength =

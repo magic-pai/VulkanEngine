@@ -327,6 +327,17 @@ bool BenchmarkLightOverflowRequested() {
         value == "YES";
 }
 
+bool BenchmarkSceneReflectionProbeRequested() {
+    const std::string value = ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkPartialLocalShadowCacheRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
     return value == "1" ||
@@ -1045,6 +1056,19 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 1.45f
             );
         }
+    }
+
+    if (BenchmarkSceneReflectionProbeRequested()) {
+        scene.CreateReflectionProbe(
+            "Benchmark Scene Reflection Probe",
+            { 0.0f, 1.2f, 0.0f },
+            6.25f,
+            { 5.2f, 3.4f, 5.2f },
+            { 1.0f, 0.86f, 0.68f },
+            1.35f,
+            0.72f,
+            1.75f
+        );
     }
 }
 
@@ -1870,6 +1894,16 @@ int main() {
             6.6f,
             { 0.55f, 0.78f, 1.0f },
             3.2f
+        );
+        scene.CreateReflectionProbe(
+            "Default Scene Reflection Probe",
+            { 0.0f, 1.2f, 0.0f },
+            5.5f,
+            { 4.8f, 3.0f, 4.8f },
+            { 1.0f, 0.82f, 0.62f },
+            1.25f,
+            0.65f,
+            2.0f
         );
     }
 

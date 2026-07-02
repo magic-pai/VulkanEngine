@@ -176,6 +176,32 @@ RectLight3D& Scene3D::CreateRectLight(
     return m_RectLights.back();
 }
 
+ReflectionProbe3D& Scene3D::CreateReflectionProbe(
+    std::string name,
+    glm::vec3 center,
+    f32 radius,
+    glm::vec3 boxExtents,
+    glm::vec3 color,
+    f32 intensity,
+    f32 blendStrength,
+    f32 falloff
+) {
+    m_ReflectionProbes.push_back(ReflectionProbe3D{
+        std::move(name),
+        center,
+        std::clamp(radius, 0.01f, 256.0f),
+        glm::max(boxExtents, glm::vec3(0.01f)),
+        glm::max(color, glm::vec3(0.0f)),
+        std::clamp(intensity, 0.0f, 4.0f),
+        std::clamp(blendStrength, 0.0f, 1.0f),
+        std::clamp(falloff, 0.25f, 8.0f),
+        true
+    });
+    MarkLightsChanged();
+
+    return m_ReflectionProbes.back();
+}
+
 DirectionalLight3D& Scene3D::SetPrimaryDirectionalLight(
     std::string name,
     glm::vec3 direction,
@@ -221,6 +247,7 @@ void Scene3D::Clear() {
     m_PointLights.clear();
     m_SpotLights.clear();
     m_RectLights.clear();
+    m_ReflectionProbes.clear();
     ++m_MembershipRevision;
     ++m_LightRevision;
     MarkRenderChanged();
@@ -281,6 +308,13 @@ std::span<const SpotLight3D> Scene3D::SpotLights() const {
 
 std::span<const RectLight3D> Scene3D::RectLights() const {
     return std::span<const RectLight3D>(m_RectLights.data(), m_RectLights.size());
+}
+
+std::span<const ReflectionProbe3D> Scene3D::ReflectionProbes() const {
+    return std::span<const ReflectionProbe3D>(
+        m_ReflectionProbes.data(),
+        m_ReflectionProbes.size()
+    );
 }
 
 bool Scene3D::Empty() const {

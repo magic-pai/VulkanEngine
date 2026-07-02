@@ -1606,6 +1606,17 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.iblPrefilteredMipCount > 0 ? "mipped cube cache" : "unknown cube"
         );
     }
+    if (inputs.sceneReflectionProbesAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "SceneReflectionProbes",
+            "frame UBO payload",
+            "scene-owned reflection-probe influence data",
+            inputs.sceneReflectionProbeCount > 0 ? "active scene probes" : "empty probe set"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,

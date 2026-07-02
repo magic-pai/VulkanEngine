@@ -20,6 +20,9 @@ struct VulkanRenderFeatureContext {
     bool has3DMainPass = false;
     bool deferredLightingAvailable = false;
     bool hdrCompositeAvailable = false;
+    u32 reflectionProbeCount = 0;
+    u32 activeReflectionProbeCount = 0;
+    bool sceneReflectionProbeOwned = false;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

@@ -184,8 +184,14 @@ struct RendererReflectionProbeStats {
     f32 diffuseIntensity = 0.0f;
     f32 specularIntensity = 0.0f;
     f32 horizonBlend = 0.0f;
+    u32 sceneProbeCount = 0;
+    u32 activeProbeCount = 0;
     u32 localEnabled = 0;
+    u32 localSceneOwned = 0;
     f32 localRadius = 0.0f;
+    f32 localBoxExtentX = 0.0f;
+    f32 localBoxExtentY = 0.0f;
+    f32 localBoxExtentZ = 0.0f;
     f32 localIntensity = 0.0f;
     f32 localBlendStrength = 0.0f;
     f32 localFalloff = 0.0f;

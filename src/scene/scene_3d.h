@@ -52,6 +52,18 @@ struct RectLight3D {
     bool enabled = true;
 };
 
+struct ReflectionProbe3D {
+    std::string name;
+    glm::vec3 center{ 0.0f, 1.2f, 0.0f };
+    f32 radius = 5.5f;
+    glm::vec3 boxExtents{ 5.5f };
+    glm::vec3 color{ 1.0f, 0.82f, 0.62f };
+    f32 intensity = 1.25f;
+    f32 blendStrength = 0.65f;
+    f32 falloff = 2.0f;
+    bool enabled = true;
+};
+
 class Scene3D {
 public:
     Scene3D();
@@ -89,6 +101,16 @@ public:
         glm::vec3 color,
         f32 intensity
     );
+    ReflectionProbe3D& CreateReflectionProbe(
+        std::string name,
+        glm::vec3 center,
+        f32 radius,
+        glm::vec3 boxExtents,
+        glm::vec3 color,
+        f32 intensity,
+        f32 blendStrength,
+        f32 falloff
+    );
     DirectionalLight3D& SetPrimaryDirectionalLight(
         std::string name,
         glm::vec3 direction,
@@ -105,6 +127,7 @@ public:
     std::span<const PointLight3D> PointLights() const;
     std::span<const SpotLight3D> SpotLights() const;
     std::span<const RectLight3D> RectLights() const;
+    std::span<const ReflectionProbe3D> ReflectionProbes() const;
     bool Empty() const;
     std::size_t Count() const;
     Renderable3D* SelectedRenderable();
@@ -126,6 +149,7 @@ private:
     std::vector<PointLight3D> m_PointLights;
     std::vector<SpotLight3D> m_SpotLights;
     std::vector<RectLight3D> m_RectLights;
+    std::vector<ReflectionProbe3D> m_ReflectionProbes;
     u64 m_MembershipRevision = 1;
     u64 m_RenderRevision = 1;
     u64 m_LightRevision = 1;

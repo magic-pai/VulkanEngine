@@ -315,8 +315,14 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
         << reflectionProbe.horizonBlend << ','
+        << reflectionProbe.sceneProbeCount << ','
+        << reflectionProbe.activeProbeCount << ','
         << reflectionProbe.localEnabled << ','
+        << reflectionProbe.localSceneOwned << ','
         << reflectionProbe.localRadius << ','
+        << reflectionProbe.localBoxExtentX << ','
+        << reflectionProbe.localBoxExtentY << ','
+        << reflectionProbe.localBoxExtentZ << ','
         << reflectionProbe.localIntensity << ','
         << reflectionProbe.localBlendStrength << ','
         << reflectionProbe.localFalloff << ','
@@ -693,7 +699,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "ibl_shader_integration_enabled,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
-        << "reflection_probe_local_enabled,reflection_probe_local_radius,"
+        << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
+        << "reflection_probe_local_enabled,reflection_probe_local_scene_owned,"
+        << "reflection_probe_local_radius,"
+        << "reflection_probe_local_box_extent_x,reflection_probe_local_box_extent_y,"
+        << "reflection_probe_local_box_extent_z,"
         << "reflection_probe_local_intensity,reflection_probe_local_blend_strength,"
         << "reflection_probe_local_falloff,"
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"

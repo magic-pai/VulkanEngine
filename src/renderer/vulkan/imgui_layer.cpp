@@ -806,9 +806,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ibl.descriptorSetsBound
     );
     ImGui::Text(
-        "Local reflection probe: %s, radius %.2f, intensity %.2f, blend %.2f, falloff %.2f",
+        "Local reflection probe: %s, scene %s, probes %u/%u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",
         stats.reflectionProbe.localEnabled ? "enabled" : "off",
+        stats.reflectionProbe.localSceneOwned ? "yes" : "no",
+        stats.reflectionProbe.activeProbeCount,
+        stats.reflectionProbe.sceneProbeCount,
         stats.reflectionProbe.localRadius,
+        stats.reflectionProbe.localBoxExtentX,
+        stats.reflectionProbe.localBoxExtentY,
+        stats.reflectionProbe.localBoxExtentZ,
         stats.reflectionProbe.localIntensity,
         stats.reflectionProbe.localBlendStrength,
         stats.reflectionProbe.localFalloff
