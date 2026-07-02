@@ -185,6 +185,15 @@ add_dependencies(SelfEngineBlackHole SelfEngineShaders)
 add_dependencies(SelfEngineForward3D SelfEngineShaders)
 
 foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
+    if (WIN32)
+        set_target_properties(${SELFENGINE_TARGET} PROPERTIES
+            WIN32_EXECUTABLE TRUE
+        )
+        if (MSVC)
+            target_link_options(${SELFENGINE_TARGET} PRIVATE /ENTRY:mainCRTStartup)
+        endif()
+    endif()
+
     target_compile_definitions(${SELFENGINE_TARGET} PRIVATE
         SE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
         SE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
