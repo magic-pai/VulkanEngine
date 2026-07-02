@@ -635,29 +635,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First screen-space reflection color tier integrated into deferred environment specular with a debug view; hierarchy, temporal accumulation, denoising, and probe fallback follow later."
         );
     }
-    if (inputs.reflectionProbeFallbackEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Reflections,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "GlobalReflectionFallback",
-            "frame reflection-probe fallback controls, sky directional basis",
-            "diffuse and specular fallback radiance",
-            "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting until imported UE reflection captures and local probes are available."
-        );
-    }
-    if (inputs.localReflectionProbeEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Reflections,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "LocalReflectionProbeBlend",
-            "frame local reflection probe center/radius/color controls",
-            "world-position weighted reflection fallback blend",
-            "First local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture is added."
-        );
+    if (inputs.appendRenderFeatures != nullptr) {
+        inputs.appendRenderFeatures(plan, inputs.appendRenderFeaturesUserData);
     }
     if (inputs.heightFogEnabled) {
         AppendPass(
@@ -934,6 +913,28 @@ RenderFrameGraphPlan BuildAAAFrameGraphBlueprint() {
         "Presentation after UI composition."
     );
     return plan;
+}
+
+void AppendRenderFrameGraphPass(
+    RenderFrameGraphPlan& plan,
+    RenderFramePassKind kind,
+    RenderFramePassStatus status,
+    RenderFramePassQueue queue,
+    std::string_view name,
+    std::string_view reads,
+    std::string_view writes,
+    std::string_view purpose
+) {
+    AppendPass(
+        plan,
+        kind,
+        status,
+        queue,
+        name,
+        reads,
+        writes,
+        purpose
+    );
 }
 
 }

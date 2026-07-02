@@ -1551,29 +1551,35 @@ int main() {
         se::PipelineSpec::DefaultForward3D(vertexShaderPath, fragmentShaderPath)
     );
 
-    // Create procedural meshes on heap (persistent), skip if already cached
-    static std::unique_ptr<se::VulkanMesh> s_cubeMesh, s_planeMesh, s_gridMesh;
-    if (!s_cubeMesh) {
-        se::MeshData3D d = se::MeshFactory::CreateCube();
-        s_cubeMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
-            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
-    }
-    if (!app.RenderResources().ContainsMesh("Cube"))
-        app.RenderResources().RegisterMesh("Cube", *s_cubeMesh);
-    if (!s_planeMesh) {
-        se::MeshData3D d = se::MeshFactory::CreatePlane();
-        s_planeMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
-            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
-    }
-    if (!app.RenderResources().ContainsMesh("Plane"))
-        app.RenderResources().RegisterMesh("Plane", *s_planeMesh);
-    if (!s_gridMesh) {
-        se::MeshData3D d = se::MeshFactory::CreateGrid(16, 0.25f, 0.012f);
-        s_gridMesh = std::make_unique<se::VulkanMesh>(app.Device(), app.PhysicalDevice(),
-            app.CommandPool(), std::move(d.vertices), std::move(d.indices));
-    }
-    if (!app.RenderResources().ContainsMesh("Grid"))
-        app.RenderResources().RegisterMesh("Grid", *s_gridMesh);
+    se::MeshData3D cubeData = se::MeshFactory::CreateCube();
+    auto cubeMesh = std::make_unique<se::VulkanMesh>(
+        app.Device(),
+        app.PhysicalDevice(),
+        app.CommandPool(),
+        std::move(cubeData.vertices),
+        std::move(cubeData.indices)
+    );
+    app.RenderResources().RegisterMesh("Cube", *cubeMesh);
+
+    se::MeshData3D planeData = se::MeshFactory::CreatePlane();
+    auto planeMesh = std::make_unique<se::VulkanMesh>(
+        app.Device(),
+        app.PhysicalDevice(),
+        app.CommandPool(),
+        std::move(planeData.vertices),
+        std::move(planeData.indices)
+    );
+    app.RenderResources().RegisterMesh("Plane", *planeMesh);
+
+    se::MeshData3D gridData = se::MeshFactory::CreateGrid(16, 0.25f, 0.012f);
+    auto gridMesh = std::make_unique<se::VulkanMesh>(
+        app.Device(),
+        app.PhysicalDevice(),
+        app.CommandPool(),
+        std::move(gridData.vertices),
+        std::move(gridData.indices)
+    );
+    app.RenderResources().RegisterMesh("Grid", *gridMesh);
 
     se::VulkanMaterial& cubeMaterial = app.MaterialLibrary().Create(
         "WarmCubeMaterial",

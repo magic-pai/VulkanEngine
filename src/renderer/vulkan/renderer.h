@@ -3,6 +3,7 @@
 #include "renderer/vulkan/vulkan_common.h"
 #include "renderer/vulkan/pipeline_spec.h"
 #include "renderer/vulkan/render_debug_settings.h"
+#include "renderer/vulkan/render_feature_registry.h"
 #include "renderer/vulkan/renderer_stats.h"
 #include "renderer/vulkan/shadow_settings.h"
 #include "renderer/vulkan/vertex.h"
@@ -20,7 +21,6 @@ namespace se {
 class VulkanCommandBuffer;
 class VulkanCommandPool;
 class VulkanComputePipeline;
-class VulkanHiZDescriptorSetLayout;
 class VulkanImage;
 class VulkanDepthBuffer;
 class VulkanDescriptorSetLayout;
@@ -353,6 +353,7 @@ private:
     std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
+    VulkanRenderFeatureRegistry m_RenderFeatures;
     RendererStats m_LastStats;
     std::size_t m_CurrentFrame = 0;
 
@@ -402,12 +403,6 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
-    // Hi-Z depth pyramid
-    std::vector<std::unique_ptr<VulkanImage>> m_HiZImages;
-    std::vector<std::array<VkImageView,4>> m_HiZMipViews;
-    std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
-    VkPipeline m_HiZBuildPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout m_HiZBuildLayout = VK_NULL_HANDLE;
     // IBL textures
         std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;

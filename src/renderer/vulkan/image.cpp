@@ -9,6 +9,21 @@ namespace se {
 
 namespace {
 
+VkDeviceSize BytesPerTexel(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+        return 8;
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R16G16_SFLOAT:
+        return 4;
+    default:
+        return 4;
+    }
+}
+
 VkCommandBuffer BeginSingleTimeCommands(
     const VulkanDevice& device,
     const VulkanCommandPool& commandPool
@@ -219,7 +234,7 @@ void VulkanImage::CopyFromBuffer(
     const VkDeviceSize layerSize =
         static_cast<VkDeviceSize>(m_Extent.width) *
         static_cast<VkDeviceSize>(m_Extent.height) *
-        4;
+        BytesPerTexel(m_Format);
 
     for (u32 layer = 0; layer < arrayLayers; ++layer) {
         VkBufferImageCopy region{};

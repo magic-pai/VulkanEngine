@@ -8,6 +8,7 @@
 #include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/features/reflection_probe_fallback_feature.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/frame_graph.h"
@@ -47,6 +48,7 @@
 #include <vector>
 #include <limits>
 #include <optional>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -796,6 +798,34 @@ bool GpuTimestampsEnabledFromEnvironment() {
         value == "ON" ||
         value == "yes" ||
         value == "YES";
+}
+
+struct RenderFeatureFrameGraphAppendData {
+    const VulkanRenderFeatureRegistry* registry = nullptr;
+    const VulkanRenderFeatureContext* renderer = nullptr;
+    const RendererStats* stats = nullptr;
+};
+
+void AppendRenderFeaturesToCurrentFrameGraph(
+    RenderFrameGraphPlan& plan,
+    const void* userData
+) {
+    const auto* data =
+        static_cast<const RenderFeatureFrameGraphAppendData*>(userData);
+    if (data == nullptr ||
+        data->registry == nullptr ||
+        data->renderer == nullptr ||
+        data->stats == nullptr) {
+        return;
+    }
+
+    data->registry->AppendFrameGraph(
+        VulkanRenderFeatureFrameGraphContext{
+            plan,
+            *data->renderer,
+            *data->stats
+        }
+    );
 }
 
 bool EnvironmentFlagEnabled(const char* name) {
@@ -1824,6 +1854,7 @@ VulkanRenderer::VulkanRenderer(
     m_Camera(camera),
     m_RenderResources(renderResources),
     m_PipelineSpec(std::move(pipelineSpec)) {
+    m_RenderFeatures.Add(std::make_unique<VulkanReflectionProbeFallbackFeature>());
     ApplyEnvironmentRenderSettings();
     if (m_Scene != nullptr) {
         SE_ASSERT(!m_Scene->Empty(), "VulkanRenderer requires at least one renderable in the 2D scene");
@@ -1848,8 +1879,6 @@ VulkanRenderer::~VulkanRenderer() {
     m_DeferredLightingPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_LightClusterCullComputePipeline.reset();
-    if(m_HiZBuildLayout){vkDestroyPipelineLayout(m_Device.Handle(),m_HiZBuildLayout,nullptr);m_HiZBuildLayout=VK_NULL_HANDLE;}
-    m_HiZDescriptorSetLayout.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
@@ -1883,6 +1912,15 @@ VulkanRenderer::~VulkanRenderer() {
     m_GBufferDescriptorSets.reset();
     m_SceneTargetSampler.reset();
     m_SceneRenderTargets.reset();
+    if (m_IblSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_Device.Handle(), m_IblSampler, nullptr);
+        m_IblSampler = VK_NULL_HANDLE;
+    }
+    m_IblPrefilteredImage.reset();
+    m_IblIrradianceImage.reset();
+    m_IblBrdfImage.reset();
+    m_IblPrefilteredView = VK_NULL_HANDLE;
+    m_IblIrradianceView = VK_NULL_HANDLE;
     m_DepthBuffer.reset();
     m_MaterialDescriptorSets.reset();
     m_OverlayDescriptorSets.reset();
@@ -2086,6 +2124,10 @@ void VulkanRenderer::DrawFrame() {
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
+    const VulkanRenderFeatureContext renderFeatureContext{
+        m_ShadowSettings,
+        has3DMainPass
+    };
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
@@ -2224,27 +2266,12 @@ void VulkanRenderer::DrawFrame() {
         m_GBufferDescriptorSets != nullptr
             ? 1u
             : 0u;
-    frameStats.reflectionProbe.fallbackEnabled =
-        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1u : 0u;
-    frameStats.reflectionProbe.diffuseIntensity =
-        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f);
-    frameStats.reflectionProbe.specularIntensity =
-        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f);
-    frameStats.reflectionProbe.horizonBlend =
-        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f);
-    frameStats.reflectionProbe.localEnabled =
-        m_ShadowSettings.reflectionProbeFallbackEnabled &&
-            m_ShadowSettings.localReflectionProbeEnabled
-            ? 1u
-            : 0u;
-    frameStats.reflectionProbe.localRadius =
-        std::clamp(m_ShadowSettings.localReflectionProbeRadius, 0.01f, 256.0f);
-    frameStats.reflectionProbe.localIntensity =
-        std::clamp(m_ShadowSettings.localReflectionProbeIntensity, 0.0f, 4.0f);
-    frameStats.reflectionProbe.localBlendStrength =
-        std::clamp(m_ShadowSettings.localReflectionProbeBlendStrength, 0.0f, 1.0f);
-    frameStats.reflectionProbe.localFalloff =
-        std::clamp(m_ShadowSettings.localReflectionProbeFalloff, 0.25f, 8.0f);
+    m_RenderFeatures.WriteStats(
+        VulkanRenderFeatureStatsContext{
+            frameStats,
+            renderFeatureContext
+        }
+    );
     frameStats.heightFog.density =
         std::clamp(m_ShadowSettings.heightFogDensity, 0.0f, 1.0f);
     frameStats.heightFog.heightFalloff =
@@ -2522,6 +2549,11 @@ void VulkanRenderer::DrawFrame() {
     frameStats.draw.mainInstancedInstances =
         static_cast<u32>(m_MainInstances.size());
     frameStats.draw.matrixRecalculations = TransformMatrixRecalculationCount();
+    const RenderFeatureFrameGraphAppendData renderFeatureFrameGraphAppendData{
+        &m_RenderFeatures,
+        &renderFeatureContext,
+        &frameStats
+    };
     frameStats.frameGraph = BuildCurrentVulkanFrameGraphPlan(
         CurrentVulkanFrameGraphInputs{
             shadowPassEnabled && !m_ShadowRenderQueue.Empty(),
@@ -2577,10 +2609,10 @@ void VulkanRenderer::DrawFrame() {
                 m_DeferredLightingPipeline != nullptr &&
                 m_GBufferDescriptorSets != nullptr,
             frameStats.ssr.colorResolveEnabled > 0,
-            frameStats.reflectionProbe.fallbackEnabled > 0 && has3DMainPass,
-            frameStats.reflectionProbe.localEnabled > 0 &&
-                frameStats.reflectionProbe.fallbackEnabled > 0 &&
-                has3DMainPass,
+            false,
+            false,
+            AppendRenderFeaturesToCurrentFrameGraph,
+            &renderFeatureFrameGraphAppendData,
             frameStats.heightFog.enabled > 0 && has3DMainPass,
             frameStats.postProcess.autoExposureEnabled > 0 &&
                 showDeferredHdr &&
@@ -2976,6 +3008,9 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         m_Swapchain->Images().size()
     );
+    GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
+        m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
+        m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);
     m_DescriptorSets = std::make_unique<VulkanDescriptorSets>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3010,7 +3045,6 @@ void VulkanRenderer::CreateSwapchainResources() {
     }
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_DepthBuffer = std::make_unique<VulkanDepthBuffer>(m_Device, m_PhysicalDevice, *m_Swapchain);
-    m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
     m_SceneRenderTargets = std::make_unique<VulkanSceneRenderTargets>(
         m_Device,
         m_PhysicalDevice,
@@ -3021,25 +3055,6 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         1
     );
-    GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
-        m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
-        m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);
-    // Hi-Z depth pyramid (4 mips, per-swapchain-image, R32_SFLOAT)
-    const u32 hizMips = 4, sc = m_Swapchain->Images().size();
-    m_HiZImages.clear(); m_HiZMipViews.resize(sc);
-    for (u32 i=0;i<sc;++i) {
-        m_HiZImages.push_back(std::make_unique<VulkanImage>(m_Device,m_PhysicalDevice,
-            m_SceneRenderTargets->Extent(), VK_FORMAT_R32_SFLOAT, VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT, hizMips));
-        for (u32 m=0;m<hizMips;++m) {
-            VkImageViewCreateInfo vi{}; vi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            vi.image=m_HiZImages[i]->Handle(); vi.viewType=VK_IMAGE_VIEW_TYPE_2D;
-            vi.format=VK_FORMAT_R32_SFLOAT; vi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-            vi.subresourceRange.baseMipLevel=m; vi.subresourceRange.levelCount=1; vi.subresourceRange.layerCount=1;
-            vkCreateImageView(m_Device.Handle(),&vi,nullptr,&m_HiZMipViews[i][m]);
-        }
-    }
     m_HdrRenderPass = std::make_unique<VulkanHdrRenderPass>(
         m_Device,
         m_SceneRenderTargets->HdrSceneColorFormat()
@@ -3385,14 +3400,9 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_LightClusterCullComputePipeline = std::make_unique<VulkanComputePipeline>(
             m_Device, *m_DescriptorSetLayout,
             std::string(SE_SHADER_DIR) + "/light_cluster_cull.comp.spv");
-        // Hi-Z build compute pipeline
-            m_Device, *m_HiZDescriptorSetLayout,
-            std::string(SE_SHADER_DIR) + "/build_hiz.comp.spv");
     } else {
         m_LightTileCullComputePipeline.reset();
         m_LightClusterCullComputePipeline.reset();
-    if(m_HiZBuildLayout){vkDestroyPipelineLayout(m_Device.Handle(),m_HiZBuildLayout,nullptr);m_HiZBuildLayout=VK_NULL_HANDLE;}
-    m_HiZDescriptorSetLayout.reset();
     }
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
     const PipelineSpec shadowSpec =

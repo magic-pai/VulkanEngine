@@ -78,6 +78,11 @@ struct RenderFrameGraphPlan {
     u32 plannedResourceCount = 0;
 };
 
+using RenderFrameGraphAppendCallback = void (*)(
+    RenderFrameGraphPlan& plan,
+    const void* userData
+);
+
 struct CurrentVulkanFrameGraphInputs {
     bool shadowPassEnabled = false;
     bool overlayPassEnabled = false;
@@ -109,6 +114,8 @@ struct CurrentVulkanFrameGraphInputs {
     bool ssrEnabled = false;
     bool reflectionProbeFallbackEnabled = false;
     bool localReflectionProbeEnabled = false;
+    RenderFrameGraphAppendCallback appendRenderFeatures = nullptr;
+    const void* appendRenderFeaturesUserData = nullptr;
     bool heightFogEnabled = false;
     bool autoExposureEnabled = false;
     bool toneMappingEnabled = false;
@@ -143,5 +150,15 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     CurrentVulkanFrameGraphInputs inputs
 );
 RenderFrameGraphPlan BuildAAAFrameGraphBlueprint();
+void AppendRenderFrameGraphPass(
+    RenderFrameGraphPlan& plan,
+    RenderFramePassKind kind,
+    RenderFramePassStatus status,
+    RenderFramePassQueue queue,
+    std::string_view name,
+    std::string_view reads,
+    std::string_view writes,
+    std::string_view purpose
+);
 
 }
