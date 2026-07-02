@@ -143,6 +143,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/framebuffer.cpp
     src/renderer/vulkan/frame_graph.cpp
     src/renderer/vulkan/render_feature_registry.cpp
+    src/renderer/vulkan/features/height_fog_feature.cpp
     src/renderer/vulkan/features/reflection_probe_fallback_feature.cpp
     src/renderer/vulkan/gpu_timer.cpp
     src/renderer/vulkan/command_pool.cpp

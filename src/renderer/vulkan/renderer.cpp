@@ -8,6 +8,7 @@
 #include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/features/height_fog_feature.h"
 #include "renderer/vulkan/features/reflection_probe_fallback_feature.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
@@ -1855,6 +1856,7 @@ VulkanRenderer::VulkanRenderer(
     m_RenderResources(renderResources),
     m_PipelineSpec(std::move(pipelineSpec)) {
     m_RenderFeatures.Add(std::make_unique<VulkanReflectionProbeFallbackFeature>());
+    m_RenderFeatures.Add(std::make_unique<VulkanHeightFogFeature>());
     ApplyEnvironmentRenderSettings();
     if (m_Scene != nullptr) {
         SE_ASSERT(!m_Scene->Empty(), "VulkanRenderer requires at least one renderable in the 2D scene");
@@ -2272,20 +2274,6 @@ void VulkanRenderer::DrawFrame() {
             renderFeatureContext
         }
     );
-    frameStats.heightFog.density =
-        std::clamp(m_ShadowSettings.heightFogDensity, 0.0f, 1.0f);
-    frameStats.heightFog.heightFalloff =
-        std::clamp(m_ShadowSettings.heightFogHeightFalloff, 0.0f, 2.0f);
-    frameStats.heightFog.startDistance =
-        std::clamp(m_ShadowSettings.heightFogStartDistance, 0.0f, 1000.0f);
-    frameStats.heightFog.maxOpacity =
-        std::clamp(m_ShadowSettings.heightFogMaxOpacity, 0.0f, 1.0f);
-    frameStats.heightFog.enabled =
-        m_ShadowSettings.heightFogEnabled &&
-            frameStats.heightFog.density > 0.0001f &&
-            frameStats.heightFog.maxOpacity > 0.0001f
-            ? 1u
-            : 0u;
     frameStats.postProcess.bloomIntensity =
         std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f);
     frameStats.postProcess.bloomThreshold =
@@ -2613,7 +2601,7 @@ void VulkanRenderer::DrawFrame() {
             false,
             AppendRenderFeaturesToCurrentFrameGraph,
             &renderFeatureFrameGraphAppendData,
-            frameStats.heightFog.enabled > 0 && has3DMainPass,
+            false,
             frameStats.postProcess.autoExposureEnabled > 0 &&
                 showDeferredHdr &&
                 m_HdrCompositePipeline != nullptr &&

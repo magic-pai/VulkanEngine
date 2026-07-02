@@ -638,18 +638,6 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(plan, inputs.appendRenderFeaturesUserData);
     }
-    if (inputs.heightFogEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Volumetrics,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "HeightFogIntegrated",
-            "frame height-fog controls, camera position, shaded world position",
-            "fogged HDR/forward scene color",
-            "First analytic height/distance fog tier integrated into deferred, legacy forward, and WBOIT shading before a full volumetric fog volume is added."
-        );
-    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(
