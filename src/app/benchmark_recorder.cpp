@@ -169,6 +169,13 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.lifetimes.readOnlyResourceCount << ','
         << stats.frameGraph.lifetimes.writeOnlyResourceCount << ','
         << stats.frameGraph.lifetimes.readWriteResourceCount << ','
+        << stats.frameGraph.barriers.transitionCount << ','
+        << stats.frameGraph.barriers.imageTransitionCount << ','
+        << stats.frameGraph.barriers.bufferTransitionCount << ','
+        << stats.frameGraph.barriers.layoutTransitionCount << ','
+        << stats.frameGraph.barriers.queueOwnershipTransferCount << ','
+        << stats.frameGraph.barriers.readAfterWriteTransitionCount << ','
+        << stats.frameGraph.barriers.writeAfterWriteTransitionCount << ','
         << sceneDiagnostics.ueBridgeRequested << ','
         << sceneDiagnostics.ueBridgeManifestLoaded << ','
         << sceneDiagnostics.ueBridgeSceneFound << ','
@@ -575,6 +582,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_used_resources,framegraph_unused_resources,"
         << "framegraph_read_only_resources,framegraph_write_only_resources,"
         << "framegraph_read_write_resources,"
+        << "framegraph_barrier_transitions,framegraph_barrier_image_transitions,"
+        << "framegraph_barrier_buffer_transitions,"
+        << "framegraph_barrier_layout_transitions,"
+        << "framegraph_barrier_queue_transfers,"
+        << "framegraph_barrier_read_after_write_transitions,"
+        << "framegraph_barrier_write_after_write_transitions,"
         << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
         << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
         << "ue_bridge_mesh_instance_loaded_count,"

@@ -1183,6 +1183,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.lifetimes.writeOnlyResourceCount,
         stats.frameGraph.lifetimes.readWriteResourceCount
     );
+    ImGui::Text(
+        "Graph barriers: %u transitions / %u layout / %u queue transfers",
+        stats.frameGraph.barriers.transitionCount,
+        stats.frameGraph.barriers.layoutTransitionCount,
+        stats.frameGraph.barriers.queueOwnershipTransferCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1314,6 +1320,72 @@ void DrawPerformanceStats(const RendererStats& stats) {
                     issue.resourceName.data(),
                     issue.writeRef ? " [write]" : ""
                 );
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    if (ImGui::TreeNode("Graph barrier plan")) {
+        if (stats.frameGraph.barrierTransitions.empty()) {
+            ImGui::TextUnformatted("No inferred barrier transitions.");
+        } else {
+            for (const RenderFrameGraphBarrierTransition& transition :
+                stats.frameGraph.barrierTransitions) {
+                const std::string_view resourceKind =
+                    RenderFrameGraphBarrierResourceKindName(
+                        transition.resourceKind
+                    );
+                const std::string_view srcAccess =
+                    RenderFrameGraphResourceAccessName(transition.srcAccess);
+                const std::string_view dstAccess =
+                    RenderFrameGraphResourceAccessName(transition.dstAccess);
+                ImGui::BulletText(
+                    "%.*s -> %.*s via %.*s",
+                    static_cast<int>(transition.producerPassName.size()),
+                    transition.producerPassName.data(),
+                    static_cast<int>(transition.consumerPassName.size()),
+                    transition.consumerPassName.data(),
+                    static_cast<int>(transition.resourceName.size()),
+                    transition.resourceName.data()
+                );
+                if (ImGui::IsItemHovered()) {
+                    ImGui::BeginTooltip();
+                    ImGui::Text(
+                        "Resource: #%08X [%.*s] %.*s",
+                        transition.resourceId,
+                        static_cast<int>(resourceKind.size()),
+                        resourceKind.data(),
+                        static_cast<int>(transition.resourceName.size()),
+                        transition.resourceName.data()
+                    );
+                    ImGui::Text(
+                        "Access: %.*s -> %.*s",
+                        static_cast<int>(srcAccess.size()),
+                        srcAccess.data(),
+                        static_cast<int>(dstAccess.size()),
+                        dstAccess.data()
+                    );
+                    ImGui::Text(
+                        "Stage: %.*s -> %.*s",
+                        static_cast<int>(transition.srcStage.size()),
+                        transition.srcStage.data(),
+                        static_cast<int>(transition.dstStage.size()),
+                        transition.dstStage.data()
+                    );
+                    ImGui::Text(
+                        "Layout: %.*s -> %.*s",
+                        static_cast<int>(transition.oldLayout.size()),
+                        transition.oldLayout.data(),
+                        static_cast<int>(transition.newLayout.size()),
+                        transition.newLayout.data()
+                    );
+                    ImGui::Text(
+                        "Dependency: %s / queue transfer: %s",
+                        transition.writeDependency ? "write-after-write" : "read-after-write",
+                        transition.queueOwnershipTransfer ? "yes" : "no"
+                    );
+                    ImGui::EndTooltip();
+                }
             }
         }
         ImGui::TreePop();

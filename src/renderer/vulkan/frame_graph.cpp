@@ -110,6 +110,16 @@ bool ContainsWord(std::string_view text, std::string_view word) {
     return text.find(word) != std::string_view::npos;
 }
 
+RenderFrameGraphBarrierResourceKind InferBarrierResourceKind(
+    const RenderGraphResource& resource
+) {
+    if (ContainsWord(resource.format, "structured") ||
+        ContainsWord(resource.usage, "indirect args")) {
+        return RenderFrameGraphBarrierResourceKind::Buffer;
+    }
+    return RenderFrameGraphBarrierResourceKind::Image;
+}
+
 RenderFrameGraphResourceAccess InferReadAccess(
     const RenderGraphResource& resource,
     const RenderFramePass& pass
@@ -357,6 +367,18 @@ const RenderFramePass* FindPassById(
     return nullptr;
 }
 
+const RenderFrameGraphResourceRef* FindResourceRefById(
+    const std::vector<RenderFrameGraphResourceRef>& refs,
+    u32 resourceId
+) {
+    for (const RenderFrameGraphResourceRef& ref : refs) {
+        if (ref.resourceId == resourceId) {
+            return &ref;
+        }
+    }
+    return nullptr;
+}
+
 bool ContainsDependency(
     const std::vector<RenderFrameGraphPassDependency>& dependencies,
     u32 passId,
@@ -454,6 +476,156 @@ void RebuildFrameGraphPassDependencies(RenderFrameGraphPlan& plan) {
             }
         }
     }
+}
+
+std::string_view BarrierStageForAccess(
+    RenderFrameGraphResourceAccess access,
+    RenderFramePassQueue queue
+) {
+    if (queue == RenderFramePassQueue::Compute ||
+        queue == RenderFramePassQueue::AsyncCompute) {
+        return "compute shader";
+    }
+    if (queue == RenderFramePassQueue::Transfer) {
+        return "transfer";
+    }
+    if (queue == RenderFramePassQueue::Present ||
+        access == RenderFrameGraphResourceAccess::Present) {
+        return "present";
+    }
+
+    switch (access) {
+    case RenderFrameGraphResourceAccess::ReadSampled:
+    case RenderFrameGraphResourceAccess::WriteStorage:
+        return "fragment shader";
+    case RenderFrameGraphResourceAccess::ReadAttachment:
+    case RenderFrameGraphResourceAccess::WriteDepthAttachment:
+        return "early/late fragment tests";
+    case RenderFrameGraphResourceAccess::WriteColorAttachment:
+        return "color attachment output";
+    case RenderFrameGraphResourceAccess::Present:
+        return "present";
+    }
+
+    return "pipeline";
+}
+
+std::string_view BarrierLayoutForAccess(
+    RenderFrameGraphResourceAccess access,
+    RenderFrameGraphBarrierResourceKind resourceKind
+) {
+    if (resourceKind == RenderFrameGraphBarrierResourceKind::Buffer) {
+        return "buffer";
+    }
+
+    switch (access) {
+    case RenderFrameGraphResourceAccess::ReadSampled:
+        return "shader read only";
+    case RenderFrameGraphResourceAccess::ReadAttachment:
+        return "attachment read";
+    case RenderFrameGraphResourceAccess::WriteColorAttachment:
+        return "color attachment";
+    case RenderFrameGraphResourceAccess::WriteDepthAttachment:
+        return "depth attachment";
+    case RenderFrameGraphResourceAccess::WriteStorage:
+        return "general";
+    case RenderFrameGraphResourceAccess::Present:
+        return "present";
+    }
+
+    return "unknown";
+}
+
+void RebuildFrameGraphBarrierPlan(RenderFrameGraphPlan& plan) {
+    RenderFrameGraphBarrierStats stats{};
+    plan.barrierTransitions.clear();
+
+    for (const RenderFramePass& consumerPass : plan.passes) {
+        for (const RenderFrameGraphPassDependency& dependency :
+            consumerPass.dependencies) {
+            const RenderFramePass* producerPass =
+                FindPassById(plan, dependency.passId);
+            const RenderGraphResource* resource =
+                FindResourceById(plan, dependency.resourceId);
+            const RenderFrameGraphResourceRef* producerWriteRef =
+                producerPass != nullptr
+                    ? FindResourceRefById(
+                        producerPass->writeResources,
+                        dependency.resourceId
+                    )
+                    : nullptr;
+            const RenderFrameGraphResourceRef* consumerReadRef =
+                FindResourceRefById(
+                    consumerPass.readResources,
+                    dependency.resourceId
+                );
+            const RenderFrameGraphResourceRef* consumerWriteRef =
+                FindResourceRefById(
+                    consumerPass.writeResources,
+                    dependency.resourceId
+                );
+            const RenderFrameGraphResourceRef* consumerRef =
+                dependency.writeDependency ? consumerWriteRef : consumerReadRef;
+
+            if (producerPass == nullptr ||
+                resource == nullptr ||
+                producerWriteRef == nullptr ||
+                consumerRef == nullptr) {
+                continue;
+            }
+
+            const RenderFrameGraphBarrierResourceKind resourceKind =
+                InferBarrierResourceKind(*resource);
+            const std::string_view oldLayout =
+                BarrierLayoutForAccess(producerWriteRef->access, resourceKind);
+            const std::string_view newLayout =
+                BarrierLayoutForAccess(consumerRef->access, resourceKind);
+
+            RenderFrameGraphBarrierTransition transition{};
+            transition.producerPassId = producerPass->id;
+            transition.producerPassName = producerPass->name;
+            transition.producerQueue = producerPass->queue;
+            transition.consumerPassId = consumerPass.id;
+            transition.consumerPassName = consumerPass.name;
+            transition.consumerQueue = consumerPass.queue;
+            transition.resourceId = resource->id;
+            transition.resourceName = resource->name;
+            transition.resourceKind = resourceKind;
+            transition.srcAccess = producerWriteRef->access;
+            transition.dstAccess = consumerRef->access;
+            transition.srcStage =
+                BarrierStageForAccess(producerWriteRef->access, producerPass->queue);
+            transition.dstStage =
+                BarrierStageForAccess(consumerRef->access, consumerPass.queue);
+            transition.oldLayout = oldLayout;
+            transition.newLayout = newLayout;
+            transition.layoutTransition = oldLayout != newLayout;
+            transition.queueOwnershipTransfer =
+                producerPass->queue != consumerPass.queue;
+            transition.writeDependency = dependency.writeDependency;
+
+            plan.barrierTransitions.push_back(transition);
+            ++stats.transitionCount;
+            if (resourceKind == RenderFrameGraphBarrierResourceKind::Buffer) {
+                ++stats.bufferTransitionCount;
+            } else {
+                ++stats.imageTransitionCount;
+            }
+            if (transition.layoutTransition) {
+                ++stats.layoutTransitionCount;
+            }
+            if (transition.queueOwnershipTransfer) {
+                ++stats.queueOwnershipTransferCount;
+            }
+            if (transition.writeDependency) {
+                ++stats.writeAfterWriteTransitionCount;
+            } else {
+                ++stats.readAfterWriteTransitionCount;
+            }
+        }
+    }
+
+    plan.barriers = stats;
 }
 
 void RecordResourceUse(
@@ -710,6 +882,7 @@ void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     RebuildFrameGraphPassDependencies(plan);
     RebuildFrameGraphResourceLifetimes(plan);
     RebuildFrameGraphValidation(plan);
+    RebuildFrameGraphBarrierPlan(plan);
 }
 
 void AppendPass(
@@ -1168,6 +1341,19 @@ std::string_view RenderFrameGraphValidationIssueKindName(
         return "write-only roadmap resource";
     case RenderFrameGraphValidationIssueKind::ActivePassWritesPlannedResource:
         return "active pass writes planned resource";
+    }
+
+    return "unknown";
+}
+
+std::string_view RenderFrameGraphBarrierResourceKindName(
+    RenderFrameGraphBarrierResourceKind kind
+) {
+    switch (kind) {
+    case RenderFrameGraphBarrierResourceKind::Image:
+        return "image";
+    case RenderFrameGraphBarrierResourceKind::Buffer:
+        return "buffer";
     }
 
     return "unknown";

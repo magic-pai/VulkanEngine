@@ -69,6 +69,11 @@ enum class RenderFrameGraphValidationIssueKind {
     ActivePassWritesPlannedResource
 };
 
+enum class RenderFrameGraphBarrierResourceKind {
+    Image,
+    Buffer
+};
+
 struct RenderGraphResource {
     u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
@@ -108,6 +113,30 @@ struct RenderFrameGraphValidationIssue {
     u32 resourceId = 0;
     std::string_view resourceName;
     bool writeRef = false;
+};
+
+struct RenderFrameGraphBarrierTransition {
+    u32 producerPassId = 0;
+    std::string_view producerPassName;
+    RenderFramePassQueue producerQueue = RenderFramePassQueue::Graphics;
+    u32 consumerPassId = 0;
+    std::string_view consumerPassName;
+    RenderFramePassQueue consumerQueue = RenderFramePassQueue::Graphics;
+    u32 resourceId = 0;
+    std::string_view resourceName;
+    RenderFrameGraphBarrierResourceKind resourceKind =
+        RenderFrameGraphBarrierResourceKind::Image;
+    RenderFrameGraphResourceAccess srcAccess =
+        RenderFrameGraphResourceAccess::WriteStorage;
+    RenderFrameGraphResourceAccess dstAccess =
+        RenderFrameGraphResourceAccess::ReadSampled;
+    std::string_view srcStage;
+    std::string_view dstStage;
+    std::string_view oldLayout;
+    std::string_view newLayout;
+    bool layoutTransition = false;
+    bool queueOwnershipTransfer = false;
+    bool writeDependency = false;
 };
 
 struct RenderFramePass {
@@ -165,15 +194,27 @@ struct RenderFrameGraphLifetimeStats {
     u32 readWriteResourceCount = 0;
 };
 
+struct RenderFrameGraphBarrierStats {
+    u32 transitionCount = 0;
+    u32 imageTransitionCount = 0;
+    u32 bufferTransitionCount = 0;
+    u32 layoutTransitionCount = 0;
+    u32 queueOwnershipTransferCount = 0;
+    u32 readAfterWriteTransitionCount = 0;
+    u32 writeAfterWriteTransitionCount = 0;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
     std::vector<RenderFramePass> passes;
     std::vector<RenderGraphResource> resources;
+    std::vector<RenderFrameGraphBarrierTransition> barrierTransitions;
     RenderFrameGraphValidation validation;
     RenderFrameGraphReferenceStats references;
     RenderFrameGraphDependencyStats dependencies;
     RenderFrameGraphLifetimeStats lifetimes;
+    RenderFrameGraphBarrierStats barriers;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;
@@ -242,6 +283,9 @@ std::string_view RenderFrameGraphResourceAccessName(
 );
 std::string_view RenderFrameGraphValidationIssueKindName(
     RenderFrameGraphValidationIssueKind kind
+);
+std::string_view RenderFrameGraphBarrierResourceKindName(
+    RenderFrameGraphBarrierResourceKind kind
 );
 
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
