@@ -49,6 +49,7 @@ enum class RenderGraphResourceLifetime {
 };
 
 struct RenderGraphResource {
+    u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
     RenderGraphResourceLifetime lifetime = RenderGraphResourceLifetime::PerFrame;
     std::string_view name;
@@ -58,6 +59,7 @@ struct RenderGraphResource {
 };
 
 struct RenderFramePass {
+    u32 id = 0;
     RenderFramePassKind kind = RenderFramePassKind::FrameSetup;
     RenderFramePassStatus status = RenderFramePassStatus::Roadmap;
     RenderFramePassQueue queue = RenderFramePassQueue::Graphics;
@@ -67,11 +69,20 @@ struct RenderFramePass {
     std::string_view purpose;
 };
 
+struct RenderFrameGraphValidation {
+    u32 issueCount = 0;
+    u32 unnamedPassCount = 0;
+    u32 duplicatePassIdCount = 0;
+    u32 unnamedResourceCount = 0;
+    u32 duplicateResourceIdCount = 0;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
     std::vector<RenderFramePass> passes;
     std::vector<RenderGraphResource> resources;
+    RenderFrameGraphValidation validation;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;

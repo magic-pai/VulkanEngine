@@ -141,6 +141,7 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.roadmapPassCount << ','
         << stats.frameGraph.physicalResourceCount << ','
         << stats.frameGraph.plannedResourceCount << ','
+        << stats.frameGraph.validation.issueCount << ','
         << sceneDiagnostics.ueBridgeRequested << ','
         << sceneDiagnostics.ueBridgeManifestLoaded << ','
         << sceneDiagnostics.ueBridgeSceneFound << ','
@@ -527,6 +528,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "sample_frame,rendered_frame,elapsed_seconds,"
         << "framegraph_active_passes,framegraph_roadmap_passes,"
         << "framegraph_physical_resources,framegraph_planned_resources,"
+        << "framegraph_validation_issues,"
         << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
         << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
         << "ue_bridge_mesh_instance_loaded_count,"

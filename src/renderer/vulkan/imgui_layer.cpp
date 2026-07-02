@@ -1138,6 +1138,10 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.physicalResourceCount,
         stats.frameGraph.plannedResourceCount
     );
+    ImGui::Text(
+        "Graph validation: %u issues",
+        stats.frameGraph.validation.issueCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1170,7 +1174,8 @@ void DrawPerformanceStats(const RendererStats& stats) {
         );
         for (const RenderFramePass& pass : stats.frameGraph.passes) {
             ImGui::BulletText(
-                "[%.*s/%.*s] %.*s",
+                "#%08X [%.*s/%.*s] %.*s",
+                pass.id,
                 static_cast<int>(RenderFramePassStatusName(pass.status).size()),
                 RenderFramePassStatusName(pass.status).data(),
                 static_cast<int>(RenderFramePassQueueName(pass.queue).size()),
@@ -1208,7 +1213,8 @@ void DrawPerformanceStats(const RendererStats& stats) {
             const std::string_view lifetime =
                 RenderGraphResourceLifetimeName(resource.lifetime);
             ImGui::BulletText(
-                "[%.*s/%.*s] %.*s",
+                "#%08X [%.*s/%.*s] %.*s",
+                resource.id,
                 static_cast<int>(status.size()),
                 status.data(),
                 static_cast<int>(lifetime.size()),

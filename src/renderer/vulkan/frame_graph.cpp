@@ -4,6 +4,75 @@ namespace se {
 
 namespace {
 
+constexpr u32 kFrameGraphHashOffset = 2166136261u;
+constexpr u32 kFrameGraphHashPrime = 16777619u;
+
+u32 HashByte(u32 hash, u32 value) {
+    return (hash ^ (value & 0xffu)) * kFrameGraphHashPrime;
+}
+
+u32 HashU32(u32 hash, u32 value) {
+    hash = HashByte(hash, value);
+    hash = HashByte(hash, value >> 8u);
+    hash = HashByte(hash, value >> 16u);
+    return HashByte(hash, value >> 24u);
+}
+
+u32 HashString(u32 hash, std::string_view value) {
+    for (const char character : value) {
+        hash = HashByte(hash, static_cast<unsigned char>(character));
+    }
+    return hash;
+}
+
+u32 NonZeroFrameGraphId(u32 value) {
+    return value != 0u ? value : 1u;
+}
+
+u32 RenderFramePassStableId(
+    RenderFramePassKind kind,
+    RenderFramePassStatus status,
+    RenderFramePassQueue queue,
+    std::string_view name
+) {
+    u32 hash = HashString(kFrameGraphHashOffset, "pass");
+    hash = HashU32(hash, static_cast<u32>(kind));
+    hash = HashU32(hash, static_cast<u32>(status));
+    hash = HashU32(hash, static_cast<u32>(queue));
+    hash = HashString(hash, name);
+    return NonZeroFrameGraphId(hash);
+}
+
+u32 RenderGraphResourceStableId(
+    RenderGraphResourceStatus status,
+    RenderGraphResourceLifetime lifetime,
+    std::string_view name
+) {
+    u32 hash = HashString(kFrameGraphHashOffset, "resource");
+    hash = HashU32(hash, static_cast<u32>(status));
+    hash = HashU32(hash, static_cast<u32>(lifetime));
+    hash = HashString(hash, name);
+    return NonZeroFrameGraphId(hash);
+}
+
+bool ContainsPassId(const RenderFrameGraphPlan& plan, u32 id) {
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ContainsResourceId(const RenderFrameGraphPlan& plan, u32 id) {
+    for (const RenderGraphResource& resource : plan.resources) {
+        if (resource.id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AppendPass(
     RenderFrameGraphPlan& plan,
     RenderFramePassKind kind,
@@ -14,15 +83,26 @@ void AppendPass(
     std::string_view writes,
     std::string_view purpose
 ) {
-    plan.passes.push_back(RenderFramePass{
-        kind,
-        status,
-        queue,
-        name,
-        reads,
-        writes,
-        purpose
-    });
+    const u32 id = RenderFramePassStableId(kind, status, queue, name);
+    if (name.empty()) {
+        ++plan.validation.unnamedPassCount;
+        ++plan.validation.issueCount;
+    }
+    if (ContainsPassId(plan, id)) {
+        ++plan.validation.duplicatePassIdCount;
+        ++plan.validation.issueCount;
+    }
+
+    RenderFramePass pass{};
+    pass.id = id;
+    pass.kind = kind;
+    pass.status = status;
+    pass.queue = queue;
+    pass.name = name;
+    pass.reads = reads;
+    pass.writes = writes;
+    pass.purpose = purpose;
+    plan.passes.push_back(pass);
 
     if (status == RenderFramePassStatus::Active) {
         ++plan.activePassCount;
@@ -40,14 +120,25 @@ void AppendResource(
     std::string_view usage,
     std::string_view scale
 ) {
-    plan.resources.push_back(RenderGraphResource{
-        status,
-        lifetime,
-        name,
-        format,
-        usage,
-        scale
-    });
+    const u32 id = RenderGraphResourceStableId(status, lifetime, name);
+    if (name.empty()) {
+        ++plan.validation.unnamedResourceCount;
+        ++plan.validation.issueCount;
+    }
+    if (ContainsResourceId(plan, id)) {
+        ++plan.validation.duplicateResourceIdCount;
+        ++plan.validation.issueCount;
+    }
+
+    RenderGraphResource resource{};
+    resource.id = id;
+    resource.status = status;
+    resource.lifetime = lifetime;
+    resource.name = name;
+    resource.format = format;
+    resource.usage = usage;
+    resource.scale = scale;
+    plan.resources.push_back(resource);
 
     if (status == RenderGraphResourceStatus::Physical) {
         ++plan.physicalResourceCount;
