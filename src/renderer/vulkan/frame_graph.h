@@ -58,6 +58,11 @@ struct RenderGraphResource {
     std::string_view scale;
 };
 
+struct RenderFrameGraphResourceRef {
+    u32 resourceId = 0;
+    std::string_view name;
+};
+
 struct RenderFramePass {
     u32 id = 0;
     RenderFramePassKind kind = RenderFramePassKind::FrameSetup;
@@ -67,6 +72,8 @@ struct RenderFramePass {
     std::string_view reads;
     std::string_view writes;
     std::string_view purpose;
+    std::vector<RenderFrameGraphResourceRef> readResources;
+    std::vector<RenderFrameGraphResourceRef> writeResources;
 };
 
 struct RenderFrameGraphValidation {
@@ -77,12 +84,20 @@ struct RenderFrameGraphValidation {
     u32 duplicateResourceIdCount = 0;
 };
 
+struct RenderFrameGraphReferenceStats {
+    u32 readCount = 0;
+    u32 writeCount = 0;
+    u32 unstructuredReadTokenCount = 0;
+    u32 unstructuredWriteTokenCount = 0;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
     std::vector<RenderFramePass> passes;
     std::vector<RenderGraphResource> resources;
     RenderFrameGraphValidation validation;
+    RenderFrameGraphReferenceStats references;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;

@@ -1142,6 +1142,16 @@ void DrawPerformanceStats(const RendererStats& stats) {
         "Graph validation: %u issues",
         stats.frameGraph.validation.issueCount
     );
+    ImGui::Text(
+        "Graph refs: %u reads / %u writes",
+        stats.frameGraph.references.readCount,
+        stats.frameGraph.references.writeCount
+    );
+    ImGui::Text(
+        "Graph unstructured refs: %u reads / %u writes",
+        stats.frameGraph.references.unstructuredReadTokenCount,
+        stats.frameGraph.references.unstructuredWriteTokenCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1196,11 +1206,33 @@ void DrawPerformanceStats(const RendererStats& stats) {
                     static_cast<int>(pass.reads.size()),
                     pass.reads.data()
                 );
+                if (!pass.readResources.empty()) {
+                    ImGui::Text("Read refs:");
+                    for (const RenderFrameGraphResourceRef& ref : pass.readResources) {
+                        ImGui::BulletText(
+                            "#%08X %.*s",
+                            ref.resourceId,
+                            static_cast<int>(ref.name.size()),
+                            ref.name.data()
+                        );
+                    }
+                }
                 ImGui::Text(
                     "Writes: %.*s",
                     static_cast<int>(pass.writes.size()),
                     pass.writes.data()
                 );
+                if (!pass.writeResources.empty()) {
+                    ImGui::Text("Write refs:");
+                    for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+                        ImGui::BulletText(
+                            "#%08X %.*s",
+                            ref.resourceId,
+                            static_cast<int>(ref.name.size()),
+                            ref.name.data()
+                        );
+                    }
+                }
                 ImGui::EndTooltip();
             }
         }

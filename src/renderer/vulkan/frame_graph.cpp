@@ -73,6 +73,96 @@ bool ContainsResourceId(const RenderFrameGraphPlan& plan, u32 id) {
     return false;
 }
 
+std::string_view TrimToken(std::string_view value) {
+    while (!value.empty() &&
+        (value.front() == ' ' || value.front() == '\t')) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() &&
+        (value.back() == ' ' ||
+            value.back() == '\t' ||
+            value.back() == '.' ||
+            value.back() == ';')) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+const RenderGraphResource* FindResourceByName(
+    const RenderFrameGraphPlan& plan,
+    std::string_view name
+) {
+    for (const RenderGraphResource& resource : plan.resources) {
+        if (resource.name == name) {
+            return &resource;
+        }
+    }
+    return nullptr;
+}
+
+bool ContainsResourceRef(
+    const std::vector<RenderFrameGraphResourceRef>& refs,
+    u32 resourceId
+) {
+    for (const RenderFrameGraphResourceRef& ref : refs) {
+        if (ref.resourceId == resourceId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+u32 ResolveResourceRefs(
+    const RenderFrameGraphPlan& plan,
+    std::string_view description,
+    std::vector<RenderFrameGraphResourceRef>& refs
+) {
+    u32 unresolvedTokenCount = 0;
+    std::size_t tokenStart = 0;
+    while (tokenStart <= description.size()) {
+        const std::size_t separator = description.find(',', tokenStart);
+        const std::size_t tokenEnd =
+            separator == std::string_view::npos ? description.size() : separator;
+        const std::string_view token =
+            TrimToken(description.substr(tokenStart, tokenEnd - tokenStart));
+
+        if (!token.empty()) {
+            const RenderGraphResource* resource = FindResourceByName(plan, token);
+            if (resource != nullptr) {
+                if (!ContainsResourceRef(refs, resource->id)) {
+                    refs.push_back(RenderFrameGraphResourceRef{
+                        resource->id,
+                        resource->name
+                    });
+                }
+            } else {
+                ++unresolvedTokenCount;
+            }
+        }
+
+        if (separator == std::string_view::npos) {
+            break;
+        }
+        tokenStart = separator + 1;
+    }
+    return unresolvedTokenCount;
+}
+
+void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
+    RenderFrameGraphReferenceStats stats{};
+    for (RenderFramePass& pass : plan.passes) {
+        pass.readResources.clear();
+        pass.writeResources.clear();
+        stats.unstructuredReadTokenCount +=
+            ResolveResourceRefs(plan, pass.reads, pass.readResources);
+        stats.unstructuredWriteTokenCount +=
+            ResolveResourceRefs(plan, pass.writes, pass.writeResources);
+        stats.readCount += static_cast<u32>(pass.readResources.size());
+        stats.writeCount += static_cast<u32>(pass.writeResources.size());
+    }
+    plan.references = stats;
+}
+
 void AppendPass(
     RenderFrameGraphPlan& plan,
     RenderFramePassKind kind,
@@ -103,6 +193,7 @@ void AppendPass(
     pass.writes = writes;
     pass.purpose = purpose;
     plan.passes.push_back(pass);
+    RebuildFrameGraphResourceReferences(plan);
 
     if (status == RenderFramePassStatus::Active) {
         ++plan.activePassCount;
@@ -139,6 +230,7 @@ void AppendResource(
     resource.usage = usage;
     resource.scale = scale;
     plan.resources.push_back(resource);
+    RebuildFrameGraphResourceReferences(plan);
 
     if (status == RenderGraphResourceStatus::Physical) {
         ++plan.physicalResourceCount;
