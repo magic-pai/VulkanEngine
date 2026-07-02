@@ -24,8 +24,8 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "GlobalReflectionFallback",
-            "frame reflection-probe fallback controls, sky directional basis",
-            "diffuse and specular fallback radiance",
+            "",
+            "",
             "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting until imported UE reflection captures and local probes are available."
         );
     }
@@ -38,8 +38,8 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "LocalReflectionProbeBlend",
-            "frame local reflection probe center/radius/color controls",
-            "world-position weighted reflection fallback blend",
+            "",
+            "",
             "First local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture is added."
         );
     }

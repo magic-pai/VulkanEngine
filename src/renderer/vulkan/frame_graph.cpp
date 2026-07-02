@@ -279,8 +279,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "FrameSetup",
-        "camera, scene, settings",
-        "frame constants, jitter, history ids",
+        "",
+        "",
         "Own per-frame state before any render pass records work."
     );
     AppendPass(
@@ -289,8 +289,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Compute,
         "GPUVisibility",
-        "scene bounds, previous depth",
-        "visible instances, compact draw lists, Hi-Z",
+        "SceneDepth",
+        "SceneDepth",
         "Move large-scene culling and draw preparation toward GPU-driven rendering."
     );
     AppendPass(
@@ -299,8 +299,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Compute,
         "VirtualGeometryClusters",
-        "cluster hierarchy, streaming cache",
-        "visibility buffer, material ranges",
+        "VirtualGeometryClusters",
+        "VirtualGeometryClusters",
         "Nanite-like cluster LOD, culling, streaming, and visibility output."
     );
     AppendPass(
@@ -309,8 +309,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "VirtualShadowMaps",
-        "visible lights, page cache, casters",
-        "shadow page atlas, page tables",
+        "VirtualShadowPhysicalPages",
+        "VirtualShadowPhysicalPages",
         "VSM clipmaps and local-light pages with cache invalidation."
     );
     AppendPass(
@@ -319,8 +319,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "DepthVelocity",
-        "opaque geometry, previous transforms",
-        "depth, velocity, hierarchical depth",
+        "",
+        "SceneDepth, Velocity",
         "Feed TAA/TSR, occlusion, motion blur, and screen-space tracing."
     );
     AppendPass(
@@ -329,8 +329,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "GBuffer",
-        "opaque visible geometry, material buffers",
-        "albedo, normal, ORM, emissive, material id",
+        "SceneDepth",
+        "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive",
         "Default opaque path for deferred PBR lighting."
     );
     AppendPass(
@@ -339,8 +339,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "DeferredLighting",
-        "GBuffer, clustered lights, shadows, probes",
-        "HDR scene color",
+        "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, VirtualShadowPhysicalPages",
+        "HDRSceneColor",
         "Direct PBR lighting with tiled or clustered light lists."
     );
     AppendPass(
@@ -349,8 +349,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::AsyncCompute,
         "DynamicGI",
-        "surface cache, screen traces, SDF/BVH",
-        "diffuse indirect, radiance history",
+        "SurfaceCacheCards, SceneDepth, GBufferNormalRoughness",
+        "TemporalHistory",
         "Lumen-like software and hardware trace paths with temporal denoising."
     );
     AppendPass(
@@ -359,8 +359,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::AsyncCompute,
         "Reflections",
-        "scene color, depth, normal, surface cache",
-        "specular indirect, reflection history",
+        "HDRSceneColor, SceneDepth, GBufferNormalRoughness, SurfaceCacheCards, TemporalHistory",
+        "TemporalHistory",
         "Screen, probe, software trace, and hardware ray tracing reflection tiers."
     );
     AppendPass(
@@ -369,8 +369,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "ForwardPlus",
-        "HDR color, depth, clustered lights",
-        "HDR scene color",
+        "HDRSceneColor, SceneDepth",
+        "HDRSceneColor",
         "Transparent, special, particle, black-hole, and unsupported deferred materials."
     );
     AppendPass(
@@ -379,8 +379,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "VolumetricsAtmosphere",
-        "lights, shadows, atmosphere, cloud media",
-        "HDR scene color, aerial perspective",
+        "HDRSceneColor, VirtualShadowPhysicalPages",
+        "HDRSceneColor",
         "Fog, clouds, light shafts, and volumetric shadows."
     );
     AppendPass(
@@ -389,8 +389,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "PostProcess",
-        "HDR scene color, exposure",
-        "tonemapped color",
+        "HDRSceneColor",
+        "HDRSceneColor",
         "Auto exposure, bloom, color grading, DOF, motion blur, and lens effects."
     );
     AppendPass(
@@ -399,8 +399,8 @@ void AppendAAARoadmapPasses(RenderFrameGraphPlan& plan) {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::AsyncCompute,
         "TemporalUpscale",
-        "color, depth, velocity, history, exposure",
-        "display-resolution color, updated history",
+        "HDRSceneColor, SceneDepth, Velocity, TemporalHistory",
+        "HDRSceneColor, TemporalHistory",
         "TSR/FSR-style dynamic-resolution upscaling and anti-aliasing."
     );
 }
@@ -773,9 +773,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             inputs.gBufferGeometryEnabled ? "GBufferOpaque" : "GBufferTarget",
-            inputs.gBufferGeometryEnabled
-                ? "opaque render queue, frame UBO, material descriptors"
-                : "",
+            "",
             "SceneDepth, Velocity, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive",
             inputs.gBufferGeometryEnabled
                 ? "Writes the first deferred opaque material data while legacy forward still owns the visible image."
@@ -958,8 +956,8 @@ RenderFrameGraphPlan BuildAAAFrameGraphBlueprint() {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Graphics,
         "DebugUI",
-        "visualizers, capture controls",
-        "display color",
+        "",
+        "",
         "Editor and runtime inspection over the graph output."
     );
     AppendPass(
@@ -968,8 +966,8 @@ RenderFrameGraphPlan BuildAAAFrameGraphBlueprint() {
         RenderFramePassStatus::Roadmap,
         RenderFramePassQueue::Present,
         "Present",
-        "display color",
-        "display",
+        "",
+        "",
         "Presentation after UI composition."
     );
     return plan;
