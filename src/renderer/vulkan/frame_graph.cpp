@@ -879,6 +879,10 @@ void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
         }
     }
     plan.references = stats;
+}
+
+void RebuildFrameGraphDerivedData(RenderFrameGraphPlan& plan) {
+    RebuildFrameGraphResourceReferences(plan);
     RebuildFrameGraphPassDependencies(plan);
     RebuildFrameGraphResourceLifetimes(plan);
     RebuildFrameGraphValidation(plan);
@@ -907,7 +911,7 @@ void AppendPass(
     pass.writes = writes;
     pass.purpose = purpose;
     plan.passes.push_back(pass);
-    RebuildFrameGraphResourceReferences(plan);
+    RebuildFrameGraphDerivedData(plan);
 
     if (status == RenderFramePassStatus::Active) {
         ++plan.activePassCount;
@@ -936,7 +940,7 @@ void AppendResource(
     resource.usage = usage;
     resource.scale = scale;
     plan.resources.push_back(resource);
-    RebuildFrameGraphResourceReferences(plan);
+    RebuildFrameGraphDerivedData(plan);
 
     if (status == RenderGraphResourceStatus::Physical) {
         ++plan.physicalResourceCount;
