@@ -65,6 +65,12 @@ struct RenderGraphResource {
     std::string_view format;
     std::string_view usage;
     std::string_view scale;
+    u32 firstUsePassId = 0;
+    std::string_view firstUsePassName;
+    u32 lastUsePassId = 0;
+    std::string_view lastUsePassName;
+    u32 readCount = 0;
+    u32 writeCount = 0;
 };
 
 struct RenderFrameGraphResourceRef {
@@ -123,6 +129,14 @@ struct RenderFrameGraphDependencyStats {
     u32 writeAfterWriteCount = 0;
 };
 
+struct RenderFrameGraphLifetimeStats {
+    u32 usedResourceCount = 0;
+    u32 unusedResourceCount = 0;
+    u32 readOnlyResourceCount = 0;
+    u32 writeOnlyResourceCount = 0;
+    u32 readWriteResourceCount = 0;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
@@ -131,6 +145,7 @@ struct RenderFrameGraphPlan {
     RenderFrameGraphValidation validation;
     RenderFrameGraphReferenceStats references;
     RenderFrameGraphDependencyStats dependencies;
+    RenderFrameGraphLifetimeStats lifetimes;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;

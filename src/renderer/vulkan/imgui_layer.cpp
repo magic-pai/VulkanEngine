@@ -1167,6 +1167,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.dependencies.readAfterWriteCount,
         stats.frameGraph.dependencies.writeAfterWriteCount
     );
+    ImGui::Text(
+        "Graph lifetimes: %u used / %u unused / %u read-only / %u write-only / %u read-write",
+        stats.frameGraph.lifetimes.usedResourceCount,
+        stats.frameGraph.lifetimes.unusedResourceCount,
+        stats.frameGraph.lifetimes.readOnlyResourceCount,
+        stats.frameGraph.lifetimes.writeOnlyResourceCount,
+        stats.frameGraph.lifetimes.readWriteResourceCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1310,6 +1318,26 @@ void DrawPerformanceStats(const RendererStats& stats) {
                     static_cast<int>(resource.scale.size()),
                     resource.scale.data()
                 );
+                ImGui::Separator();
+                ImGui::Text(
+                    "Uses: %u reads / %u writes",
+                    resource.readCount,
+                    resource.writeCount
+                );
+                if (resource.firstUsePassId != 0u) {
+                    ImGui::Text(
+                        "First: #%08X %.*s",
+                        resource.firstUsePassId,
+                        static_cast<int>(resource.firstUsePassName.size()),
+                        resource.firstUsePassName.data()
+                    );
+                    ImGui::Text(
+                        "Last: #%08X %.*s",
+                        resource.lastUsePassId,
+                        static_cast<int>(resource.lastUsePassName.size()),
+                        resource.lastUsePassName.data()
+                    );
+                }
                 ImGui::EndTooltip();
             }
         }

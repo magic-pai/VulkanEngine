@@ -100,6 +100,18 @@ const RenderGraphResource* FindResourceByName(
     return nullptr;
 }
 
+RenderGraphResource* FindResourceById(
+    RenderFrameGraphPlan& plan,
+    u32 resourceId
+) {
+    for (RenderGraphResource& resource : plan.resources) {
+        if (resource.id == resourceId) {
+            return &resource;
+        }
+    }
+    return nullptr;
+}
+
 bool ContainsWord(std::string_view text, std::string_view word) {
     return text.find(word) != std::string_view::npos;
 }
@@ -334,6 +346,69 @@ void RebuildFrameGraphPassDependencies(RenderFrameGraphPlan& plan) {
     }
 }
 
+void RecordResourceUse(
+    RenderGraphResource& resource,
+    const RenderFramePass& pass,
+    bool writeUse
+) {
+    if (resource.firstUsePassId == 0u) {
+        resource.firstUsePassId = pass.id;
+        resource.firstUsePassName = pass.name;
+    }
+    resource.lastUsePassId = pass.id;
+    resource.lastUsePassName = pass.name;
+    if (writeUse) {
+        ++resource.writeCount;
+    } else {
+        ++resource.readCount;
+    }
+}
+
+void RebuildFrameGraphResourceLifetimes(RenderFrameGraphPlan& plan) {
+    RenderFrameGraphLifetimeStats stats{};
+    for (RenderGraphResource& resource : plan.resources) {
+        resource.firstUsePassId = 0u;
+        resource.firstUsePassName = {};
+        resource.lastUsePassId = 0u;
+        resource.lastUsePassName = {};
+        resource.readCount = 0u;
+        resource.writeCount = 0u;
+    }
+
+    for (const RenderFramePass& pass : plan.passes) {
+        for (const RenderFrameGraphResourceRef& ref : pass.readResources) {
+            RenderGraphResource* resource =
+                FindResourceById(plan, ref.resourceId);
+            if (resource != nullptr) {
+                RecordResourceUse(*resource, pass, false);
+            }
+        }
+        for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+            RenderGraphResource* resource =
+                FindResourceById(plan, ref.resourceId);
+            if (resource != nullptr) {
+                RecordResourceUse(*resource, pass, true);
+            }
+        }
+    }
+
+    for (const RenderGraphResource& resource : plan.resources) {
+        if (resource.readCount == 0u && resource.writeCount == 0u) {
+            ++stats.unusedResourceCount;
+        } else {
+            ++stats.usedResourceCount;
+            if (resource.readCount > 0u && resource.writeCount > 0u) {
+                ++stats.readWriteResourceCount;
+            } else if (resource.readCount > 0u) {
+                ++stats.readOnlyResourceCount;
+            } else {
+                ++stats.writeOnlyResourceCount;
+            }
+        }
+    }
+    plan.lifetimes = stats;
+}
+
 void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     RenderFrameGraphReferenceStats stats{};
     for (RenderFramePass& pass : plan.passes) {
@@ -354,6 +429,7 @@ void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     }
     plan.references = stats;
     RebuildFrameGraphPassDependencies(plan);
+    RebuildFrameGraphResourceLifetimes(plan);
 }
 
 void AppendPass(

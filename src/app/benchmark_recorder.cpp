@@ -155,6 +155,11 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.dependencies.dependencyCount << ','
         << stats.frameGraph.dependencies.readAfterWriteCount << ','
         << stats.frameGraph.dependencies.writeAfterWriteCount << ','
+        << stats.frameGraph.lifetimes.usedResourceCount << ','
+        << stats.frameGraph.lifetimes.unusedResourceCount << ','
+        << stats.frameGraph.lifetimes.readOnlyResourceCount << ','
+        << stats.frameGraph.lifetimes.writeOnlyResourceCount << ','
+        << stats.frameGraph.lifetimes.readWriteResourceCount << ','
         << sceneDiagnostics.ueBridgeRequested << ','
         << sceneDiagnostics.ueBridgeManifestLoaded << ','
         << sceneDiagnostics.ueBridgeSceneFound << ','
@@ -549,6 +554,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_unstructured_read_tokens,framegraph_unstructured_write_tokens,"
         << "framegraph_dependencies,framegraph_read_after_write_dependencies,"
         << "framegraph_write_after_write_dependencies,"
+        << "framegraph_used_resources,framegraph_unused_resources,"
+        << "framegraph_read_only_resources,framegraph_write_only_resources,"
+        << "framegraph_read_write_resources,"
         << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
         << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
         << "ue_bridge_mesh_instance_loaded_count,"
