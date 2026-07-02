@@ -11,6 +11,7 @@ struct VulkanShadowSettings;
 struct VulkanRenderFeatureContext {
     const VulkanShadowSettings& shadowSettings;
     bool has3DMainPass = false;
+    bool deferredLightingAvailable = false;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

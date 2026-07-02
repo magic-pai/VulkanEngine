@@ -611,30 +611,6 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First compute-backed tiled light-list write feeding deferred lighting."
         );
     }
-    if (inputs.ssaoEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::ScreenSpaceAmbientOcclusion,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "SSAOIntegrated",
-            "GBufferNormalRoughness, SceneDepth, frame matrices",
-            "deferred ambient occlusion factor",
-            "First screen-space ambient occlusion tier integrated into deferred ambient with a debug view; a standalone AO target and temporal filter follow later."
-        );
-    }
-    if (inputs.ssrEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Reflections,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "SSRIntegrated",
-            "GBufferNormalRoughness, SceneDepth, frame matrices",
-            "deferred reflection radiance and screen-space hit confidence",
-            "First screen-space reflection color tier integrated into deferred environment specular with a debug view; hierarchy, temporal accumulation, denoising, and probe fallback follow later."
-        );
-    }
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(plan, inputs.appendRenderFeaturesUserData);
     }

@@ -10,6 +10,8 @@
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/features/height_fog_feature.h"
 #include "renderer/vulkan/features/reflection_probe_fallback_feature.h"
+#include "renderer/vulkan/features/ssao_feature.h"
+#include "renderer/vulkan/features/ssr_feature.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/frame_graph.h"
@@ -1855,6 +1857,8 @@ VulkanRenderer::VulkanRenderer(
     m_Camera(camera),
     m_RenderResources(renderResources),
     m_PipelineSpec(std::move(pipelineSpec)) {
+    m_RenderFeatures.Add(std::make_unique<VulkanSsaoFeature>());
+    m_RenderFeatures.Add(std::make_unique<VulkanSsrFeature>());
     m_RenderFeatures.Add(std::make_unique<VulkanReflectionProbeFallbackFeature>());
     m_RenderFeatures.Add(std::make_unique<VulkanHeightFogFeature>());
     ApplyEnvironmentRenderSettings();
@@ -2128,7 +2132,8 @@ void VulkanRenderer::DrawFrame() {
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
     const VulkanRenderFeatureContext renderFeatureContext{
         m_ShadowSettings,
-        has3DMainPass
+        has3DMainPass,
+        m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr
     };
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     const FrameMaterialSet frameMaterialSet = has3DMainPass
@@ -2233,41 +2238,6 @@ void VulkanRenderer::DrawFrame() {
         std::clamp(m_ShadowSettings.contactShadowJitterStrength, 0.0f, 1.0f);
     frameStats.shadowCascades.contactShadowEdgeFadePixels =
         std::clamp(m_ShadowSettings.contactShadowEdgeFadePixels, 0.0f, 96.0f);
-    frameStats.ssao.strength =
-        std::clamp(m_ShadowSettings.ssaoStrength, 0.0f, 1.0f);
-    frameStats.ssao.radius =
-        std::clamp(m_ShadowSettings.ssaoRadius, 0.0f, 8.0f);
-    frameStats.ssao.bias =
-        std::clamp(m_ShadowSettings.ssaoBias, 0.0f, 0.5f);
-    frameStats.ssao.sampleCount =
-        std::clamp<u32>(m_ShadowSettings.ssaoSampleCount, 0u, 16u);
-    frameStats.ssao.enabled =
-        frameStats.ssao.strength > 0.0001f &&
-        frameStats.ssao.radius > 0.0001f &&
-        frameStats.ssao.sampleCount > 0
-            ? 1u
-            : 0u;
-    frameStats.ssr.strength =
-        std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f);
-    frameStats.ssr.rayLength =
-        std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f);
-    frameStats.ssr.thickness =
-        std::clamp(m_ShadowSettings.ssrThickness, 0.0f, 0.5f);
-    frameStats.ssr.stepCount =
-        std::clamp<u32>(m_ShadowSettings.ssrStepCount, 0u, 32u);
-    frameStats.ssr.enabled =
-        frameStats.ssr.strength > 0.0001f &&
-        frameStats.ssr.rayLength > 0.0001f &&
-        frameStats.ssr.stepCount > 0
-            ? 1u
-            : 0u;
-    frameStats.ssr.colorResolveEnabled =
-        frameStats.ssr.enabled > 0 &&
-        has3DMainPass &&
-        m_DeferredLightingPipeline != nullptr &&
-        m_GBufferDescriptorSets != nullptr
-            ? 1u
-            : 0u;
     m_RenderFeatures.WriteStats(
         VulkanRenderFeatureStatsContext{
             frameStats,
@@ -2592,11 +2562,8 @@ void VulkanRenderer::DrawFrame() {
                 : VK_FORMAT_UNDEFINED,
             m_HdrRenderPass != nullptr && m_HdrFramebuffer != nullptr,
             m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
-            frameStats.ssao.enabled > 0 &&
-                has3DMainPass &&
-                m_DeferredLightingPipeline != nullptr &&
-                m_GBufferDescriptorSets != nullptr,
-            frameStats.ssr.colorResolveEnabled > 0,
+            false,
+            false,
             false,
             false,
             AppendRenderFeaturesToCurrentFrameGraph,
