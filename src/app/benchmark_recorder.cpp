@@ -152,6 +152,9 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.references.presentCount << ','
         << stats.frameGraph.references.unstructuredReadTokenCount << ','
         << stats.frameGraph.references.unstructuredWriteTokenCount << ','
+        << stats.frameGraph.dependencies.dependencyCount << ','
+        << stats.frameGraph.dependencies.readAfterWriteCount << ','
+        << stats.frameGraph.dependencies.writeAfterWriteCount << ','
         << sceneDiagnostics.ueBridgeRequested << ','
         << sceneDiagnostics.ueBridgeManifestLoaded << ','
         << sceneDiagnostics.ueBridgeSceneFound << ','
@@ -544,6 +547,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_write_color_refs,framegraph_write_depth_refs,"
         << "framegraph_write_storage_refs,framegraph_present_refs,"
         << "framegraph_unstructured_read_tokens,framegraph_unstructured_write_tokens,"
+        << "framegraph_dependencies,framegraph_read_after_write_dependencies,"
+        << "framegraph_write_after_write_dependencies,"
         << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
         << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
         << "ue_bridge_mesh_instance_loaded_count,"

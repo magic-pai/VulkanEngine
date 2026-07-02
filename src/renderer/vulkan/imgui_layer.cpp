@@ -1161,6 +1161,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.references.writeStorageCount,
         stats.frameGraph.references.presentCount
     );
+    ImGui::Text(
+        "Graph dependencies: %u total / %u read-after-write / %u write-after-write",
+        stats.frameGraph.dependencies.dependencyCount,
+        stats.frameGraph.dependencies.readAfterWriteCount,
+        stats.frameGraph.dependencies.writeAfterWriteCount
+    );
 
     if (ImGui::TreeNode("CPU breakdown")) {
         ImGui::Text("Wait + acquire: %.3f ms", cpu.waitAcquireMs);
@@ -1247,6 +1253,22 @@ void DrawPerformanceStats(const RendererStats& stats) {
                             access.data(),
                             static_cast<int>(ref.name.size()),
                             ref.name.data()
+                        );
+                    }
+                }
+                if (!pass.dependencies.empty()) {
+                    ImGui::Separator();
+                    ImGui::Text("Depends on:");
+                    for (const RenderFrameGraphPassDependency& dependency :
+                        pass.dependencies) {
+                        ImGui::BulletText(
+                            "#%08X %.*s via %.*s (%s)",
+                            dependency.passId,
+                            static_cast<int>(dependency.passName.size()),
+                            dependency.passName.data(),
+                            static_cast<int>(dependency.resourceName.size()),
+                            dependency.resourceName.data(),
+                            dependency.writeDependency ? "write" : "read"
                         );
                     }
                 }

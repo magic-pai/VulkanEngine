@@ -74,6 +74,14 @@ struct RenderFrameGraphResourceRef {
         RenderFrameGraphResourceAccess::ReadSampled;
 };
 
+struct RenderFrameGraphPassDependency {
+    u32 passId = 0;
+    std::string_view passName;
+    u32 resourceId = 0;
+    std::string_view resourceName;
+    bool writeDependency = false;
+};
+
 struct RenderFramePass {
     u32 id = 0;
     RenderFramePassKind kind = RenderFramePassKind::FrameSetup;
@@ -85,6 +93,7 @@ struct RenderFramePass {
     std::string_view purpose;
     std::vector<RenderFrameGraphResourceRef> readResources;
     std::vector<RenderFrameGraphResourceRef> writeResources;
+    std::vector<RenderFrameGraphPassDependency> dependencies;
 };
 
 struct RenderFrameGraphValidation {
@@ -108,6 +117,12 @@ struct RenderFrameGraphReferenceStats {
     u32 unstructuredWriteTokenCount = 0;
 };
 
+struct RenderFrameGraphDependencyStats {
+    u32 dependencyCount = 0;
+    u32 readAfterWriteCount = 0;
+    u32 writeAfterWriteCount = 0;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
@@ -115,6 +130,7 @@ struct RenderFrameGraphPlan {
     std::vector<RenderGraphResource> resources;
     RenderFrameGraphValidation validation;
     RenderFrameGraphReferenceStats references;
+    RenderFrameGraphDependencyStats dependencies;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;

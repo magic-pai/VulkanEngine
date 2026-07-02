@@ -223,6 +223,117 @@ void CountAccess(
     }
 }
 
+const RenderFramePass* FindPassById(
+    const RenderFrameGraphPlan& plan,
+    u32 passId
+) {
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.id == passId) {
+            return &pass;
+        }
+    }
+    return nullptr;
+}
+
+bool ContainsDependency(
+    const std::vector<RenderFrameGraphPassDependency>& dependencies,
+    u32 passId,
+    u32 resourceId,
+    bool writeDependency
+) {
+    for (const RenderFrameGraphPassDependency& dependency : dependencies) {
+        if (dependency.passId == passId &&
+            dependency.resourceId == resourceId &&
+            dependency.writeDependency == writeDependency) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void AppendDependency(
+    RenderFrameGraphPlan& plan,
+    RenderFramePass& pass,
+    u32 dependencyPassId,
+    const RenderFrameGraphResourceRef& resourceRef,
+    bool writeDependency
+) {
+    if (dependencyPassId == 0u || dependencyPassId == pass.id ||
+        ContainsDependency(
+            pass.dependencies,
+            dependencyPassId,
+            resourceRef.resourceId,
+            writeDependency
+        )) {
+        return;
+    }
+
+    const RenderFramePass* dependencyPass =
+        FindPassById(plan, dependencyPassId);
+    pass.dependencies.push_back(RenderFrameGraphPassDependency{
+        dependencyPassId,
+        dependencyPass != nullptr ? dependencyPass->name : std::string_view{},
+        resourceRef.resourceId,
+        resourceRef.name,
+        writeDependency
+    });
+    ++plan.dependencies.dependencyCount;
+    if (writeDependency) {
+        ++plan.dependencies.writeAfterWriteCount;
+    } else {
+        ++plan.dependencies.readAfterWriteCount;
+    }
+}
+
+void RebuildFrameGraphPassDependencies(RenderFrameGraphPlan& plan) {
+    RenderFrameGraphDependencyStats stats{};
+    plan.dependencies = stats;
+    std::vector<RenderFrameGraphResourceRef> lastWrites;
+    std::vector<u32> lastWriterPassIds;
+
+    for (RenderFramePass& pass : plan.passes) {
+        pass.dependencies.clear();
+
+        for (const RenderFrameGraphResourceRef& readRef : pass.readResources) {
+            for (std::size_t index = 0; index < lastWrites.size(); ++index) {
+                if (lastWrites[index].resourceId == readRef.resourceId) {
+                    AppendDependency(
+                        plan,
+                        pass,
+                        lastWriterPassIds[index],
+                        readRef,
+                        false
+                    );
+                    break;
+                }
+            }
+        }
+
+        for (const RenderFrameGraphResourceRef& writeRef : pass.writeResources) {
+            bool updatedLastWrite = false;
+            for (std::size_t index = 0; index < lastWrites.size(); ++index) {
+                if (lastWrites[index].resourceId == writeRef.resourceId) {
+                    AppendDependency(
+                        plan,
+                        pass,
+                        lastWriterPassIds[index],
+                        writeRef,
+                        true
+                    );
+                    lastWrites[index] = writeRef;
+                    lastWriterPassIds[index] = pass.id;
+                    updatedLastWrite = true;
+                    break;
+                }
+            }
+            if (!updatedLastWrite) {
+                lastWrites.push_back(writeRef);
+                lastWriterPassIds.push_back(pass.id);
+            }
+        }
+    }
+}
+
 void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     RenderFrameGraphReferenceStats stats{};
     for (RenderFramePass& pass : plan.passes) {
@@ -242,6 +353,7 @@ void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
         }
     }
     plan.references = stats;
+    RebuildFrameGraphPassDependencies(plan);
 }
 
 void AppendPass(
