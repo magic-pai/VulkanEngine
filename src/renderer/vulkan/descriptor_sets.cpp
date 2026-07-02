@@ -804,10 +804,18 @@ VulkanHdrDescriptorSets::VulkanHdrDescriptorSets(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
+    const VulkanColorGradingLut* colorGradingLut,
     const VulkanSampler& sampler
 ) : m_Device(device.Handle()) {
     try {
-        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, bloomPyramid, sampler);
+        CreateDescriptorSets(
+            device,
+            descriptorSetLayout,
+            renderTargets,
+            bloomPyramid,
+            colorGradingLut,
+            sampler
+        );
     } catch (...) {
         Release();
         throw;
@@ -832,13 +840,21 @@ void VulkanHdrDescriptorSets::Recreate(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
+    const VulkanColorGradingLut* colorGradingLut,
     const VulkanSampler& sampler
 ) {
     Release();
     m_Device = device.Handle();
 
     try {
-        CreateDescriptorSets(device, descriptorSetLayout, renderTargets, bloomPyramid, sampler);
+        CreateDescriptorSets(
+            device,
+            descriptorSetLayout,
+            renderTargets,
+            bloomPyramid,
+            colorGradingLut,
+            sampler
+        );
     } catch (...) {
         Release();
         throw;
@@ -880,6 +896,7 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
+    const VulkanColorGradingLut* colorGradingLut,
     const VulkanSampler& sampler
 ) {
     const std::size_t count = renderTargets.Count();
@@ -914,6 +931,15 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
             bloomImageInfo.sampler = sampler.Handle();
         }
 
+        VkDescriptorImageInfo colorGradingLutInfo = hdrImageInfo;
+        if (colorGradingLut != nullptr &&
+            colorGradingLut->Uploaded() &&
+            colorGradingLut->View() != VK_NULL_HANDLE) {
+            colorGradingLutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            colorGradingLutInfo.imageView = colorGradingLut->View();
+            colorGradingLutInfo.sampler = sampler.Handle();
+        }
+
         std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
         for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
             descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -922,8 +948,13 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
             descriptorWrites[binding].dstArrayElement = 0;
             descriptorWrites[binding].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             descriptorWrites[binding].descriptorCount = 1;
-            descriptorWrites[binding].pImageInfo =
-                binding == 1 ? &bloomImageInfo : &hdrImageInfo;
+            if (binding == 1) {
+                descriptorWrites[binding].pImageInfo = &bloomImageInfo;
+            } else if (binding == 2) {
+                descriptorWrites[binding].pImageInfo = &colorGradingLutInfo;
+            } else {
+                descriptorWrites[binding].pImageInfo = &hdrImageInfo;
+            }
         }
 
         vkUpdateDescriptorSets(

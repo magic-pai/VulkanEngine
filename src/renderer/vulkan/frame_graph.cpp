@@ -1562,6 +1562,17 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.bloomPyramidMipCount > 0 ? "half-res mip chain" : "unknown mips"
         );
     }
+    if (inputs.colorGradingLutAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentHistory,
+            "ColorGradingLUT",
+            VulkanFormatName(inputs.colorGradingLutFormat),
+            "sampled neutral 2D LUT strip",
+            inputs.colorGradingLutSize > 0 ? "renderer-owned LUT" : "unknown LUT"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,

@@ -30,6 +30,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 probeGridSizeBlend;
     vec4 autoExposureControls;
     vec4 sharpeningControls;
+    vec4 colorGradingLutControls;
 } frame;
 
 layout(set = 1, binding = 2) uniform sampler2D lowerBloomMip;

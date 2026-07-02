@@ -10,6 +10,7 @@ class VulkanDevice;
 class VulkanMaterial;
 class VulkanSampler;
 class VulkanBloomPyramid;
+class VulkanColorGradingLut;
 class VulkanSceneRenderTargets;
 class VulkanDirectionalShadowCascadeAtlas;
 class VulkanLocalShadowAtlas;
@@ -182,6 +183,7 @@ public:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
+        const VulkanColorGradingLut* colorGradingLut,
         const VulkanSampler& sampler
     );
 
@@ -198,6 +200,7 @@ public:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
+        const VulkanColorGradingLut* colorGradingLut,
         const VulkanSampler& sampler
     );
     void Release();
@@ -209,6 +212,7 @@ private:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
+        const VulkanColorGradingLut* colorGradingLut,
         const VulkanSampler& sampler
     );
 

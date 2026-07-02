@@ -11,14 +11,29 @@ namespace se {
 namespace {
 
 std::string_view HdrCompositeReads(const RendererPostProcessStats& postProcess) {
+    const bool readsBloom = postProcess.bloomPyramidEnabled > 0;
+    const bool readsExposure = postProcess.autoExposureHistogramEnabled > 0;
+    const bool readsLut = postProcess.colorGradingLutEnabled > 0;
+    if (readsExposure && readsBloom && readsLut) {
+        return "HDRSceneColor, BloomPyramid, ColorGradingLUT, AutoExposureHistory";
+    }
+    if (readsExposure && readsBloom) {
+        return "HDRSceneColor, BloomPyramid, AutoExposureHistory";
+    }
+    if (readsExposure && readsLut) {
+        return "HDRSceneColor, ColorGradingLUT, AutoExposureHistory";
+    }
     if (postProcess.autoExposureHistogramEnabled > 0) {
-        if (postProcess.bloomPyramidEnabled > 0) {
-            return "HDRSceneColor, BloomPyramid, AutoExposureHistory";
-        }
         return "HDRSceneColor, AutoExposureHistory";
     }
-    if (postProcess.bloomPyramidEnabled > 0) {
+    if (readsBloom && readsLut) {
+        return "HDRSceneColor, BloomPyramid, ColorGradingLUT";
+    }
+    if (readsBloom) {
         return "HDRSceneColor, BloomPyramid";
+    }
+    if (readsLut) {
+        return "HDRSceneColor, ColorGradingLUT";
     }
     return "HDRSceneColor";
 }
@@ -98,9 +113,11 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "ColorGradingIntegrated",
-            "HDRSceneColor",
+            postProcess.colorGradingLutEnabled > 0
+                ? "HDRSceneColor, ColorGradingLUT"
+                : "HDRSceneColor",
             "",
-            "First display-referred color grading tier inside HDR composite; LUT grading can replace it later."
+            "Display-referred color grading inside HDR composite with optional renderer-owned LUT sampling."
         );
     }
     if (postProcess.sharpeningEnabled > 0) {
@@ -174,6 +191,8 @@ void VulkanPostProcessFeature::WriteStats(
         std::clamp(settings.colorGradingGamma, 0.25f, 4.0f);
     postProcess.colorGradingEnabled =
         settings.colorGradingEnabled ? 1u : 0u;
+    postProcess.colorGradingLutStrength =
+        std::clamp(settings.colorGradingLutStrength, 0.0f, 1.0f);
     postProcess.sharpeningStrength =
         std::clamp(settings.sharpeningStrength, 0.0f, 2.0f);
     postProcess.sharpeningRadiusPixels =

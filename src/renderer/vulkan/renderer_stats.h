@@ -211,6 +211,10 @@ struct RendererPostProcessStats {
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
     f32 colorGradingGamma = 1.0f;
+    u32 colorGradingLutEnabled = 0;
+    u32 colorGradingLutSize = 0;
+    f32 colorGradingLutStrength = 0.0f;
+    u32 colorGradingLutFallbacks = 0;
     u32 sharpeningEnabled = 0;
     f32 sharpeningStrength = 0.0f;
     f32 sharpeningRadiusPixels = 0.0f;

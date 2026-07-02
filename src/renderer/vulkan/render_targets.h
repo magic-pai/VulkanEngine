@@ -6,6 +6,7 @@ namespace se {
 
 class VulkanDevice;
 class VulkanPhysicalDevice;
+class VulkanCommandPool;
 class VulkanSceneRenderTargets;
 class VulkanSwapchain;
 
@@ -281,6 +282,48 @@ private:
     VkDevice m_Device = VK_NULL_HANDLE;
     std::vector<std::vector<VkFramebuffer>> m_Framebuffers;
     std::array<VkExtent2D, kBloomPyramidMipCount> m_MipExtents{};
+};
+
+inline constexpr u32 kColorGradingLutSize = 16;
+
+class VulkanColorGradingLut {
+public:
+    VulkanColorGradingLut(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool
+    );
+    ~VulkanColorGradingLut();
+
+    SE_DISABLE_COPY(VulkanColorGradingLut);
+    SE_DISABLE_MOVE(VulkanColorGradingLut);
+
+    VkImageView View() const;
+    VkFormat Format() const;
+    u32 LutSize() const;
+    VkExtent2D Extent() const;
+    bool Uploaded() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool
+    );
+    void Release();
+
+    static constexpr VkFormat kLutFormat = VK_FORMAT_R8G8B8A8_UNORM;
+
+private:
+    void CreateNeutralLut(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool
+    );
+
+private:
+    std::unique_ptr<VulkanImage> m_Image;
+    VkExtent2D m_Extent{};
+    bool m_Uploaded = false;
 };
 
 class VulkanHdrFramebuffer {

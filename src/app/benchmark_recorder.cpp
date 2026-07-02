@@ -338,6 +338,10 @@ void BenchmarkRecorder::RecordFrame(
         << postProcess.colorGradingSaturation << ','
         << postProcess.colorGradingContrast << ','
         << postProcess.colorGradingGamma << ','
+        << postProcess.colorGradingLutEnabled << ','
+        << postProcess.colorGradingLutSize << ','
+        << postProcess.colorGradingLutStrength << ','
+        << postProcess.colorGradingLutFallbacks << ','
         << postProcess.sharpeningEnabled << ','
         << postProcess.sharpeningStrength << ','
         << postProcess.sharpeningRadiusPixels << ','
@@ -685,6 +689,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "auto_exposure_gpu_average_luminance,auto_exposure_gpu_fallbacks,"
         << "color_grading_enabled,color_grading_saturation,"
         << "color_grading_contrast,color_grading_gamma,"
+        << "color_grading_lut_enabled,color_grading_lut_size,"
+        << "color_grading_lut_strength,color_grading_lut_fallbacks,"
         << "sharpening_enabled,sharpening_strength,sharpening_radius_pixels,"
         << "shadow_cascade_max_distance,shadow_cascade_near_depth,shadow_cascade_far_depth,"
         << "shadow_cascade_split0,shadow_cascade_split1,"

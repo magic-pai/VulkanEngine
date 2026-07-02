@@ -67,6 +67,7 @@ struct VulkanRenderDebugSettings {
     f32 colorGradingSaturation = 1.0f;
     f32 colorGradingContrast = 1.0f;
     f32 colorGradingGamma = 1.0f;
+    f32 colorGradingLutStrength = 1.0f;
     bool sharpeningEnabled = false;
     f32 sharpeningStrength = 0.35f;
     f32 sharpeningRadiusPixels = 1.0f;

@@ -1931,6 +1931,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_WeightedTranslucencyDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
     m_SceneTargetSampler.reset();
+    m_ColorGradingLut.reset();
     m_BloomPyramid.reset();
     m_SceneRenderTargets.reset();
     if (m_IblSampler != VK_NULL_HANDLE) {
@@ -2306,6 +2307,18 @@ void VulkanRenderer::DrawFrame() {
         m_BloomPyramid != nullptr ? m_BloomPyramid->MipCount() : 0u;
     frameStats.postProcess.bloomPyramidFallbacks =
         frameStats.postProcess.bloomEnabled > 0 && !recordBloomPyramid ? 1u : 0u;
+    const bool colorGradingLutReady =
+        m_ColorGradingLut != nullptr && m_ColorGradingLut->Uploaded();
+    frameStats.postProcess.colorGradingLutEnabled =
+        frameStats.postProcess.colorGradingEnabled > 0 &&
+            colorGradingLutReady &&
+            frameStats.postProcess.colorGradingLutStrength > 0.0001f
+            ? 1u
+            : 0u;
+    frameStats.postProcess.colorGradingLutSize =
+        colorGradingLutReady ? m_ColorGradingLut->LutSize() : 0u;
+    frameStats.postProcess.colorGradingLutFallbacks =
+        frameStats.postProcess.colorGradingEnabled > 0 && !colorGradingLutReady ? 1u : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2577,6 +2590,11 @@ void VulkanRenderer::DrawFrame() {
                 ? m_BloomPyramid->BloomFormat()
                 : VK_FORMAT_UNDEFINED,
             m_BloomPyramid != nullptr ? m_BloomPyramid->MipCount() : 0,
+            frameStats.postProcess.colorGradingLutEnabled > 0,
+            m_ColorGradingLut != nullptr
+                ? m_ColorGradingLut->Format()
+                : VK_FORMAT_UNDEFINED,
+            colorGradingLutReady ? m_ColorGradingLut->LutSize() : 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,
@@ -3023,6 +3041,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         *m_Swapchain
     );
+    m_ColorGradingLut = std::make_unique<VulkanColorGradingLut>(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool
+    );
     m_SceneTargetSampler = std::make_unique<VulkanSampler>(
         m_Device,
         m_PhysicalDevice,
@@ -3144,6 +3167,7 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_MaterialDescriptorSetLayout,
         *m_SceneRenderTargets,
         m_BloomPyramid.get(),
+        m_ColorGradingLut.get(),
         *m_SceneTargetSampler
     );
     m_BloomDescriptorSets = std::make_unique<VulkanBloomDescriptorSets>(
@@ -3627,6 +3651,9 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_BloomPyramid != nullptr) {
         m_BloomPyramid->Release();
     }
+    if (m_ColorGradingLut != nullptr) {
+        m_ColorGradingLut->Release();
+    }
     if (m_MaterialDescriptorSets != nullptr) {
         m_MaterialDescriptorSets->Release();
     }
@@ -3754,6 +3781,13 @@ void VulkanRenderer::RecreateSwapchain() {
             m_Device,
             m_PhysicalDevice,
             *m_Swapchain
+        );
+    }
+    if (m_ColorGradingLut != nullptr) {
+        m_ColorGradingLut->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool
         );
     }
     if (m_HdrRenderPass != nullptr && m_SceneRenderTargets != nullptr) {
@@ -3919,6 +3953,7 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_MaterialDescriptorSetLayout,
             *m_SceneRenderTargets,
             m_BloomPyramid.get(),
+            m_ColorGradingLut.get(),
             *m_SceneTargetSampler
         );
     }
@@ -4414,6 +4449,11 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (colorGradingGamma.has_value()) {
         m_RenderDebugSettings.colorGradingGamma = *colorGradingGamma;
     }
+    const std::optional<f32> colorGradingLutStrength =
+        EnvironmentFloatOverride("SE_COLOR_GRADING_LUT_STRENGTH");
+    if (colorGradingLutStrength.has_value()) {
+        m_RenderDebugSettings.colorGradingLutStrength = *colorGradingLutStrength;
+    }
     const std::optional<bool> sharpening =
         EnvironmentFlagOverride("SE_SHARPENING");
     if (sharpening.has_value()) {
@@ -4746,6 +4786,20 @@ void VulkanRenderer::UpdateUniformBuffer(
         std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
     );
+    const bool colorGradingLutReady =
+        m_ColorGradingLut != nullptr && m_ColorGradingLut->Uploaded();
+    const bool colorGradingLutApplied =
+        m_RenderDebugSettings.colorGradingEnabled &&
+        colorGradingLutReady &&
+        m_RenderDebugSettings.colorGradingLutStrength > 0.0001f;
+    uniformData.colorGradingLutControls = glm::vec4(
+        colorGradingLutApplied
+            ? std::clamp(m_RenderDebugSettings.colorGradingLutStrength, 0.0f, 1.0f)
+            : 0.0f,
+        static_cast<f32>(kColorGradingLutSize),
+        colorGradingLutReady ? 1.0f : 0.0f,
+        m_RenderDebugSettings.colorGradingEnabled && !colorGradingLutReady ? 1.0f : 0.0f
+    );
     uniformData.toneMappingControls = glm::vec4(
         static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),
         std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f),
@@ -4898,6 +4952,20 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f),
         std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f)
+    );
+    const bool colorGradingLutReady =
+        m_ColorGradingLut != nullptr && m_ColorGradingLut->Uploaded();
+    const bool colorGradingLutApplied =
+        m_RenderDebugSettings.colorGradingEnabled &&
+        colorGradingLutReady &&
+        m_RenderDebugSettings.colorGradingLutStrength > 0.0001f;
+    uniformData.colorGradingLutControls = glm::vec4(
+        colorGradingLutApplied
+            ? std::clamp(m_RenderDebugSettings.colorGradingLutStrength, 0.0f, 1.0f)
+            : 0.0f,
+        static_cast<f32>(kColorGradingLutSize),
+        colorGradingLutReady ? 1.0f : 0.0f,
+        m_RenderDebugSettings.colorGradingEnabled && !colorGradingLutReady ? 1.0f : 0.0f
     );
     uniformData.toneMappingControls = glm::vec4(
         static_cast<f32>(std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u)),

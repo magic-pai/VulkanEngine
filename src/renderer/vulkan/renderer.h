@@ -60,6 +60,7 @@ class VulkanBloomDescriptorSets;
 class VulkanBloomFramebuffer;
 class VulkanBloomPyramid;
 class VulkanBloomRenderPass;
+class VulkanColorGradingLut;
 class VulkanLightBuffer;
 class VulkanLightTileDiagnosticsBuffer;
 class VulkanMaterialBuffer;
@@ -392,6 +393,7 @@ private:
     std::unique_ptr<VulkanLocalShadowBuffer> m_LocalShadowBuffer;
     std::unique_ptr<VulkanSceneRenderTargets> m_SceneRenderTargets;
     std::unique_ptr<VulkanBloomPyramid> m_BloomPyramid;
+    std::unique_ptr<VulkanColorGradingLut> m_ColorGradingLut;
     std::unique_ptr<VulkanSampler> m_SceneTargetSampler;
     std::unique_ptr<VulkanGBufferRenderPass> m_GBufferRenderPass;
     std::unique_ptr<VulkanGBufferFramebuffer> m_GBufferFramebuffer;

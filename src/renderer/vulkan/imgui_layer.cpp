@@ -611,6 +611,7 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
     ImGui::SliderFloat("Saturation##Post", &settings.colorGradingSaturation, 0.0f, 2.5f, "%.3f");
     ImGui::SliderFloat("Contrast##Post", &settings.colorGradingContrast, 0.0f, 2.5f, "%.3f");
     ImGui::SliderFloat("Gamma##Post", &settings.colorGradingGamma, 0.25f, 4.0f, "%.3f");
+    ImGui::SliderFloat("LUT strength##Post", &settings.colorGradingLutStrength, 0.0f, 1.0f, "%.3f");
     ImGui::Checkbox("Sharpening##Post", &settings.sharpeningEnabled);
     ImGui::SliderFloat("Sharpen strength##Post", &settings.sharpeningStrength, 0.0f, 2.0f, "%.3f");
     ImGui::SliderFloat("Sharpen radius px##Post", &settings.sharpeningRadiusPixels, 0.0f, 4.0f, "%.2f");
@@ -844,11 +845,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureFallbacks
     );
     ImGui::Text(
-        "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f",
+        "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,
         stats.postProcess.colorGradingContrast,
-        stats.postProcess.colorGradingGamma
+        stats.postProcess.colorGradingGamma,
+        stats.postProcess.colorGradingLutEnabled ? "enabled" : "off",
+        stats.postProcess.colorGradingLutSize,
+        stats.postProcess.colorGradingLutStrength,
+        stats.postProcess.colorGradingLutFallbacks
     );
     ImGui::Text(
         "Sharpening: %s, strength %.3f, radius %.2f px",

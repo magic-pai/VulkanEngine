@@ -276,6 +276,9 @@ struct CurrentVulkanFrameGraphInputs {
     bool bloomPyramidAllocated = false;
     VkFormat bloomPyramidFormat = VK_FORMAT_UNDEFINED;
     u32 bloomPyramidMipCount = 0;
+    bool colorGradingLutAllocated = false;
+    VkFormat colorGradingLutFormat = VK_FORMAT_UNDEFINED;
+    u32 colorGradingLutSize = 0;
     bool autoExposureHistogramEnabled = false;
     bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;

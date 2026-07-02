@@ -1,10 +1,55 @@
 #include "renderer/vulkan/render_targets.h"
 
+#include "renderer/vulkan/buffer.h"
+#include "renderer/vulkan/command_pool.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/swapchain.h"
 
+#include <array>
+#include <cstddef>
+
 namespace se {
+
+namespace {
+
+std::array<u8, 4> LutTexel(u32 red, u32 green, u32 blue, u32 size) {
+    const u32 denominator = std::max(size - 1, 1u);
+    return {
+        static_cast<u8>((red * 255u + denominator / 2u) / denominator),
+        static_cast<u8>((green * 255u + denominator / 2u) / denominator),
+        static_cast<u8>((blue * 255u + denominator / 2u) / denominator),
+        255u
+    };
+}
+
+std::vector<std::byte> BuildNeutralLutStrip(u32 size) {
+    const u32 width = size * size;
+    const u32 height = size;
+    std::vector<std::byte> texels(
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u
+    );
+
+    for (u32 blue = 0; blue < size; ++blue) {
+        for (u32 green = 0; green < size; ++green) {
+            for (u32 red = 0; red < size; ++red) {
+                const u32 x = blue * size + red;
+                const u32 y = green;
+                const std::size_t offset =
+                    (static_cast<std::size_t>(y) * width + x) * 4u;
+                const std::array<u8, 4> texel = LutTexel(red, green, blue, size);
+                texels[offset + 0] = static_cast<std::byte>(texel[0]);
+                texels[offset + 1] = static_cast<std::byte>(texel[1]);
+                texels[offset + 2] = static_cast<std::byte>(texel[2]);
+                texels[offset + 3] = static_cast<std::byte>(texel[3]);
+            }
+        }
+    }
+
+    return texels;
+}
+
+} // namespace
 
 VulkanHdrRenderPass::VulkanHdrRenderPass(
     const VulkanDevice& device,
@@ -835,6 +880,100 @@ void VulkanBloomFramebuffer::Release() {
 
     m_Framebuffers.clear();
     m_MipExtents = {};
+}
+
+VulkanColorGradingLut::VulkanColorGradingLut(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool
+) {
+    Recreate(device, physicalDevice, commandPool);
+}
+
+VulkanColorGradingLut::~VulkanColorGradingLut() {
+    Release();
+}
+
+VkImageView VulkanColorGradingLut::View() const {
+    return m_Image != nullptr ? m_Image->View() : VK_NULL_HANDLE;
+}
+
+VkFormat VulkanColorGradingLut::Format() const {
+    return kLutFormat;
+}
+
+u32 VulkanColorGradingLut::LutSize() const {
+    return kColorGradingLutSize;
+}
+
+VkExtent2D VulkanColorGradingLut::Extent() const {
+    return m_Extent;
+}
+
+bool VulkanColorGradingLut::Uploaded() const {
+    return m_Uploaded && m_Image != nullptr;
+}
+
+void VulkanColorGradingLut::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool
+) {
+    Release();
+    CreateNeutralLut(device, physicalDevice, commandPool);
+}
+
+void VulkanColorGradingLut::Release() {
+    m_Image.reset();
+    m_Extent = {};
+    m_Uploaded = false;
+}
+
+void VulkanColorGradingLut::CreateNeutralLut(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool
+) {
+    m_Extent = {
+        kColorGradingLutSize * kColorGradingLutSize,
+        kColorGradingLutSize
+    };
+    const std::vector<std::byte> texels =
+        BuildNeutralLutStrip(kColorGradingLutSize);
+    VulkanBuffer stagingBuffer(
+        device,
+        physicalDevice,
+        static_cast<VkDeviceSize>(texels.size()),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    stagingBuffer.Upload(texels);
+
+    m_Image = std::make_unique<VulkanImage>(
+        device,
+        physicalDevice,
+        m_Extent,
+        kLutFormat,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+    m_Image->TransitionLayout(
+        device,
+        commandPool,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+    );
+    m_Image->CopyFromBuffer(device, commandPool, stagingBuffer.Handle());
+    m_Image->TransitionLayout(
+        device,
+        commandPool,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+    m_Uploaded = true;
 }
 
 VulkanHdrFramebuffer::VulkanHdrFramebuffer(

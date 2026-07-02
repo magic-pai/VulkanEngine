@@ -30,6 +30,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 probeGridSizeBlend;
     vec4 autoExposureControls;
     vec4 sharpeningControls;
+    vec4 colorGradingLutControls;
 } frame;
 
 layout(set = 0, binding = 10) readonly buffer AutoExposureState {
@@ -39,6 +40,7 @@ layout(set = 0, binding = 10) readonly buffer AutoExposureState {
 
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 layout(set = 1, binding = 1) uniform sampler2D bloomTexture;
+layout(set = 1, binding = 2) uniform sampler2D colorGradingLut;
 
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
@@ -132,6 +134,30 @@ vec3 ApplyColorGrading(vec3 color) {
     graded = (graded - vec3(0.5)) * contrast + vec3(0.5);
     graded = clamp(graded, 0.0, 1.0);
     graded = pow(graded, vec3(1.0 / gamma));
+
+    float lutStrength = clamp(frame.colorGradingLutControls.x, 0.0, 1.0);
+    float lutSize = max(frame.colorGradingLutControls.y, 2.0);
+    if (lutStrength > 0.0001) {
+        vec3 lutCoord = clamp(graded, vec3(0.0), vec3(1.0)) * (lutSize - 1.0);
+        float blueSlice = floor(lutCoord.b);
+        float blueBlend = fract(lutCoord.b);
+        float stripWidth = lutSize * lutSize;
+        vec2 lutUv0 = vec2(
+            (blueSlice * lutSize + lutCoord.r + 0.5) / stripWidth,
+            (lutCoord.g + 0.5) / lutSize
+        );
+        vec2 lutUv1 = vec2(
+            (min(blueSlice + 1.0, lutSize - 1.0) * lutSize + lutCoord.r + 0.5) / stripWidth,
+            lutUv0.y
+        );
+        vec3 lutColor = mix(
+            texture(colorGradingLut, lutUv0).rgb,
+            texture(colorGradingLut, lutUv1).rgb,
+            blueBlend
+        );
+        graded = mix(graded, lutColor, lutStrength);
+    }
+
     return clamp(graded, 0.0, 1.0);
 }
 
