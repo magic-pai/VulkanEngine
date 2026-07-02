@@ -279,6 +279,16 @@ struct CurrentVulkanFrameGraphInputs {
     bool colorGradingLutAllocated = false;
     VkFormat colorGradingLutFormat = VK_FORMAT_UNDEFINED;
     u32 colorGradingLutSize = 0;
+    bool iblBrdfLutAllocated = false;
+    VkFormat iblBrdfLutFormat = VK_FORMAT_UNDEFINED;
+    u32 iblBrdfLutSize = 0;
+    bool iblIrradianceMapAllocated = false;
+    VkFormat iblIrradianceFormat = VK_FORMAT_UNDEFINED;
+    u32 iblIrradianceFaceSize = 0;
+    bool iblPrefilteredMapAllocated = false;
+    VkFormat iblPrefilteredFormat = VK_FORMAT_UNDEFINED;
+    u32 iblPrefilteredFaceSize = 0;
+    u32 iblPrefilteredMipCount = 0;
     bool autoExposureHistogramEnabled = false;
     bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;

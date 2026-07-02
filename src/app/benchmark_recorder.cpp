@@ -126,6 +126,7 @@ void BenchmarkRecorder::RecordFrame(
         stats.weightedTranslucency;
     const RendererSsaoStats& ssao = stats.ssao;
     const RendererSsrStats& ssr = stats.ssr;
+    const RendererIblStats& ibl = stats.ibl;
     const RendererReflectionProbeStats& reflectionProbe = stats.reflectionProbe;
     const RendererHeightFogStats& heightFog = stats.heightFog;
     const RendererPostProcessStats& postProcess = stats.postProcess;
@@ -298,6 +299,18 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.rayLength << ','
         << ssr.thickness << ','
         << ssr.stepCount << ','
+        << ibl.brdfLutAllocated << ','
+        << ibl.brdfLutSize << ','
+        << static_cast<int>(ibl.brdfLutFormat) << ','
+        << ibl.irradianceMapAllocated << ','
+        << ibl.irradianceFaceSize << ','
+        << static_cast<int>(ibl.irradianceFormat) << ','
+        << ibl.prefilteredMapAllocated << ','
+        << ibl.prefilteredFaceSize << ','
+        << ibl.prefilteredMipCount << ','
+        << static_cast<int>(ibl.prefilteredFormat) << ','
+        << ibl.descriptorSetsBound << ','
+        << ibl.shaderIntegrationEnabled << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -672,6 +685,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssao_enabled,ssao_strength,ssao_radius,ssao_bias,ssao_sample_count,"
         << "ssr_enabled,ssr_color_resolve_enabled,ssr_strength,"
         << "ssr_ray_length,ssr_thickness,ssr_step_count,"
+        << "ibl_brdf_lut_allocated,ibl_brdf_lut_size,ibl_brdf_lut_format,"
+        << "ibl_irradiance_map_allocated,ibl_irradiance_face_size,"
+        << "ibl_irradiance_format,ibl_prefiltered_map_allocated,"
+        << "ibl_prefiltered_face_size,ibl_prefiltered_mip_count,"
+        << "ibl_prefiltered_format,ibl_descriptor_sets_bound,"
+        << "ibl_shader_integration_enabled,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_local_enabled,reflection_probe_local_radius,"

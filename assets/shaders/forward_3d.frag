@@ -229,6 +229,13 @@ vec2 EnvBrdfApprox(float roughness, float nDotV) {
     return vec2(-1.04, 1.04) * a004 + r.zw;
 }
 
+vec2 SampleEnvironmentBrdf(float roughness, float nDotV) {
+    return max(texture(brdfLut, vec2(
+        clamp(nDotV, 0.0, 1.0),
+        clamp(roughness, 0.0, 1.0)
+    )).rg, vec2(0.0));
+}
+
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
     const float b = 0.03;
@@ -272,7 +279,22 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     vec3 sunTint = vec3(1.12, 1.08, 1.0);
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
     float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
-    return (base + sun) * intensity * enabled;
+    vec3 procedural = (base + sun) * intensity;
+    vec3 sampleDirection = dot(direction, direction) > 0.0001
+        ? normalize(direction)
+        : vec3(0.0, 1.0, 0.0);
+    vec3 sampledDiffuse =
+        max(texture(irradianceMap, sampleDirection).rgb, vec3(0.0)) *
+        diffuseIntensity;
+    vec3 sampledSpecular =
+        max(textureLod(
+            prefilteredMap,
+            sampleDirection,
+            clamp(roughness, 0.0, 1.0) * 4.0
+        ).rgb, vec3(0.0)) *
+        specularIntensity;
+    vec3 sampled = mix(sampledSpecular, sampledDiffuse, smoothstep(0.45, 1.0, roughness));
+    return mix(procedural, sampled, 0.65) * enabled;
 }
 
 vec3 SampleProbeGridIrradiance(vec3 worldPos) {
@@ -1534,7 +1556,7 @@ void main() {
     f0 = mix(dielectricF0, baseColor, metallic);
     vec3 envFresnel = FresnelSchlickRoughness(nDotV, f0, roughness);
     vec3 envDiffuse = (vec3(1.0) - envFresnel) * (1.0 - metallic);
-    vec2 envBrdf = EnvBrdfApprox(roughness, nDotV);
+    vec2 envBrdf = SampleEnvironmentBrdf(roughness, nDotV);
     vec3 envSpecular = specularEnv * (f0 * envBrdf.x + envBrdf.y);
     float envStrength = ambientStrength * 4.0 + 0.08 + directIntensity * 0.06;
     vec3 ambient = (envDiffuse * baseColor * diffuseEnv +

@@ -795,6 +795,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.horizonBlend
     );
     ImGui::Text(
+        "IBL resources: BRDF %s %u, irradiance %s %u, prefiltered %s %u mips %u, descriptors %u",
+        stats.ibl.brdfLutAllocated ? "on" : "off",
+        stats.ibl.brdfLutSize,
+        stats.ibl.irradianceMapAllocated ? "on" : "off",
+        stats.ibl.irradianceFaceSize,
+        stats.ibl.prefilteredMapAllocated ? "on" : "off",
+        stats.ibl.prefilteredFaceSize,
+        stats.ibl.prefilteredMipCount,
+        stats.ibl.descriptorSetsBound
+    );
+    ImGui::Text(
         "Local reflection probe: %s, radius %.2f, intensity %.2f, blend %.2f, falloff %.2f",
         stats.reflectionProbe.localEnabled ? "enabled" : "off",
         stats.reflectionProbe.localRadius,

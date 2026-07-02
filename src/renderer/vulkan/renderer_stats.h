@@ -164,6 +164,21 @@ struct RendererSsrStats {
     u32 stepCount = 0;
 };
 
+struct RendererIblStats {
+    u32 brdfLutAllocated = 0;
+    u32 brdfLutSize = 0;
+    VkFormat brdfLutFormat = VK_FORMAT_UNDEFINED;
+    u32 irradianceMapAllocated = 0;
+    u32 irradianceFaceSize = 0;
+    VkFormat irradianceFormat = VK_FORMAT_UNDEFINED;
+    u32 prefilteredMapAllocated = 0;
+    u32 prefilteredFaceSize = 0;
+    u32 prefilteredMipCount = 0;
+    VkFormat prefilteredFormat = VK_FORMAT_UNDEFINED;
+    u32 descriptorSetsBound = 0;
+    u32 shaderIntegrationEnabled = 0;
+};
+
 struct RendererReflectionProbeStats {
     u32 fallbackEnabled = 0;
     f32 diffuseIntensity = 0.0f;
@@ -403,6 +418,7 @@ struct RendererStats {
     RendererWeightedTranslucencyStats weightedTranslucency;
     RendererSsaoStats ssao;
     RendererSsrStats ssr;
+    RendererIblStats ibl;
     RendererReflectionProbeStats reflectionProbe;
     RendererHeightFogStats heightFog;
     RendererPostProcessStats postProcess;

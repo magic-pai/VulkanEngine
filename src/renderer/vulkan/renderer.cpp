@@ -2319,6 +2319,43 @@ void VulkanRenderer::DrawFrame() {
         colorGradingLutReady ? m_ColorGradingLut->LutSize() : 0u;
     frameStats.postProcess.colorGradingLutFallbacks =
         frameStats.postProcess.colorGradingEnabled > 0 && !colorGradingLutReady ? 1u : 0u;
+    const bool iblBrdfReady =
+        m_IblBrdfImage != nullptr &&
+        m_IblBrdfImage->View() != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE;
+    const bool iblIrradianceReady =
+        m_IblIrradianceImage != nullptr &&
+        m_IblIrradianceView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE;
+    const bool iblPrefilteredReady =
+        m_IblPrefilteredImage != nullptr &&
+        m_IblPrefilteredView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE;
+    const bool iblReady =
+        iblBrdfReady && iblIrradianceReady && iblPrefilteredReady;
+    frameStats.ibl.brdfLutAllocated = iblBrdfReady ? 1u : 0u;
+    frameStats.ibl.brdfLutSize =
+        iblBrdfReady ? m_IblBrdfImage->Extent().width : 0u;
+    frameStats.ibl.brdfLutFormat =
+        iblBrdfReady ? m_IblBrdfImage->Format() : VK_FORMAT_UNDEFINED;
+    frameStats.ibl.irradianceMapAllocated = iblIrradianceReady ? 1u : 0u;
+    frameStats.ibl.irradianceFaceSize =
+        iblIrradianceReady ? m_IblIrradianceImage->Extent().width : 0u;
+    frameStats.ibl.irradianceFormat =
+        iblIrradianceReady ? m_IblIrradianceImage->Format() : VK_FORMAT_UNDEFINED;
+    frameStats.ibl.prefilteredMapAllocated = iblPrefilteredReady ? 1u : 0u;
+    frameStats.ibl.prefilteredFaceSize =
+        iblPrefilteredReady ? m_IblPrefilteredImage->Extent().width : 0u;
+    frameStats.ibl.prefilteredMipCount =
+        iblPrefilteredReady ? m_IblPrefilteredImage->MipLevels() : 0u;
+    frameStats.ibl.prefilteredFormat =
+        iblPrefilteredReady ? m_IblPrefilteredImage->Format() : VK_FORMAT_UNDEFINED;
+    frameStats.ibl.descriptorSetsBound =
+        iblReady && m_DescriptorSets != nullptr
+            ? static_cast<u32>(m_DescriptorSets->Count())
+            : 0u;
+    frameStats.ibl.shaderIntegrationEnabled =
+        iblReady && has3DMainPass ? 1u : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2595,6 +2632,16 @@ void VulkanRenderer::DrawFrame() {
                 ? m_ColorGradingLut->Format()
                 : VK_FORMAT_UNDEFINED,
             colorGradingLutReady ? m_ColorGradingLut->LutSize() : 0,
+            frameStats.ibl.brdfLutAllocated > 0,
+            frameStats.ibl.brdfLutFormat,
+            frameStats.ibl.brdfLutSize,
+            frameStats.ibl.irradianceMapAllocated > 0,
+            frameStats.ibl.irradianceFormat,
+            frameStats.ibl.irradianceFaceSize,
+            frameStats.ibl.prefilteredMapAllocated > 0,
+            frameStats.ibl.prefilteredFormat,
+            frameStats.ibl.prefilteredFaceSize,
+            frameStats.ibl.prefilteredMipCount,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,

@@ -198,6 +198,13 @@ vec3 FresnelSchlick(float cosTheta, vec3 f0) {
     return f0 + (1.0 - f0) * Pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
 }
 
+vec2 SampleEnvironmentBrdf(float roughness, float nDotV) {
+    return max(texture(brdfLut, vec2(
+        clamp(nDotV, 0.0, 1.0),
+        clamp(roughness, 0.0, 1.0)
+    )).rg, vec2(0.0));
+}
+
 vec3 DirectPbrContribution(
     vec3 baseColor,
     float roughness,
@@ -256,9 +263,24 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     float sunPower = mix(128.0, 24.0, roughness);
     float sunDisk = pow(max(sunAmount, 0.0001), sunPower);
     float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
-    return (base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness)) *
-        intensity *
-        enabled;
+    vec3 procedural =
+        (base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness)) *
+        intensity;
+    vec3 sampleDirection = dot(direction, direction) > 0.0001
+        ? normalize(direction)
+        : vec3(0.0, 1.0, 0.0);
+    vec3 sampledDiffuse =
+        max(texture(irradianceMap, sampleDirection).rgb, vec3(0.0)) *
+        diffuseIntensity;
+    vec3 sampledSpecular =
+        max(textureLod(
+            prefilteredMap,
+            sampleDirection,
+            clamp(roughness, 0.0, 1.0) * 4.0
+        ).rgb, vec3(0.0)) *
+        specularIntensity;
+    vec3 sampled = mix(sampledSpecular, sampledDiffuse, smoothstep(0.45, 1.0, roughness));
+    return mix(procedural, sampled, 0.65) * enabled;
 }
 
 vec3 SampleProbeGridIrradiance(vec3 worldPos) {
@@ -1849,9 +1871,12 @@ void main() {
         ambientStrength,
         directIntensity
     );
+    float nDotV = max(dot(normal, viewDir), 0.0);
+    vec2 envBrdf = SampleEnvironmentBrdf(roughness, nDotV);
+    vec3 envSpecular = ssrReflection * (f0 * envBrdf.x + envBrdf.y);
     vec3 ambient = (
         baseColor * EnvironmentRadiance(normal, lightDir, 1.0, worldPosition) * 0.45 +
-        ssrReflection * f0 * 0.16
+        envSpecular * 0.36
     ) * ambientStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);

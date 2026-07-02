@@ -1573,6 +1573,39 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.colorGradingLutSize > 0 ? "renderer-owned LUT" : "unknown LUT"
         );
     }
+    if (inputs.iblBrdfLutAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "BRDFLUT",
+            VulkanFormatName(inputs.iblBrdfLutFormat),
+            "sampled split-sum GGX BRDF integration LUT",
+            inputs.iblBrdfLutSize > 0 ? "renderer-owned LUT" : "unknown LUT"
+        );
+    }
+    if (inputs.iblIrradianceMapAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "IrradianceMap",
+            VulkanFormatName(inputs.iblIrradianceFormat),
+            "sampled diffuse irradiance cubemap",
+            inputs.iblIrradianceFaceSize > 0 ? "cube face cache" : "unknown cube"
+        );
+    }
+    if (inputs.iblPrefilteredMapAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "PrefilteredEnvironmentMap",
+            VulkanFormatName(inputs.iblPrefilteredFormat),
+            "sampled prefiltered specular environment cubemap",
+            inputs.iblPrefilteredMipCount > 0 ? "mipped cube cache" : "unknown cube"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,
@@ -1771,8 +1804,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassQueue::Graphics,
             "WeightedTranslucencyForwardPlus",
             inputs.lightTileCullComputeEnabled
-                ? "SceneDepth, LightTileLists"
-                : "SceneDepth",
+                ? "SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : "SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
             "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling."
         );
@@ -1790,8 +1823,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "HdrOffscreenTarget",
             inputs.deferredLightingEnabled
                 ? (inputs.lightTileCullComputeEnabled
-                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, LightTileLists"
-                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth")
+                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
                 : "",
             "HDRSceneColor",
             inputs.deferredLightingEnabled
@@ -1849,8 +1882,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         RenderFramePassStatus::Active,
         RenderFramePassQueue::Graphics,
         inputs.has3DMainPass ? "LegacyForward3D" : "Legacy2D",
-        inputs.has3DMainPass && inputs.lightTileCullComputeEnabled
-            ? "LightTileLists"
+        inputs.has3DMainPass
+            ? (inputs.lightTileCullComputeEnabled
+                ? "LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : "BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
             : "",
         "SwapchainColor, LegacyDepth",
         "Current compatibility path while HDR/deferred targets are introduced."
