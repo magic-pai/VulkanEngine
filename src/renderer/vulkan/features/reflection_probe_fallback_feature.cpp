@@ -32,19 +32,29 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
     if (reflectionProbe.localEnabled > 0 &&
         reflectionProbe.fallbackEnabled > 0 &&
         context.renderer.has3DMainPass) {
+        const bool sceneCubemapSampling =
+            context.renderer.sceneReflectionProbeOwned &&
+            context.renderer.sceneReflectionProbeCubemapSamplingEnabled &&
+            reflectionProbe.localCubemapShaderSamplingEnabled > 0;
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            context.renderer.sceneReflectionProbeOwned
+            sceneCubemapSampling
+                ? "SceneReflectionProbeCubemapSample"
+                : context.renderer.sceneReflectionProbeOwned
                 ? "SceneReflectionProbeBlend"
                 : "LocalReflectionProbeBlend",
-            context.renderer.sceneReflectionProbeOwned
+            sceneCubemapSampling
+                ? "SceneReflectionProbes, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : context.renderer.sceneReflectionProbeOwned
                 ? "SceneReflectionProbes, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : "BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
-            context.renderer.sceneReflectionProbeOwned
+            sceneCubemapSampling
+                ? "Scene-owned reflection probe samples a renderer-owned local cubemap in deferred, forward, and WBOIT environment lighting."
+                : context.renderer.sceneReflectionProbeOwned
                 ? "Scene-owned reflection probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
                 : "Debug local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
         );

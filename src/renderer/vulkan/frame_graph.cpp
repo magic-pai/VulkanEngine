@@ -1617,6 +1617,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.sceneReflectionProbeCount > 0 ? "active scene probes" : "empty probe set"
         );
     }
+    if (inputs.sceneReflectionProbeCubemapAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "SceneReflectionProbeCubemap",
+            VulkanFormatName(inputs.sceneReflectionProbeCubemapFormat),
+            "sampled local reflection-probe cubemap",
+            inputs.sceneReflectionProbeCubemapMipCount > 0
+                ? "mipped cube cache"
+                : "unknown cube"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,

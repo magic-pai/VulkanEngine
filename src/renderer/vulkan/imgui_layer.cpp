@@ -820,6 +820,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.localFalloff
     );
     ImGui::Text(
+        "Reflection probe cubemap: %s, face %u, mips %u, descriptors %u, shader %s, source %u",
+        stats.reflectionProbe.localCubemapAllocated ? "allocated" : "off",
+        stats.reflectionProbe.localCubemapFaceSize,
+        stats.reflectionProbe.localCubemapMipCount,
+        stats.reflectionProbe.localCubemapDescriptorSetsBound,
+        stats.reflectionProbe.localCubemapShaderSamplingEnabled ? "sampling" : "off",
+        stats.reflectionProbe.localCubemapSourceType
+    );
+    ImGui::Text(
         "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
         stats.heightFog.enabled ? "enabled" : "off",
         stats.heightFog.density,

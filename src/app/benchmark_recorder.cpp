@@ -326,6 +326,13 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.localIntensity << ','
         << reflectionProbe.localBlendStrength << ','
         << reflectionProbe.localFalloff << ','
+        << reflectionProbe.localCubemapAllocated << ','
+        << reflectionProbe.localCubemapFaceSize << ','
+        << reflectionProbe.localCubemapMipCount << ','
+        << static_cast<int>(reflectionProbe.localCubemapFormat) << ','
+        << reflectionProbe.localCubemapDescriptorSetsBound << ','
+        << reflectionProbe.localCubemapShaderSamplingEnabled << ','
+        << reflectionProbe.localCubemapSourceType << ','
         << heightFog.enabled << ','
         << heightFog.density << ','
         << heightFog.heightFalloff << ','
@@ -706,6 +713,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_local_box_extent_z,"
         << "reflection_probe_local_intensity,reflection_probe_local_blend_strength,"
         << "reflection_probe_local_falloff,"
+        << "reflection_probe_cubemap_allocated,reflection_probe_cubemap_face_size,"
+        << "reflection_probe_cubemap_mip_count,reflection_probe_cubemap_format,"
+        << "reflection_probe_cubemap_descriptor_sets_bound,"
+        << "reflection_probe_cubemap_shader_sampling_enabled,"
+        << "reflection_probe_cubemap_source_type,"
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
         << "height_fog_start_distance,height_fog_max_opacity,"
         << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"

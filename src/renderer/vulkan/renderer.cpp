@@ -2015,6 +2015,9 @@ VulkanRenderer::~VulkanRenderer() {
         vkDestroySampler(m_Device.Handle(), m_IblSampler, nullptr);
         m_IblSampler = VK_NULL_HANDLE;
     }
+    m_ReflectionProbeCubemapImage.reset();
+    m_ReflectionProbeCubemapView = VK_NULL_HANDLE;
+    m_ReflectionProbeCubemapDescriptorSetsBound = 0;
     m_IblPrefilteredImage.reset();
     m_IblIrradianceImage.reset();
     m_IblBrdfImage.reset();
@@ -2243,7 +2246,13 @@ void VulkanRenderer::DrawFrame() {
         hdrCompositeAvailable,
         frameReflectionProbes.sceneProbeCount,
         frameReflectionProbes.activeLocalProbeCount,
-        frameReflectionProbes.localProbe.sceneOwned
+        frameReflectionProbes.localProbe.sceneOwned,
+        m_ShadowSettings.reflectionProbeCubemapEnabled &&
+            LocalReflectionProbeCubemapReady() &&
+            frameReflectionProbes.fallbackEnabled &&
+            frameReflectionProbes.activeLocalProbeCount > 0 &&
+            frameReflectionProbes.localProbe.sceneOwned &&
+            ReflectionProbeContributes(frameReflectionProbes.localProbe)
     };
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
@@ -2444,6 +2453,35 @@ void VulkanRenderer::DrawFrame() {
             : 0u;
     frameStats.ibl.shaderIntegrationEnabled =
         iblReady && has3DMainPass ? 1u : 0u;
+    const bool reflectionProbeCubemapReady = LocalReflectionProbeCubemapReady();
+    frameStats.reflectionProbe.localCubemapAllocated =
+        reflectionProbeCubemapReady ? 1u : 0u;
+    frameStats.reflectionProbe.localCubemapFaceSize =
+        reflectionProbeCubemapReady
+            ? m_ReflectionProbeCubemapImage->Extent().width
+            : 0u;
+    frameStats.reflectionProbe.localCubemapMipCount =
+        reflectionProbeCubemapReady
+            ? m_ReflectionProbeCubemapImage->MipLevels()
+            : 0u;
+    frameStats.reflectionProbe.localCubemapFormat =
+        reflectionProbeCubemapReady
+            ? m_ReflectionProbeCubemapImage->Format()
+            : VK_FORMAT_UNDEFINED;
+    frameStats.reflectionProbe.localCubemapDescriptorSetsBound =
+        reflectionProbeCubemapReady
+            ? m_ReflectionProbeCubemapDescriptorSetsBound
+            : 0u;
+    frameStats.reflectionProbe.localCubemapShaderSamplingEnabled =
+        reflectionProbeCubemapReady &&
+            m_ShadowSettings.reflectionProbeCubemapEnabled &&
+            frameStats.reflectionProbe.localEnabled > 0 &&
+            frameStats.reflectionProbe.localSceneOwned > 0 &&
+            has3DMainPass
+            ? 1u
+            : 0u;
+    frameStats.reflectionProbe.localCubemapSourceType =
+        reflectionProbeCubemapReady ? 1u : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2733,6 +2771,10 @@ void VulkanRenderer::DrawFrame() {
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameReflectionProbes.sceneProbeCount,
+            frameStats.reflectionProbe.localCubemapShaderSamplingEnabled > 0,
+            frameStats.reflectionProbe.localCubemapFormat,
+            frameStats.reflectionProbe.localCubemapFaceSize,
+            frameStats.reflectionProbe.localCubemapMipCount,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,
@@ -3029,6 +3071,9 @@ void VulkanRenderer::SetOverlay3DContext(
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
+    m_ReflectionProbeCubemapDescriptorSetsBound =
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get()) +
+        UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
     m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3134,6 +3179,8 @@ void VulkanRenderer::CreateSwapchainResources() {
     GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
         m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
         m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);
+    GenerateReflectionProbeCubemap(m_Device, m_PhysicalDevice, m_CommandPool,
+        m_ReflectionProbeCubemapImage, m_ReflectionProbeCubemapView);
     m_DescriptorSets = std::make_unique<VulkanDescriptorSets>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3145,28 +3192,10 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
-    // Bind IBL textures to descriptor sets (bindings 6-8)
-    if (m_IblSampler && m_IblBrdfImage) {
-        for (u32 i = 0; i < m_Swapchain->Images().size(); ++i) {
-            VkWriteDescriptorSet ws[3]{};
-            VkDescriptorImageInfo bi{}; bi.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            bi.imageView = m_IblBrdfImage->View(); bi.sampler = m_IblSampler;
-            ws[0].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[0].dstSet=m_DescriptorSets->Handle(i);
-            ws[0].dstBinding=6; ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[0].descriptorCount=1; ws[0].pImageInfo=&bi;
-            VkDescriptorImageInfo ii{}; ii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            ii.imageView=m_IblIrradianceView; ii.sampler=m_IblSampler;
-            ws[1].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[1].dstSet=m_DescriptorSets->Handle(i);
-            ws[1].dstBinding=7; ws[1].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[1].descriptorCount=1; ws[1].pImageInfo=&ii;
-            VkDescriptorImageInfo pi{}; pi.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            pi.imageView=m_IblPrefilteredView; pi.sampler=m_IblSampler;
-            ws[2].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[2].dstSet=m_DescriptorSets->Handle(i);
-            ws[2].dstBinding=8; ws[2].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[2].descriptorCount=1; ws[2].pImageInfo=&pi;
-            vkUpdateDescriptorSets(m_Device.Handle(), 3, ws, 0, nullptr);
-        }
-    }
+    m_ReflectionProbeCubemapDescriptorSetsBound =
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get());
+    m_ReflectionProbeCubemapDescriptorSetsBound +=
+        UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_DepthBuffer = std::make_unique<VulkanDepthBuffer>(m_Device, m_PhysicalDevice, *m_Swapchain);
     m_SceneRenderTargets = std::make_unique<VulkanSceneRenderTargets>(
@@ -3883,28 +3912,8 @@ void VulkanRenderer::RecreateSwapchain() {
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
-    // Rebind IBL textures after descriptor pool recreation
-    if (m_IblSampler && m_IblBrdfImage) {
-        for (u32 i = 0; i < m_Swapchain->Images().size(); ++i) {
-            VkWriteDescriptorSet ws[3]{};
-            VkDescriptorImageInfo bi{}; bi.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            bi.imageView=m_IblBrdfImage->View(); bi.sampler=m_IblSampler;
-            ws[0].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[0].dstSet=m_DescriptorSets->Handle(i);
-            ws[0].dstBinding=6; ws[0].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[0].descriptorCount=1; ws[0].pImageInfo=&bi;
-            VkDescriptorImageInfo ii{}; ii.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            ii.imageView=m_IblIrradianceView; ii.sampler=m_IblSampler;
-            ws[1].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[1].dstSet=m_DescriptorSets->Handle(i);
-            ws[1].dstBinding=7; ws[1].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[1].descriptorCount=1; ws[1].pImageInfo=&ii;
-            VkDescriptorImageInfo pi{}; pi.imageLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            pi.imageView=m_IblPrefilteredView; pi.sampler=m_IblSampler;
-            ws[2].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; ws[2].dstSet=m_DescriptorSets->Handle(i);
-            ws[2].dstBinding=8; ws[2].descriptorType=VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            ws[2].descriptorCount=1; ws[2].pImageInfo=&pi;
-            vkUpdateDescriptorSets(m_Device.Handle(), 3, ws, 0, nullptr);
-        }
-    }
+    m_ReflectionProbeCubemapDescriptorSetsBound =
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get());
     m_SyncObjects->RecreateSwapchainSyncObjects(m_Swapchain->Images().size());
     m_DepthBuffer->Recreate(m_Device, m_PhysicalDevice, *m_Swapchain);
     if (m_SceneRenderTargets != nullptr) {
@@ -4451,6 +4460,8 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_LocalShadowBuffer,
             *m_AutoExposureBuffer
         );
+        m_ReflectionProbeCubemapDescriptorSetsBound +=
+            UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
         m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
             *m_DescriptorSetLayout,
@@ -4498,6 +4509,11 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
         EnvironmentFlagOverride("SE_REFLECTION_PROBE_FALLBACK");
     if (reflectionProbeFallback.has_value()) {
         m_ShadowSettings.reflectionProbeFallbackEnabled = *reflectionProbeFallback;
+    }
+    const std::optional<bool> reflectionProbeCubemap =
+        EnvironmentFlagOverride("SE_REFLECTION_PROBE_CUBEMAP");
+    if (reflectionProbeCubemap.has_value()) {
+        m_ShadowSettings.reflectionProbeCubemapEnabled = *reflectionProbeCubemap;
     }
     const std::optional<bool> localReflectionProbe =
         EnvironmentFlagOverride("SE_LOCAL_REFLECTION_PROBE");
@@ -4877,6 +4893,10 @@ void VulkanRenderer::UpdateUniformBuffer(
         reflectionProbes.fallbackEnabled &&
         reflectionProbes.activeLocalProbeCount > 0 &&
         ReflectionProbeContributes(localProbe);
+    const bool localReflectionProbeCubemapApplied =
+        localReflectionProbeApplied &&
+        m_ShadowSettings.reflectionProbeCubemapEnabled &&
+        LocalReflectionProbeCubemapReady();
     uniformData.localReflectionProbePositionRadius = glm::vec4(
         localProbe.center,
         localProbe.radius
@@ -4889,7 +4909,7 @@ void VulkanRenderer::UpdateUniformBuffer(
     );
     uniformData.localReflectionProbeColor = glm::vec4(
         glm::clamp(localProbe.color, glm::vec3(0.0f), glm::vec3(4.0f)),
-        0.0f
+        localReflectionProbeCubemapApplied ? 1.0f : 0.0f
     );
     const bool heightFogApplied =
         m_ShadowSettings.heightFogEnabled &&
@@ -5043,6 +5063,10 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         reflectionProbes.fallbackEnabled &&
         reflectionProbes.activeLocalProbeCount > 0 &&
         ReflectionProbeContributes(localProbe);
+    const bool localReflectionProbeCubemapApplied =
+        localReflectionProbeApplied &&
+        m_ShadowSettings.reflectionProbeCubemapEnabled &&
+        LocalReflectionProbeCubemapReady();
     uniformData.localReflectionProbePositionRadius = glm::vec4(
         localProbe.center,
         localProbe.radius
@@ -5055,7 +5079,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
     );
     uniformData.localReflectionProbeColor = glm::vec4(
         glm::clamp(localProbe.color, glm::vec3(0.0f), glm::vec3(4.0f)),
-        0.0f
+        localReflectionProbeCubemapApplied ? 1.0f : 0.0f
     );
     const bool heightFogApplied =
         m_ShadowSettings.heightFogEnabled &&
@@ -6005,6 +6029,94 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
     }
 
     return tileSet;
+}
+
+bool VulkanRenderer::LocalReflectionProbeCubemapReady() const {
+    return m_ReflectionProbeCubemapImage != nullptr &&
+        m_ReflectionProbeCubemapView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE;
+}
+
+u32 VulkanRenderer::UpdateEnvironmentDescriptorSets(
+    VulkanDescriptorSets* descriptorSets
+) const {
+    if (descriptorSets == nullptr ||
+        m_IblSampler == VK_NULL_HANDLE ||
+        m_IblBrdfImage == nullptr ||
+        m_IblBrdfImage->View() == VK_NULL_HANDLE ||
+        m_IblIrradianceView == VK_NULL_HANDLE ||
+        m_IblPrefilteredView == VK_NULL_HANDLE) {
+        return 0;
+    }
+
+    const VkImageView localReflectionProbeView =
+        LocalReflectionProbeCubemapReady()
+            ? m_ReflectionProbeCubemapView
+            : m_IblPrefilteredView;
+    u32 localProbeDescriptorWrites = 0;
+    for (std::size_t index = 0; index < descriptorSets->Count(); ++index) {
+        VkDescriptorImageInfo brdfInfo{};
+        brdfInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        brdfInfo.imageView = m_IblBrdfImage->View();
+        brdfInfo.sampler = m_IblSampler;
+
+        VkDescriptorImageInfo irradianceInfo{};
+        irradianceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        irradianceInfo.imageView = m_IblIrradianceView;
+        irradianceInfo.sampler = m_IblSampler;
+
+        VkDescriptorImageInfo prefilteredInfo{};
+        prefilteredInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        prefilteredInfo.imageView = m_IblPrefilteredView;
+        prefilteredInfo.sampler = m_IblSampler;
+
+        VkDescriptorImageInfo localReflectionProbeInfo{};
+        localReflectionProbeInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        localReflectionProbeInfo.imageView = localReflectionProbeView;
+        localReflectionProbeInfo.sampler = m_IblSampler;
+
+        std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[0].dstSet = descriptorSets->Handle(index);
+        descriptorWrites[0].dstBinding = 6;
+        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[0].descriptorCount = 1;
+        descriptorWrites[0].pImageInfo = &brdfInfo;
+
+        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[1].dstSet = descriptorSets->Handle(index);
+        descriptorWrites[1].dstBinding = 7;
+        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[1].descriptorCount = 1;
+        descriptorWrites[1].pImageInfo = &irradianceInfo;
+
+        descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[2].dstSet = descriptorSets->Handle(index);
+        descriptorWrites[2].dstBinding = 8;
+        descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[2].descriptorCount = 1;
+        descriptorWrites[2].pImageInfo = &prefilteredInfo;
+
+        descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[3].dstSet = descriptorSets->Handle(index);
+        descriptorWrites[3].dstBinding = 11;
+        descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[3].descriptorCount = 1;
+        descriptorWrites[3].pImageInfo = &localReflectionProbeInfo;
+
+        vkUpdateDescriptorSets(
+            m_Device.Handle(),
+            static_cast<u32>(descriptorWrites.size()),
+            descriptorWrites.data(),
+            0,
+            nullptr
+        );
+        if (LocalReflectionProbeCubemapReady()) {
+            ++localProbeDescriptorWrites;
+        }
+    }
+
+    return localProbeDescriptorWrites;
 }
 
 std::span<const RenderCommand> VulkanRenderer::ShadowRenderCommands() const {

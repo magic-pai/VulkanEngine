@@ -50,6 +50,7 @@ struct VulkanShadowSettings {
     f32 reflectionProbeDiffuseIntensity = 1.0f;
     f32 reflectionProbeSpecularIntensity = 1.0f;
     f32 reflectionProbeHorizonBlend = 0.22f;
+    bool reflectionProbeCubemapEnabled = true;
     bool localReflectionProbeEnabled = false;
     f32 localReflectionProbeCenterX = 0.0f;
     f32 localReflectionProbeCenterY = 1.2f;

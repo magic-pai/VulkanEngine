@@ -104,7 +104,14 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
     autoExposureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
     autoExposureBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 11> bindings = {
+    VkDescriptorSetLayoutBinding localReflectionProbeMapBinding{};
+    localReflectionProbeMapBinding.binding = 11;
+    localReflectionProbeMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    localReflectionProbeMapBinding.descriptorCount = 1;
+    localReflectionProbeMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    localReflectionProbeMapBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 12> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
@@ -115,7 +122,8 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         irradianceMapBinding,
         prefilteredMapBinding,
         probeGridBinding,
-        autoExposureBinding
+        autoExposureBinding,
+        localReflectionProbeMapBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

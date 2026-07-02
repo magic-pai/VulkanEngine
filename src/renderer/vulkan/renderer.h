@@ -287,6 +287,8 @@ private:
     void ApplyShadowMapSettings();
     void ResetLocalShadowCacheStates();
     void HandleObjectPicking();
+    bool LocalReflectionProbeCubemapReady() const;
+    u32 UpdateEnvironmentDescriptorSets(VulkanDescriptorSets* descriptorSets) const;
     glm::vec2 CursorToWorldPosition(const VkExtent2D& extent) const;
     void UpdateUniformBuffer(
         std::size_t imageIndex,
@@ -453,12 +455,15 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_AutoExposureComputePipeline;
     // IBL textures
-        std::unique_ptr<VulkanImage> m_IblBrdfImage;
+    std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;
     std::unique_ptr<VulkanImage> m_IblPrefilteredImage;
     VkImageView m_IblIrradianceView = VK_NULL_HANDLE;
     VkImageView m_IblPrefilteredView = VK_NULL_HANDLE;
     VkSampler m_IblSampler = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanImage> m_ReflectionProbeCubemapImage;
+    VkImageView m_ReflectionProbeCubemapView = VK_NULL_HANDLE;
+    u32 m_ReflectionProbeCubemapDescriptorSetsBound = 0;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;

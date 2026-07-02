@@ -23,6 +23,7 @@ struct VulkanRenderFeatureContext {
     u32 reflectionProbeCount = 0;
     u32 activeReflectionProbeCount = 0;
     bool sceneReflectionProbeOwned = false;
+    bool sceneReflectionProbeCubemapSamplingEnabled = false;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

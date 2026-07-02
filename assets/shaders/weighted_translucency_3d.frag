@@ -120,6 +120,7 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
 layout(set = 0, binding = 6) uniform sampler2D brdfLut;
 layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
+layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMap;
 
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 layout(set = 1, binding = 1) uniform sampler2D materialAuxSampler;
@@ -325,7 +326,21 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
     vec3 localTint = max(frame.localReflectionProbeColor.rgb, vec3(0.0));
     float localIntensity = clamp(frame.localReflectionProbeControls.y, 0.0, 4.0);
     float glossBoost = mix(1.18, 0.88, clamp(roughness, 0.0, 1.0));
+    vec3 sampleDirection = dot(direction, direction) > 0.0001
+        ? normalize(direction)
+        : vec3(0.0, 1.0, 0.0);
     vec3 localRadiance = globalRadiance * localTint * localIntensity * glossBoost;
+    if (frame.localReflectionProbeColor.a > 0.5) {
+        localRadiance =
+            max(textureLod(
+                localReflectionProbeMap,
+                sampleDirection,
+                clamp(roughness, 0.0, 1.0) * 4.0
+            ).rgb, vec3(0.0)) *
+            localTint *
+            localIntensity *
+            glossBoost;
+    }
     return mix(globalRadiance, localRadiance, localWeight);
 }
 

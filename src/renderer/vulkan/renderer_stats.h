@@ -195,6 +195,13 @@ struct RendererReflectionProbeStats {
     f32 localIntensity = 0.0f;
     f32 localBlendStrength = 0.0f;
     f32 localFalloff = 0.0f;
+    u32 localCubemapAllocated = 0;
+    u32 localCubemapFaceSize = 0;
+    u32 localCubemapMipCount = 0;
+    VkFormat localCubemapFormat = VK_FORMAT_UNDEFINED;
+    u32 localCubemapDescriptorSetsBound = 0;
+    u32 localCubemapShaderSamplingEnabled = 0;
+    u32 localCubemapSourceType = 0;
 };
 
 struct RendererHeightFogStats {

@@ -6,6 +6,7 @@
 #include "renderer/vulkan/physical_device.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 
@@ -57,6 +58,49 @@ glm::vec3 ImportanceSampleGgx(glm::vec2 xi, float roughness) {
     );
 }
 
+glm::vec3 CubemapDirection(u32 face, float u, float v) {
+    switch (face) {
+    case 0:
+        return glm::normalize(glm::vec3(1.0f, -v, -u));
+    case 1:
+        return glm::normalize(glm::vec3(-1.0f, -v, u));
+    case 2:
+        return glm::normalize(glm::vec3(u, 1.0f, v));
+    case 3:
+        return glm::normalize(glm::vec3(u, -1.0f, -v));
+    case 4:
+        return glm::normalize(glm::vec3(u, -v, 1.0f));
+    default:
+        return glm::normalize(glm::vec3(-u, -v, -1.0f));
+    }
+}
+
+glm::vec3 ReflectionProbeTexel(u32 face, u32 x, u32 y, u32 faceSize) {
+    const float u = (float(x) + 0.5f) / float(faceSize) * 2.0f - 1.0f;
+    const float v = (float(y) + 0.5f) / float(faceSize) * 2.0f - 1.0f;
+    const glm::vec3 direction = CubemapDirection(face, u, v);
+    const std::array<glm::vec3, 6> faceTints{
+        glm::vec3(1.00f, 0.32f, 0.18f),
+        glm::vec3(0.18f, 0.56f, 1.00f),
+        glm::vec3(0.72f, 1.00f, 0.28f),
+        glm::vec3(0.22f, 0.18f, 0.14f),
+        glm::vec3(1.00f, 0.76f, 0.22f),
+        glm::vec3(0.64f, 0.38f, 1.00f)
+    };
+    const float horizon = std::clamp(direction.y * 0.5f + 0.5f, 0.0f, 1.0f);
+    const float center =
+        1.0f - std::clamp(std::sqrt(u * u + v * v) * 0.72f, 0.0f, 1.0f);
+    const float band =
+        std::sin((direction.x * 5.0f + direction.z * 3.0f + float(face)) *
+            glm::pi<float>()) * 0.5f + 0.5f;
+    glm::vec3 color =
+        faceTints[face] * (0.28f + 0.42f * center) +
+        glm::vec3(0.06f, 0.09f, 0.14f) * (1.0f - horizon) +
+        glm::vec3(0.18f, 0.24f, 0.34f) * horizon +
+        glm::vec3(0.16f, 0.10f, 0.04f) * band;
+    return glm::clamp(color, glm::vec3(0.0f), glm::vec3(4.0f));
+}
+
 float GeometrySchlickGgx(float nDotV, float roughness) {
     const float a = roughness;
     const float k = (a * a) / 2.0f;
@@ -103,6 +147,54 @@ glm::vec2 IntegrateBrdf(float nDotV, float roughness) {
 }
 
 } // namespace
+
+void GenerateReflectionProbeCubemap(const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice, const VulkanCommandPool& commandPool,
+    std::unique_ptr<VulkanImage>& cubemapImage, VkImageView& cubemapView)
+{
+    constexpr u32 faceSize = kReflectionProbeCubemapFaceSize;
+    constexpr u32 mipCount = kReflectionProbeCubemapMipCount;
+    constexpr u32 faceCount = 6;
+    constexpr u32 pxBytes = 8;
+    const VkFormat fmt = kReflectionProbeCubemapFormat;
+
+    std::vector<u8> pixels(faceSize * faceSize * faceCount * pxBytes);
+    for (u32 face = 0; face < faceCount; ++face) {
+        for (u32 y = 0; y < faceSize; ++y) {
+            for (u32 x = 0; x < faceSize; ++x) {
+                const glm::vec3 color = ReflectionProbeTexel(face, x, y, faceSize);
+                const u32 offset = ((face * faceSize + y) * faceSize + x) * pxBytes;
+                const u16 r = f2h(color.r);
+                const u16 g = f2h(color.g);
+                const u16 b = f2h(color.b);
+                const u16 a = u16(0x3C00);
+                memcpy(&pixels[offset], &r, 2);
+                memcpy(&pixels[offset + 2], &g, 2);
+                memcpy(&pixels[offset + 4], &b, 2);
+                memcpy(&pixels[offset + 6], &a, 2);
+            }
+        }
+    }
+
+    VulkanBuffer staging(device, physicalDevice, pixels.size(),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    staging.Upload(std::as_bytes(std::span<const u8>(pixels)));
+
+    cubemapImage = std::make_unique<VulkanImage>(device, physicalDevice,
+        VkExtent2D{faceSize, faceSize}, fmt, VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_ASPECT_COLOR_BIT,
+        mipCount, faceCount, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+        VK_IMAGE_VIEW_TYPE_CUBE);
+    cubemapImage->TransitionLayout(device, commandPool, VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipCount);
+    cubemapImage->CopyFromBuffer(device, commandPool, staging.Handle(), faceCount);
+    cubemapImage->GenerateMipmaps(physicalDevice, device, commandPool, faceCount);
+    cubemapView = cubemapImage->View();
+}
 
 void GenerateIblTextures(const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice, const VulkanCommandPool& commandPool,
