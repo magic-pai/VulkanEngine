@@ -21,8 +21,8 @@ void VulkanSsrFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "SSRIntegrated",
-            "GBufferNormalRoughness, SceneDepth, frame matrices",
-            "deferred reflection radiance and screen-space hit confidence",
+            "GBufferNormalRoughness, SceneDepth",
+            "",
             "First screen-space reflection color tier integrated into deferred environment specular with a debug view; hierarchy, temporal accumulation, denoising, and probe fallback follow later."
         );
     }

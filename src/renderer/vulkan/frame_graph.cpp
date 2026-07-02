@@ -672,10 +672,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "LocalShadowAtlasBudget",
-            "local light list, atlas budget",
+            "LocalShadowAtlas",
             inputs.localShadowAtlasAssignedTiles > 0
-                ? "local shadow tile assignments"
-                : "local shadow atlas capacity",
+                ? "LocalShadowAtlas"
+                : "",
             "Physical atlas resource and occupancy diagnostics for upcoming point/spot shadow rendering."
         );
     }
@@ -775,7 +775,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.gBufferGeometryEnabled ? "GBufferOpaque" : "GBufferTarget",
             inputs.gBufferGeometryEnabled
                 ? "opaque render queue, frame UBO, material descriptors"
-                : "frame graph setup",
+                : "",
             "SceneDepth, Velocity, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive",
             inputs.gBufferGeometryEnabled
                 ? "Writes the first deferred opaque material data while legacy forward still owns the visible image."
@@ -789,8 +789,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Compute,
             "LightTileCull",
-            "frame matrices, local light records",
-            "tile light lists",
+            "",
+            "",
             "First compute-backed tiled light-list write feeding deferred lighting."
         );
     }
@@ -809,7 +809,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "WeightedTranslucencyForwardPlus",
-            "transparent residual queue, compute-written frame light lists, shadow metadata",
+            "HDRSceneColor",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
             "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling, then resolves them into HDR scene color."
         );
@@ -826,8 +826,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 ? "DeferredLighting"
                 : "HdrOffscreenTarget",
             inputs.deferredLightingEnabled
-                ? "GBuffer, SceneDepth, frame constants"
-                : "frame graph setup",
+                ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth"
+                : "",
             "HDRSceneColor",
             inputs.deferredLightingEnabled
                 ? "Fullscreen lighting pass consumes the first GBuffer and writes HDR scene color while legacy forward remains the visible reference."
@@ -850,8 +850,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "GBufferDebug",
-            "GBuffer, GBufferEmissive, SceneDepth, Velocity, ShadowMap, frame constants",
-            "swapchain color",
+            "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, Velocity, LegacyShadowMap",
+            "SwapchainColor",
             "Debug visualizer for deferred attachments and reconstructed deferred shadow visibility."
         );
     }
@@ -863,8 +863,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "LegacyShadowDepth",
-            "shadow caster queue, frame matrices",
-            "single shadow depth map",
+            "",
+            "LegacyShadowMap",
             "Current directional shadow-map path kept as the fallback tier."
         );
     }
@@ -876,10 +876,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "DirectionalCSMScaffold",
-            "camera frustum, directional light, caster bounds, cascade atlas",
+            "DirectionalShadowCascades",
             inputs.directionalShadowAtlasPasses > 0
-                ? "cascade split depths, light matrices, atlas depth tiles"
-                : "cascade split depths, light matrices, texel metrics",
+                ? "DirectionalShadowCascades"
+                : "",
             inputs.directionalShadowAtlasPasses > 0
                 ? "Records one shadow-depth tile pass per active directional cascade while the single shadow map remains the sampled fallback."
                 : "CSM split and stable texel diagnostics feeding the current single-map fallback."
@@ -894,8 +894,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         RenderFramePassStatus::Active,
         RenderFramePassQueue::Graphics,
         inputs.has3DMainPass ? "LegacyForward3D" : "Legacy2D",
-        "render queue, frame UBO, material descriptors",
-        "swapchain color, depth",
+        "",
+        "SwapchainColor, LegacyDepth",
         "Current compatibility path while HDR/deferred targets are introduced."
     );
 
@@ -906,8 +906,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "OverlayForward3D",
-            "overlay queue, overlay camera UBO",
-            "swapchain color, depth",
+            "SwapchainColor, LegacyDepth",
+            "SwapchainColor, LegacyDepth",
             "Current secondary 3D path used by the black-hole demo."
         );
     }
@@ -919,8 +919,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "ImGui",
-            "debug UI draw data",
-            "swapchain color",
+            "SwapchainColor",
+            "SwapchainColor",
             "Runtime controls, pass visibility, and performance diagnostics."
         );
     }
@@ -931,8 +931,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         RenderFramePassStatus::Active,
         RenderFramePassQueue::Present,
         "Present",
-        "swapchain color",
-        "display",
+        "SwapchainColor",
+        "",
         "Final swapchain present."
     );
 

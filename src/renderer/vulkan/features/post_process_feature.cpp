@@ -10,61 +10,8 @@ namespace se {
 
 namespace {
 
-std::string_view HdrCompositeReads(const RendererPostProcessStats& postProcess) {
-    if (postProcess.sharpeningEnabled > 0) {
-        return "HDRSceneColor, exposure/auto exposure, tone map, bloom, color grading, sharpening";
-    }
-    if (postProcess.autoExposureEnabled > 0 &&
-        postProcess.toneMappingEnabled > 0 &&
-        postProcess.bloomEnabled > 0 &&
-        postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, auto exposure, tone map, bloom, color grading";
-    }
-    if (postProcess.autoExposureEnabled > 0 &&
-        postProcess.toneMappingEnabled > 0 &&
-        postProcess.bloomEnabled > 0) {
-        return "HDRSceneColor, auto exposure, tone map, bloom";
-    }
-    if (postProcess.autoExposureEnabled > 0 &&
-        postProcess.toneMappingEnabled > 0 &&
-        postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, auto exposure, tone map, color grading";
-    }
-    if (postProcess.toneMappingEnabled > 0 &&
-        postProcess.bloomEnabled > 0 &&
-        postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, exposure, tone map, bloom, color grading";
-    }
-    if (postProcess.autoExposureEnabled > 0 &&
-        postProcess.toneMappingEnabled > 0) {
-        return "HDRSceneColor, auto exposure, tone map";
-    }
-    if (postProcess.toneMappingEnabled > 0 &&
-        postProcess.bloomEnabled > 0) {
-        return "HDRSceneColor, exposure, tone map, bloom";
-    }
-    if (postProcess.toneMappingEnabled > 0 &&
-        postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, exposure, tone map, color grading";
-    }
-    if (postProcess.bloomEnabled > 0 &&
-        postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, exposure, bloom, color grading";
-    }
-    if (postProcess.autoExposureEnabled > 0) {
-        return "HDRSceneColor, auto exposure";
-    }
-    if (postProcess.toneMappingEnabled > 0) {
-        return "HDRSceneColor, exposure, tone map";
-    }
-    if (postProcess.bloomEnabled > 0) {
-        return "HDRSceneColor, exposure, bloom";
-    }
-    if (postProcess.colorGradingEnabled > 0) {
-        return "HDRSceneColor, exposure, color grading";
-    }
-
-    return "HDRSceneColor, exposure";
+std::string_view HdrCompositeReads(const RendererPostProcessStats&) {
+    return "HDRSceneColor";
 }
 
 } // namespace
@@ -85,8 +32,8 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "AutoExposureIntegrated",
-            "HDRSceneColor, exposure controls",
-            "adapted exposure during composite",
+            "HDRSceneColor",
+            "",
             "First sampled auto-exposure tier inside HDR composite; GPU histogram and eye-adaptation history can replace it later."
         );
     }
@@ -97,8 +44,8 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "ToneMappingIntegrated",
-            "HDRSceneColor, exposure, tone-map controls",
-            "tonemapped color during composite",
+            "HDRSceneColor",
+            "",
             "First explicit tone-map control tier inside HDR composite; a dedicated post graph pass can replace it later."
         );
     }
@@ -109,8 +56,8 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "BloomIntegrated",
-            "HDRSceneColor, exposure, bloom controls",
-            "HDRSceneColor contribution during composite",
+            "HDRSceneColor",
+            "HDRSceneColor",
             "First screen-space bloom tier sampled inside HDR composite; a downsample/upsample bloom pyramid can replace it later."
         );
     }
@@ -121,8 +68,8 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "ColorGradingIntegrated",
-            "HDRSceneColor, exposure, tone map, color grading controls",
-            "tonemapped graded color during composite",
+            "HDRSceneColor",
+            "",
             "First display-referred color grading tier inside HDR composite; LUT grading can replace it later."
         );
     }
@@ -133,8 +80,8 @@ void VulkanPostProcessFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "SharpeningIntegrated",
-            "tonemapped color, sharpening controls",
-            "sharpened LDR color during composite",
+            "HDRSceneColor",
+            "",
             "First LDR unsharp-mask sharpening tier inside HDR composite; CAS/RCAS can replace it later."
         );
     }
@@ -145,7 +92,7 @@ void VulkanPostProcessFeature::AppendFrameGraph(
         RenderFramePassQueue::Graphics,
         "HDRComposite",
         HdrCompositeReads(postProcess),
-        "swapchain color",
+        "SwapchainColor",
         "Debug-visible HDR composite path for deferred output before it becomes the default present path."
     );
 }

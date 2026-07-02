@@ -23,8 +23,8 @@ void VulkanSsaoFeature::AppendFrameGraph(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "SSAOIntegrated",
-            "GBufferNormalRoughness, SceneDepth, frame matrices",
-            "deferred ambient occlusion factor",
+            "GBufferNormalRoughness, SceneDepth",
+            "",
             "First screen-space ambient occlusion tier integrated into deferred ambient with a debug view; a standalone AO target and temporal filter follow later."
         );
     }
