@@ -176,6 +176,10 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.barriers.queueOwnershipTransferCount << ','
         << stats.frameGraph.barriers.readAfterWriteTransitionCount << ','
         << stats.frameGraph.barriers.writeAfterWriteTransitionCount << ','
+        << stats.frameGraph.barrierExecution.plannedBridgeBarrierCount << ','
+        << stats.frameGraph.barrierExecution.executedBarrierCount << ','
+        << stats.frameGraph.barrierExecution.fallbackBarrierCount << ','
+        << stats.frameGraph.barrierExecution.mismatchCount << ','
         << sceneDiagnostics.ueBridgeRequested << ','
         << sceneDiagnostics.ueBridgeManifestLoaded << ','
         << sceneDiagnostics.ueBridgeSceneFound << ','
@@ -588,6 +592,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_barrier_queue_transfers,"
         << "framegraph_barrier_read_after_write_transitions,"
         << "framegraph_barrier_write_after_write_transitions,"
+        << "framegraph_barrier_planned_bridge_transitions,"
+        << "framegraph_executed_barriers,"
+        << "framegraph_barrier_fallbacks,"
+        << "framegraph_barrier_mismatches,"
         << "ue_bridge_requested,ue_bridge_manifest_loaded,ue_bridge_scene_found,"
         << "ue_bridge_exported_scene_ready,ue_bridge_mesh_instance_count,"
         << "ue_bridge_mesh_instance_loaded_count,"

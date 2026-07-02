@@ -2655,7 +2655,8 @@ void VulkanRenderer::DrawFrame() {
         m_InstanceBuffer.get(),
         m_MainInstanceBatches,
         m_GpuTimer.get(),
-        &frameStats.binds
+        &frameStats.binds,
+        &frameStats.frameGraph
     );
     frameStats.localShadowAtlas.recordedTilePasses =
         frameStats.binds.localShadowAtlasPasses;

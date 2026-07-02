@@ -33,6 +33,7 @@ class VulkanWeightedTranslucencyRenderPass;
 struct RenderCommand;
 struct RenderInstanceBatch;
 struct RendererBindStats;
+struct RenderFrameGraphPlan;
 struct FrameMaterialSet;
 struct DirectionalShadowCascadeSet;
 struct LocalShadowTileSet;
@@ -130,6 +131,7 @@ public:
         std::span<const RenderInstanceBatch> instanceBatches = {},
         const VulkanGpuTimer* gpuTimer = nullptr,
         RendererBindStats* bindStats = nullptr,
+        RenderFrameGraphPlan* frameGraph = nullptr,
         const VulkanComputePipeline* hizBuildPipeline = nullptr,
         const VulkanSceneRenderTargets* hizTargets = nullptr
     ) const;

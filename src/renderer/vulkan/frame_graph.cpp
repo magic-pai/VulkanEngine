@@ -110,6 +110,12 @@ bool ContainsWord(std::string_view text, std::string_view word) {
     return text.find(word) != std::string_view::npos;
 }
 
+bool IsLightTileFragmentConsumer(std::string_view passName) {
+    return passName == "DeferredLighting" ||
+        passName == "WeightedTranslucencyForwardPlus" ||
+        passName == "LegacyForward3D";
+}
+
 RenderFrameGraphBarrierResourceKind InferBarrierResourceKind(
     const RenderGraphResource& resource
 ) {
@@ -536,6 +542,40 @@ std::string_view BarrierLayoutForAccess(
     return "unknown";
 }
 
+bool MatchesBarrierBridge(
+    const RenderFrameGraphBarrierTransition& transition,
+    RenderFrameGraphBarrierBridge bridge
+) {
+    switch (bridge) {
+    case RenderFrameGraphBarrierBridge::LightTileCullFragmentRead:
+        return transition.producerPassName == "LightTileCull" &&
+            IsLightTileFragmentConsumer(transition.consumerPassName) &&
+            transition.resourceName == "LightTileLists" &&
+            transition.resourceKind == RenderFrameGraphBarrierResourceKind::Buffer &&
+            transition.srcAccess == RenderFrameGraphResourceAccess::WriteStorage &&
+            transition.dstAccess == RenderFrameGraphResourceAccess::ReadSampled &&
+            transition.producerQueue == RenderFramePassQueue::Compute &&
+            transition.consumerQueue == RenderFramePassQueue::Graphics &&
+            !transition.writeDependency;
+    }
+
+    return false;
+}
+
+u32 CountBarrierBridgeTransitions(
+    const RenderFrameGraphPlan& plan,
+    RenderFrameGraphBarrierBridge bridge
+) {
+    u32 count = 0;
+    for (const RenderFrameGraphBarrierTransition& transition :
+        plan.barrierTransitions) {
+        if (MatchesBarrierBridge(transition, bridge)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 void RebuildFrameGraphBarrierPlan(RenderFrameGraphPlan& plan) {
     RenderFrameGraphBarrierStats stats{};
     plan.barrierTransitions.clear();
@@ -626,6 +666,11 @@ void RebuildFrameGraphBarrierPlan(RenderFrameGraphPlan& plan) {
     }
 
     plan.barriers = stats;
+    plan.barrierExecution.plannedBridgeBarrierCount =
+        CountBarrierBridgeTransitions(
+            plan,
+            RenderFrameGraphBarrierBridge::LightTileCullFragmentRead
+        );
 }
 
 void RecordResourceUse(
@@ -1363,6 +1408,42 @@ std::string_view RenderFrameGraphBarrierResourceKindName(
     return "unknown";
 }
 
+std::string_view RenderFrameGraphBarrierBridgeName(
+    RenderFrameGraphBarrierBridge bridge
+) {
+    switch (bridge) {
+    case RenderFrameGraphBarrierBridge::LightTileCullFragmentRead:
+        return "LightTileCull fragment read";
+    }
+
+    return "unknown";
+}
+
+RenderFrameGraphBarrierExecutionResult RecordRenderFrameGraphBarrierExecution(
+    RenderFrameGraphPlan& plan,
+    RenderFrameGraphBarrierBridge bridge
+) {
+    RenderFrameGraphBarrierExecutionResult result{};
+    result.plannedBarrierCount = CountBarrierBridgeTransitions(plan, bridge);
+    ++plan.barrierExecution.executedBarrierCount;
+
+    if (result.plannedBarrierCount > 0u) {
+        result.matched = true;
+    } else {
+        result.fallback = true;
+        result.mismatch = true;
+        ++plan.barrierExecution.fallbackBarrierCount;
+        ++plan.barrierExecution.mismatchCount;
+    }
+
+    plan.barrierExecution.plannedBridgeBarrierCount =
+        CountBarrierBridgeTransitions(
+            plan,
+            RenderFrameGraphBarrierBridge::LightTileCullFragmentRead
+        );
+    return result;
+}
+
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     CurrentVulkanFrameGraphInputs inputs
 ) {
@@ -1525,6 +1606,26 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "window extent"
         );
     }
+    if (inputs.lightTileCullComputeEnabled) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "LightTileLists",
+            "structured buffer",
+            "storage buffer, compute-written tile metadata and light index lists",
+            "tile grid"
+        );
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "LightTileDiagnostics",
+            "structured buffer",
+            "storage buffer, compute-written tile cull counters",
+            "per frame"
+        );
+    }
     if (inputs.gBufferRenderPassAllocated) {
         AppendPass(
             plan,
@@ -1592,7 +1693,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassQueue::Compute,
             "LightTileCull",
             "",
-            "",
+            "LightTileLists, LightTileDiagnostics",
             "First compute-backed tiled light-list write feeding deferred lighting."
         );
     }
@@ -1604,7 +1705,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "WeightedTranslucencyForwardPlus",
-            "SceneDepth",
+            inputs.lightTileCullComputeEnabled
+                ? "SceneDepth, LightTileLists"
+                : "SceneDepth",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
             "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling."
         );
@@ -1621,7 +1724,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 ? "DeferredLighting"
                 : "HdrOffscreenTarget",
             inputs.deferredLightingEnabled
-                ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth"
+                ? (inputs.lightTileCullComputeEnabled
+                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, LightTileLists"
+                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth")
                 : "",
             "HDRSceneColor",
             inputs.deferredLightingEnabled
@@ -1679,7 +1784,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         RenderFramePassStatus::Active,
         RenderFramePassQueue::Graphics,
         inputs.has3DMainPass ? "LegacyForward3D" : "Legacy2D",
-        "",
+        inputs.has3DMainPass && inputs.lightTileCullComputeEnabled
+            ? "LightTileLists"
+            : "",
         "SwapchainColor, LegacyDepth",
         "Current compatibility path while HDR/deferred targets are introduced."
     );

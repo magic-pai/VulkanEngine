@@ -5,6 +5,7 @@
 #include "renderer/vulkan/depth_buffer.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/gpu_timer.h"
@@ -934,6 +935,7 @@ void VulkanCommandBuffer::Record(
     std::span<const RenderInstanceBatch> instanceBatches,
     const VulkanGpuTimer* gpuTimer,
     RendererBindStats* bindStats,
+    RenderFrameGraphPlan* frameGraph,
     const VulkanComputePipeline* hizBuildPipeline,
     const VulkanSceneRenderTargets* hizTargets
 ) const {
@@ -1386,6 +1388,12 @@ void VulkanCommandBuffer::Record(
             lightTileCullGroupCountY,
             lightTileCullGroupCountZ);
         BarrierComputeLightTilesForFragmentRead(commandBuffer);
+        if (frameGraph != nullptr) {
+            RecordRenderFrameGraphBarrierExecution(
+                *frameGraph,
+                RenderFrameGraphBarrierBridge::LightTileCullFragmentRead
+            );
+        }
 
         if (bindStats != nullptr) {
             ++bindStats->lightTileCullComputeDispatches;

@@ -1184,10 +1184,18 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.lifetimes.readWriteResourceCount
     );
     ImGui::Text(
-        "Graph barriers: %u transitions / %u layout / %u queue transfers",
+        "Graph barriers: %u transitions / %u buffer / %u layout / %u queue transfers",
         stats.frameGraph.barriers.transitionCount,
+        stats.frameGraph.barriers.bufferTransitionCount,
         stats.frameGraph.barriers.layoutTransitionCount,
         stats.frameGraph.barriers.queueOwnershipTransferCount
+    );
+    ImGui::Text(
+        "Graph barrier bridge: %u planned / %u executed / %u fallback / %u mismatch",
+        stats.frameGraph.barrierExecution.plannedBridgeBarrierCount,
+        stats.frameGraph.barrierExecution.executedBarrierCount,
+        stats.frameGraph.barrierExecution.fallbackBarrierCount,
+        stats.frameGraph.barrierExecution.mismatchCount
     );
 
     if (ImGui::TreeNode("CPU breakdown")) {
@@ -1326,6 +1334,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
     }
 
     if (ImGui::TreeNode("Graph barrier plan")) {
+        ImGui::Text(
+            "Bridge: %u planned / %u executed / %u fallback / %u mismatch",
+            stats.frameGraph.barrierExecution.plannedBridgeBarrierCount,
+            stats.frameGraph.barrierExecution.executedBarrierCount,
+            stats.frameGraph.barrierExecution.fallbackBarrierCount,
+            stats.frameGraph.barrierExecution.mismatchCount
+        );
         if (stats.frameGraph.barrierTransitions.empty()) {
             ImGui::TextUnformatted("No inferred barrier transitions.");
         } else {

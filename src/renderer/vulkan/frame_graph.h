@@ -74,6 +74,10 @@ enum class RenderFrameGraphBarrierResourceKind {
     Buffer
 };
 
+enum class RenderFrameGraphBarrierBridge {
+    LightTileCullFragmentRead
+};
+
 struct RenderGraphResource {
     u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
@@ -204,6 +208,20 @@ struct RenderFrameGraphBarrierStats {
     u32 writeAfterWriteTransitionCount = 0;
 };
 
+struct RenderFrameGraphBarrierExecutionStats {
+    u32 plannedBridgeBarrierCount = 0;
+    u32 executedBarrierCount = 0;
+    u32 fallbackBarrierCount = 0;
+    u32 mismatchCount = 0;
+};
+
+struct RenderFrameGraphBarrierExecutionResult {
+    u32 plannedBarrierCount = 0;
+    bool matched = false;
+    bool fallback = false;
+    bool mismatch = false;
+};
+
 struct RenderFrameGraphPlan {
     std::string_view name;
     std::string_view target;
@@ -215,6 +233,7 @@ struct RenderFrameGraphPlan {
     RenderFrameGraphDependencyStats dependencies;
     RenderFrameGraphLifetimeStats lifetimes;
     RenderFrameGraphBarrierStats barriers;
+    RenderFrameGraphBarrierExecutionStats barrierExecution;
     u32 activePassCount = 0;
     u32 roadmapPassCount = 0;
     u32 physicalResourceCount = 0;
@@ -286,6 +305,14 @@ std::string_view RenderFrameGraphValidationIssueKindName(
 );
 std::string_view RenderFrameGraphBarrierResourceKindName(
     RenderFrameGraphBarrierResourceKind kind
+);
+std::string_view RenderFrameGraphBarrierBridgeName(
+    RenderFrameGraphBarrierBridge bridge
+);
+
+RenderFrameGraphBarrierExecutionResult RecordRenderFrameGraphBarrierExecution(
+    RenderFrameGraphPlan& plan,
+    RenderFrameGraphBarrierBridge bridge
 );
 
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
