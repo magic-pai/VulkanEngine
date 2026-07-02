@@ -52,6 +52,13 @@ struct RectLight3D {
     bool enabled = true;
 };
 
+enum class ReflectionProbeCaptureSource : u32 {
+    None = 0,
+    BuiltInProcedural = 1,
+    AuthoredCubemap = 2,
+    CapturedScene = 3
+};
+
 struct ReflectionProbe3D {
     std::string name;
     glm::vec3 center{ 0.0f, 1.2f, 0.0f };
@@ -62,6 +69,9 @@ struct ReflectionProbe3D {
     f32 blendStrength = 0.65f;
     f32 falloff = 2.0f;
     bool enabled = true;
+    ReflectionProbeCaptureSource captureSource =
+        ReflectionProbeCaptureSource::BuiltInProcedural;
+    std::string captureAssetId;
 };
 
 class Scene3D {
@@ -109,7 +119,10 @@ public:
         glm::vec3 color,
         f32 intensity,
         f32 blendStrength,
-        f32 falloff
+        f32 falloff,
+        ReflectionProbeCaptureSource captureSource =
+            ReflectionProbeCaptureSource::BuiltInProcedural,
+        std::string captureAssetId = {}
     );
     DirectionalLight3D& SetPrimaryDirectionalLight(
         std::string name,

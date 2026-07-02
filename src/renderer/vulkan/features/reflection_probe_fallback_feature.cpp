@@ -41,16 +41,34 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             RenderFramePassKind::Reflections,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
+            "ReflectionCaptureSourceResolve",
+            reflectionProbe.captureResourceReady > 0
+                ? context.renderer.sceneReflectionProbeOwned
+                    ? "SceneReflectionProbes, ReflectionCaptureSource, SceneReflectionProbeCubemap"
+                    : "ReflectionCaptureSource, SceneReflectionProbeCubemap"
+                : context.renderer.sceneReflectionProbeOwned
+                    ? "SceneReflectionProbes, ReflectionCaptureSource"
+                    : "ReflectionCaptureSource",
+            "",
+            reflectionProbe.captureResourceReady > 0
+                ? "Resolves the active reflection probe capture source to a renderer-owned cubemap descriptor."
+                : "Selects the active reflection probe source and records the explicit fallback reason."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
             sceneCubemapSampling
                 ? "SceneReflectionProbeCubemapSample"
                 : context.renderer.sceneReflectionProbeOwned
                 ? "SceneReflectionProbeBlend"
                 : "LocalReflectionProbeBlend",
             sceneCubemapSampling
-                ? "SceneReflectionProbes, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbes, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : context.renderer.sceneReflectionProbeOwned
-                ? "SceneReflectionProbes, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
-                : "BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
+                ? "SceneReflectionProbes, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : "ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
             sceneCubemapSampling
                 ? "Scene-owned reflection probe samples a renderer-owned local cubemap in deferred, forward, and WBOIT environment lighting."

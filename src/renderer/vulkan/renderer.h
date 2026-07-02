@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 #include "renderer/vulkan/pipeline_spec.h"
+#include "renderer/vulkan/reflection_probe_resources.h"
 #include "renderer/vulkan/render_debug_settings.h"
 #include "renderer/vulkan/render_feature_registry.h"
 #include "renderer/vulkan/renderer_stats.h"
@@ -134,6 +135,8 @@ struct RendererReflectionProbe {
     f32 falloff = 2.0f;
     bool enabled = false;
     bool sceneOwned = false;
+    RendererReflectionProbeCaptureSource captureSource =
+        RendererReflectionProbeCaptureSource::None;
 };
 
 struct FrameReflectionProbeSet {
@@ -141,6 +144,12 @@ struct FrameReflectionProbeSet {
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     bool fallbackEnabled = false;
+    bool captureResourceReady = false;
+    bool captureDescriptorBound = false;
+    RendererReflectionProbeCaptureSource captureSource =
+        RendererReflectionProbeCaptureSource::None;
+    RendererReflectionProbeCaptureFallbackReason captureFallbackReason =
+        RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe;
 };
 
 struct FrameLightTileStats {
@@ -461,9 +470,7 @@ private:
     VkImageView m_IblIrradianceView = VK_NULL_HANDLE;
     VkImageView m_IblPrefilteredView = VK_NULL_HANDLE;
     VkSampler m_IblSampler = VK_NULL_HANDLE;
-    std::unique_ptr<VulkanImage> m_ReflectionProbeCubemapImage;
-    VkImageView m_ReflectionProbeCubemapView = VK_NULL_HANDLE;
-    u32 m_ReflectionProbeCubemapDescriptorSetsBound = 0;
+    VulkanReflectionProbeResources m_ReflectionProbeResources;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;

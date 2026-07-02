@@ -24,6 +24,7 @@
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
 #include "renderer/vulkan/physical_device.h"
+#include "renderer/vulkan/reflection_probe_resources.h"
 #include "renderer/vulkan/render_resources_2d.h"
 #include "renderer/vulkan/render_targets.h"
 #include "renderer/vulkan/render_pass.h"
@@ -875,6 +876,35 @@ std::optional<bool> EnvironmentFlagOverride(const char* name) {
     return std::nullopt;
 }
 
+std::optional<RendererReflectionProbeCaptureSource>
+ReflectionProbeCaptureSourceOverrideFromEnvironment() {
+    const std::string value =
+        ReadEnvironmentString("SE_REFLECTION_PROBE_CAPTURE_SOURCE");
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    if (value == "none" || value == "None" || value == "NONE" ||
+        value == "off" || value == "OFF" || value == "0") {
+        return RendererReflectionProbeCaptureSource::None;
+    }
+    if (value == "builtin" || value == "built_in" ||
+        value == "procedural" || value == "BuiltInProcedural" ||
+        value == "1") {
+        return RendererReflectionProbeCaptureSource::BuiltInProcedural;
+    }
+    if (value == "authored" || value == "authored_cubemap" ||
+        value == "AuthoredCubemap" || value == "2") {
+        return RendererReflectionProbeCaptureSource::AuthoredCubemap;
+    }
+    if (value == "captured" || value == "captured_scene" ||
+        value == "CapturedScene" || value == "3") {
+        return RendererReflectionProbeCaptureSource::CapturedScene;
+    }
+
+    return std::nullopt;
+}
+
 std::optional<f32> EnvironmentFloatOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -977,6 +1007,45 @@ RendererReflectionProbe ClampReflectionProbe(RendererReflectionProbe probe) {
     return probe;
 }
 
+RendererReflectionProbeCaptureSource RendererCaptureSource(
+    ReflectionProbeCaptureSource source
+) {
+    switch (source) {
+    case ReflectionProbeCaptureSource::None:
+        return RendererReflectionProbeCaptureSource::None;
+    case ReflectionProbeCaptureSource::BuiltInProcedural:
+        return RendererReflectionProbeCaptureSource::BuiltInProcedural;
+    case ReflectionProbeCaptureSource::AuthoredCubemap:
+        return RendererReflectionProbeCaptureSource::AuthoredCubemap;
+    case ReflectionProbeCaptureSource::CapturedScene:
+        return RendererReflectionProbeCaptureSource::CapturedScene;
+    }
+
+    return RendererReflectionProbeCaptureSource::None;
+}
+
+RendererReflectionProbeCaptureFallbackReason CaptureFallbackReasonFor(
+    RendererReflectionProbeCaptureSource source,
+    bool resourceReady
+) {
+    if (resourceReady) {
+        return RendererReflectionProbeCaptureFallbackReason::None;
+    }
+
+    switch (source) {
+    case RendererReflectionProbeCaptureSource::None:
+        return RendererReflectionProbeCaptureFallbackReason::SourceDisabled;
+    case RendererReflectionProbeCaptureSource::BuiltInProcedural:
+        return RendererReflectionProbeCaptureFallbackReason::BuiltInResourceUnavailable;
+    case RendererReflectionProbeCaptureSource::AuthoredCubemap:
+        return RendererReflectionProbeCaptureFallbackReason::AuthoredCubemapNotLoaded;
+    case RendererReflectionProbeCaptureSource::CapturedScene:
+        return RendererReflectionProbeCaptureFallbackReason::CapturedSceneNotImplemented;
+    }
+
+    return RendererReflectionProbeCaptureFallbackReason::SourceDisabled;
+}
+
 RendererReflectionProbe SceneReflectionProbe(const ReflectionProbe3D& source) {
     RendererReflectionProbe probe{};
     probe.center = source.center;
@@ -988,6 +1057,7 @@ RendererReflectionProbe SceneReflectionProbe(const ReflectionProbe3D& source) {
     probe.falloff = source.falloff;
     probe.enabled = source.enabled;
     probe.sceneOwned = true;
+    probe.captureSource = RendererCaptureSource(source.captureSource);
     return ClampReflectionProbe(probe);
 }
 
@@ -1012,6 +1082,7 @@ RendererReflectionProbe SettingsReflectionProbe(
     probe.falloff = settings.localReflectionProbeFalloff;
     probe.enabled = settings.localReflectionProbeEnabled;
     probe.sceneOwned = false;
+    probe.captureSource = RendererReflectionProbeCaptureSource::None;
     return ClampReflectionProbe(probe);
 }
 
@@ -1084,6 +1155,14 @@ void WriteFrameReflectionProbeStats(
     stats.localIntensity = localProbe.intensity;
     stats.localBlendStrength = localProbe.blendStrength;
     stats.localFalloff = localProbe.falloff;
+    stats.captureSourceType =
+        static_cast<u32>(frameProbes.captureSource);
+    stats.captureResourceReady =
+        frameProbes.captureResourceReady ? 1u : 0u;
+    stats.captureFallbackReason =
+        static_cast<u32>(frameProbes.captureFallbackReason);
+    stats.captureDescriptorBound =
+        frameProbes.captureDescriptorBound ? 1u : 0u;
 }
 
 struct ScreenTileBounds {
@@ -2015,9 +2094,7 @@ VulkanRenderer::~VulkanRenderer() {
         vkDestroySampler(m_Device.Handle(), m_IblSampler, nullptr);
         m_IblSampler = VK_NULL_HANDLE;
     }
-    m_ReflectionProbeCubemapImage.reset();
-    m_ReflectionProbeCubemapView = VK_NULL_HANDLE;
-    m_ReflectionProbeCubemapDescriptorSetsBound = 0;
+    m_ReflectionProbeResources.Release();
     m_IblPrefilteredImage.reset();
     m_IblIrradianceImage.reset();
     m_IblBrdfImage.reset();
@@ -2248,11 +2325,13 @@ void VulkanRenderer::DrawFrame() {
         frameReflectionProbes.activeLocalProbeCount,
         frameReflectionProbes.localProbe.sceneOwned,
         m_ShadowSettings.reflectionProbeCubemapEnabled &&
-            LocalReflectionProbeCubemapReady() &&
+            frameReflectionProbes.captureResourceReady &&
             frameReflectionProbes.fallbackEnabled &&
             frameReflectionProbes.activeLocalProbeCount > 0 &&
             frameReflectionProbes.localProbe.sceneOwned &&
-            ReflectionProbeContributes(frameReflectionProbes.localProbe)
+            ReflectionProbeContributes(frameReflectionProbes.localProbe),
+        static_cast<u32>(frameReflectionProbes.captureSource),
+        static_cast<u32>(frameReflectionProbes.captureFallbackReason)
     };
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
@@ -2458,30 +2537,30 @@ void VulkanRenderer::DrawFrame() {
         reflectionProbeCubemapReady ? 1u : 0u;
     frameStats.reflectionProbe.localCubemapFaceSize =
         reflectionProbeCubemapReady
-            ? m_ReflectionProbeCubemapImage->Extent().width
+            ? m_ReflectionProbeResources.FaceSize()
             : 0u;
     frameStats.reflectionProbe.localCubemapMipCount =
         reflectionProbeCubemapReady
-            ? m_ReflectionProbeCubemapImage->MipLevels()
+            ? m_ReflectionProbeResources.MipCount()
             : 0u;
     frameStats.reflectionProbe.localCubemapFormat =
         reflectionProbeCubemapReady
-            ? m_ReflectionProbeCubemapImage->Format()
+            ? m_ReflectionProbeResources.Format()
             : VK_FORMAT_UNDEFINED;
     frameStats.reflectionProbe.localCubemapDescriptorSetsBound =
         reflectionProbeCubemapReady
-            ? m_ReflectionProbeCubemapDescriptorSetsBound
+            ? m_ReflectionProbeResources.DescriptorSetsBound()
             : 0u;
     frameStats.reflectionProbe.localCubemapShaderSamplingEnabled =
-        reflectionProbeCubemapReady &&
-            m_ShadowSettings.reflectionProbeCubemapEnabled &&
+        m_ShadowSettings.reflectionProbeCubemapEnabled &&
+            frameStats.reflectionProbe.captureResourceReady > 0 &&
             frameStats.reflectionProbe.localEnabled > 0 &&
             frameStats.reflectionProbe.localSceneOwned > 0 &&
             has3DMainPass
             ? 1u
             : 0u;
     frameStats.reflectionProbe.localCubemapSourceType =
-        reflectionProbeCubemapReady ? 1u : 0u;
+        frameStats.reflectionProbe.captureSourceType;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2771,7 +2850,10 @@ void VulkanRenderer::DrawFrame() {
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameReflectionProbes.sceneProbeCount,
-            frameStats.reflectionProbe.localCubemapShaderSamplingEnabled > 0,
+            frameReflectionProbes.activeLocalProbeCount > 0,
+            frameStats.reflectionProbe.captureSourceType,
+            frameStats.reflectionProbe.captureFallbackReason,
+            frameStats.reflectionProbe.captureResourceReady > 0,
             frameStats.reflectionProbe.localCubemapFormat,
             frameStats.reflectionProbe.localCubemapFaceSize,
             frameStats.reflectionProbe.localCubemapMipCount,
@@ -3071,9 +3153,10 @@ void VulkanRenderer::SetOverlay3DContext(
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
-    m_ReflectionProbeCubemapDescriptorSetsBound =
+    m_ReflectionProbeResources.SetDescriptorSetsBound(
         UpdateEnvironmentDescriptorSets(m_DescriptorSets.get()) +
-        UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
+            UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get())
+    );
     m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3179,8 +3262,11 @@ void VulkanRenderer::CreateSwapchainResources() {
     GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
         m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
         m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);
-    GenerateReflectionProbeCubemap(m_Device, m_PhysicalDevice, m_CommandPool,
-        m_ReflectionProbeCubemapImage, m_ReflectionProbeCubemapView);
+    m_ReflectionProbeResources.CreateBuiltInProcedural(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool
+    );
     m_DescriptorSets = std::make_unique<VulkanDescriptorSets>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -3192,10 +3278,10 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
-    m_ReflectionProbeCubemapDescriptorSetsBound =
-        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get());
-    m_ReflectionProbeCubemapDescriptorSetsBound +=
-        UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
+    m_ReflectionProbeResources.SetDescriptorSetsBound(
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get()) +
+            UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get())
+    );
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_DepthBuffer = std::make_unique<VulkanDepthBuffer>(m_Device, m_PhysicalDevice, *m_Swapchain);
     m_SceneRenderTargets = std::make_unique<VulkanSceneRenderTargets>(
@@ -3912,8 +3998,9 @@ void VulkanRenderer::RecreateSwapchain() {
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
     );
-    m_ReflectionProbeCubemapDescriptorSetsBound =
-        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get());
+    m_ReflectionProbeResources.SetDescriptorSetsBound(
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get())
+    );
     m_SyncObjects->RecreateSwapchainSyncObjects(m_Swapchain->Images().size());
     m_DepthBuffer->Recreate(m_Device, m_PhysicalDevice, *m_Swapchain);
     if (m_SceneRenderTargets != nullptr) {
@@ -4460,8 +4547,10 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_LocalShadowBuffer,
             *m_AutoExposureBuffer
         );
-        m_ReflectionProbeCubemapDescriptorSetsBound +=
-            UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get());
+        m_ReflectionProbeResources.SetDescriptorSetsBound(
+            m_ReflectionProbeResources.DescriptorSetsBound() +
+                UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get())
+        );
         m_OverlayGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
             *m_DescriptorSetLayout,
@@ -4896,7 +4985,7 @@ void VulkanRenderer::UpdateUniformBuffer(
     const bool localReflectionProbeCubemapApplied =
         localReflectionProbeApplied &&
         m_ShadowSettings.reflectionProbeCubemapEnabled &&
-        LocalReflectionProbeCubemapReady();
+        reflectionProbes.captureResourceReady;
     uniformData.localReflectionProbePositionRadius = glm::vec4(
         localProbe.center,
         localProbe.radius
@@ -5066,7 +5155,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
     const bool localReflectionProbeCubemapApplied =
         localReflectionProbeApplied &&
         m_ShadowSettings.reflectionProbeCubemapEnabled &&
-        LocalReflectionProbeCubemapReady();
+        reflectionProbes.captureResourceReady;
     uniformData.localReflectionProbePositionRadius = glm::vec4(
         localProbe.center,
         localProbe.radius
@@ -5395,8 +5484,13 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet() const {
         ));
     }
     if (!probes.fallbackEnabled) {
+        probes.captureFallbackReason =
+            RendererReflectionProbeCaptureFallbackReason::FallbackDisabled;
         return probes;
     }
+
+    const std::optional<RendererReflectionProbeCaptureSource>
+        captureSourceOverride = ReflectionProbeCaptureSourceOverrideFromEnvironment();
 
     if (!sceneProbes.empty()) {
         for (const ReflectionProbe3D& sceneProbe : sceneProbes) {
@@ -5404,9 +5498,28 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet() const {
             if (!ReflectionProbeContributes(candidate)) {
                 continue;
             }
+            if (captureSourceOverride.has_value()) {
+                candidate.captureSource = *captureSourceOverride;
+            }
 
             probes.localProbe = candidate;
             probes.activeLocalProbeCount = 1;
+            probes.captureSource = candidate.captureSource;
+            probes.captureResourceReady =
+                candidate.captureSource ==
+                    RendererReflectionProbeCaptureSource::BuiltInProcedural &&
+                LocalReflectionProbeCubemapReady();
+            probes.captureDescriptorBound =
+                probes.captureResourceReady &&
+                m_ReflectionProbeResources.DescriptorSetsBound() > 0u;
+            probes.captureFallbackReason =
+                m_ShadowSettings.reflectionProbeCubemapEnabled
+                    ? CaptureFallbackReasonFor(
+                        probes.captureSource,
+                        probes.captureResourceReady
+                    )
+                    : RendererReflectionProbeCaptureFallbackReason::
+                        CubemapSamplingDisabled;
             return probes;
         }
     }
@@ -5416,6 +5529,8 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet() const {
     if (ReflectionProbeContributes(settingsProbe)) {
         probes.localProbe = settingsProbe;
         probes.activeLocalProbeCount = 1;
+        probes.captureFallbackReason =
+            RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe;
     }
     return probes;
 }
@@ -6032,9 +6147,7 @@ LocalShadowTileSet VulkanRenderer::BuildLocalShadowTiles(
 }
 
 bool VulkanRenderer::LocalReflectionProbeCubemapReady() const {
-    return m_ReflectionProbeCubemapImage != nullptr &&
-        m_ReflectionProbeCubemapView != VK_NULL_HANDLE &&
-        m_IblSampler != VK_NULL_HANDLE;
+    return m_ReflectionProbeResources.BuiltInProceduralReady(m_IblSampler);
 }
 
 u32 VulkanRenderer::UpdateEnvironmentDescriptorSets(
@@ -6050,9 +6163,10 @@ u32 VulkanRenderer::UpdateEnvironmentDescriptorSets(
     }
 
     const VkImageView localReflectionProbeView =
-        LocalReflectionProbeCubemapReady()
-            ? m_ReflectionProbeCubemapView
-            : m_IblPrefilteredView;
+        m_ReflectionProbeResources.DescriptorViewFor(
+            m_IblPrefilteredView,
+            m_IblSampler
+        );
     u32 localProbeDescriptorWrites = 0;
     for (std::size_t index = 0; index < descriptorSets->Count(); ++index) {
         VkDescriptorImageInfo brdfInfo{};

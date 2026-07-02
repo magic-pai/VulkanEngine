@@ -291,6 +291,9 @@ struct CurrentVulkanFrameGraphInputs {
     u32 iblPrefilteredMipCount = 0;
     bool sceneReflectionProbesAllocated = false;
     u32 sceneReflectionProbeCount = 0;
+    bool reflectionCaptureSourceAllocated = false;
+    u32 reflectionCaptureSourceType = 0;
+    u32 reflectionCaptureFallbackReason = 0;
     bool sceneReflectionProbeCubemapAllocated = false;
     VkFormat sceneReflectionProbeCubemapFormat = VK_FORMAT_UNDEFINED;
     u32 sceneReflectionProbeCubemapFaceSize = 0;

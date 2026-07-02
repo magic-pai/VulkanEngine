@@ -202,6 +202,10 @@ struct RendererReflectionProbeStats {
     u32 localCubemapDescriptorSetsBound = 0;
     u32 localCubemapShaderSamplingEnabled = 0;
     u32 localCubemapSourceType = 0;
+    u32 captureSourceType = 0;
+    u32 captureResourceReady = 0;
+    u32 captureFallbackReason = 0;
+    u32 captureDescriptorBound = 0;
 };
 
 struct RendererHeightFogStats {

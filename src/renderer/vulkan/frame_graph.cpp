@@ -1617,6 +1617,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.sceneReflectionProbeCount > 0 ? "active scene probes" : "empty probe set"
         );
     }
+    if (inputs.reflectionCaptureSourceAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "ReflectionCaptureSource",
+            "source policy",
+            "reflection capture source and fallback diagnostics",
+            inputs.reflectionCaptureFallbackReason == 0u
+                ? "resource-ready source"
+                : "fallback-selected source"
+        );
+    }
     if (inputs.sceneReflectionProbeCubemapAllocated) {
         AppendResource(
             plan,
@@ -1624,7 +1637,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "SceneReflectionProbeCubemap",
             VulkanFormatName(inputs.sceneReflectionProbeCubemapFormat),
-            "sampled local reflection-probe cubemap",
+            "sampled local reflection-probe cubemap resolved from ReflectionCaptureSource",
             inputs.sceneReflectionProbeCubemapMipCount > 0
                 ? "mipped cube cache"
                 : "unknown cube"

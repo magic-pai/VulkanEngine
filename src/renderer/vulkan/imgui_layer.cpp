@@ -57,6 +57,44 @@ void ResetForward3DParameters(MaterialProperties& properties) {
     properties.viewControls = { 0.78f, 0.24f, 48.0f, 0.0f };
 }
 
+const char* ReflectionCaptureSourceName(u32 source) {
+    switch (source) {
+    case 0:
+        return "none";
+    case 1:
+        return "built-in procedural";
+    case 2:
+        return "authored cubemap";
+    case 3:
+        return "captured scene";
+    default:
+        return "unknown";
+    }
+}
+
+const char* ReflectionCaptureFallbackReasonName(u32 reason) {
+    switch (reason) {
+    case 0:
+        return "none";
+    case 1:
+        return "source disabled";
+    case 2:
+        return "authored cubemap not loaded";
+    case 3:
+        return "captured scene not implemented";
+    case 4:
+        return "built-in resource unavailable";
+    case 5:
+        return "cubemap sampling disabled";
+    case 6:
+        return "no active scene probe";
+    case 7:
+        return "fallback disabled";
+    default:
+        return "unknown";
+    }
+}
+
 void DrawBlackHoleControls(MaterialProperties& properties) {
     ImGui::SeparatorText("Black Hole");
     ImGui::SliderFloat("Lensing", &properties.custom[1], 0.0f, 2.0f);
@@ -827,6 +865,15 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.localCubemapDescriptorSetsBound,
         stats.reflectionProbe.localCubemapShaderSamplingEnabled ? "sampling" : "off",
         stats.reflectionProbe.localCubemapSourceType
+    );
+    ImGui::Text(
+        "Reflection capture: %s, ready %s, descriptor %s, fallback %s",
+        ReflectionCaptureSourceName(stats.reflectionProbe.captureSourceType),
+        stats.reflectionProbe.captureResourceReady ? "yes" : "no",
+        stats.reflectionProbe.captureDescriptorBound ? "bound" : "fallback",
+        ReflectionCaptureFallbackReasonName(
+            stats.reflectionProbe.captureFallbackReason
+        )
     );
     ImGui::Text(
         "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
