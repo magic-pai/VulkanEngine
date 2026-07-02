@@ -186,6 +186,9 @@ struct RendererReflectionProbeStats {
     f32 horizonBlend = 0.0f;
     u32 sceneProbeCount = 0;
     u32 activeProbeCount = 0;
+    u32 sceneEligibleProbeCount = 0;
+    u32 droppedProbeCount = 0;
+    i32 selectedProbeIndex = -1;
     u32 localEnabled = 0;
     u32 localSceneOwned = 0;
     f32 localRadius = 0.0f;
@@ -206,6 +209,9 @@ struct RendererReflectionProbeStats {
     u32 captureResourceReady = 0;
     u32 captureFallbackReason = 0;
     u32 captureDescriptorBound = 0;
+    u32 boxProjectionEnabled = 0;
+    u32 influenceMode = 0;
+    u32 parallaxCorrectionEnabled = 0;
 };
 
 struct RendererHeightFogStats {

@@ -338,6 +338,18 @@ bool BenchmarkSceneReflectionProbeRequested() {
         value == "YES";
 }
 
+bool BenchmarkSceneReflectionProbeMultiRequested() {
+    const std::string value =
+        ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_MULTI");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkPartialLocalShadowCacheRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
     return value == "1" ||
@@ -1069,6 +1081,28 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             0.72f,
             1.75f
         );
+        if (BenchmarkSceneReflectionProbeMultiRequested()) {
+            scene.CreateReflectionProbe(
+                "Benchmark Warm Reflection Probe",
+                { -3.8f, 1.1f, -2.4f },
+                4.8f,
+                { 3.4f, 2.6f, 3.0f },
+                { 1.0f, 0.68f, 0.48f },
+                1.05f,
+                0.58f,
+                1.55f
+            );
+            scene.CreateReflectionProbe(
+                "Benchmark Cool Reflection Probe",
+                { 3.6f, 1.4f, 2.6f },
+                5.2f,
+                { 3.8f, 2.8f, 3.6f },
+                { 0.58f, 0.78f, 1.0f },
+                1.12f,
+                0.62f,
+                1.65f
+            );
+        }
     }
 }
 

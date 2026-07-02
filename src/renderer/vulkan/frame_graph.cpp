@@ -1617,6 +1617,17 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.sceneReflectionProbeCount > 0 ? "active scene probes" : "empty probe set"
         );
     }
+    if (inputs.sceneReflectionProbeSelectionAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "SceneReflectionProbeSelection",
+            "frame UBO payload",
+            "selected scene reflection-probe index and influence policy",
+            "single selected local probe"
+        );
+    }
     if (inputs.reflectionCaptureSourceAllocated) {
         AppendResource(
             plan,

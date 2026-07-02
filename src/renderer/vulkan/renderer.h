@@ -135,6 +135,7 @@ struct RendererReflectionProbe {
     f32 falloff = 2.0f;
     bool enabled = false;
     bool sceneOwned = false;
+    i32 sceneIndex = -1;
     RendererReflectionProbeCaptureSource captureSource =
         RendererReflectionProbeCaptureSource::None;
 };
@@ -143,7 +144,13 @@ struct FrameReflectionProbeSet {
     RendererReflectionProbe localProbe{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
+    u32 eligibleSceneProbeCount = 0;
+    u32 droppedSceneProbeCount = 0;
+    i32 selectedSceneProbeIndex = -1;
     bool fallbackEnabled = false;
+    bool boxProjectionEnabled = false;
+    bool parallaxCorrectionEnabled = false;
+    u32 influenceMode = 0;
     bool captureResourceReady = false;
     bool captureDescriptorBound = false;
     RendererReflectionProbeCaptureSource captureSource =
@@ -342,7 +349,9 @@ private:
         const LocalShadowTileSet& localShadowTiles
     ) const;
     FrameLightSet BuildFrameLightSet(std::span<const RenderCommand> renderCommands) const;
-    FrameReflectionProbeSet BuildFrameReflectionProbeSet() const;
+    FrameReflectionProbeSet BuildFrameReflectionProbeSet(
+        const FrameMatrices* matrices
+    ) const;
     FrameMaterialSet BuildFrameMaterialSet(std::span<const RenderCommand> renderCommands) const;
     void BuildGBufferCommandList(
         std::span<const RenderCommand> renderCommands,

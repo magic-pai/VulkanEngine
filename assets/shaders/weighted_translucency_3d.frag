@@ -40,6 +40,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 localReflectionProbePositionRadius;
     vec4 localReflectionProbeControls;
     vec4 localReflectionProbeColor;
+    vec4 localReflectionProbeBoxExtentsProjection;
     vec4 heightFogControls;
     vec4 heightFogColor;
     vec4 postProcessControls;
@@ -309,7 +310,50 @@ float LocalReflectionProbeWeight(vec3 worldPosition) {
         length(worldPosition - frame.localReflectionProbePositionRadius.xyz) / radius;
     float falloff = clamp(frame.localReflectionProbeControls.w, 0.25, 8.0);
     float influence = pow(clamp(1.0 - normalizedDistance, 0.0, 1.0), falloff);
+    if (frame.localReflectionProbeBoxExtentsProjection.w > 0.5) {
+        vec3 extents = max(frame.localReflectionProbeBoxExtentsProjection.xyz, vec3(0.001));
+        vec3 normalizedBox =
+            abs(worldPosition - frame.localReflectionProbePositionRadius.xyz) / extents;
+        float maxAxis = max(max(normalizedBox.x, normalizedBox.y), normalizedBox.z);
+        influence *= 1.0 - smoothstep(1.0, 1.25, maxAxis);
+    }
     return influence * clamp(frame.localReflectionProbeControls.z, 0.0, 1.0);
+}
+
+vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
+    vec3 sampleDirection = dot(direction, direction) > 0.0001
+        ? normalize(direction)
+        : vec3(0.0, 1.0, 0.0);
+    if (frame.localReflectionProbeBoxExtentsProjection.w <= 0.5) {
+        return sampleDirection;
+    }
+
+    vec3 center = frame.localReflectionProbePositionRadius.xyz;
+    vec3 extents = max(frame.localReflectionProbeBoxExtentsProjection.xyz, vec3(0.001));
+    vec3 localPosition = worldPosition - center;
+    vec3 safeDirection = sampleDirection;
+    safeDirection.x = abs(safeDirection.x) < 0.0001
+        ? (safeDirection.x < 0.0 ? -0.0001 : 0.0001)
+        : safeDirection.x;
+    safeDirection.y = abs(safeDirection.y) < 0.0001
+        ? (safeDirection.y < 0.0 ? -0.0001 : 0.0001)
+        : safeDirection.y;
+    safeDirection.z = abs(safeDirection.z) < 0.0001
+        ? (safeDirection.z < 0.0 ? -0.0001 : 0.0001)
+        : safeDirection.z;
+
+    vec3 tMin = (-extents - localPosition) / safeDirection;
+    vec3 tMax = (extents - localPosition) / safeDirection;
+    vec3 tFar = max(tMin, tMax);
+    float hitDistance = min(min(tFar.x, tFar.y), tFar.z);
+    if (hitDistance <= 0.0001 || hitDistance > 100000.0) {
+        return sampleDirection;
+    }
+
+    vec3 hitLocal = localPosition + sampleDirection * hitDistance;
+    return dot(hitLocal, hitLocal) > 0.0001
+        ? normalize(hitLocal)
+        : sampleDirection;
 }
 
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
@@ -326,9 +370,8 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
     vec3 localTint = max(frame.localReflectionProbeColor.rgb, vec3(0.0));
     float localIntensity = clamp(frame.localReflectionProbeControls.y, 0.0, 4.0);
     float glossBoost = mix(1.18, 0.88, clamp(roughness, 0.0, 1.0));
-    vec3 sampleDirection = dot(direction, direction) > 0.0001
-        ? normalize(direction)
-        : vec3(0.0, 1.0, 0.0);
+    vec3 sampleDirection =
+        BoxProjectedLocalReflectionDirection(direction, worldPosition);
     vec3 localRadiance = globalRadiance * localTint * localIntensity * glossBoost;
     if (frame.localReflectionProbeColor.a > 0.5) {
         localRadiance =

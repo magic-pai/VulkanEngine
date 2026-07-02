@@ -317,6 +317,9 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.horizonBlend << ','
         << reflectionProbe.sceneProbeCount << ','
         << reflectionProbe.activeProbeCount << ','
+        << reflectionProbe.sceneEligibleProbeCount << ','
+        << reflectionProbe.selectedProbeIndex << ','
+        << reflectionProbe.droppedProbeCount << ','
         << reflectionProbe.localEnabled << ','
         << reflectionProbe.localSceneOwned << ','
         << reflectionProbe.localRadius << ','
@@ -337,6 +340,9 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.captureResourceReady << ','
         << reflectionProbe.captureFallbackReason << ','
         << reflectionProbe.captureDescriptorBound << ','
+        << reflectionProbe.boxProjectionEnabled << ','
+        << reflectionProbe.influenceMode << ','
+        << reflectionProbe.parallaxCorrectionEnabled << ','
         << heightFog.enabled << ','
         << heightFog.density << ','
         << heightFog.heightFalloff << ','
@@ -711,6 +717,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
+        << "reflection_probe_scene_eligible_probe_count,"
+        << "reflection_probe_selected_probe_index,"
+        << "reflection_probe_dropped_probe_count,"
         << "reflection_probe_local_enabled,reflection_probe_local_scene_owned,"
         << "reflection_probe_local_radius,"
         << "reflection_probe_local_box_extent_x,reflection_probe_local_box_extent_y,"
@@ -726,6 +735,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_capture_resource_ready,"
         << "reflection_probe_capture_fallback_reason,"
         << "reflection_probe_capture_descriptor_bound,"
+        << "reflection_probe_box_projection_enabled,"
+        << "reflection_probe_influence_mode,"
+        << "reflection_probe_parallax_correction_enabled,"
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
         << "height_fog_start_distance,height_fog_max_opacity,"
         << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"

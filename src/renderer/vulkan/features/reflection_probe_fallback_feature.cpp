@@ -36,6 +36,18 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             context.renderer.sceneReflectionProbeOwned &&
             context.renderer.sceneReflectionProbeCubemapSamplingEnabled &&
             reflectionProbe.localCubemapShaderSamplingEnabled > 0;
+        if (context.renderer.sceneReflectionProbeOwned) {
+            AppendRenderFrameGraphPass(
+                context.plan,
+                RenderFramePassKind::Reflections,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "SceneReflectionProbeSelection",
+                "SceneReflectionProbes",
+                "SceneReflectionProbeSelection",
+                "Selects the best scene-owned reflection probe for the current camera and records dropped probe diagnostics before multi-probe blending is added."
+            );
+        }
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,
@@ -44,10 +56,10 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             "ReflectionCaptureSourceResolve",
             reflectionProbe.captureResourceReady > 0
                 ? context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbes, ReflectionCaptureSource, SceneReflectionProbeCubemap"
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSource, SceneReflectionProbeCubemap"
                     : "ReflectionCaptureSource, SceneReflectionProbeCubemap"
                 : context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbes, ReflectionCaptureSource"
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSource"
                     : "ReflectionCaptureSource",
             "",
             reflectionProbe.captureResourceReady > 0
@@ -65,9 +77,9 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 ? "SceneReflectionProbeBlend"
                 : "LocalReflectionProbeBlend",
             sceneCubemapSampling
-                ? "SceneReflectionProbes, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbeSelection, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : context.renderer.sceneReflectionProbeOwned
-                ? "SceneReflectionProbes, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbeSelection, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : "ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
             sceneCubemapSampling

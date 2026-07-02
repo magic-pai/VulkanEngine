@@ -844,11 +844,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ibl.descriptorSetsBound
     );
     ImGui::Text(
-        "Local reflection probe: %s, scene %s, probes %u/%u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",
+        "Local reflection probe: %s, scene %s, probes %u/%u, eligible %u, selected %d, dropped %u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",
         stats.reflectionProbe.localEnabled ? "enabled" : "off",
         stats.reflectionProbe.localSceneOwned ? "yes" : "no",
         stats.reflectionProbe.activeProbeCount,
         stats.reflectionProbe.sceneProbeCount,
+        stats.reflectionProbe.sceneEligibleProbeCount,
+        stats.reflectionProbe.selectedProbeIndex,
+        stats.reflectionProbe.droppedProbeCount,
         stats.reflectionProbe.localRadius,
         stats.reflectionProbe.localBoxExtentX,
         stats.reflectionProbe.localBoxExtentY,
@@ -874,6 +877,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         ReflectionCaptureFallbackReasonName(
             stats.reflectionProbe.captureFallbackReason
         )
+    );
+    ImGui::Text(
+        "Reflection probe spatial policy: box projection %s, parallax %s, influence mode %u",
+        stats.reflectionProbe.boxProjectionEnabled ? "on" : "off",
+        stats.reflectionProbe.parallaxCorrectionEnabled ? "on" : "off",
+        stats.reflectionProbe.influenceMode
     );
     ImGui::Text(
         "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
