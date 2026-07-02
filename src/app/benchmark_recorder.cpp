@@ -142,6 +142,15 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.physicalResourceCount << ','
         << stats.frameGraph.plannedResourceCount << ','
         << stats.frameGraph.validation.issueCount << ','
+        << stats.frameGraph.validation.unnamedPassCount << ','
+        << stats.frameGraph.validation.duplicatePassIdCount << ','
+        << stats.frameGraph.validation.unnamedResourceCount << ','
+        << stats.frameGraph.validation.duplicateResourceIdCount << ','
+        << stats.frameGraph.validation.missingResourceRefCount << ','
+        << stats.frameGraph.validation.readBeforeFirstWriteCount << ','
+        << stats.frameGraph.validation.unusedPhysicalResourceCount << ','
+        << stats.frameGraph.validation.writeOnlyRoadmapResourceCount << ','
+        << stats.frameGraph.validation.activePassWritesPlannedResourceCount << ','
         << stats.frameGraph.references.readCount << ','
         << stats.frameGraph.references.writeCount << ','
         << stats.frameGraph.references.readSampledCount << ','
@@ -547,6 +556,15 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_active_passes,framegraph_roadmap_passes,"
         << "framegraph_physical_resources,framegraph_planned_resources,"
         << "framegraph_validation_issues,"
+        << "framegraph_validation_unnamed_passes,"
+        << "framegraph_validation_duplicate_pass_ids,"
+        << "framegraph_validation_unnamed_resources,"
+        << "framegraph_validation_duplicate_resource_ids,"
+        << "framegraph_validation_missing_resource_refs,"
+        << "framegraph_validation_read_before_first_write,"
+        << "framegraph_validation_unused_physical_resources,"
+        << "framegraph_validation_write_only_roadmap_resources,"
+        << "framegraph_validation_active_writes_planned_resources,"
         << "framegraph_read_refs,framegraph_write_refs,"
         << "framegraph_read_sampled_refs,framegraph_read_attachment_refs,"
         << "framegraph_write_color_refs,framegraph_write_depth_refs,"

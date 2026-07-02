@@ -1143,6 +1143,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.frameGraph.validation.issueCount
     );
     ImGui::Text(
+        "Graph validation classes: missing refs %u / read-before-write %u / unused physical %u / roadmap write-only %u / active writes planned %u",
+        stats.frameGraph.validation.missingResourceRefCount,
+        stats.frameGraph.validation.readBeforeFirstWriteCount,
+        stats.frameGraph.validation.unusedPhysicalResourceCount,
+        stats.frameGraph.validation.writeOnlyRoadmapResourceCount,
+        stats.frameGraph.validation.activePassWritesPlannedResourceCount
+    );
+    ImGui::Text(
         "Graph refs: %u reads / %u writes",
         stats.frameGraph.references.readCount,
         stats.frameGraph.references.writeCount
@@ -1281,6 +1289,31 @@ void DrawPerformanceStats(const RendererStats& stats) {
                     }
                 }
                 ImGui::EndTooltip();
+            }
+        }
+        ImGui::TreePop();
+    }
+
+    if (ImGui::TreeNode("Graph validation")) {
+        if (stats.frameGraph.validation.issues.empty()) {
+            ImGui::TextUnformatted("No frame graph validation issues.");
+        } else {
+            for (const RenderFrameGraphValidationIssue& issue :
+                stats.frameGraph.validation.issues) {
+                const std::string_view kind =
+                    RenderFrameGraphValidationIssueKindName(issue.kind);
+                ImGui::BulletText(
+                    "%.*s: pass #%08X %.*s / resource #%08X %.*s%s",
+                    static_cast<int>(kind.size()),
+                    kind.data(),
+                    issue.passId,
+                    static_cast<int>(issue.passName.size()),
+                    issue.passName.data(),
+                    issue.resourceId,
+                    static_cast<int>(issue.resourceName.size()),
+                    issue.resourceName.data(),
+                    issue.writeRef ? " [write]" : ""
+                );
             }
         }
         ImGui::TreePop();

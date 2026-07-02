@@ -57,6 +57,18 @@ enum class RenderFrameGraphResourceAccess {
     Present
 };
 
+enum class RenderFrameGraphValidationIssueKind {
+    UnnamedPass,
+    DuplicatePassId,
+    UnnamedResource,
+    DuplicateResourceId,
+    MissingResourceRef,
+    ReadBeforeFirstWrite,
+    UnusedPhysicalResource,
+    WriteOnlyRoadmapResource,
+    ActivePassWritesPlannedResource
+};
+
 struct RenderGraphResource {
     u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
@@ -88,6 +100,16 @@ struct RenderFrameGraphPassDependency {
     bool writeDependency = false;
 };
 
+struct RenderFrameGraphValidationIssue {
+    RenderFrameGraphValidationIssueKind kind =
+        RenderFrameGraphValidationIssueKind::MissingResourceRef;
+    u32 passId = 0;
+    std::string_view passName;
+    u32 resourceId = 0;
+    std::string_view resourceName;
+    bool writeRef = false;
+};
+
 struct RenderFramePass {
     u32 id = 0;
     RenderFramePassKind kind = RenderFramePassKind::FrameSetup;
@@ -108,6 +130,12 @@ struct RenderFrameGraphValidation {
     u32 duplicatePassIdCount = 0;
     u32 unnamedResourceCount = 0;
     u32 duplicateResourceIdCount = 0;
+    u32 missingResourceRefCount = 0;
+    u32 readBeforeFirstWriteCount = 0;
+    u32 unusedPhysicalResourceCount = 0;
+    u32 writeOnlyRoadmapResourceCount = 0;
+    u32 activePassWritesPlannedResourceCount = 0;
+    std::vector<RenderFrameGraphValidationIssue> issues;
 };
 
 struct RenderFrameGraphReferenceStats {
@@ -211,6 +239,9 @@ std::string_view RenderGraphResourceStatusName(RenderGraphResourceStatus status)
 std::string_view RenderGraphResourceLifetimeName(RenderGraphResourceLifetime lifetime);
 std::string_view RenderFrameGraphResourceAccessName(
     RenderFrameGraphResourceAccess access
+);
+std::string_view RenderFrameGraphValidationIssueKindName(
+    RenderFrameGraphValidationIssueKind kind
 );
 
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(

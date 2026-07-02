@@ -55,24 +55,6 @@ u32 RenderGraphResourceStableId(
     return NonZeroFrameGraphId(hash);
 }
 
-bool ContainsPassId(const RenderFrameGraphPlan& plan, u32 id) {
-    for (const RenderFramePass& pass : plan.passes) {
-        if (pass.id == id) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool ContainsResourceId(const RenderFrameGraphPlan& plan, u32 id) {
-    for (const RenderGraphResource& resource : plan.resources) {
-        if (resource.id == id) {
-            return true;
-        }
-    }
-    return false;
-}
-
 std::string_view TrimToken(std::string_view value) {
     while (!value.empty() &&
         (value.front() == ' ' || value.front() == '\t')) {
@@ -105,6 +87,18 @@ RenderGraphResource* FindResourceById(
     u32 resourceId
 ) {
     for (RenderGraphResource& resource : plan.resources) {
+        if (resource.id == resourceId) {
+            return &resource;
+        }
+    }
+    return nullptr;
+}
+
+const RenderGraphResource* FindResourceById(
+    const RenderFrameGraphPlan& plan,
+    u32 resourceId
+) {
+    for (const RenderGraphResource& resource : plan.resources) {
         if (resource.id == resourceId) {
             return &resource;
         }
@@ -232,6 +226,122 @@ void CountAccess(
     case RenderFrameGraphResourceAccess::Present:
         ++stats.presentCount;
         return;
+    }
+}
+
+void AppendValidationIssue(
+    RenderFrameGraphValidation& validation,
+    RenderFrameGraphValidationIssue issue
+) {
+    ++validation.issueCount;
+    switch (issue.kind) {
+    case RenderFrameGraphValidationIssueKind::UnnamedPass:
+        ++validation.unnamedPassCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::DuplicatePassId:
+        ++validation.duplicatePassIdCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::UnnamedResource:
+        ++validation.unnamedResourceCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::DuplicateResourceId:
+        ++validation.duplicateResourceIdCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::MissingResourceRef:
+        ++validation.missingResourceRefCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::ReadBeforeFirstWrite:
+        ++validation.readBeforeFirstWriteCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::UnusedPhysicalResource:
+        ++validation.unusedPhysicalResourceCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::WriteOnlyRoadmapResource:
+        ++validation.writeOnlyRoadmapResourceCount;
+        break;
+    case RenderFrameGraphValidationIssueKind::ActivePassWritesPlannedResource:
+        ++validation.activePassWritesPlannedResourceCount;
+        break;
+    }
+    validation.issues.push_back(issue);
+}
+
+bool ContainsId(const std::vector<u32>& ids, u32 id) {
+    for (const u32 existingId : ids) {
+        if (existingId == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasActiveWriter(
+    const RenderFrameGraphPlan& plan,
+    u32 resourceId
+) {
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.status != RenderFramePassStatus::Active) {
+            continue;
+        }
+        for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+            if (ref.resourceId == resourceId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool HasRoadmapWriter(
+    const RenderFrameGraphPlan& plan,
+    u32 resourceId
+) {
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.status != RenderFramePassStatus::Roadmap) {
+            continue;
+        }
+        for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+            if (ref.resourceId == resourceId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void AppendMissingResourceRefIssues(
+    const RenderFrameGraphPlan& plan,
+    const RenderFramePass& pass,
+    std::string_view description,
+    bool writeRef,
+    RenderFrameGraphValidation& validation
+) {
+    std::size_t tokenStart = 0;
+    while (tokenStart <= description.size()) {
+        const std::size_t separator = description.find(',', tokenStart);
+        const std::size_t tokenEnd =
+            separator == std::string_view::npos ? description.size() : separator;
+        const std::string_view token =
+            TrimToken(description.substr(tokenStart, tokenEnd - tokenStart));
+
+        if (!token.empty() && FindResourceByName(plan, token) == nullptr) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::MissingResourceRef,
+                    pass.id,
+                    pass.name,
+                    0u,
+                    token,
+                    writeRef
+                }
+            );
+        }
+
+        if (separator == std::string_view::npos) {
+            break;
+        }
+        tokenStart = separator + 1;
     }
 }
 
@@ -409,6 +519,175 @@ void RebuildFrameGraphResourceLifetimes(RenderFrameGraphPlan& plan) {
     plan.lifetimes = stats;
 }
 
+void RebuildFrameGraphValidation(RenderFrameGraphPlan& plan) {
+    RenderFrameGraphValidation validation{};
+
+    std::vector<u32> seenPassIds;
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.name.empty()) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::UnnamedPass,
+                    pass.id,
+                    pass.name,
+                    0u,
+                    {},
+                    false
+                }
+            );
+        }
+        if (ContainsId(seenPassIds, pass.id)) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::DuplicatePassId,
+                    pass.id,
+                    pass.name,
+                    0u,
+                    {},
+                    false
+                }
+            );
+        } else {
+            seenPassIds.push_back(pass.id);
+        }
+
+        AppendMissingResourceRefIssues(
+            plan,
+            pass,
+            pass.reads,
+            false,
+            validation
+        );
+        AppendMissingResourceRefIssues(
+            plan,
+            pass,
+            pass.writes,
+            true,
+            validation
+        );
+    }
+
+    std::vector<u32> seenResourceIds;
+    for (const RenderGraphResource& resource : plan.resources) {
+        if (resource.name.empty()) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::UnnamedResource,
+                    0u,
+                    {},
+                    resource.id,
+                    resource.name,
+                    false
+                }
+            );
+        }
+        if (ContainsId(seenResourceIds, resource.id)) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::DuplicateResourceId,
+                    0u,
+                    {},
+                    resource.id,
+                    resource.name,
+                    false
+                }
+            );
+        } else {
+            seenResourceIds.push_back(resource.id);
+        }
+
+        if (resource.status == RenderGraphResourceStatus::Physical &&
+            resource.readCount == 0u &&
+            resource.writeCount == 0u) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::UnusedPhysicalResource,
+                    0u,
+                    {},
+                    resource.id,
+                    resource.name,
+                    false
+                }
+            );
+        }
+
+        if (resource.status == RenderGraphResourceStatus::Planned &&
+            resource.readCount == 0u &&
+            resource.writeCount > 0u &&
+            HasRoadmapWriter(plan, resource.id) &&
+            !HasActiveWriter(plan, resource.id)) {
+            AppendValidationIssue(
+                validation,
+                RenderFrameGraphValidationIssue{
+                    RenderFrameGraphValidationIssueKind::WriteOnlyRoadmapResource,
+                    0u,
+                    {},
+                    resource.id,
+                    resource.name,
+                    true
+                }
+            );
+        }
+    }
+
+    std::vector<u32> activeWrittenResourceIds;
+    for (const RenderFramePass& pass : plan.passes) {
+        if (pass.status != RenderFramePassStatus::Active) {
+            continue;
+        }
+
+        for (const RenderFrameGraphResourceRef& ref : pass.readResources) {
+            const RenderGraphResource* resource =
+                FindResourceById(plan, ref.resourceId);
+            if (resource != nullptr &&
+                HasActiveWriter(plan, ref.resourceId) &&
+                !ContainsId(activeWrittenResourceIds, ref.resourceId)) {
+                AppendValidationIssue(
+                    validation,
+                    RenderFrameGraphValidationIssue{
+                        RenderFrameGraphValidationIssueKind::ReadBeforeFirstWrite,
+                        pass.id,
+                        pass.name,
+                        resource->id,
+                        resource->name,
+                        false
+                    }
+                );
+            }
+        }
+
+        for (const RenderFrameGraphResourceRef& ref : pass.writeResources) {
+            const RenderGraphResource* resource =
+                FindResourceById(plan, ref.resourceId);
+            if (resource != nullptr &&
+                resource->status == RenderGraphResourceStatus::Planned) {
+                AppendValidationIssue(
+                    validation,
+                    RenderFrameGraphValidationIssue{
+                        RenderFrameGraphValidationIssueKind::
+                            ActivePassWritesPlannedResource,
+                        pass.id,
+                        pass.name,
+                        resource->id,
+                        resource->name,
+                        true
+                    }
+                );
+            }
+            if (!ContainsId(activeWrittenResourceIds, ref.resourceId)) {
+                activeWrittenResourceIds.push_back(ref.resourceId);
+            }
+        }
+    }
+
+    plan.validation = validation;
+}
+
 void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     RenderFrameGraphReferenceStats stats{};
     for (RenderFramePass& pass : plan.passes) {
@@ -430,6 +709,7 @@ void RebuildFrameGraphResourceReferences(RenderFrameGraphPlan& plan) {
     plan.references = stats;
     RebuildFrameGraphPassDependencies(plan);
     RebuildFrameGraphResourceLifetimes(plan);
+    RebuildFrameGraphValidation(plan);
 }
 
 void AppendPass(
@@ -443,14 +723,6 @@ void AppendPass(
     std::string_view purpose
 ) {
     const u32 id = RenderFramePassStableId(kind, status, queue, name);
-    if (name.empty()) {
-        ++plan.validation.unnamedPassCount;
-        ++plan.validation.issueCount;
-    }
-    if (ContainsPassId(plan, id)) {
-        ++plan.validation.duplicatePassIdCount;
-        ++plan.validation.issueCount;
-    }
 
     RenderFramePass pass{};
     pass.id = id;
@@ -481,14 +753,6 @@ void AppendResource(
     std::string_view scale
 ) {
     const u32 id = RenderGraphResourceStableId(status, lifetime, name);
-    if (name.empty()) {
-        ++plan.validation.unnamedResourceCount;
-        ++plan.validation.issueCount;
-    }
-    if (ContainsResourceId(plan, id)) {
-        ++plan.validation.duplicateResourceIdCount;
-        ++plan.validation.issueCount;
-    }
 
     RenderGraphResource resource{};
     resource.id = id;
@@ -882,6 +1146,33 @@ std::string_view RenderFrameGraphResourceAccessName(
     return "unknown";
 }
 
+std::string_view RenderFrameGraphValidationIssueKindName(
+    RenderFrameGraphValidationIssueKind kind
+) {
+    switch (kind) {
+    case RenderFrameGraphValidationIssueKind::UnnamedPass:
+        return "unnamed pass";
+    case RenderFrameGraphValidationIssueKind::DuplicatePassId:
+        return "duplicate pass id";
+    case RenderFrameGraphValidationIssueKind::UnnamedResource:
+        return "unnamed resource";
+    case RenderFrameGraphValidationIssueKind::DuplicateResourceId:
+        return "duplicate resource id";
+    case RenderFrameGraphValidationIssueKind::MissingResourceRef:
+        return "missing resource ref";
+    case RenderFrameGraphValidationIssueKind::ReadBeforeFirstWrite:
+        return "read before first write";
+    case RenderFrameGraphValidationIssueKind::UnusedPhysicalResource:
+        return "unused physical resource";
+    case RenderFrameGraphValidationIssueKind::WriteOnlyRoadmapResource:
+        return "write-only roadmap resource";
+    case RenderFrameGraphValidationIssueKind::ActivePassWritesPlannedResource:
+        return "active pass writes planned resource";
+    }
+
+    return "unknown";
+}
+
 RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     CurrentVulkanFrameGraphInputs inputs
 ) {
@@ -955,18 +1246,6 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "depth atlas",
             "sampled depth attachment, point/spot light tiles",
             "shadow tile grid"
-        );
-        AppendPass(
-            plan,
-            RenderFramePassKind::Shadow,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "LocalShadowAtlasBudget",
-            "LocalShadowAtlas",
-            inputs.localShadowAtlasAssignedTiles > 0
-                ? "LocalShadowAtlas"
-                : "",
-            "Physical atlas resource and occupancy diagnostics for upcoming point/spot shadow rendering."
         );
     }
     if (inputs.hdrSceneColorAllocated) {
@@ -1070,6 +1349,51 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "Recorded clear-only GBuffer pass; opaque geometry migration follows."
         );
     }
+    if (inputs.shadowPassEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Shadow,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "LegacyShadowDepth",
+            "",
+            "LegacyShadowMap",
+            "Current directional shadow-map path kept as the fallback tier."
+        );
+    }
+    if (inputs.directionalShadowCascadeScaffoldEnabled &&
+        inputs.directionalShadowCascadeCount > 1) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Shadow,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "DirectionalCSMScaffold",
+            "",
+            inputs.directionalShadowAtlasPasses > 0
+                ? "DirectionalShadowCascades"
+                : "",
+            inputs.directionalShadowAtlasPasses > 0
+                ? "Records one shadow-depth tile pass per active directional cascade while the single shadow map remains the sampled fallback."
+                : "CSM split and stable texel diagnostics feeding the current single-map fallback."
+        );
+    }
+    if (inputs.localShadowAtlasWidth > 0 &&
+        inputs.localShadowAtlasHeight > 0 &&
+        inputs.localShadowAtlasTileSize > 0) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Shadow,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "LocalShadowAtlasBudget",
+            "",
+            inputs.localShadowAtlasAssignedTiles > 0
+                ? "LocalShadowAtlas"
+                : "",
+            "Physical atlas resource and occupancy diagnostics for upcoming point/spot shadow rendering."
+        );
+    }
     if (inputs.lightTileCullComputeEnabled) {
         AppendPass(
             plan,
@@ -1082,13 +1406,6 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "First compute-backed tiled light-list write feeding deferred lighting."
         );
     }
-    if (inputs.appendRenderFeatures != nullptr) {
-        inputs.appendRenderFeatures(
-            plan,
-            RenderFramePassKind::DeferredLighting,
-            inputs.appendRenderFeaturesUserData
-        );
-    }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
         inputs.weightedTranslucencyFramebufferCount > 0) {
         AppendPass(
@@ -1097,9 +1414,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "WeightedTranslucencyForwardPlus",
-            "HDRSceneColor",
+            "SceneDepth",
             "WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
-            "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling, then resolves them into HDR scene color."
+            "Clears and writes weighted blended translucency accum/revealage targets after tiled light culling."
         );
     }
     if (inputs.hdrRenderPassAllocated) {
@@ -1122,6 +1439,26 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "Recorded offscreen HDR clear pass; scene rendering migrates into this target in the next slice."
         );
     }
+    if (inputs.appendRenderFeatures != nullptr) {
+        inputs.appendRenderFeatures(
+            plan,
+            RenderFramePassKind::DeferredLighting,
+            inputs.appendRenderFeaturesUserData
+        );
+    }
+    if (inputs.weightedTranslucencyRenderPassAllocated &&
+        inputs.weightedTranslucencyFramebufferCount > 0) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Forward,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "WeightedTranslucencyResolve",
+            "HDRSceneColor, WeightedTranslucencyAccum, WeightedTranslucencyRevealage",
+            "HDRSceneColor",
+            "Resolves weighted blended translucency accum/revealage back into HDR scene color."
+        );
+    }
 
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(
@@ -1141,36 +1478,6 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, Velocity, LegacyShadowMap",
             "SwapchainColor",
             "Debug visualizer for deferred attachments and reconstructed deferred shadow visibility."
-        );
-    }
-
-    if (inputs.shadowPassEnabled) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Shadow,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "LegacyShadowDepth",
-            "",
-            "LegacyShadowMap",
-            "Current directional shadow-map path kept as the fallback tier."
-        );
-    }
-    if (inputs.directionalShadowCascadeScaffoldEnabled &&
-        inputs.directionalShadowCascadeCount > 1) {
-        AppendPass(
-            plan,
-            RenderFramePassKind::Shadow,
-            RenderFramePassStatus::Active,
-            RenderFramePassQueue::Graphics,
-            "DirectionalCSMScaffold",
-            "DirectionalShadowCascades",
-            inputs.directionalShadowAtlasPasses > 0
-                ? "DirectionalShadowCascades"
-                : "",
-            inputs.directionalShadowAtlasPasses > 0
-                ? "Records one shadow-depth tile pass per active directional cascade while the single shadow map remains the sampled fallback."
-                : "CSM split and stable texel diagnostics feeding the current single-map fallback."
         );
     }
 
