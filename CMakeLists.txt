@@ -144,6 +144,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/frame_graph.cpp
     src/renderer/vulkan/render_feature_registry.cpp
     src/renderer/vulkan/features/height_fog_feature.cpp
+    src/renderer/vulkan/features/post_process_feature.cpp
     src/renderer/vulkan/features/reflection_probe_fallback_feature.cpp
     src/renderer/vulkan/features/ssao_feature.cpp
     src/renderer/vulkan/features/ssr_feature.cpp

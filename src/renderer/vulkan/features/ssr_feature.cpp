@@ -11,6 +11,9 @@ namespace se {
 void VulkanSsrFeature::AppendFrameGraph(
     const VulkanRenderFeatureFrameGraphContext& context
 ) const {
+    if (context.stage != VulkanRenderFeatureFrameGraphStage::Lighting) {
+        return;
+    }
     if (context.stats.ssr.colorResolveEnabled > 0) {
         AppendRenderFrameGraphPass(
             context.plan,

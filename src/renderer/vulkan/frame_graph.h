@@ -80,6 +80,7 @@ struct RenderFrameGraphPlan {
 
 using RenderFrameGraphAppendCallback = void (*)(
     RenderFrameGraphPlan& plan,
+    RenderFramePassKind stage,
     const void* userData
 );
 

@@ -6,18 +6,28 @@ namespace se {
 
 struct RenderFrameGraphPlan;
 struct RendererStats;
+struct VulkanRenderDebugSettings;
 struct VulkanShadowSettings;
+
+enum class VulkanRenderFeatureFrameGraphStage {
+    Lighting,
+    PostProcess
+};
 
 struct VulkanRenderFeatureContext {
     const VulkanShadowSettings& shadowSettings;
+    const VulkanRenderDebugSettings& debugSettings;
     bool has3DMainPass = false;
     bool deferredLightingAvailable = false;
+    bool hdrCompositeAvailable = false;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {
     RenderFrameGraphPlan& plan;
     const VulkanRenderFeatureContext& renderer;
     const RendererStats& stats;
+    VulkanRenderFeatureFrameGraphStage stage =
+        VulkanRenderFeatureFrameGraphStage::Lighting;
 };
 
 struct VulkanRenderFeatureStatsContext {

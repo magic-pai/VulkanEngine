@@ -9,6 +9,7 @@
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/features/height_fog_feature.h"
+#include "renderer/vulkan/features/post_process_feature.h"
 #include "renderer/vulkan/features/reflection_probe_fallback_feature.h"
 #include "renderer/vulkan/features/ssao_feature.h"
 #include "renderer/vulkan/features/ssr_feature.h"
@@ -811,6 +812,7 @@ struct RenderFeatureFrameGraphAppendData {
 
 void AppendRenderFeaturesToCurrentFrameGraph(
     RenderFrameGraphPlan& plan,
+    RenderFramePassKind stage,
     const void* userData
 ) {
     const auto* data =
@@ -826,7 +828,10 @@ void AppendRenderFeaturesToCurrentFrameGraph(
         VulkanRenderFeatureFrameGraphContext{
             plan,
             *data->renderer,
-            *data->stats
+            *data->stats,
+            stage == RenderFramePassKind::PostProcess
+                ? VulkanRenderFeatureFrameGraphStage::PostProcess
+                : VulkanRenderFeatureFrameGraphStage::Lighting
         }
     );
 }
@@ -1861,6 +1866,7 @@ VulkanRenderer::VulkanRenderer(
     m_RenderFeatures.Add(std::make_unique<VulkanSsrFeature>());
     m_RenderFeatures.Add(std::make_unique<VulkanReflectionProbeFallbackFeature>());
     m_RenderFeatures.Add(std::make_unique<VulkanHeightFogFeature>());
+    m_RenderFeatures.Add(std::make_unique<VulkanPostProcessFeature>());
     ApplyEnvironmentRenderSettings();
     if (m_Scene != nullptr) {
         SE_ASSERT(!m_Scene->Empty(), "VulkanRenderer requires at least one renderable in the 2D scene");
@@ -2130,10 +2136,18 @@ void VulkanRenderer::DrawFrame() {
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
+    const bool showDeferredHdr =
+        UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView);
+    const bool hdrCompositeAvailable =
+        showDeferredHdr &&
+        m_HdrCompositePipeline != nullptr &&
+        m_HdrDescriptorSets != nullptr;
     const VulkanRenderFeatureContext renderFeatureContext{
         m_ShadowSettings,
+        m_RenderDebugSettings,
         has3DMainPass,
-        m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr
+        m_DeferredLightingPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
+        hdrCompositeAvailable
     };
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     const FrameMaterialSet frameMaterialSet = has3DMainPass
@@ -2192,8 +2206,6 @@ void VulkanRenderer::DrawFrame() {
     m_SyncObjects->MarkImageInFlight(imageIndex, currentFrameFence);
     vkResetFences(m_Device.Handle(), 1, &currentFrameFence);
 
-    const bool showDeferredHdr =
-        UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView);
     const int deferredPbrDebugView =
         DeferredPbrDebugViewIndex(m_RenderDebugSettings.forwardView);
     const int weightedTranslucencyDebugView =
@@ -2244,57 +2256,6 @@ void VulkanRenderer::DrawFrame() {
             renderFeatureContext
         }
     );
-    frameStats.postProcess.bloomIntensity =
-        std::clamp(m_RenderDebugSettings.bloomIntensity, 0.0f, 4.0f);
-    frameStats.postProcess.bloomThreshold =
-        std::clamp(m_RenderDebugSettings.bloomThreshold, 0.0f, 16.0f);
-    frameStats.postProcess.bloomRadiusPixels =
-        std::clamp(m_RenderDebugSettings.bloomRadiusPixels, 0.0f, 24.0f);
-    frameStats.postProcess.bloomEnabled =
-        m_RenderDebugSettings.bloomEnabled &&
-            frameStats.postProcess.bloomIntensity > 0.0001f &&
-            frameStats.postProcess.bloomRadiusPixels > 0.0001f
-            ? 1u
-            : 0u;
-    frameStats.postProcess.toneMapMode =
-        std::clamp<u32>(m_RenderDebugSettings.toneMapMode, 0u, 2u);
-    frameStats.postProcess.exposure =
-        std::clamp(m_RenderDebugSettings.exposure, 0.001f, 32.0f);
-    frameStats.postProcess.toneMapWhitePoint =
-        std::clamp(m_RenderDebugSettings.toneMapWhitePoint, 0.1f, 64.0f);
-    frameStats.postProcess.toneMappingEnabled =
-        frameStats.postProcess.toneMapMode == 2u ? 0u : 1u;
-    frameStats.postProcess.autoExposureEnabled =
-        m_RenderDebugSettings.autoExposureEnabled ? 1u : 0u;
-    frameStats.postProcess.autoExposureTargetLuminance =
-        std::clamp(m_RenderDebugSettings.autoExposureTargetLuminance, 0.001f, 4.0f);
-    frameStats.postProcess.autoExposureMin =
-        std::clamp(m_RenderDebugSettings.autoExposureMin, 0.001f, 32.0f);
-    frameStats.postProcess.autoExposureMax =
-        std::max(
-            frameStats.postProcess.autoExposureMin,
-            std::clamp(m_RenderDebugSettings.autoExposureMax, 0.001f, 32.0f)
-        );
-    frameStats.postProcess.autoExposureAdaptation =
-        std::clamp(m_RenderDebugSettings.autoExposureAdaptation, 0.0f, 1.0f);
-    frameStats.postProcess.colorGradingSaturation =
-        std::clamp(m_RenderDebugSettings.colorGradingSaturation, 0.0f, 2.5f);
-    frameStats.postProcess.colorGradingContrast =
-        std::clamp(m_RenderDebugSettings.colorGradingContrast, 0.0f, 2.5f);
-    frameStats.postProcess.colorGradingGamma =
-        std::clamp(m_RenderDebugSettings.colorGradingGamma, 0.25f, 4.0f);
-    frameStats.postProcess.colorGradingEnabled =
-        m_RenderDebugSettings.colorGradingEnabled ? 1u : 0u;
-    frameStats.postProcess.sharpeningStrength =
-        std::clamp(m_RenderDebugSettings.sharpeningStrength, 0.0f, 2.0f);
-    frameStats.postProcess.sharpeningRadiusPixels =
-        std::clamp(m_RenderDebugSettings.sharpeningRadiusPixels, 0.0f, 4.0f);
-    frameStats.postProcess.sharpeningEnabled =
-        m_RenderDebugSettings.sharpeningEnabled &&
-            frameStats.postProcess.sharpeningStrength > 0.0001f &&
-            frameStats.postProcess.sharpeningRadiusPixels > 0.0001f
-            ? 1u
-            : 0u;
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
         frameStats.shadowCascades.atlasAllocated = cascadeAtlasExtent.width > 0 ? 1u : 0u;
@@ -2569,28 +2530,13 @@ void VulkanRenderer::DrawFrame() {
             AppendRenderFeaturesToCurrentFrameGraph,
             &renderFeatureFrameGraphAppendData,
             false,
-            frameStats.postProcess.autoExposureEnabled > 0 &&
-                showDeferredHdr &&
-                m_HdrCompositePipeline != nullptr &&
-                m_HdrDescriptorSets != nullptr,
-            frameStats.postProcess.toneMappingEnabled > 0 &&
-                showDeferredHdr &&
-                m_HdrCompositePipeline != nullptr &&
-                m_HdrDescriptorSets != nullptr,
-            frameStats.postProcess.bloomEnabled > 0 &&
-                showDeferredHdr &&
-                m_HdrCompositePipeline != nullptr &&
-                m_HdrDescriptorSets != nullptr,
-            frameStats.postProcess.colorGradingEnabled > 0 &&
-                showDeferredHdr &&
-                m_HdrCompositePipeline != nullptr &&
-                m_HdrDescriptorSets != nullptr,
-            frameStats.postProcess.sharpeningEnabled > 0 &&
-                showDeferredHdr &&
-                m_HdrCompositePipeline != nullptr &&
-                m_HdrDescriptorSets != nullptr,
+            false,
+            false,
+            false,
+            false,
+            false,
             has3DMainPass && m_LightTileCullComputePipeline != nullptr,
-            showDeferredHdr && m_HdrCompositePipeline != nullptr && m_HdrDescriptorSets != nullptr,
+            hdrCompositeAvailable,
             gBufferDebugView >= 0 && m_GBufferDebugPipeline != nullptr && m_GBufferDescriptorSets != nullptr,
             frameStats.weightedTranslucency.allocated > 0,
             frameStats.weightedTranslucency.accumFormat,

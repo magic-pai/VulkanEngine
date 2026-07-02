@@ -11,6 +11,9 @@ namespace se {
 void VulkanSsaoFeature::AppendFrameGraph(
     const VulkanRenderFeatureFrameGraphContext& context
 ) const {
+    if (context.stage != VulkanRenderFeatureFrameGraphStage::Lighting) {
+        return;
+    }
     if (context.stats.ssao.enabled > 0 &&
         context.renderer.has3DMainPass &&
         context.renderer.deferredLightingAvailable) {

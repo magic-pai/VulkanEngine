@@ -11,6 +11,9 @@ namespace se {
 void VulkanHeightFogFeature::AppendFrameGraph(
     const VulkanRenderFeatureFrameGraphContext& context
 ) const {
+    if (context.stage != VulkanRenderFeatureFrameGraphStage::Lighting) {
+        return;
+    }
     if (context.stats.heightFog.enabled > 0 &&
         context.renderer.has3DMainPass) {
         AppendRenderFrameGraphPass(

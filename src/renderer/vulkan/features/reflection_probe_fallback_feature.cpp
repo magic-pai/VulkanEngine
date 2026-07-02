@@ -11,6 +11,9 @@ namespace se {
 void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
     const VulkanRenderFeatureFrameGraphContext& context
 ) const {
+    if (context.stage != VulkanRenderFeatureFrameGraphStage::Lighting) {
+        return;
+    }
     const RendererReflectionProbeStats& reflectionProbe =
         context.stats.reflectionProbe;
     if (reflectionProbe.fallbackEnabled > 0 &&
