@@ -375,6 +375,12 @@ private:
         std::size_t imageIndex,
         const FrameMaterialSet& materials
     ) const;
+    bool ProbeGridEnabled() const;
+    void PopulateProbeGridUniforms(UniformBufferObject& uniformData) const;
+    void UpdateProbeGridBuffer(
+        std::size_t imageIndex,
+        RendererProbeGridStats& stats
+    ) const;
     void UpdateDirectionalShadowCascadeBuffer(
         std::size_t imageIndex,
         const DirectionalShadowCascadeSet& cascades,
@@ -467,6 +473,7 @@ private:
     std::unique_ptr<VulkanLightTileDiagnosticsBuffer> m_LightTileDiagnosticsBuffer;
     std::unique_ptr<VulkanAutoExposureBuffer> m_AutoExposureBuffer;
     std::unique_ptr<VulkanMaterialBuffer> m_MaterialBuffer;
+    std::unique_ptr<VulkanProbeGridBuffer> m_ProbeGridBuffer;
     std::unique_ptr<VulkanDirectionalShadowCascadeBuffer> m_DirectionalShadowCascadeBuffer;
     std::unique_ptr<VulkanLocalShadowBuffer> m_LocalShadowBuffer;
     std::unique_ptr<VulkanSceneRenderTargets> m_SceneRenderTargets;

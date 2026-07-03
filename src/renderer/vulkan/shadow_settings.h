@@ -62,6 +62,8 @@ struct VulkanShadowSettings {
     f32 localReflectionProbeColorR = 1.0f;
     f32 localReflectionProbeColorG = 0.82f;
     f32 localReflectionProbeColorB = 0.62f;
+    bool probeGridEnabled = false;
+    f32 probeGridBlendStrength = 0.5f;
     bool heightFogEnabled = false;
     f32 heightFogDensity = 0.035f;
     f32 heightFogHeightFalloff = 0.08f;

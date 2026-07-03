@@ -305,29 +305,74 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     return mix(procedural, sampled, 0.65) * enabled;
 }
 
-vec3 SampleProbeGridIrradiance(vec3 worldPos) {
+vec3 ProbeGridProbeIrradiance(uint probeIndex, vec3 normal) {
+    uint baseIndex = probeIndex * 7u;
+    vec3 n = dot(normal, normal) > 0.0001
+        ? normalize(normal)
+        : vec3(0.0, 1.0, 0.0);
+    vec3 irradiance = probeGrid.probes[baseIndex].rgb;
+    irradiance += probeGrid.probes[baseIndex + 1u].rgb * max(n.x, 0.0);
+    irradiance += probeGrid.probes[baseIndex + 2u].rgb * max(-n.x, 0.0);
+    irradiance += probeGrid.probes[baseIndex + 3u].rgb * max(n.y, 0.0);
+    irradiance += probeGrid.probes[baseIndex + 4u].rgb * max(-n.y, 0.0);
+    irradiance += probeGrid.probes[baseIndex + 5u].rgb * max(n.z, 0.0);
+    irradiance += probeGrid.probes[baseIndex + 6u].rgb * max(-n.z, 0.0);
+    return max(irradiance, vec3(0.0));
+}
+
+vec3 SampleProbeGridIrradiance(vec3 worldPos, vec3 normal) {
     vec3 origin = frame.probeGridOriginSpacing.xyz;
     float spacing = frame.probeGridOriginSpacing.w;
     vec3 gs = frame.probeGridSizeBlend.xyz;
-    if (spacing <= 0.0 || gs.x < 1.0) return vec3(0.0);
-    vec3 lp = (worldPos - origin) / spacing;
-    ivec3 bc = ivec3(floor(lp));
-    vec3 frac = fract(lp);
-    bc = clamp(bc, ivec3(0), ivec3(gs) - 2);
-    frac = clamp(frac, 0.0, 1.0);
-    int gx=int(gs.x), gy=int(gs.y);
-    vec3 c000=probeGrid.probes[uint(bc.z*gy*gx+bc.y*gx+bc.x)*7u].rgb;
-    vec3 c100=probeGrid.probes[uint(bc.z*gy*gx+bc.y*gx+bc.x+1)*7u].rgb;
-    vec3 c010=probeGrid.probes[uint(bc.z*gy*gx+(bc.y+1)*gx+bc.x)*7u].rgb;
-    vec3 c110=probeGrid.probes[uint(bc.z*gy*gx+(bc.y+1)*gx+bc.x+1)*7u].rgb;
-    vec3 c001=probeGrid.probes[uint((bc.z+1)*gy*gx+bc.y*gx+bc.x)*7u].rgb;
-    vec3 c101=probeGrid.probes[uint((bc.z+1)*gy*gx+bc.y*gx+bc.x+1)*7u].rgb;
-    vec3 c011=probeGrid.probes[uint((bc.z+1)*gy*gx+(bc.y+1)*gx+bc.x)*7u].rgb;
-    vec3 c111=probeGrid.probes[uint((bc.z+1)*gy*gx+(bc.y+1)*gx+bc.x+1)*7u].rgb;
-    vec3 c00=mix(c000,c100,frac.x); vec3 c10=mix(c010,c110,frac.x);
-    vec3 c01=mix(c001,c101,frac.x); vec3 c11=mix(c011,c111,frac.x);
-    vec3 c0=mix(c00,c10,frac.y); vec3 c1=mix(c01,c11,frac.y);
-    return mix(c0,c1,frac.z);
+    float blendStrength = clamp(frame.probeGridSizeBlend.w, 0.0, 2.0);
+    ivec3 gridSize = ivec3(gs + vec3(0.5));
+    if (spacing <= 0.0 ||
+        blendStrength <= 0.0001 ||
+        gridSize.x < 2 ||
+        gridSize.y < 2 ||
+        gridSize.z < 2) {
+        return vec3(0.0);
+    }
+
+    vec3 gridPos = clamp(
+        (worldPos - origin) / spacing,
+        vec3(0.0),
+        vec3(gridSize) - vec3(1.0)
+    );
+    ivec3 cell = clamp(
+        ivec3(floor(gridPos)),
+        ivec3(0),
+        gridSize - ivec3(2)
+    );
+    vec3 frac = clamp(gridPos - vec3(cell), vec3(0.0), vec3(1.0));
+    int gx = gridSize.x;
+    int gy = gridSize.y;
+
+    uint i000 = uint(cell.z * gy * gx + cell.y * gx + cell.x);
+    uint i100 = uint(cell.z * gy * gx + cell.y * gx + cell.x + 1);
+    uint i010 = uint(cell.z * gy * gx + (cell.y + 1) * gx + cell.x);
+    uint i110 = uint(cell.z * gy * gx + (cell.y + 1) * gx + cell.x + 1);
+    uint i001 = uint((cell.z + 1) * gy * gx + cell.y * gx + cell.x);
+    uint i101 = uint((cell.z + 1) * gy * gx + cell.y * gx + cell.x + 1);
+    uint i011 = uint((cell.z + 1) * gy * gx + (cell.y + 1) * gx + cell.x);
+    uint i111 = uint((cell.z + 1) * gy * gx + (cell.y + 1) * gx + cell.x + 1);
+
+    vec3 c000 = ProbeGridProbeIrradiance(i000, normal);
+    vec3 c100 = ProbeGridProbeIrradiance(i100, normal);
+    vec3 c010 = ProbeGridProbeIrradiance(i010, normal);
+    vec3 c110 = ProbeGridProbeIrradiance(i110, normal);
+    vec3 c001 = ProbeGridProbeIrradiance(i001, normal);
+    vec3 c101 = ProbeGridProbeIrradiance(i101, normal);
+    vec3 c011 = ProbeGridProbeIrradiance(i011, normal);
+    vec3 c111 = ProbeGridProbeIrradiance(i111, normal);
+
+    vec3 c00 = mix(c000, c100, frac.x);
+    vec3 c10 = mix(c010, c110, frac.x);
+    vec3 c01 = mix(c001, c101, frac.x);
+    vec3 c11 = mix(c011, c111, frac.x);
+    vec3 c0 = mix(c00, c10, frac.y);
+    vec3 c1 = mix(c01, c11, frac.y);
+    return mix(c0, c1, frac.z) * blendStrength;
 }
 
 float LocalReflectionProbeWeightAt(int probeIndex, vec3 worldPosition) {
@@ -1695,7 +1740,10 @@ void main() {
         envSpecular * (0.55 + specularStrength)) * envStrength * occlusion;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
     ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
-    ambient += SampleProbeGridIrradiance(fragWorldPosition) * baseColor * occlusion * (1.0 - metallic) * 0.5;
+    ambient += SampleProbeGridIrradiance(fragWorldPosition, normal) *
+        baseColor *
+        occlusion *
+        (1.0 - metallic);
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
         vec3 transmittedEnv =

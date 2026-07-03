@@ -127,6 +127,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererSsaoStats& ssao = stats.ssao;
     const RendererSsrStats& ssr = stats.ssr;
     const RendererIblStats& ibl = stats.ibl;
+    const RendererProbeGridStats& probeGrid = stats.probeGrid;
     const RendererReflectionProbeStats& reflectionProbe = stats.reflectionProbe;
     const RendererHeightFogStats& heightFog = stats.heightFog;
     const RendererPostProcessStats& postProcess = stats.postProcess;
@@ -311,6 +312,22 @@ void BenchmarkRecorder::RecordFrame(
         << static_cast<int>(ibl.prefilteredFormat) << ','
         << ibl.descriptorSetsBound << ','
         << ibl.shaderIntegrationEnabled << ','
+        << probeGrid.allocated << ','
+        << probeGrid.enabled << ','
+        << probeGrid.shaderIntegrationEnabled << ','
+        << probeGrid.bufferUpdates << ','
+        << probeGrid.fallbackCount << ','
+        << probeGrid.probeCount << ','
+        << probeGrid.sizeX << ','
+        << probeGrid.sizeY << ','
+        << probeGrid.sizeZ << ','
+        << probeGrid.vec4sPerProbe << ','
+        << probeGrid.directionalLobeCount << ','
+        << probeGrid.originX << ','
+        << probeGrid.originY << ','
+        << probeGrid.originZ << ','
+        << probeGrid.spacing << ','
+        << probeGrid.blendStrength << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -775,6 +792,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "ibl_prefiltered_face_size,ibl_prefiltered_mip_count,"
         << "ibl_prefiltered_format,ibl_descriptor_sets_bound,"
         << "ibl_shader_integration_enabled,"
+        << "probe_grid_allocated,probe_grid_enabled,"
+        << "probe_grid_shader_integration_enabled,probe_grid_buffer_updates,"
+        << "probe_grid_fallback_count,probe_grid_probe_count,"
+        << "probe_grid_size_x,probe_grid_size_y,probe_grid_size_z,"
+        << "probe_grid_vec4s_per_probe,probe_grid_directional_lobe_count,"
+        << "probe_grid_origin_x,probe_grid_origin_y,probe_grid_origin_z,"
+        << "probe_grid_spacing,probe_grid_blend_strength,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"

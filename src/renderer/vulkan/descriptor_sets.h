@@ -19,6 +19,7 @@ class VulkanAutoExposureBuffer;
 class VulkanLightBuffer;
 class VulkanLightTileDiagnosticsBuffer;
 class VulkanMaterialBuffer;
+class VulkanProbeGridBuffer;
 class VulkanDirectionalShadowCascadeBuffer;
 class VulkanLocalShadowBuffer;
 class VulkanUniformBuffer;
@@ -32,6 +33,7 @@ public:
         const VulkanLightBuffer& lightBuffer,
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
+        const VulkanProbeGridBuffer& probeGridBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
         const VulkanLocalShadowBuffer& localShadowBuffer,
         const VulkanAutoExposureBuffer& autoExposureBuffer
@@ -52,6 +54,7 @@ public:
         const VulkanLightBuffer& lightBuffer,
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
+        const VulkanProbeGridBuffer& probeGridBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
         const VulkanLocalShadowBuffer& localShadowBuffer,
         const VulkanAutoExposureBuffer& autoExposureBuffer
@@ -67,6 +70,7 @@ private:
         const VulkanLightBuffer& lightBuffer,
         const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
         const VulkanMaterialBuffer& materialBuffer,
+        const VulkanProbeGridBuffer& probeGridBuffer,
         const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
         const VulkanLocalShadowBuffer& localShadowBuffer,
         const VulkanAutoExposureBuffer& autoExposureBuffer

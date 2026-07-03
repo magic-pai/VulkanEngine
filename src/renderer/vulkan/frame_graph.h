@@ -340,6 +340,14 @@ struct CurrentVulkanFrameGraphInputs {
     u32 reflectionCaptureSlotCount = 0;
     u32 reflectionCaptureSlotReadyCount = 0;
     u32 reflectionCaptureSlotFallbackCount = 0;
+    bool probeGridAllocated = false;
+    bool probeGridEnabled = false;
+    u32 probeGridProbeCount = 0;
+    u32 probeGridSizeX = 0;
+    u32 probeGridSizeY = 0;
+    u32 probeGridSizeZ = 0;
+    u32 probeGridVec4sPerProbe = 0;
+    u32 probeGridDirectionalLobeCount = 0;
 };
 
 std::string_view RenderFramePassStatusName(RenderFramePassStatus status);

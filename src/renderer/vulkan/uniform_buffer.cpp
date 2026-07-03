@@ -38,6 +38,10 @@ std::span<const std::byte> AsBytes(const MaterialBufferObject& materialData) {
     return std::as_bytes(std::span<const MaterialBufferObject>(&materialData, 1));
 }
 
+std::span<const std::byte> AsBytes(const ProbeGridBufferObject& probeGridData) {
+    return std::as_bytes(std::span<const ProbeGridBufferObject>(&probeGridData, 1));
+}
+
 }
 
 VulkanUniformBuffer::VulkanUniformBuffer(
@@ -410,6 +414,78 @@ void VulkanMaterialBuffer::CreateMaterialBuffers(
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
         ));
+    }
+}
+
+VulkanProbeGridBuffer::VulkanProbeGridBuffer(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    CreateBuffers(device, physicalDevice, count);
+}
+
+VulkanProbeGridBuffer::~VulkanProbeGridBuffer() {
+    Release();
+}
+
+std::size_t VulkanProbeGridBuffer::Count() const {
+    return m_Buffers.size();
+}
+
+VkDescriptorBufferInfo VulkanProbeGridBuffer::DescriptorInfo(
+    std::size_t index
+) const {
+    SE_ASSERT(index < m_Buffers.size(), "Probe grid buffer index is out of range");
+
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = m_Buffers[index]->Handle();
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(ProbeGridBufferObject);
+
+    return bufferInfo;
+}
+
+void VulkanProbeGridBuffer::Update(
+    std::size_t index,
+    const ProbeGridBufferObject& probeGridData
+) const {
+    SE_ASSERT(index < m_Buffers.size(), "Probe grid buffer index is out of range");
+    m_Buffers[index]->Upload(AsBytes(probeGridData));
+}
+
+void VulkanProbeGridBuffer::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    Release();
+    CreateBuffers(device, physicalDevice, count);
+}
+
+void VulkanProbeGridBuffer::Release() {
+    m_Buffers.clear();
+}
+
+void VulkanProbeGridBuffer::CreateBuffers(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count
+) {
+    SE_ASSERT(count > 0, "Probe grid buffer count must be greater than zero");
+
+    m_Buffers.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        auto buffer = std::make_unique<VulkanBuffer>(
+            device,
+            physicalDevice,
+            sizeof(ProbeGridBufferObject),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        ProbeGridBufferObject initialData{};
+        buffer->Upload(AsBytes(initialData));
+        m_Buffers.push_back(std::move(buffer));
     }
 }
 

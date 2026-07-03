@@ -97,11 +97,63 @@ constexpr f32 kShadowMinHalfExtent = 2.5f;
 constexpr f32 kShadowPaddingRatio = 0.18f;
 constexpr f32 kShadowDepthPadding = 4.0f;
 constexpr f32 kLocalShadowNearPlane = 0.05f;
+const glm::vec3 kProbeGridOrigin{ -18.0f, -4.0f, -18.0f };
+constexpr f32 kProbeGridSpacing = 12.0f;
 
 using FrameClock = std::chrono::steady_clock;
 
 f32 ElapsedMilliseconds(FrameClock::time_point start, FrameClock::time_point end) {
     return std::chrono::duration<f32, std::milli>(end - start).count();
+}
+
+std::size_t ProbeGridLinearIndex(
+    std::size_t x,
+    std::size_t y,
+    std::size_t z
+) {
+    return z * kProbeGridSizeY * kProbeGridSizeX + y * kProbeGridSizeX + x;
+}
+
+ProbeGridBufferObject BuildDeterministicProbeGridData() {
+    ProbeGridBufferObject data{};
+    for (std::size_t z = 0; z < kProbeGridSizeZ; ++z) {
+        for (std::size_t y = 0; y < kProbeGridSizeY; ++y) {
+            for (std::size_t x = 0; x < kProbeGridSizeX; ++x) {
+                const glm::vec3 normalized{
+                    kProbeGridSizeX > 1
+                        ? static_cast<f32>(x) / static_cast<f32>(kProbeGridSizeX - 1)
+                        : 0.0f,
+                    kProbeGridSizeY > 1
+                        ? static_cast<f32>(y) / static_cast<f32>(kProbeGridSizeY - 1)
+                        : 0.0f,
+                    kProbeGridSizeZ > 1
+                        ? static_cast<f32>(z) / static_cast<f32>(kProbeGridSizeZ - 1)
+                        : 0.0f
+                };
+                const glm::vec3 base =
+                    glm::vec3(0.16f, 0.18f, 0.21f) +
+                    glm::vec3(0.08f, 0.05f, 0.02f) * normalized.x +
+                    glm::vec3(0.08f, 0.11f, 0.16f) * normalized.y +
+                    glm::vec3(0.02f, 0.04f, 0.08f) * normalized.z;
+                GpuProbeGridRecord& record =
+                    data.probes[ProbeGridLinearIndex(x, y, z)];
+                record.irradiance = glm::vec4(base, 1.0f);
+                record.directionalLobes[0] =
+                    glm::vec4(glm::vec3(0.035f, 0.020f, 0.012f) * (0.4f + normalized.x), 0.0f);
+                record.directionalLobes[1] =
+                    glm::vec4(glm::vec3(0.010f, 0.018f, 0.032f) * (1.1f - normalized.x), 0.0f);
+                record.directionalLobes[2] =
+                    glm::vec4(glm::vec3(0.050f, 0.062f, 0.085f) * (0.45f + normalized.y), 0.0f);
+                record.directionalLobes[3] =
+                    glm::vec4(glm::vec3(0.035f, 0.028f, 0.018f) * (1.0f - normalized.y * 0.35f), 0.0f);
+                record.directionalLobes[4] =
+                    glm::vec4(glm::vec3(0.014f, 0.026f, 0.045f) * (0.5f + normalized.z), 0.0f);
+                record.directionalLobes[5] =
+                    glm::vec4(glm::vec3(0.042f, 0.030f, 0.018f) * (1.1f - normalized.z * 0.5f), 0.0f);
+            }
+        }
+    }
+    return data;
 }
 
 RendererDrawStats DrawStatsForQueues(
@@ -2452,6 +2504,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_LightTileDiagnosticsBuffer.reset();
     m_AutoExposureBuffer.reset();
     m_MaterialBuffer.reset();
+    m_ProbeGridBuffer.reset();
     m_DirectionalShadowCascadeBuffer.reset();
     m_LocalShadowBuffer.reset();
     m_UniformBuffer.reset();
@@ -2736,6 +2789,7 @@ void VulkanRenderer::DrawFrame() {
         &lightTileStats
     );
     UpdateMaterialBuffer(imageIndex, frameMaterialSet);
+    UpdateProbeGridBuffer(imageIndex, frameStats.probeGrid);
     UpdateDirectionalShadowCascadeBuffer(
         imageIndex,
         directionalShadowCascades,
@@ -3357,7 +3411,15 @@ void VulkanRenderer::DrawFrame() {
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
             frameStats.reflectionProbe.selectedCaptureResourceReadyCount,
-            frameStats.reflectionProbe.selectedCaptureFallbackCount
+            frameStats.reflectionProbe.selectedCaptureFallbackCount,
+            frameStats.probeGrid.allocated > 0,
+            frameStats.probeGrid.enabled > 0,
+            frameStats.probeGrid.probeCount,
+            frameStats.probeGrid.sizeX,
+            frameStats.probeGrid.sizeY,
+            frameStats.probeGrid.sizeZ,
+            frameStats.probeGrid.vec4sPerProbe,
+            frameStats.probeGrid.directionalLobeCount
         }
     );
 
@@ -3616,6 +3678,7 @@ void VulkanRenderer::SetOverlay3DContext(
         *m_LightBuffer,
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
+        *m_ProbeGridBuffer,
         *m_DirectionalShadowCascadeBuffer,
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
@@ -3715,6 +3778,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         m_Swapchain->Images().size()
     );
+    m_ProbeGridBuffer = std::make_unique<VulkanProbeGridBuffer>(
+        m_Device,
+        m_PhysicalDevice,
+        m_Swapchain->Images().size()
+    );
     m_DirectionalShadowCascadeBuffer =
         std::make_unique<VulkanDirectionalShadowCascadeBuffer>(
             m_Device,
@@ -3741,6 +3809,7 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_LightBuffer,
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
+        *m_ProbeGridBuffer,
         *m_DirectionalShadowCascadeBuffer,
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
@@ -4409,6 +4478,9 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_MaterialBuffer != nullptr) {
         m_MaterialBuffer->Release();
     }
+    if (m_ProbeGridBuffer != nullptr) {
+        m_ProbeGridBuffer->Release();
+    }
     if (m_DirectionalShadowCascadeBuffer != nullptr) {
         m_DirectionalShadowCascadeBuffer->Release();
     }
@@ -4440,6 +4512,13 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_MaterialBuffer != nullptr) {
         m_MaterialBuffer->Recreate(m_Device, m_PhysicalDevice, m_Swapchain->Images().size());
     }
+    if (m_ProbeGridBuffer != nullptr) {
+        m_ProbeGridBuffer->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_Swapchain->Images().size()
+        );
+    }
     if (m_DirectionalShadowCascadeBuffer != nullptr) {
         m_DirectionalShadowCascadeBuffer->Recreate(
             m_Device,
@@ -4461,6 +4540,7 @@ void VulkanRenderer::RecreateSwapchain() {
         *m_LightBuffer,
         *m_LightTileDiagnosticsBuffer,
         *m_MaterialBuffer,
+        *m_ProbeGridBuffer,
         *m_DirectionalShadowCascadeBuffer,
         *m_LocalShadowBuffer,
         *m_AutoExposureBuffer
@@ -5010,6 +5090,7 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_LightBuffer,
             *m_LightTileDiagnosticsBuffer,
             *m_MaterialBuffer,
+            *m_ProbeGridBuffer,
             *m_DirectionalShadowCascadeBuffer,
             *m_LocalShadowBuffer,
             *m_AutoExposureBuffer
@@ -5075,6 +5156,16 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
         EnvironmentFlagOverride("SE_LOCAL_REFLECTION_PROBE");
     if (localReflectionProbe.has_value()) {
         m_ShadowSettings.localReflectionProbeEnabled = *localReflectionProbe;
+    }
+    const std::optional<bool> probeGrid =
+        EnvironmentFlagOverride("SE_PROBE_GRID");
+    if (probeGrid.has_value()) {
+        m_ShadowSettings.probeGridEnabled = *probeGrid;
+    }
+    const std::optional<f32> probeGridBlend =
+        EnvironmentFloatOverride("SE_PROBE_GRID_BLEND");
+    if (probeGridBlend.has_value()) {
+        m_ShadowSettings.probeGridBlendStrength = *probeGridBlend;
     }
     const std::optional<bool> heightFog =
         EnvironmentFlagOverride("SE_HEIGHT_FOG");
@@ -5449,6 +5540,7 @@ void VulkanRenderer::UpdateUniformBuffer(
         m_ShadowSettings.reflectionProbeCubemapEnabled,
         uniformData
     );
+    PopulateProbeGridUniforms(uniformData);
     const bool heightFogApplied =
         m_ShadowSettings.heightFogEnabled &&
         m_ShadowSettings.heightFogDensity > 0.0001f &&
@@ -5601,6 +5693,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         m_ShadowSettings.reflectionProbeCubemapEnabled,
         uniformData
     );
+    PopulateProbeGridUniforms(uniformData);
     const bool heightFogApplied =
         m_ShadowSettings.heightFogEnabled &&
         m_ShadowSettings.heightFogDensity > 0.0001f &&
@@ -5798,6 +5891,61 @@ void VulkanRenderer::UpdateMaterialBuffer(
     }
 
     m_MaterialBuffer->Update(imageIndex, materials.materialData);
+}
+
+bool VulkanRenderer::ProbeGridEnabled() const {
+    return m_ShadowSettings.probeGridEnabled &&
+        m_ShadowSettings.probeGridBlendStrength > 0.0001f;
+}
+
+void VulkanRenderer::PopulateProbeGridUniforms(
+    UniformBufferObject& uniformData
+) const {
+    if (!ProbeGridEnabled()) {
+        uniformData.probeGridOriginSpacing = glm::vec4(kProbeGridOrigin, kProbeGridSpacing);
+        uniformData.probeGridSizeBlend = glm::vec4(0.0f);
+        return;
+    }
+
+    uniformData.probeGridOriginSpacing = glm::vec4(kProbeGridOrigin, kProbeGridSpacing);
+    uniformData.probeGridSizeBlend = glm::vec4(
+        static_cast<f32>(kProbeGridSizeX),
+        static_cast<f32>(kProbeGridSizeY),
+        static_cast<f32>(kProbeGridSizeZ),
+        std::clamp(m_ShadowSettings.probeGridBlendStrength, 0.0f, 2.0f)
+    );
+}
+
+void VulkanRenderer::UpdateProbeGridBuffer(
+    std::size_t imageIndex,
+    RendererProbeGridStats& stats
+) const {
+    stats.allocated = m_ProbeGridBuffer != nullptr ? 1u : 0u;
+    stats.enabled = ProbeGridEnabled() ? 1u : 0u;
+    stats.shaderIntegrationEnabled = stats.enabled;
+    stats.fallbackCount = stats.enabled > 0 ? 0u : 1u;
+    stats.probeCount = static_cast<u32>(kProbeGridProbeCount);
+    stats.sizeX = static_cast<u32>(kProbeGridSizeX);
+    stats.sizeY = static_cast<u32>(kProbeGridSizeY);
+    stats.sizeZ = static_cast<u32>(kProbeGridSizeZ);
+    stats.vec4sPerProbe = static_cast<u32>(kProbeGridVec4sPerProbe);
+    stats.directionalLobeCount = static_cast<u32>(kProbeGridDirectionalLobeCount);
+    stats.originX = kProbeGridOrigin.x;
+    stats.originY = kProbeGridOrigin.y;
+    stats.originZ = kProbeGridOrigin.z;
+    stats.spacing = kProbeGridSpacing;
+    stats.blendStrength = stats.enabled > 0
+        ? std::clamp(m_ShadowSettings.probeGridBlendStrength, 0.0f, 2.0f)
+        : 0.0f;
+
+    if (m_ProbeGridBuffer == nullptr ||
+        stats.enabled == 0 ||
+        imageIndex >= m_ProbeGridBuffer->Count()) {
+        return;
+    }
+
+    m_ProbeGridBuffer->Update(imageIndex, BuildDeterministicProbeGridData());
+    stats.bufferUpdates = 1u;
 }
 
 void VulkanRenderer::UpdateDirectionalShadowCascadeBuffer(

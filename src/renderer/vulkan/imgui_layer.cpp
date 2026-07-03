@@ -386,6 +386,14 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.localReflectionProbeColorG = localProbeColor[1];
         settings.localReflectionProbeColorB = localProbeColor[2];
     }
+    ImGui::Checkbox("Static light-probe grid##Shadow", &settings.probeGridEnabled);
+    ImGui::SliderFloat(
+        "Probe grid blend##Shadow",
+        &settings.probeGridBlendStrength,
+        0.0f,
+        2.0f,
+        "%.2f"
+    );
     ImGui::SeparatorText("Height fog");
     ImGui::Checkbox("Height fog##Shadow", &settings.heightFogEnabled);
     ImGui::SliderFloat(
@@ -844,6 +852,18 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ibl.prefilteredFaceSize,
         stats.ibl.prefilteredMipCount,
         stats.ibl.descriptorSetsBound
+    );
+    ImGui::Text(
+        "Probe grid: %s, %ux%ux%u (%u probes), %u vec4/probe, lobes %u, blend %.2f, updates %u",
+        stats.probeGrid.enabled ? "enabled" : "off",
+        stats.probeGrid.sizeX,
+        stats.probeGrid.sizeY,
+        stats.probeGrid.sizeZ,
+        stats.probeGrid.probeCount,
+        stats.probeGrid.vec4sPerProbe,
+        stats.probeGrid.directionalLobeCount,
+        stats.probeGrid.blendStrength,
+        stats.probeGrid.bufferUpdates
     );
     ImGui::Text(
         "Local reflection probe: %s, scene %s, probes %u/%u, eligible %u, selected %u, top %d, dropped %u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",

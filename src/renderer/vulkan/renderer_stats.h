@@ -180,6 +180,25 @@ struct RendererIblStats {
     u32 shaderIntegrationEnabled = 0;
 };
 
+struct RendererProbeGridStats {
+    u32 allocated = 0;
+    u32 enabled = 0;
+    u32 shaderIntegrationEnabled = 0;
+    u32 bufferUpdates = 0;
+    u32 fallbackCount = 0;
+    u32 probeCount = 0;
+    u32 sizeX = 0;
+    u32 sizeY = 0;
+    u32 sizeZ = 0;
+    u32 vec4sPerProbe = 0;
+    u32 directionalLobeCount = 0;
+    f32 originX = 0.0f;
+    f32 originY = 0.0f;
+    f32 originZ = 0.0f;
+    f32 spacing = 0.0f;
+    f32 blendStrength = 0.0f;
+};
+
 struct RendererReflectionProbeStats {
     u32 fallbackEnabled = 0;
     f32 diffuseIntensity = 0.0f;
@@ -493,6 +512,7 @@ struct RendererStats {
     RendererSsaoStats ssao;
     RendererSsrStats ssr;
     RendererIblStats ibl;
+    RendererProbeGridStats probeGrid;
     RendererReflectionProbeStats reflectionProbe;
     RendererHeightFogStats heightFog;
     RendererPostProcessStats postProcess;

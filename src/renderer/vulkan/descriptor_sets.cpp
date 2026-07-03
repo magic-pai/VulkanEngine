@@ -21,6 +21,7 @@ VulkanDescriptorSets::VulkanDescriptorSets(
     const VulkanLightBuffer& lightBuffer,
     const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
     const VulkanMaterialBuffer& materialBuffer,
+    const VulkanProbeGridBuffer& probeGridBuffer,
     const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
     const VulkanLocalShadowBuffer& localShadowBuffer,
     const VulkanAutoExposureBuffer& autoExposureBuffer
@@ -34,6 +35,7 @@ VulkanDescriptorSets::VulkanDescriptorSets(
             lightBuffer,
             lightTileDiagnosticsBuffer,
             materialBuffer,
+            probeGridBuffer,
             directionalShadowCascadeBuffer,
             localShadowBuffer,
             autoExposureBuffer
@@ -64,6 +66,7 @@ void VulkanDescriptorSets::Recreate(
     const VulkanLightBuffer& lightBuffer,
     const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
     const VulkanMaterialBuffer& materialBuffer,
+    const VulkanProbeGridBuffer& probeGridBuffer,
     const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
     const VulkanLocalShadowBuffer& localShadowBuffer,
     const VulkanAutoExposureBuffer& autoExposureBuffer
@@ -80,6 +83,7 @@ void VulkanDescriptorSets::Recreate(
             lightBuffer,
             lightTileDiagnosticsBuffer,
             materialBuffer,
+            probeGridBuffer,
             directionalShadowCascadeBuffer,
             localShadowBuffer,
             autoExposureBuffer
@@ -131,6 +135,7 @@ void VulkanDescriptorSets::CreateDescriptorSets(
     const VulkanLightBuffer& lightBuffer,
     const VulkanLightTileDiagnosticsBuffer& lightTileDiagnosticsBuffer,
     const VulkanMaterialBuffer& materialBuffer,
+    const VulkanProbeGridBuffer& probeGridBuffer,
     const VulkanDirectionalShadowCascadeBuffer& directionalShadowCascadeBuffer,
     const VulkanLocalShadowBuffer& localShadowBuffer,
     const VulkanAutoExposureBuffer& autoExposureBuffer
@@ -142,6 +147,7 @@ void VulkanDescriptorSets::CreateDescriptorSets(
         "Light tile diagnostics buffer count must match frame uniform buffer count"
     );
     SE_ASSERT(materialBuffer.Count() == count, "Material buffer count must match frame uniform buffer count");
+    SE_ASSERT(probeGridBuffer.Count() == count, "Probe grid buffer count must match frame uniform buffer count");
     SE_ASSERT(
         directionalShadowCascadeBuffer.Count() == count,
         "Directional shadow cascade buffer count must match frame uniform buffer count"
@@ -174,6 +180,7 @@ void VulkanDescriptorSets::CreateDescriptorSets(
         const VkDescriptorBufferInfo lightTileDiagnosticsBufferInfo =
             lightTileDiagnosticsBuffer.DescriptorInfo(index);
         const VkDescriptorBufferInfo materialBufferInfo = materialBuffer.DescriptorInfo(index);
+        const VkDescriptorBufferInfo probeGridBufferInfo = probeGridBuffer.DescriptorInfo(index);
         const VkDescriptorBufferInfo directionalShadowCascadeBufferInfo =
             directionalShadowCascadeBuffer.DescriptorInfo(index);
         const VkDescriptorBufferInfo localShadowBufferInfo =
@@ -181,7 +188,7 @@ void VulkanDescriptorSets::CreateDescriptorSets(
         const VkDescriptorBufferInfo autoExposureBufferInfo =
             autoExposureBuffer.DescriptorInfo(index);
 
-        std::array<VkWriteDescriptorSet, 7> descriptorWrites{};
+        std::array<VkWriteDescriptorSet, 8> descriptorWrites{};
         descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[0].dstSet = m_DescriptorSets[index];
         descriptorWrites[0].dstBinding = 0;
@@ -232,18 +239,19 @@ void VulkanDescriptorSets::CreateDescriptorSets(
 
         descriptorWrites[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         descriptorWrites[6].dstSet = m_DescriptorSets[index];
-        descriptorWrites[6].dstBinding = 10;
+        descriptorWrites[6].dstBinding = 9;
         descriptorWrites[6].dstArrayElement = 0;
         descriptorWrites[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         descriptorWrites[6].descriptorCount = 1;
-        descriptorWrites[6].pBufferInfo = &autoExposureBufferInfo;
+        descriptorWrites[6].pBufferInfo = &probeGridBufferInfo;
 
-        // Binding 9 (probe grid): placeholder, updated when probe grid buffer is active
-        { VkWriteDescriptorSet w{}; w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          w.dstSet=m_DescriptorSets[index]; w.dstBinding=9;
-          w.descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; w.descriptorCount=1;
-          w.pBufferInfo=&localShadowBufferInfo;
-          vkUpdateDescriptorSets(device.Handle(), 1, &w, 0, nullptr); }
+        descriptorWrites[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[7].dstSet = m_DescriptorSets[index];
+        descriptorWrites[7].dstBinding = 10;
+        descriptorWrites[7].dstArrayElement = 0;
+        descriptorWrites[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        descriptorWrites[7].descriptorCount = 1;
+        descriptorWrites[7].pBufferInfo = &autoExposureBufferInfo;
 
         vkUpdateDescriptorSets(
             device.Handle(),

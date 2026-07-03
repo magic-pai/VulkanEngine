@@ -28,6 +28,14 @@ inline constexpr std::size_t kMaxFrameLocalShadowTiles = 64;
 inline constexpr std::size_t kAutoExposureHistogramBinCount = 64;
 inline constexpr std::size_t kAutoExposureHistogramGroupCount =
     kAutoExposureHistogramBinCount / 4;
+inline constexpr std::size_t kProbeGridSizeX = 4;
+inline constexpr std::size_t kProbeGridSizeY = 2;
+inline constexpr std::size_t kProbeGridSizeZ = 4;
+inline constexpr std::size_t kProbeGridProbeCount =
+    kProbeGridSizeX * kProbeGridSizeY * kProbeGridSizeZ;
+inline constexpr std::size_t kProbeGridDirectionalLobeCount = 6;
+inline constexpr std::size_t kProbeGridVec4sPerProbe =
+    1 + kProbeGridDirectionalLobeCount;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 view{ 1.0f };
@@ -129,6 +137,16 @@ struct LocalShadowBufferObject {
     alignas(16) std::array<GpuLocalShadowTileRecord, kMaxFrameLocalShadowTiles> tiles{};
 };
 
+struct GpuProbeGridRecord {
+    alignas(16) glm::vec4 irradiance{ 0.0f };
+    alignas(16) std::array<glm::vec4, kProbeGridDirectionalLobeCount>
+        directionalLobes{};
+};
+
+struct ProbeGridBufferObject {
+    alignas(16) std::array<GpuProbeGridRecord, kProbeGridProbeCount> probes{};
+};
+
 struct GpuMaterialRecord {
     alignas(16) glm::vec4 baseColorFactor{ 1.0f };
     alignas(16) glm::vec4 materialControls{ 1.0f, 0.0f, 0.0f, 0.0f };
@@ -223,6 +241,18 @@ static_assert(
         sizeof(glm::vec4) * 2 +
         sizeof(GpuLocalShadowTileRecord) * kMaxFrameLocalShadowTiles,
     "LocalShadowBufferObject layout must match the shader storage buffer"
+);
+
+static_assert(
+    sizeof(GpuProbeGridRecord) ==
+        sizeof(glm::vec4) * kProbeGridVec4sPerProbe,
+    "GpuProbeGridRecord layout must match the shader storage buffer record"
+);
+
+static_assert(
+    sizeof(ProbeGridBufferObject) ==
+        sizeof(GpuProbeGridRecord) * kProbeGridProbeCount,
+    "ProbeGridBufferObject layout must match the shader storage buffer"
 );
 
 static_assert(
@@ -411,6 +441,41 @@ public:
 
 private:
     void CreateMaterialBuffers(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+
+private:
+    std::vector<std::unique_ptr<VulkanBuffer>> m_Buffers;
+};
+
+class VulkanProbeGridBuffer {
+public:
+    VulkanProbeGridBuffer(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+
+    ~VulkanProbeGridBuffer();
+
+    SE_DISABLE_COPY(VulkanProbeGridBuffer);
+    SE_DISABLE_MOVE(VulkanProbeGridBuffer);
+
+    std::size_t Count() const;
+    VkDescriptorBufferInfo DescriptorInfo(std::size_t index) const;
+
+    void Update(std::size_t index, const ProbeGridBufferObject& probeGridData) const;
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count
+    );
+    void Release();
+
+private:
+    void CreateBuffers(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
         std::size_t count

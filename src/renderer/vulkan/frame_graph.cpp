@@ -1606,6 +1606,21 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.iblPrefilteredMipCount > 0 ? "mipped cube cache" : "unknown cube"
         );
     }
+    if (inputs.probeGridAllocated && inputs.probeGridEnabled) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "StaticLightProbeGrid",
+            "vec4 SSBO",
+            inputs.probeGridDirectionalLobeCount > 0
+                ? "diffuse irradiance plus directional lobe records"
+                : "diffuse irradiance records",
+            inputs.probeGridProbeCount > 0
+                ? "renderer-owned static probe grid"
+                : "empty probe-grid carrier"
+        );
+    }
     if (inputs.sceneReflectionProbesAllocated) {
         AppendResource(
             plan,
@@ -1933,6 +1948,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             plan,
             RenderFramePassKind::DeferredLighting,
             inputs.appendRenderFeaturesUserData
+        );
+    }
+    if (inputs.probeGridEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::GlobalIllumination,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "StaticLightProbeGridIntegrated",
+            "StaticLightProbeGrid, SceneDepth, GBufferNormalRoughness",
+            "",
+            "Trilinear static light-probe irradiance with first directional lobes integrated into deferred and forward ambient lighting."
         );
     }
     if (inputs.weightedTranslucencyRenderPassAllocated &&
