@@ -2929,6 +2929,12 @@ void VulkanRenderer::DrawFrame() {
         m_ReflectionProbeResources.AuthoredCubemapLoadFailedCount();
     frameStats.reflectionProbe.authoredCubemapUploadCount =
         m_ReflectionProbeResources.AuthoredCubemapUploadCount();
+    frameStats.reflectionProbe.authoredCubemapSixFaceLoadedCount =
+        m_ReflectionProbeResources.AuthoredCubemapSixFaceLoadedCount();
+    frameStats.reflectionProbe.authoredCubemapEquirectangularLoadedCount =
+        m_ReflectionProbeResources.AuthoredCubemapEquirectangularLoadedCount();
+    frameStats.reflectionProbe.authoredCubemapEquirectangularConversionCount =
+        m_ReflectionProbeResources.AuthoredCubemapEquirectangularConversionCount();
     if (frameReflectionProbes.selectedProbeCount > 0 &&
         frameReflectionProbes.selectedProbes[0].captureSource ==
             RendererReflectionProbeCaptureSource::AuthoredCubemap) {
@@ -2944,6 +2950,10 @@ void VulkanRenderer::DrawFrame() {
             m_ReflectionProbeResources.AuthoredCubemapFormat(
                 frameReflectionProbes.selectedProbes[0].captureAssetId
             );
+        frameStats.reflectionProbe.authoredCubemapSourceType =
+            static_cast<u32>(m_ReflectionProbeResources.AuthoredCubemapSourceType(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            ));
     }
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
@@ -3248,6 +3258,8 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapFaceSize,
             frameStats.reflectionProbe.authoredCubemapMipCount,
             frameStats.reflectionProbe.authoredCubemapLoadedCount,
+            frameStats.reflectionProbe.authoredCubemapEquirectangularLoadedCount,
+            frameStats.reflectionProbe.authoredCubemapEquirectangularConversionCount,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,

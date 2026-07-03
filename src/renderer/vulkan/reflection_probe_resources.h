@@ -14,6 +14,12 @@ class VulkanDevice;
 class VulkanImage;
 class VulkanPhysicalDevice;
 
+enum class AuthoredReflectionCubemapSourceType : u32 {
+    Unknown = 0,
+    SixFace = 1,
+    Equirectangular = 2
+};
+
 enum class RendererReflectionProbeCaptureSource : u32 {
     None = 0,
     BuiltInProcedural = 1,
@@ -67,9 +73,15 @@ public:
     u32 AuthoredCubemapMissingCount() const;
     u32 AuthoredCubemapLoadFailedCount() const;
     u32 AuthoredCubemapUploadCount() const;
+    u32 AuthoredCubemapSixFaceLoadedCount() const;
+    u32 AuthoredCubemapEquirectangularLoadedCount() const;
+    u32 AuthoredCubemapEquirectangularConversionCount() const;
     u32 AuthoredCubemapFaceSize(std::string_view assetId) const;
     u32 AuthoredCubemapMipCount(std::string_view assetId) const;
     VkFormat AuthoredCubemapFormat(std::string_view assetId) const;
+    AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
+        std::string_view assetId
+    ) const;
 
     void SetDescriptorSetsBound(u32 count);
     u32 DescriptorSetsBound() const;
@@ -77,6 +89,8 @@ public:
 private:
     struct AuthoredCubemapResource {
         std::unique_ptr<VulkanImage> image;
+        AuthoredReflectionCubemapSourceType sourceType =
+            AuthoredReflectionCubemapSourceType::Unknown;
         bool assetFound = false;
         bool loadFailed = false;
     };
@@ -86,6 +100,7 @@ private:
     VkImageView m_BuiltInCubemapView = VK_NULL_HANDLE;
     std::unordered_map<std::string, AuthoredCubemapResource> m_AuthoredCubemaps;
     u32 m_AuthoredCubemapUploadCount = 0;
+    u32 m_AuthoredCubemapEquirectangularConversionCount = 0;
     u32 m_DescriptorSetsBound = 0;
 };
 

@@ -1674,10 +1674,14 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
-            "loaded authored reflection-probe cubemaps available for selected capture slots",
-            inputs.authoredReflectionCubemapLoadedCount > 0
-                ? "loaded authored cube cache"
-                : "empty authored cube cache"
+            inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
+                ? "loaded authored reflection-probe cubemaps with equirectangular conversions available for selected capture slots"
+                : "loaded authored reflection-probe cubemaps available for selected capture slots",
+            inputs.authoredReflectionCubemapEquirectangularLoadedCount > 0
+                ? "equirectangular converted authored cube cache"
+                : inputs.authoredReflectionCubemapLoadedCount > 0
+                    ? "loaded authored cube cache"
+                    : "empty authored cube cache"
         );
     }
     if (inputs.autoExposureHistogramEnabled) {
