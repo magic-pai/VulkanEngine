@@ -299,6 +299,11 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat sceneReflectionProbeCubemapFormat = VK_FORMAT_UNDEFINED;
     u32 sceneReflectionProbeCubemapFaceSize = 0;
     u32 sceneReflectionProbeCubemapMipCount = 0;
+    bool authoredReflectionCubemapCacheAllocated = false;
+    VkFormat authoredReflectionCubemapFormat = VK_FORMAT_UNDEFINED;
+    u32 authoredReflectionCubemapFaceSize = 0;
+    u32 authoredReflectionCubemapMipCount = 0;
+    u32 authoredReflectionCubemapLoadedCount = 0;
     bool autoExposureHistogramEnabled = false;
     bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;

@@ -17,6 +17,7 @@
 
 #include <array>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace se {
@@ -334,7 +335,12 @@ private:
     void ResetLocalShadowCacheStates();
     void HandleObjectPicking();
     bool LocalReflectionProbeCubemapReady() const;
-    u32 UpdateEnvironmentDescriptorSets(VulkanDescriptorSets* descriptorSets) const;
+    void PrepareReflectionProbeCaptureResources();
+    u32 UpdateEnvironmentDescriptorSets(
+        VulkanDescriptorSets* descriptorSets,
+        const FrameReflectionProbeSet* reflectionProbes = nullptr,
+        std::optional<std::size_t> descriptorSetIndex = std::nullopt
+    ) const;
     glm::vec2 CursorToWorldPosition(const VkExtent2D& extent) const;
     void UpdateUniformBuffer(
         std::size_t imageIndex,

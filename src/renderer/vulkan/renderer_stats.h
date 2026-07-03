@@ -203,6 +203,13 @@ struct RendererReflectionProbeStats {
     u32 selectedAuthoredAssetSpecifiedMask = 0;
     u32 selectedAuthoredAssetFoundMask = 0;
     u32 selectedAuthoredAssetMissingMask = 0;
+    u32 authoredCubemapLoadedCount = 0;
+    u32 authoredCubemapMissingCount = 0;
+    u32 authoredCubemapLoadFailedCount = 0;
+    u32 authoredCubemapUploadCount = 0;
+    u32 authoredCubemapFaceSize = 0;
+    u32 authoredCubemapMipCount = 0;
+    VkFormat authoredCubemapFormat = VK_FORMAT_UNDEFINED;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
     std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};

@@ -126,7 +126,7 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
 layout(set = 0, binding = 6) uniform sampler2D brdfLut;
 layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
-layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMap;
+layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMaps[4];
 
 layout(set = 1, binding = 0) uniform sampler2D texSampler;
 layout(set = 1, binding = 1) uniform sampler2D materialAuxSampler;
@@ -381,6 +381,19 @@ vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
     return BoxProjectedLocalReflectionDirectionAt(0, direction, worldPosition);
 }
 
+vec3 SampleLocalReflectionProbeMap(int slotIndex, vec3 direction, float lod) {
+    if (slotIndex == 0) {
+        return textureLod(localReflectionProbeMaps[0], direction, lod).rgb;
+    }
+    if (slotIndex == 1) {
+        return textureLod(localReflectionProbeMaps[1], direction, lod).rgb;
+    }
+    if (slotIndex == 2) {
+        return textureLod(localReflectionProbeMaps[2], direction, lod).rgb;
+    }
+    return textureLod(localReflectionProbeMaps[3], direction, lod).rgb;
+}
+
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
 }
@@ -431,12 +444,13 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
         vec3 localRadiance =
             globalRadiance * localTint * localIntensity * glossBoost;
         if (color.a > 0.5) {
+            int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
             localRadiance =
-                max(textureLod(
-                    localReflectionProbeMap,
+                max(SampleLocalReflectionProbeMap(
+                    slotIndex,
                     sampleDirection,
                     roughnessClamped * 4.0
-                ).rgb, vec3(0.0)) *
+                ), vec3(0.0)) *
                 localTint *
                 localIntensity *
                 glossBoost;

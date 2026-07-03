@@ -333,6 +333,13 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedAuthoredAssetSpecifiedMask << ','
         << reflectionProbe.selectedAuthoredAssetFoundMask << ','
         << reflectionProbe.selectedAuthoredAssetMissingMask << ','
+        << reflectionProbe.authoredCubemapLoadedCount << ','
+        << reflectionProbe.authoredCubemapMissingCount << ','
+        << reflectionProbe.authoredCubemapLoadFailedCount << ','
+        << reflectionProbe.authoredCubemapUploadCount << ','
+        << reflectionProbe.authoredCubemapFaceSize << ','
+        << reflectionProbe.authoredCubemapMipCount << ','
+        << static_cast<int>(reflectionProbe.authoredCubemapFormat) << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
         << reflectionProbe.selectedCaptureSlots[2] << ','
@@ -767,6 +774,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_asset_specified_mask,"
         << "reflection_probe_authored_asset_found_mask,"
         << "reflection_probe_authored_asset_missing_mask,"
+        << "reflection_probe_authored_cubemap_loaded_count,"
+        << "reflection_probe_authored_cubemap_missing_count,"
+        << "reflection_probe_authored_cubemap_load_failed_count,"
+        << "reflection_probe_authored_cubemap_upload_count,"
+        << "reflection_probe_authored_cubemap_face_size,"
+        << "reflection_probe_authored_cubemap_mip_count,"
+        << "reflection_probe_authored_cubemap_format,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"
         << "reflection_probe_selected_capture_slot_2,"

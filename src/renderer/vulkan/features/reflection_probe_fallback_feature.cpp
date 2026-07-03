@@ -77,7 +77,7 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 ? "SceneReflectionProbeBlend"
                 : "LocalReflectionProbeBlend",
             sceneCubemapSampling
-                ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, SceneReflectionProbeCubemap, AuthoredReflectionCubemapCache, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : context.renderer.sceneReflectionProbeOwned
                 ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : "ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",

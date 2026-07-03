@@ -107,7 +107,7 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
     VkDescriptorSetLayoutBinding localReflectionProbeMapBinding{};
     localReflectionProbeMapBinding.binding = 11;
     localReflectionProbeMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    localReflectionProbeMapBinding.descriptorCount = 1;
+    localReflectionProbeMapBinding.descriptorCount = 4;
     localReflectionProbeMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     localReflectionProbeMapBinding.pImmutableSamplers = nullptr;
 

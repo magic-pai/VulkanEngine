@@ -1667,6 +1667,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "unknown cube"
         );
     }
+    if (inputs.authoredReflectionCubemapCacheAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "AuthoredReflectionCubemapCache",
+            VulkanFormatName(inputs.authoredReflectionCubemapFormat),
+            "loaded authored reflection-probe cubemaps available for selected capture slots",
+            inputs.authoredReflectionCubemapLoadedCount > 0
+                ? "loaded authored cube cache"
+                : "empty authored cube cache"
+        );
+    }
     if (inputs.autoExposureHistogramEnabled) {
         AppendResource(
             plan,

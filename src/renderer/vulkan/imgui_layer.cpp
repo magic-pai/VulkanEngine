@@ -910,6 +910,16 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedAuthoredAssetHashes[3]
     );
     ImGui::Text(
+        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, face %u, mips %u, format %d",
+        stats.reflectionProbe.authoredCubemapLoadedCount,
+        stats.reflectionProbe.authoredCubemapMissingCount,
+        stats.reflectionProbe.authoredCubemapLoadFailedCount,
+        stats.reflectionProbe.authoredCubemapUploadCount,
+        stats.reflectionProbe.authoredCubemapFaceSize,
+        stats.reflectionProbe.authoredCubemapMipCount,
+        static_cast<int>(stats.reflectionProbe.authoredCubemapFormat)
+    );
+    ImGui::Text(
         "Reflection probe cubemap: %s, face %u, mips %u, descriptors %u, shader %s, source %u",
         stats.reflectionProbe.localCubemapAllocated ? "allocated" : "off",
         stats.reflectionProbe.localCubemapFaceSize,
