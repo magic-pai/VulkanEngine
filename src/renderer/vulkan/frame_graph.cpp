@@ -1674,14 +1674,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
-            inputs.authoredReflectionCubemapPrefilteredLoadedCount > 0
+            inputs.authoredReflectionCubemapPrefilterMode == 1u
+                ? "loaded GGX-weighted authored reflection-probe cubemaps with explicit mip payloads"
+                : inputs.authoredReflectionCubemapPrefilteredLoadedCount > 0
                 ? "loaded CPU-prefiltered authored reflection-probe cubemaps with explicit mip payloads"
                 : inputs.authoredReflectionCubemapHdrLoadedCount > 0
                 ? "loaded HDR-preserving authored reflection-probe cubemaps with cache refresh diagnostics"
                 : inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
                 ? "loaded authored reflection-probe cubemaps with equirectangular conversions available for selected capture slots"
                 : "loaded authored reflection-probe cubemaps available for selected capture slots",
-            inputs.authoredReflectionCubemapPrefilteredUploadCount > 0
+            inputs.authoredReflectionCubemapPrefilterMode == 1u
+                ? "GGX authored mip chain uploaded"
+                : inputs.authoredReflectionCubemapPrefilteredUploadCount > 0
                 ? "prefiltered authored mip chain uploaded"
                 : inputs.authoredReflectionCubemapReloadCount > 0
                 ? "asset-signature reload observed"

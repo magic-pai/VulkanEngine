@@ -67,6 +67,7 @@ struct AuthoredCubemapLoadResult {
     bool hdr = false;
     bool prefilteredMipChain = false;
     u32 generatedMipCount = 0;
+    u32 prefilterSampleCount = 0;
 };
 
 struct AuthoredCubemapPixelData {
@@ -85,6 +86,7 @@ struct AuthoredCubemapMipChain {
     u32 faceSize = 0;
     u32 mipLevels = 1;
     u32 bytesPerTexel = 4;
+    u32 prefilterSampleCount = 0;
 };
 
 std::string Lowercase(std::string value) {
@@ -611,6 +613,106 @@ std::array<float, 3> CubemapDirection(
     return direction;
 }
 
+float Dot3(
+    const std::array<float, 3>& a,
+    const std::array<float, 3>& b
+) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+std::array<float, 3> Cross3(
+    const std::array<float, 3>& a,
+    const std::array<float, 3>& b
+) {
+    return {
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    };
+}
+
+std::array<float, 3> Normalize3(std::array<float, 3> value) {
+    const float length = std::sqrt(std::max(0.0f, Dot3(value, value)));
+    if (length <= 0.000001f) {
+        return { 0.0f, 0.0f, 1.0f };
+    }
+    const float invLength = 1.0f / length;
+    value[0] *= invLength;
+    value[1] *= invLength;
+    value[2] *= invLength;
+    return value;
+}
+
+std::array<float, 3> Scale3(const std::array<float, 3>& value, float scale) {
+    return { value[0] * scale, value[1] * scale, value[2] * scale };
+}
+
+std::array<float, 3> Add3(
+    const std::array<float, 3>& a,
+    const std::array<float, 3>& b
+) {
+    return { a[0] + b[0], a[1] + b[1], a[2] + b[2] };
+}
+
+float RadicalInverseVdc(u32 bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return static_cast<float>(bits) * 2.3283064365386963e-10f;
+}
+
+std::array<float, 2> Hammersley(u32 index, u32 sampleCount) {
+    return {
+        static_cast<float>(index) / static_cast<float>(sampleCount),
+        RadicalInverseVdc(index)
+    };
+}
+
+std::array<float, 3> ImportanceSampleGgx(
+    const std::array<float, 2>& xi,
+    float roughness,
+    const std::array<float, 3>& normal
+) {
+    static constexpr float kPi = 3.14159265358979323846f;
+    const float alpha = roughness * roughness;
+    const float alphaSquared = alpha * alpha;
+    const float phi = 2.0f * kPi * xi[0];
+    const float cosTheta = std::sqrt(std::clamp(
+        (1.0f - xi[1]) / (1.0f + (alphaSquared - 1.0f) * xi[1]),
+        0.0f,
+        1.0f
+    ));
+    const float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
+    const std::array<float, 3> halfVectorLocal{
+        std::cos(phi) * sinTheta,
+        std::sin(phi) * sinTheta,
+        cosTheta
+    };
+
+    const std::array<float, 3> up =
+        std::fabs(normal[2]) < 0.999f
+            ? std::array<float, 3>{ 0.0f, 0.0f, 1.0f }
+            : std::array<float, 3>{ 1.0f, 0.0f, 0.0f };
+    const std::array<float, 3> tangent = Normalize3(Cross3(up, normal));
+    const std::array<float, 3> bitangent = Cross3(normal, tangent);
+    return Normalize3(Add3(
+        Add3(
+            Scale3(tangent, halfVectorLocal[0]),
+            Scale3(bitangent, halfVectorLocal[1])
+        ),
+        Scale3(normal, halfVectorLocal[2])
+    ));
+}
+
+std::array<float, 3> Reflect3(
+    const std::array<float, 3>& incident,
+    const std::array<float, 3>& normal
+) {
+    return Add3(incident, Scale3(normal, -2.0f * Dot3(incident, normal)));
+}
+
 u8 EncodeReflectionChannel(float value, bool hdr) {
     value = std::clamp(value, 0.0f, 1.0f);
     if (hdr) {
@@ -888,6 +990,114 @@ std::array<float, 4> LoadCubemapBaseTexel(
     };
 }
 
+struct CubemapSampleLocation {
+    std::size_t face = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+CubemapSampleLocation CubemapLocationForDirection(
+    const std::array<float, 3>& direction,
+    u32 faceSize
+) {
+    const float absX = std::fabs(direction[0]);
+    const float absY = std::fabs(direction[1]);
+    const float absZ = std::fabs(direction[2]);
+    std::size_t face = 0;
+    float u = 0.0f;
+    float v = 0.0f;
+
+    if (absX >= absY && absX >= absZ) {
+        if (direction[0] >= 0.0f) {
+            face = 0;
+            u = -direction[2] / absX;
+            v = -direction[1] / absX;
+        } else {
+            face = 1;
+            u = direction[2] / absX;
+            v = -direction[1] / absX;
+        }
+    } else if (absY >= absX && absY >= absZ) {
+        if (direction[1] >= 0.0f) {
+            face = 2;
+            u = direction[0] / absY;
+            v = direction[2] / absY;
+        } else {
+            face = 3;
+            u = direction[0] / absY;
+            v = -direction[2] / absY;
+        }
+    } else {
+        if (direction[2] >= 0.0f) {
+            face = 4;
+            u = direction[0] / absZ;
+            v = -direction[1] / absZ;
+        } else {
+            face = 5;
+            u = -direction[0] / absZ;
+            v = -direction[1] / absZ;
+        }
+    }
+
+    const float size = static_cast<float>(faceSize);
+    return CubemapSampleLocation{
+        face,
+        (u + 1.0f) * 0.5f * size - 0.5f,
+        (v + 1.0f) * 0.5f * size - 0.5f
+    };
+}
+
+std::array<float, 4> SampleCubemapBaseBilinear(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize,
+    const std::array<float, 3>& direction
+) {
+    const CubemapSampleLocation location =
+        CubemapLocationForDirection(direction, faceSize);
+    const int x0 = static_cast<int>(std::floor(location.x));
+    const int y0 = static_cast<int>(std::floor(location.y));
+    const float tx = location.x - static_cast<float>(x0);
+    const float ty = location.y - static_cast<float>(y0);
+
+    const auto load = [&](int x, int y) {
+        const u32 clampedX = static_cast<u32>(std::clamp(
+            x,
+            0,
+            static_cast<int>(faceSize) - 1
+        ));
+        const u32 clampedY = static_cast<u32>(std::clamp(
+            y,
+            0,
+            static_cast<int>(faceSize) - 1
+        ));
+        return LoadCubemapBaseTexel(
+            pixelData,
+            faceSize,
+            location.face,
+            clampedX,
+            clampedY
+        );
+    };
+
+    const std::array<float, 4> c00 = load(x0, y0);
+    const std::array<float, 4> c10 = load(x0 + 1, y0);
+    const std::array<float, 4> c01 = load(x0, y0 + 1);
+    const std::array<float, 4> c11 = load(x0 + 1, y0 + 1);
+    const auto lerp = [](float a, float b, float factor) {
+        return a + (b - a) * factor;
+    };
+
+    std::array<float, 4> result{};
+    for (std::size_t channel = 0; channel < result.size(); ++channel) {
+        result[channel] = lerp(
+            lerp(c00[channel], c10[channel], tx),
+            lerp(c01[channel], c11[channel], tx),
+            ty
+        );
+    }
+    return result;
+}
+
 void StoreCubemapMipTexel(
     AuthoredCubemapMipChain& mipChain,
     std::size_t offset,
@@ -907,56 +1117,71 @@ void StoreCubemapMipTexel(
     mipChain.pixels[offset + 3u] = EncodeReflectionChannel(color[3], false);
 }
 
-std::array<float, 4> AverageCubemapBaseTexelsForMip(
+u32 PrefilterSampleCountForMip(u32 mipLevel, u32 mipLevels) {
+    if (mipLevel == 0u || mipLevels <= 1u) {
+        return 1u;
+    }
+    return std::min(128u, 32u + mipLevel * 32u);
+}
+
+std::array<float, 4> PrefilterCubemapBaseTexelsForMip(
     const AuthoredCubemapPixelData& pixelData,
     u32 faceSize,
     std::size_t face,
     u32 mipLevel,
+    u32 mipLevels,
     u32 mipX,
-    u32 mipY
+    u32 mipY,
+    u32 sampleCount
 ) {
     const u32 mipExtent = MipExtent(faceSize, mipLevel);
-    const float scale =
-        static_cast<float>(faceSize) / static_cast<float>(mipExtent);
-    const int baseMinX = static_cast<int>(std::floor(
-        static_cast<float>(mipX) * scale
-    ));
-    const int baseMaxX = static_cast<int>(std::ceil(
-        static_cast<float>(mipX + 1u) * scale
-    ));
-    const int baseMinY = static_cast<int>(std::floor(
-        static_cast<float>(mipY) * scale
-    ));
-    const int baseMaxY = static_cast<int>(std::ceil(
-        static_cast<float>(mipY + 1u) * scale
-    ));
-    const int blurPad = static_cast<int>(std::max(0u, mipLevel - 1u));
+    const float faceU =
+        (2.0f * (static_cast<float>(mipX) + 0.5f) /
+         static_cast<float>(mipExtent)) -
+        1.0f;
+    const float faceV =
+        (2.0f * (static_cast<float>(mipY) + 0.5f) /
+         static_cast<float>(mipExtent)) -
+        1.0f;
+    const std::array<float, 3> normal =
+        CubemapDirection(face, faceU, faceV);
+    const float roughness = mipLevels > 1u
+        ? std::clamp(
+            static_cast<float>(mipLevel) / static_cast<float>(mipLevels - 1u),
+            0.0f,
+            1.0f
+        )
+        : 0.0f;
 
-    std::array<float, 4> sum{ 0.0f, 0.0f, 0.0f, 0.0f };
-    u32 sampleCount = 0;
-    for (int y = baseMinY - blurPad; y < baseMaxY + blurPad; ++y) {
-        const u32 clampedY = static_cast<u32>(std::clamp(
-            y,
-            0,
-            static_cast<int>(faceSize) - 1
-        ));
-        for (int x = baseMinX - blurPad; x < baseMaxX + blurPad; ++x) {
-            const u32 clampedX = static_cast<u32>(std::clamp(
-                x,
-                0,
-                static_cast<int>(faceSize) - 1
-            ));
-            const std::array<float, 4> sample =
-                LoadCubemapBaseTexel(pixelData, faceSize, face, clampedX, clampedY);
-            for (std::size_t channel = 0; channel < sum.size(); ++channel) {
-                sum[channel] += sample[channel];
-            }
-            ++sampleCount;
-        }
+    if (roughness <= 0.0001f || sampleCount <= 1u) {
+        return SampleCubemapBaseBilinear(pixelData, faceSize, normal);
     }
 
-    const float invSampleCount =
-        sampleCount > 0u ? 1.0f / static_cast<float>(sampleCount) : 0.0f;
+    const std::array<float, 3> view = normal;
+    std::array<float, 4> sum{ 0.0f, 0.0f, 0.0f, 0.0f };
+    float totalWeight = 0.0f;
+    for (u32 sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        const std::array<float, 2> xi = Hammersley(sampleIndex, sampleCount);
+        const std::array<float, 3> halfVector =
+            ImportanceSampleGgx(xi, roughness, normal);
+        const std::array<float, 3> light =
+            Normalize3(Reflect3(Scale3(view, -1.0f), halfVector));
+        const float nDotL = std::max(0.0f, Dot3(normal, light));
+        if (nDotL <= 0.0f) {
+            continue;
+        }
+
+        const std::array<float, 4> sample =
+            SampleCubemapBaseBilinear(pixelData, faceSize, light);
+        for (std::size_t channel = 0; channel < sum.size(); ++channel) {
+            sum[channel] += sample[channel] * nDotL;
+        }
+        totalWeight += nDotL;
+    }
+
+    const float invSampleCount = totalWeight > 0.000001f
+        ? 1.0f / totalWeight
+        : 0.0f;
     for (float& channel : sum) {
         channel *= invSampleCount;
     }
@@ -977,6 +1202,8 @@ AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
     );
     mipChain.bytesPerTexel = pixelData.bytesPerTexel;
     mipChain.prefiltered = mipChain.mipLevels > 1u;
+    mipChain.prefilterSampleCount =
+        PrefilterSampleCountForMip(mipChain.mipLevels - 1u, mipChain.mipLevels);
     mipChain.copyRegions.reserve(6u * mipChain.mipLevels);
 
     VkDeviceSize bufferOffset = 0;
@@ -1013,16 +1240,22 @@ AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
                     mipChain.pixels.data() + outputOffset
                 );
             } else {
+                const u32 sampleCount = PrefilterSampleCountForMip(
+                    mipLevel,
+                    mipChain.mipLevels
+                );
                 for (u32 y = 0; y < extent; ++y) {
                     for (u32 x = 0; x < extent; ++x) {
                         const std::array<float, 4> color =
-                            AverageCubemapBaseTexelsForMip(
+                            PrefilterCubemapBaseTexelsForMip(
                                 pixelData,
                                 faceSize,
                                 face,
                                 mipLevel,
+                                mipChain.mipLevels,
                                 x,
-                                y
+                                y,
+                                sampleCount
                             );
                         const std::size_t texelOffset =
                             outputOffset +
@@ -1154,7 +1387,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             source.type,
             pixelData.hdr,
             mipChain.prefiltered,
-            mipChain.mipLevels
+            mipChain.mipLevels,
+            mipChain.prefilterSampleCount
         };
     }
 
@@ -1185,7 +1419,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         source.type,
         pixelData.hdr,
         mipChain.prefiltered,
-        mipChain.mipLevels
+        mipChain.mipLevels,
+        mipChain.prefilterSampleCount
     };
 }
 
@@ -1239,6 +1474,7 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.hdr = false;
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
+        resource.prefilterSampleCount = 0;
         return;
     }
 
@@ -1263,6 +1499,7 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.hdr = false;
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
+        resource.prefilterSampleCount = 0;
         return;
     }
 
@@ -1281,6 +1518,7 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     resource.hdr = false;
     resource.prefiltered = false;
     resource.generatedMipCount = 0;
+    resource.prefilterSampleCount = 0;
 
     try {
         AuthoredCubemapLoadResult loadResult = CreateAuthoredCubemapImage(
@@ -1295,6 +1533,7 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.hdr = loadResult.hdr;
         resource.prefiltered = loadResult.prefilteredMipChain;
         resource.generatedMipCount = loadResult.generatedMipCount;
+        resource.prefilterSampleCount = loadResult.prefilterSampleCount;
         ++m_AuthoredCubemapUploadCount;
         if (resource.prefiltered) {
             ++m_AuthoredCubemapPrefilteredUploadCount;
@@ -1311,6 +1550,7 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.hdr = false;
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
+        resource.prefilterSampleCount = 0;
     }
 }
 
@@ -1558,6 +1798,15 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapGeneratedMipCount(
     const auto found = m_AuthoredCubemaps.find(std::string(assetId));
     return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
         ? found->second.generatedMipCount
+        : 0u;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapPrefilterSampleCount(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
+        ? found->second.prefilterSampleCount
         : 0u;
 }
 

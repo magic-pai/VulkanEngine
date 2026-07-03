@@ -353,6 +353,8 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.authoredCubemapHdr << ','
         << reflectionProbe.authoredCubemapPrefiltered << ','
         << reflectionProbe.authoredCubemapGeneratedMipCount << ','
+        << reflectionProbe.authoredCubemapPrefilterSampleCount << ','
+        << reflectionProbe.authoredCubemapPrefilterMode << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
         << reflectionProbe.selectedCaptureSlots[2] << ','
@@ -807,6 +809,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_cubemap_hdr,"
         << "reflection_probe_authored_cubemap_prefiltered,"
         << "reflection_probe_authored_cubemap_generated_mip_count,"
+        << "reflection_probe_authored_cubemap_prefilter_sample_count,"
+        << "reflection_probe_authored_cubemap_prefilter_mode,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"
         << "reflection_probe_selected_capture_slot_2,"

@@ -309,6 +309,7 @@ struct CurrentVulkanFrameGraphInputs {
     u32 authoredReflectionCubemapHdrLoadedCount = 0;
     u32 authoredReflectionCubemapPrefilteredLoadedCount = 0;
     u32 authoredReflectionCubemapPrefilteredUploadCount = 0;
+    u32 authoredReflectionCubemapPrefilterMode = 0;
     u32 authoredReflectionCubemapCacheHitCount = 0;
     u32 authoredReflectionCubemapReloadCount = 0;
     u32 authoredReflectionCubemapRefreshCheckCount = 0;

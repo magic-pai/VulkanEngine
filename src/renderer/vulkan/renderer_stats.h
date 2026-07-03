@@ -223,6 +223,8 @@ struct RendererReflectionProbeStats {
     u32 authoredCubemapHdr = 0;
     u32 authoredCubemapPrefiltered = 0;
     u32 authoredCubemapGeneratedMipCount = 0;
+    u32 authoredCubemapPrefilterSampleCount = 0;
+    u32 authoredCubemapPrefilterMode = 0;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
     std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};

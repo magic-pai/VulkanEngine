@@ -88,6 +88,7 @@ public:
     bool AuthoredCubemapHdr(std::string_view assetId) const;
     bool AuthoredCubemapPrefiltered(std::string_view assetId) const;
     u32 AuthoredCubemapGeneratedMipCount(std::string_view assetId) const;
+    u32 AuthoredCubemapPrefilterSampleCount(std::string_view assetId) const;
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
@@ -106,6 +107,7 @@ private:
         bool hdr = false;
         bool prefiltered = false;
         u32 generatedMipCount = 0;
+        u32 prefilterSampleCount = 0;
     };
 
 private:

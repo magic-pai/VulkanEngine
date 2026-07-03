@@ -2982,6 +2982,14 @@ void VulkanRenderer::DrawFrame() {
             m_ReflectionProbeResources.AuthoredCubemapGeneratedMipCount(
                 frameReflectionProbes.selectedProbes[0].captureAssetId
             );
+        frameStats.reflectionProbe.authoredCubemapPrefilterSampleCount =
+            m_ReflectionProbeResources.AuthoredCubemapPrefilterSampleCount(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            );
+        frameStats.reflectionProbe.authoredCubemapPrefilterMode =
+            frameStats.reflectionProbe.authoredCubemapPrefiltered > 0
+                ? 1u
+                : 0u;
     }
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
@@ -3291,6 +3299,7 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapHdrLoadedCount,
             frameStats.reflectionProbe.authoredCubemapPrefilteredLoadedCount,
             frameStats.reflectionProbe.authoredCubemapPrefilteredUploadCount,
+            frameStats.reflectionProbe.authoredCubemapPrefilterMode,
             frameStats.reflectionProbe.authoredCubemapCacheHitCount,
             frameStats.reflectionProbe.authoredCubemapReloadCount,
             frameStats.reflectionProbe.authoredCubemapRefreshCheckCount,
