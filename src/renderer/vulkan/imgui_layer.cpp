@@ -90,6 +90,8 @@ const char* ReflectionCaptureFallbackReasonName(u32 reason) {
         return "no active scene probe";
     case 7:
         return "fallback disabled";
+    case 8:
+        return "authored cubemap asset missing";
     default:
         return "unknown";
     }
@@ -895,6 +897,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedCaptureSlots[3],
         stats.reflectionProbe.selectedCaptureSourceTypes[3],
         stats.reflectionProbe.selectedCaptureFallbackReasons[3]
+    );
+    ImGui::Text(
+        "Reflection authored assets: specified %u, found %u, missing %u, found mask 0x%X, hashes [%u, %u, %u, %u]",
+        stats.reflectionProbe.selectedAuthoredAssetSpecifiedCount,
+        stats.reflectionProbe.selectedAuthoredAssetFoundCount,
+        stats.reflectionProbe.selectedAuthoredAssetMissingCount,
+        stats.reflectionProbe.selectedAuthoredAssetFoundMask,
+        stats.reflectionProbe.selectedAuthoredAssetHashes[0],
+        stats.reflectionProbe.selectedAuthoredAssetHashes[1],
+        stats.reflectionProbe.selectedAuthoredAssetHashes[2],
+        stats.reflectionProbe.selectedAuthoredAssetHashes[3]
     );
     ImGui::Text(
         "Reflection probe cubemap: %s, face %u, mips %u, descriptors %u, shader %s, source %u",

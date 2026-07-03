@@ -374,6 +374,10 @@ bool BenchmarkSceneReflectionProbeMixedSourcesRequested() {
         value == "YES";
 }
 
+std::string BenchmarkSceneReflectionProbeAuthoredAssetId() {
+    return ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_AUTHORED_ASSET");
+}
+
 bool BenchmarkPartialLocalShadowCacheRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
     return value == "1" ||
@@ -1100,6 +1104,13 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             BenchmarkSceneReflectionProbeOverflowRequested();
         const bool mixedSourceProbeRequested =
             BenchmarkSceneReflectionProbeMixedSourcesRequested();
+        const std::string authoredAssetId =
+            BenchmarkSceneReflectionProbeAuthoredAssetId();
+        const bool authoredAssetProbeRequested = !authoredAssetId.empty();
+        const se::ReflectionProbeCaptureSource baseProbeCaptureSource =
+            authoredAssetProbeRequested
+                ? se::ReflectionProbeCaptureSource::AuthoredCubemap
+                : se::ReflectionProbeCaptureSource::BuiltInProcedural;
         scene.CreateReflectionProbe(
             "Benchmark Scene Reflection Probe",
             { 0.0f, 1.2f, 0.0f },
@@ -1108,7 +1119,9 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             { 1.0f, 0.86f, 0.68f },
             1.35f,
             0.72f,
-            1.75f
+            1.75f,
+            baseProbeCaptureSource,
+            authoredAssetId
         );
         if (multiProbeRequested || overflowProbeRequested || mixedSourceProbeRequested) {
             scene.CreateReflectionProbe(
@@ -1122,7 +1135,8 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 1.55f,
                 mixedSourceProbeRequested
                     ? se::ReflectionProbeCaptureSource::AuthoredCubemap
-                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural,
+                mixedSourceProbeRequested ? authoredAssetId : std::string{}
             );
             scene.CreateReflectionProbe(
                 "Benchmark Cool Reflection Probe",

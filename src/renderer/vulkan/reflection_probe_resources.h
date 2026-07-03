@@ -26,7 +26,8 @@ enum class RendererReflectionProbeCaptureFallbackReason : u32 {
     BuiltInResourceUnavailable = 4,
     CubemapSamplingDisabled = 5,
     NoActiveSceneProbe = 6,
-    FallbackDisabled = 7
+    FallbackDisabled = 7,
+    AuthoredCubemapAssetMissing = 8
 };
 
 class VulkanReflectionProbeResources {

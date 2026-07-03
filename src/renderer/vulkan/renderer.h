@@ -17,6 +17,7 @@
 
 #include <array>
 #include <functional>
+#include <string>
 
 namespace se {
 
@@ -139,6 +140,7 @@ struct RendererReflectionProbe {
     i32 sceneIndex = -1;
     RendererReflectionProbeCaptureSource captureSource =
         RendererReflectionProbeCaptureSource::None;
+    std::string captureAssetId;
 };
 
 struct FrameReflectionProbeSet {
@@ -149,6 +151,9 @@ struct FrameReflectionProbeSet {
     std::array<bool, kMaxFrameReflectionProbes> selectedCaptureDescriptorBound{};
     std::array<RendererReflectionProbeCaptureFallbackReason, kMaxFrameReflectionProbes>
         selectedCaptureFallbackReasons{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetSpecified{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetFound{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     u32 eligibleSceneProbeCount = 0;
@@ -161,6 +166,12 @@ struct FrameReflectionProbeSet {
     u32 selectedCaptureReadyMask = 0;
     u32 selectedCaptureFallbackMask = 0;
     u32 selectedCubemapSamplingMask = 0;
+    u32 selectedAuthoredAssetSpecifiedCount = 0;
+    u32 selectedAuthoredAssetFoundCount = 0;
+    u32 selectedAuthoredAssetMissingCount = 0;
+    u32 selectedAuthoredAssetSpecifiedMask = 0;
+    u32 selectedAuthoredAssetFoundMask = 0;
+    u32 selectedAuthoredAssetMissingMask = 0;
     u32 droppedSceneProbeCount = 0;
     i32 selectedSceneProbeIndex = -1;
     f32 maxBlendWeight = 0.0f;

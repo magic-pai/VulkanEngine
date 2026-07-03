@@ -1648,7 +1648,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PerFrame,
             "ReflectionCaptureSlotTable",
             "frame UBO payload",
-            "selected reflection-probe capture slot, readiness, and fallback diagnostics",
+            "selected reflection-probe capture slot, authored asset, readiness, and fallback diagnostics",
             inputs.reflectionCaptureSlotReadyCount > 0
                 ? "partially or fully resource-ready"
                 : "all selected probes using fallback"

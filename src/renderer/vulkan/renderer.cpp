@@ -50,6 +50,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 #include <limits>
 #include <optional>
@@ -1127,6 +1128,29 @@ RendererReflectionProbeCaptureFallbackReason CaptureFallbackReasonFor(
     return RendererReflectionProbeCaptureFallbackReason::SourceDisabled;
 }
 
+u32 StableStringHash(std::string_view value) {
+    u32 hash = 2166136261u;
+    for (char character : value) {
+        hash ^= static_cast<u8>(character);
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+bool AuthoredReflectionProbeAssetExists(std::string_view assetId) {
+    if (assetId.empty()) {
+        return false;
+    }
+
+    std::error_code error;
+    std::filesystem::path path(assetId);
+    if (path.is_relative()) {
+        path = std::filesystem::current_path(error) / path;
+        error.clear();
+    }
+    return std::filesystem::is_regular_file(path, error);
+}
+
 bool ReflectionProbeCaptureResourceReady(
     RendererReflectionProbeCaptureSource source,
     bool builtInCubemapReady
@@ -1142,6 +1166,9 @@ void ResetFrameReflectionProbeCaptureDiagnostics(FrameReflectionProbeSet& probes
     probes.selectedCaptureFallbackReasons.fill(
         RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
     );
+    probes.selectedAuthoredAssetHashes.fill(0u);
+    probes.selectedAuthoredAssetSpecified.fill(false);
+    probes.selectedAuthoredAssetFound.fill(false);
 }
 
 void SetSelectedReflectionProbeCaptureDiagnostics(
@@ -1159,9 +1186,20 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
     const bool resourceReady =
         ReflectionProbeCaptureResourceReady(probe.captureSource, builtInCubemapReady);
     const bool descriptorBound = resourceReady && descriptorSetsBound > 0u;
+    const bool authoredAssetSpecified =
+        probe.captureSource == RendererReflectionProbeCaptureSource::AuthoredCubemap &&
+        !probe.captureAssetId.empty();
+    const bool authoredAssetFound =
+        authoredAssetSpecified &&
+        AuthoredReflectionProbeAssetExists(probe.captureAssetId);
     const RendererReflectionProbeCaptureFallbackReason fallbackReason =
         cubemapSamplingEnabled
-            ? CaptureFallbackReasonFor(probe.captureSource, resourceReady)
+            ? probe.captureSource == RendererReflectionProbeCaptureSource::AuthoredCubemap &&
+                    !resourceReady &&
+                    !authoredAssetFound
+                ? RendererReflectionProbeCaptureFallbackReason::
+                    AuthoredCubemapAssetMissing
+                : CaptureFallbackReasonFor(probe.captureSource, resourceReady)
             : RendererReflectionProbeCaptureFallbackReason::CubemapSamplingDisabled;
     const u32 bit = 1u << selectedIndex;
 
@@ -1169,6 +1207,21 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
     probes.selectedCaptureResourceReady[selectedIndex] = resourceReady;
     probes.selectedCaptureDescriptorBound[selectedIndex] = descriptorBound;
     probes.selectedCaptureFallbackReasons[selectedIndex] = fallbackReason;
+    probes.selectedAuthoredAssetHashes[selectedIndex] =
+        authoredAssetSpecified ? StableStringHash(probe.captureAssetId) : 0u;
+    probes.selectedAuthoredAssetSpecified[selectedIndex] = authoredAssetSpecified;
+    probes.selectedAuthoredAssetFound[selectedIndex] = authoredAssetFound;
+    if (authoredAssetSpecified) {
+        ++probes.selectedAuthoredAssetSpecifiedCount;
+        probes.selectedAuthoredAssetSpecifiedMask |= bit;
+        if (authoredAssetFound) {
+            ++probes.selectedAuthoredAssetFoundCount;
+            probes.selectedAuthoredAssetFoundMask |= bit;
+        } else {
+            ++probes.selectedAuthoredAssetMissingCount;
+            probes.selectedAuthoredAssetMissingMask |= bit;
+        }
+    }
     if (resourceReady) {
         if (probes.selectedCaptureSlotCount == 0u) {
             ++probes.selectedCaptureSlotCount;
@@ -1201,6 +1254,7 @@ RendererReflectionProbe SceneReflectionProbe(
     probe.sceneOwned = true;
     probe.sceneIndex = sceneIndex;
     probe.captureSource = RendererCaptureSource(source.captureSource);
+    probe.captureAssetId = source.captureAssetId;
     return ClampReflectionProbe(probe);
 }
 
@@ -1298,6 +1352,18 @@ void WriteFrameReflectionProbeStats(
     stats.selectedCaptureReadyMask = frameProbes.selectedCaptureReadyMask;
     stats.selectedCaptureFallbackMask = frameProbes.selectedCaptureFallbackMask;
     stats.selectedCubemapSamplingMask = frameProbes.selectedCubemapSamplingMask;
+    stats.selectedAuthoredAssetSpecifiedCount =
+        frameProbes.selectedAuthoredAssetSpecifiedCount;
+    stats.selectedAuthoredAssetFoundCount =
+        frameProbes.selectedAuthoredAssetFoundCount;
+    stats.selectedAuthoredAssetMissingCount =
+        frameProbes.selectedAuthoredAssetMissingCount;
+    stats.selectedAuthoredAssetSpecifiedMask =
+        frameProbes.selectedAuthoredAssetSpecifiedMask;
+    stats.selectedAuthoredAssetFoundMask =
+        frameProbes.selectedAuthoredAssetFoundMask;
+    stats.selectedAuthoredAssetMissingMask =
+        frameProbes.selectedAuthoredAssetMissingMask;
     stats.droppedProbeCount = frameProbes.droppedSceneProbeCount;
     stats.selectedProbeIndex = frameProbes.selectedSceneProbeIndex;
     stats.selectedProbeIndices.fill(-1);
@@ -1308,6 +1374,7 @@ void WriteFrameReflectionProbeStats(
             RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
         )
     );
+    stats.selectedAuthoredAssetHashes.fill(0u);
     const u32 selectedProbeCount = std::min<u32>(
         frameProbes.selectedProbeCount,
         static_cast<u32>(stats.selectedProbeIndices.size())
@@ -1321,6 +1388,8 @@ void WriteFrameReflectionProbeStats(
             static_cast<u32>(frameProbes.selectedProbes[index].captureSource);
         stats.selectedCaptureFallbackReasons[index] =
             static_cast<u32>(frameProbes.selectedCaptureFallbackReasons[index]);
+        stats.selectedAuthoredAssetHashes[index] =
+            frameProbes.selectedAuthoredAssetHashes[index];
     }
     stats.maxBlendWeight = frameProbes.maxBlendWeight;
     stats.totalBlendWeight = frameProbes.totalBlendWeight;

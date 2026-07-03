@@ -327,10 +327,20 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedCaptureReadyMask << ','
         << reflectionProbe.selectedCaptureFallbackMask << ','
         << reflectionProbe.selectedCubemapSamplingMask << ','
+        << reflectionProbe.selectedAuthoredAssetSpecifiedCount << ','
+        << reflectionProbe.selectedAuthoredAssetFoundCount << ','
+        << reflectionProbe.selectedAuthoredAssetMissingCount << ','
+        << reflectionProbe.selectedAuthoredAssetSpecifiedMask << ','
+        << reflectionProbe.selectedAuthoredAssetFoundMask << ','
+        << reflectionProbe.selectedAuthoredAssetMissingMask << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
         << reflectionProbe.selectedCaptureSlots[2] << ','
         << reflectionProbe.selectedCaptureSlots[3] << ','
+        << reflectionProbe.selectedAuthoredAssetHashes[0] << ','
+        << reflectionProbe.selectedAuthoredAssetHashes[1] << ','
+        << reflectionProbe.selectedAuthoredAssetHashes[2] << ','
+        << reflectionProbe.selectedAuthoredAssetHashes[3] << ','
         << reflectionProbe.selectedCaptureSourceTypes[0] << ','
         << reflectionProbe.selectedCaptureSourceTypes[1] << ','
         << reflectionProbe.selectedCaptureSourceTypes[2] << ','
@@ -751,10 +761,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_selected_capture_ready_mask,"
         << "reflection_probe_selected_capture_fallback_mask,"
         << "reflection_probe_selected_cubemap_sampling_mask,"
+        << "reflection_probe_authored_asset_specified_count,"
+        << "reflection_probe_authored_asset_found_count,"
+        << "reflection_probe_authored_asset_missing_count,"
+        << "reflection_probe_authored_asset_specified_mask,"
+        << "reflection_probe_authored_asset_found_mask,"
+        << "reflection_probe_authored_asset_missing_mask,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"
         << "reflection_probe_selected_capture_slot_2,"
         << "reflection_probe_selected_capture_slot_3,"
+        << "reflection_probe_selected_authored_asset_hash_0,"
+        << "reflection_probe_selected_authored_asset_hash_1,"
+        << "reflection_probe_selected_authored_asset_hash_2,"
+        << "reflection_probe_selected_authored_asset_hash_3,"
         << "reflection_probe_selected_capture_source_type_0,"
         << "reflection_probe_selected_capture_source_type_1,"
         << "reflection_probe_selected_capture_source_type_2,"
