@@ -355,6 +355,11 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.authoredCubemapGeneratedMipCount << ','
         << reflectionProbe.authoredCubemapPrefilterSampleCount << ','
         << reflectionProbe.authoredCubemapPrefilterMode << ','
+        << reflectionProbe.authoredCubemapIrradianceReadyCount << ','
+        << reflectionProbe.authoredCubemapIrradianceApplied << ','
+        << reflectionProbe.authoredCubemapIrradianceR << ','
+        << reflectionProbe.authoredCubemapIrradianceG << ','
+        << reflectionProbe.authoredCubemapIrradianceB << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
         << reflectionProbe.selectedCaptureSlots[2] << ','
@@ -811,6 +816,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_cubemap_generated_mip_count,"
         << "reflection_probe_authored_cubemap_prefilter_sample_count,"
         << "reflection_probe_authored_cubemap_prefilter_mode,"
+        << "reflection_probe_authored_cubemap_irradiance_ready_count,"
+        << "reflection_probe_authored_cubemap_irradiance_applied,"
+        << "reflection_probe_authored_cubemap_irradiance_r,"
+        << "reflection_probe_authored_cubemap_irradiance_g,"
+        << "reflection_probe_authored_cubemap_irradiance_b,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"
         << "reflection_probe_selected_capture_slot_2,"

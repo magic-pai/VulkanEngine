@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -89,6 +90,11 @@ public:
     bool AuthoredCubemapPrefiltered(std::string_view assetId) const;
     u32 AuthoredCubemapGeneratedMipCount(std::string_view assetId) const;
     u32 AuthoredCubemapPrefilterSampleCount(std::string_view assetId) const;
+    bool AuthoredCubemapIrradianceReady(std::string_view assetId) const;
+    std::array<f32, 3> AuthoredCubemapIrradianceColor(
+        std::string_view assetId
+    ) const;
+    u32 AuthoredCubemapIrradianceReadyCount() const;
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
@@ -108,6 +114,8 @@ private:
         bool prefiltered = false;
         u32 generatedMipCount = 0;
         u32 prefilterSampleCount = 0;
+        bool irradianceReady = false;
+        std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
     };
 
 private:

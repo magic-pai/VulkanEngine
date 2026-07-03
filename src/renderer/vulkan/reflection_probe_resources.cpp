@@ -68,6 +68,8 @@ struct AuthoredCubemapLoadResult {
     bool prefilteredMipChain = false;
     u32 generatedMipCount = 0;
     u32 prefilterSampleCount = 0;
+    bool irradianceReady = false;
+    std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
 };
 
 struct AuthoredCubemapPixelData {
@@ -990,6 +992,45 @@ std::array<float, 4> LoadCubemapBaseTexel(
     };
 }
 
+float CubemapTexelSolidAngle(u32 faceSize, u32 x, u32 y) {
+    const float size = static_cast<float>(faceSize);
+    const float u = (2.0f * (static_cast<float>(x) + 0.5f) / size) - 1.0f;
+    const float v = (2.0f * (static_cast<float>(y) + 0.5f) / size) - 1.0f;
+    const float denominator = 1.0f + u * u + v * v;
+    return 4.0f / (size * size * std::sqrt(denominator * denominator * denominator));
+}
+
+std::array<f32, 3> ComputeCubemapDiffuseIrradianceColor(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize
+) {
+    std::array<double, 3> weightedColor{ 0.0, 0.0, 0.0 };
+    double totalWeight = 0.0;
+    for (std::size_t face = 0; face < 6u; ++face) {
+        for (u32 y = 0; y < faceSize; ++y) {
+            for (u32 x = 0; x < faceSize; ++x) {
+                const float solidAngle = CubemapTexelSolidAngle(faceSize, x, y);
+                const std::array<float, 4> texel =
+                    LoadCubemapBaseTexel(pixelData, faceSize, face, x, y);
+                weightedColor[0] += static_cast<double>(texel[0]) * solidAngle;
+                weightedColor[1] += static_cast<double>(texel[1]) * solidAngle;
+                weightedColor[2] += static_cast<double>(texel[2]) * solidAngle;
+                totalWeight += solidAngle;
+            }
+        }
+    }
+
+    if (totalWeight <= 0.000001) {
+        return { 1.0f, 1.0f, 1.0f };
+    }
+    const double invWeight = 1.0 / totalWeight;
+    return {
+        static_cast<f32>(std::max(0.0, weightedColor[0] * invWeight)),
+        static_cast<f32>(std::max(0.0, weightedColor[1] * invWeight)),
+        static_cast<f32>(std::max(0.0, weightedColor[2] * invWeight))
+    };
+}
+
 struct CubemapSampleLocation {
     std::size_t face = 0;
     float x = 0.0f;
@@ -1375,6 +1416,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             std::max(1u, static_cast<u32>(equirectangular.height / 2));
         AuthoredCubemapPixelData pixelData =
             ConvertEquirectangularToCubemapPixels(equirectangular, faceSize);
+        const std::array<f32, 3> irradianceColor =
+            ComputeCubemapDiffuseIrradianceColor(pixelData, faceSize);
         AuthoredCubemapMipChain mipChain =
             BuildPrefilteredCubemapMipChain(pixelData, faceSize);
         return AuthoredCubemapLoadResult{
@@ -1388,7 +1431,9 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             pixelData.hdr,
             mipChain.prefiltered,
             mipChain.mipLevels,
-            mipChain.prefilterSampleCount
+            mipChain.prefilterSampleCount,
+            true,
+            irradianceColor
         };
     }
 
@@ -1406,21 +1451,28 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
     }
 
     AuthoredCubemapPixelData pixelData = PackSixFaceCubemapPixels(faces);
+    const std::array<f32, 3> irradianceColor =
+        ComputeCubemapDiffuseIrradianceColor(
+            pixelData,
+            static_cast<u32>(faces[0].width)
+        );
     AuthoredCubemapMipChain mipChain =
         BuildPrefilteredCubemapMipChain(pixelData, static_cast<u32>(faces[0].width));
 
     return AuthoredCubemapLoadResult{
-            UploadAuthoredCubemapMipChain(
-                device,
-                physicalDevice,
-                commandPool,
-                mipChain
-            ),
+        UploadAuthoredCubemapMipChain(
+            device,
+            physicalDevice,
+            commandPool,
+            mipChain
+        ),
         source.type,
         pixelData.hdr,
         mipChain.prefiltered,
         mipChain.mipLevels,
-        mipChain.prefilterSampleCount
+        mipChain.prefilterSampleCount,
+        true,
+        irradianceColor
     };
 }
 
@@ -1475,6 +1527,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.irradianceReady = false;
+        resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
         return;
     }
 
@@ -1500,6 +1554,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.irradianceReady = false;
+        resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
         return;
     }
 
@@ -1519,6 +1575,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     resource.prefiltered = false;
     resource.generatedMipCount = 0;
     resource.prefilterSampleCount = 0;
+    resource.irradianceReady = false;
+    resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
 
     try {
         AuthoredCubemapLoadResult loadResult = CreateAuthoredCubemapImage(
@@ -1534,6 +1592,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = loadResult.prefilteredMipChain;
         resource.generatedMipCount = loadResult.generatedMipCount;
         resource.prefilterSampleCount = loadResult.prefilterSampleCount;
+        resource.irradianceReady = loadResult.irradianceReady;
+        resource.irradianceColor = loadResult.irradianceColor;
         ++m_AuthoredCubemapUploadCount;
         if (resource.prefiltered) {
             ++m_AuthoredCubemapPrefilteredUploadCount;
@@ -1551,6 +1611,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.irradianceReady = false;
+        resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
     }
 }
 
@@ -1808,6 +1870,37 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapPrefilterSampleCount(
     return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
         ? found->second.prefilterSampleCount
         : 0u;
+}
+
+bool VulkanReflectionProbeResources::AuthoredCubemapIrradianceReady(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+        found->second.image != nullptr &&
+        found->second.irradianceReady;
+}
+
+std::array<f32, 3> VulkanReflectionProbeResources::AuthoredCubemapIrradianceColor(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+            found->second.image != nullptr &&
+            found->second.irradianceReady
+        ? found->second.irradianceColor
+        : std::array<f32, 3>{ 1.0f, 1.0f, 1.0f };
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapIrradianceReadyCount() const {
+    u32 count = 0;
+    for (const auto& [assetId, resource] : m_AuthoredCubemaps) {
+        (void)assetId;
+        if (resource.image != nullptr && resource.irradianceReady) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 AuthoredReflectionCubemapSourceType VulkanReflectionProbeResources::AuthoredCubemapSourceType(

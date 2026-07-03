@@ -910,7 +910,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedAuthoredAssetHashes[3]
     );
     ImGui::Text(
-        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u, cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
+        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u, irradiance %u/%u [%.2f %.2f %.2f], cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
         stats.reflectionProbe.authoredCubemapLoadedCount,
         stats.reflectionProbe.authoredCubemapMissingCount,
         stats.reflectionProbe.authoredCubemapLoadFailedCount,
@@ -925,6 +925,11 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.authoredCubemapGeneratedMipCount,
         stats.reflectionProbe.authoredCubemapPrefilterSampleCount,
         stats.reflectionProbe.authoredCubemapPrefilterMode,
+        stats.reflectionProbe.authoredCubemapIrradianceReadyCount,
+        stats.reflectionProbe.authoredCubemapIrradianceApplied,
+        stats.reflectionProbe.authoredCubemapIrradianceR,
+        stats.reflectionProbe.authoredCubemapIrradianceG,
+        stats.reflectionProbe.authoredCubemapIrradianceB,
         stats.reflectionProbe.authoredCubemapCacheHitCount,
         stats.reflectionProbe.authoredCubemapReloadCount,
         stats.reflectionProbe.authoredCubemapRefreshCheckCount,

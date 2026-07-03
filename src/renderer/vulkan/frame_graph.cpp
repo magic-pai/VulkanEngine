@@ -1674,7 +1674,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
-            inputs.authoredReflectionCubemapPrefilterMode == 1u
+            inputs.authoredReflectionCubemapIrradianceApplied
+                ? "loaded authored reflection-probe cubemaps with GGX specular mips and diffuse irradiance color"
+                : inputs.authoredReflectionCubemapPrefilterMode == 1u
                 ? "loaded GGX-weighted authored reflection-probe cubemaps with explicit mip payloads"
                 : inputs.authoredReflectionCubemapPrefilteredLoadedCount > 0
                 ? "loaded CPU-prefiltered authored reflection-probe cubemaps with explicit mip payloads"
@@ -1683,7 +1685,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
                 ? "loaded authored reflection-probe cubemaps with equirectangular conversions available for selected capture slots"
                 : "loaded authored reflection-probe cubemaps available for selected capture slots",
-            inputs.authoredReflectionCubemapPrefilterMode == 1u
+            inputs.authoredReflectionCubemapIrradianceApplied
+                ? "authored diffuse irradiance applied to selected local probe"
+                : inputs.authoredReflectionCubemapPrefilterMode == 1u
                 ? "GGX authored mip chain uploaded"
                 : inputs.authoredReflectionCubemapPrefilteredUploadCount > 0
                 ? "prefiltered authored mip chain uploaded"

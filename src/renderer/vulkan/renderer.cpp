@@ -2947,6 +2947,8 @@ void VulkanRenderer::DrawFrame() {
         m_ReflectionProbeResources.AuthoredCubemapReloadCount();
     frameStats.reflectionProbe.authoredCubemapRefreshCheckCount =
         m_ReflectionProbeResources.AuthoredCubemapRefreshCheckCount();
+    frameStats.reflectionProbe.authoredCubemapIrradianceReadyCount =
+        m_ReflectionProbeResources.AuthoredCubemapIrradianceReadyCount();
     if (frameReflectionProbes.selectedProbeCount > 0 &&
         frameReflectionProbes.selectedProbes[0].captureSource ==
             RendererReflectionProbeCaptureSource::AuthoredCubemap) {
@@ -2990,6 +2992,18 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapPrefiltered > 0
                 ? 1u
                 : 0u;
+        if (m_ReflectionProbeResources.AuthoredCubemapIrradianceReady(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            )) {
+            const std::array<f32, 3> irradiance =
+                m_ReflectionProbeResources.AuthoredCubemapIrradianceColor(
+                    frameReflectionProbes.selectedProbes[0].captureAssetId
+                );
+            frameStats.reflectionProbe.authoredCubemapIrradianceApplied = 1u;
+            frameStats.reflectionProbe.authoredCubemapIrradianceR = irradiance[0];
+            frameStats.reflectionProbe.authoredCubemapIrradianceG = irradiance[1];
+            frameStats.reflectionProbe.authoredCubemapIrradianceB = irradiance[2];
+        }
     }
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
@@ -3300,6 +3314,8 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapPrefilteredLoadedCount,
             frameStats.reflectionProbe.authoredCubemapPrefilteredUploadCount,
             frameStats.reflectionProbe.authoredCubemapPrefilterMode,
+            frameStats.reflectionProbe.authoredCubemapIrradianceReadyCount,
+            frameStats.reflectionProbe.authoredCubemapIrradianceApplied > 0,
             frameStats.reflectionProbe.authoredCubemapCacheHitCount,
             frameStats.reflectionProbe.authoredCubemapReloadCount,
             frameStats.reflectionProbe.authoredCubemapRefreshCheckCount,
@@ -6004,10 +6020,24 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                             selected.probe.captureAssetId
                         )
                         : false;
+                if (authoredCubemapReady &&
+                    m_ReflectionProbeResources.AuthoredCubemapIrradianceReady(
+                        selected.probe.captureAssetId
+                    )) {
+                    const std::array<f32, 3> irradiance =
+                        m_ReflectionProbeResources.AuthoredCubemapIrradianceColor(
+                            selected.probe.captureAssetId
+                        );
+                    probes.selectedProbes[index].color = glm::vec3{
+                        irradiance[0],
+                        irradiance[1],
+                        irradiance[2]
+                    };
+                }
                 SetSelectedReflectionProbeCaptureDiagnostics(
                     probes,
                     index,
-                    selected.probe,
+                    probes.selectedProbes[index],
                     m_ShadowSettings.reflectionProbeCubemapEnabled,
                     builtInCubemapReady,
                     authoredCubemapReady,
