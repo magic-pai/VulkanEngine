@@ -873,6 +873,30 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedProbeIndices[3]
     );
     ImGui::Text(
+        "Reflection capture slots: slots %u, ready %u, fallback %u, sampling %u, ready mask 0x%X, sampling mask 0x%X",
+        stats.reflectionProbe.selectedCaptureSlotCount,
+        stats.reflectionProbe.selectedCaptureResourceReadyCount,
+        stats.reflectionProbe.selectedCaptureFallbackCount,
+        stats.reflectionProbe.selectedCubemapSamplingCount,
+        stats.reflectionProbe.selectedCaptureReadyMask,
+        stats.reflectionProbe.selectedCubemapSamplingMask
+    );
+    ImGui::Text(
+        "Reflection capture top slots: [%d/%u/%u, %d/%u/%u, %d/%u/%u, %d/%u/%u]",
+        stats.reflectionProbe.selectedCaptureSlots[0],
+        stats.reflectionProbe.selectedCaptureSourceTypes[0],
+        stats.reflectionProbe.selectedCaptureFallbackReasons[0],
+        stats.reflectionProbe.selectedCaptureSlots[1],
+        stats.reflectionProbe.selectedCaptureSourceTypes[1],
+        stats.reflectionProbe.selectedCaptureFallbackReasons[1],
+        stats.reflectionProbe.selectedCaptureSlots[2],
+        stats.reflectionProbe.selectedCaptureSourceTypes[2],
+        stats.reflectionProbe.selectedCaptureFallbackReasons[2],
+        stats.reflectionProbe.selectedCaptureSlots[3],
+        stats.reflectionProbe.selectedCaptureSourceTypes[3],
+        stats.reflectionProbe.selectedCaptureFallbackReasons[3]
+    );
+    ImGui::Text(
         "Reflection probe cubemap: %s, face %u, mips %u, descriptors %u, shader %s, source %u",
         stats.reflectionProbe.localCubemapAllocated ? "allocated" : "off",
         stats.reflectionProbe.localCubemapFaceSize,

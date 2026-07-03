@@ -320,6 +320,25 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.sceneEligibleProbeCount << ','
         << reflectionProbe.selectedProbeCount << ','
         << reflectionProbe.blendedProbeCount << ','
+        << reflectionProbe.selectedCaptureSlotCount << ','
+        << reflectionProbe.selectedCaptureResourceReadyCount << ','
+        << reflectionProbe.selectedCaptureFallbackCount << ','
+        << reflectionProbe.selectedCubemapSamplingCount << ','
+        << reflectionProbe.selectedCaptureReadyMask << ','
+        << reflectionProbe.selectedCaptureFallbackMask << ','
+        << reflectionProbe.selectedCubemapSamplingMask << ','
+        << reflectionProbe.selectedCaptureSlots[0] << ','
+        << reflectionProbe.selectedCaptureSlots[1] << ','
+        << reflectionProbe.selectedCaptureSlots[2] << ','
+        << reflectionProbe.selectedCaptureSlots[3] << ','
+        << reflectionProbe.selectedCaptureSourceTypes[0] << ','
+        << reflectionProbe.selectedCaptureSourceTypes[1] << ','
+        << reflectionProbe.selectedCaptureSourceTypes[2] << ','
+        << reflectionProbe.selectedCaptureSourceTypes[3] << ','
+        << reflectionProbe.selectedCaptureFallbackReasons[0] << ','
+        << reflectionProbe.selectedCaptureFallbackReasons[1] << ','
+        << reflectionProbe.selectedCaptureFallbackReasons[2] << ','
+        << reflectionProbe.selectedCaptureFallbackReasons[3] << ','
         << reflectionProbe.selectedProbeIndex << ','
         << reflectionProbe.droppedProbeCount << ','
         << reflectionProbe.maxBlendWeight << ','
@@ -725,6 +744,25 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_scene_eligible_probe_count,"
         << "reflection_probe_selected_probe_count,"
         << "reflection_probe_blended_probe_count,"
+        << "reflection_probe_capture_slot_count,"
+        << "reflection_probe_selected_capture_ready_count,"
+        << "reflection_probe_selected_capture_fallback_count,"
+        << "reflection_probe_selected_cubemap_sampling_count,"
+        << "reflection_probe_selected_capture_ready_mask,"
+        << "reflection_probe_selected_capture_fallback_mask,"
+        << "reflection_probe_selected_cubemap_sampling_mask,"
+        << "reflection_probe_selected_capture_slot_0,"
+        << "reflection_probe_selected_capture_slot_1,"
+        << "reflection_probe_selected_capture_slot_2,"
+        << "reflection_probe_selected_capture_slot_3,"
+        << "reflection_probe_selected_capture_source_type_0,"
+        << "reflection_probe_selected_capture_source_type_1,"
+        << "reflection_probe_selected_capture_source_type_2,"
+        << "reflection_probe_selected_capture_source_type_3,"
+        << "reflection_probe_selected_capture_fallback_reason_0,"
+        << "reflection_probe_selected_capture_fallback_reason_1,"
+        << "reflection_probe_selected_capture_fallback_reason_2,"
+        << "reflection_probe_selected_capture_fallback_reason_3,"
         << "reflection_probe_selected_probe_index,"
         << "reflection_probe_dropped_probe_count,"
         << "reflection_probe_max_blend_weight,"

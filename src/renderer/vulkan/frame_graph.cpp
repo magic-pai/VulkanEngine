@@ -1641,6 +1641,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "fallback-selected source"
         );
     }
+    if (inputs.reflectionCaptureSlotTableAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "ReflectionCaptureSlotTable",
+            "frame UBO payload",
+            "selected reflection-probe capture slot, readiness, and fallback diagnostics",
+            inputs.reflectionCaptureSlotReadyCount > 0
+                ? "partially or fully resource-ready"
+                : "all selected probes using fallback"
+        );
+    }
     if (inputs.sceneReflectionProbeCubemapAllocated) {
         AppendResource(
             plan,

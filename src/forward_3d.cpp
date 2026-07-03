@@ -362,6 +362,18 @@ bool BenchmarkSceneReflectionProbeOverflowRequested() {
         value == "YES";
 }
 
+bool BenchmarkSceneReflectionProbeMixedSourcesRequested() {
+    const std::string value =
+        ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_MIXED_SOURCES");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkPartialLocalShadowCacheRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
     return value == "1" ||
@@ -1086,6 +1098,8 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
         const bool multiProbeRequested = BenchmarkSceneReflectionProbeMultiRequested();
         const bool overflowProbeRequested =
             BenchmarkSceneReflectionProbeOverflowRequested();
+        const bool mixedSourceProbeRequested =
+            BenchmarkSceneReflectionProbeMixedSourcesRequested();
         scene.CreateReflectionProbe(
             "Benchmark Scene Reflection Probe",
             { 0.0f, 1.2f, 0.0f },
@@ -1096,7 +1110,7 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             0.72f,
             1.75f
         );
-        if (multiProbeRequested || overflowProbeRequested) {
+        if (multiProbeRequested || overflowProbeRequested || mixedSourceProbeRequested) {
             scene.CreateReflectionProbe(
                 "Benchmark Warm Reflection Probe",
                 { -3.8f, 1.1f, -2.4f },
@@ -1105,7 +1119,10 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 { 1.0f, 0.68f, 0.48f },
                 1.05f,
                 0.58f,
-                1.55f
+                1.55f,
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::AuthoredCubemap
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
             );
             scene.CreateReflectionProbe(
                 "Benchmark Cool Reflection Probe",
@@ -1115,10 +1132,13 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 { 0.58f, 0.78f, 1.0f },
                 1.12f,
                 0.62f,
-                1.65f
+                1.65f,
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::CapturedScene
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
             );
         }
-        if (overflowProbeRequested) {
+        if (overflowProbeRequested || mixedSourceProbeRequested) {
             scene.CreateReflectionProbe(
                 "Benchmark Garden Reflection Probe",
                 { -1.6f, 1.0f, 3.8f },
@@ -1127,8 +1147,13 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 { 0.62f, 1.0f, 0.72f },
                 0.96f,
                 0.54f,
-                1.5f
+                1.5f,
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::None
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
             );
+        }
+        if (overflowProbeRequested) {
             scene.CreateReflectionProbe(
                 "Benchmark Ember Reflection Probe",
                 { 2.4f, 1.3f, -3.9f },

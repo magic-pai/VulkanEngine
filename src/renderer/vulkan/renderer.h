@@ -144,11 +144,23 @@ struct RendererReflectionProbe {
 struct FrameReflectionProbeSet {
     RendererReflectionProbe localProbe{};
     std::array<RendererReflectionProbe, kMaxFrameReflectionProbes> selectedProbes{};
+    std::array<i32, kMaxFrameReflectionProbes> selectedCaptureSlots{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedCaptureResourceReady{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedCaptureDescriptorBound{};
+    std::array<RendererReflectionProbeCaptureFallbackReason, kMaxFrameReflectionProbes>
+        selectedCaptureFallbackReasons{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     u32 eligibleSceneProbeCount = 0;
     u32 selectedProbeCount = 0;
     u32 blendedProbeCount = 0;
+    u32 selectedCaptureSlotCount = 0;
+    u32 selectedCaptureResourceReadyCount = 0;
+    u32 selectedCaptureFallbackCount = 0;
+    u32 selectedCubemapSamplingCount = 0;
+    u32 selectedCaptureReadyMask = 0;
+    u32 selectedCaptureFallbackMask = 0;
+    u32 selectedCubemapSamplingMask = 0;
     u32 droppedSceneProbeCount = 0;
     i32 selectedSceneProbeIndex = -1;
     f32 maxBlendWeight = 0.0f;

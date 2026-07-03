@@ -1127,6 +1127,64 @@ RendererReflectionProbeCaptureFallbackReason CaptureFallbackReasonFor(
     return RendererReflectionProbeCaptureFallbackReason::SourceDisabled;
 }
 
+bool ReflectionProbeCaptureResourceReady(
+    RendererReflectionProbeCaptureSource source,
+    bool builtInCubemapReady
+) {
+    return source == RendererReflectionProbeCaptureSource::BuiltInProcedural &&
+        builtInCubemapReady;
+}
+
+void ResetFrameReflectionProbeCaptureDiagnostics(FrameReflectionProbeSet& probes) {
+    probes.selectedCaptureSlots.fill(-1);
+    probes.selectedCaptureResourceReady.fill(false);
+    probes.selectedCaptureDescriptorBound.fill(false);
+    probes.selectedCaptureFallbackReasons.fill(
+        RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
+    );
+}
+
+void SetSelectedReflectionProbeCaptureDiagnostics(
+    FrameReflectionProbeSet& probes,
+    u32 selectedIndex,
+    const RendererReflectionProbe& probe,
+    bool cubemapSamplingEnabled,
+    bool builtInCubemapReady,
+    u32 descriptorSetsBound
+) {
+    if (selectedIndex >= probes.selectedCaptureSlots.size()) {
+        return;
+    }
+
+    const bool resourceReady =
+        ReflectionProbeCaptureResourceReady(probe.captureSource, builtInCubemapReady);
+    const bool descriptorBound = resourceReady && descriptorSetsBound > 0u;
+    const RendererReflectionProbeCaptureFallbackReason fallbackReason =
+        cubemapSamplingEnabled
+            ? CaptureFallbackReasonFor(probe.captureSource, resourceReady)
+            : RendererReflectionProbeCaptureFallbackReason::CubemapSamplingDisabled;
+    const u32 bit = 1u << selectedIndex;
+
+    probes.selectedCaptureSlots[selectedIndex] = resourceReady ? 0 : -1;
+    probes.selectedCaptureResourceReady[selectedIndex] = resourceReady;
+    probes.selectedCaptureDescriptorBound[selectedIndex] = descriptorBound;
+    probes.selectedCaptureFallbackReasons[selectedIndex] = fallbackReason;
+    if (resourceReady) {
+        if (probes.selectedCaptureSlotCount == 0u) {
+            ++probes.selectedCaptureSlotCount;
+        }
+        ++probes.selectedCaptureResourceReadyCount;
+        probes.selectedCaptureReadyMask |= bit;
+    } else {
+        ++probes.selectedCaptureFallbackCount;
+        probes.selectedCaptureFallbackMask |= bit;
+    }
+    if (cubemapSamplingEnabled && descriptorBound) {
+        ++probes.selectedCubemapSamplingCount;
+        probes.selectedCubemapSamplingMask |= bit;
+    }
+}
+
 RendererReflectionProbe SceneReflectionProbe(
     const ReflectionProbe3D& source,
     i32 sceneIndex
@@ -1230,9 +1288,26 @@ void WriteFrameReflectionProbeStats(
     stats.sceneEligibleProbeCount = frameProbes.eligibleSceneProbeCount;
     stats.selectedProbeCount = frameProbes.selectedProbeCount;
     stats.blendedProbeCount = frameProbes.blendedProbeCount;
+    stats.selectedCaptureSlotCount = frameProbes.selectedCaptureSlotCount;
+    stats.selectedCaptureResourceReadyCount =
+        frameProbes.selectedCaptureResourceReadyCount;
+    stats.selectedCaptureFallbackCount =
+        frameProbes.selectedCaptureFallbackCount;
+    stats.selectedCubemapSamplingCount =
+        frameProbes.selectedCubemapSamplingCount;
+    stats.selectedCaptureReadyMask = frameProbes.selectedCaptureReadyMask;
+    stats.selectedCaptureFallbackMask = frameProbes.selectedCaptureFallbackMask;
+    stats.selectedCubemapSamplingMask = frameProbes.selectedCubemapSamplingMask;
     stats.droppedProbeCount = frameProbes.droppedSceneProbeCount;
     stats.selectedProbeIndex = frameProbes.selectedSceneProbeIndex;
     stats.selectedProbeIndices.fill(-1);
+    stats.selectedCaptureSlots.fill(-1);
+    stats.selectedCaptureSourceTypes.fill(0u);
+    stats.selectedCaptureFallbackReasons.fill(
+        static_cast<u32>(
+            RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
+        )
+    );
     const u32 selectedProbeCount = std::min<u32>(
         frameProbes.selectedProbeCount,
         static_cast<u32>(stats.selectedProbeIndices.size())
@@ -1240,6 +1315,12 @@ void WriteFrameReflectionProbeStats(
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         stats.selectedProbeIndices[index] =
             frameProbes.selectedProbes[index].sceneIndex;
+        stats.selectedCaptureSlots[index] =
+            frameProbes.selectedCaptureSlots[index];
+        stats.selectedCaptureSourceTypes[index] =
+            static_cast<u32>(frameProbes.selectedProbes[index].captureSource);
+        stats.selectedCaptureFallbackReasons[index] =
+            static_cast<u32>(frameProbes.selectedCaptureFallbackReasons[index]);
     }
     stats.maxBlendWeight = frameProbes.maxBlendWeight;
     stats.totalBlendWeight = frameProbes.totalBlendWeight;
@@ -1317,7 +1398,7 @@ void PopulateReflectionProbeUniforms(
         const bool probeCubemapApplied =
             probeApplied &&
             cubemapSamplingEnabled &&
-            reflectionProbes.captureResourceReady;
+            reflectionProbes.selectedCaptureDescriptorBound[index];
         uniformData.reflectionProbePositionRadius[index] = glm::vec4(
             probe.center,
             probe.radius
@@ -2507,11 +2588,9 @@ void VulkanRenderer::DrawFrame() {
         frameReflectionProbes.activeLocalProbeCount,
         frameReflectionProbes.localProbe.sceneOwned,
         m_ShadowSettings.reflectionProbeCubemapEnabled &&
-            frameReflectionProbes.captureResourceReady &&
             frameReflectionProbes.fallbackEnabled &&
-            frameReflectionProbes.activeLocalProbeCount > 0 &&
             frameReflectionProbes.localProbe.sceneOwned &&
-            ReflectionProbeContributes(frameReflectionProbes.localProbe),
+            frameReflectionProbes.selectedCubemapSamplingCount > 0,
         static_cast<u32>(frameReflectionProbes.captureSource),
         static_cast<u32>(frameReflectionProbes.captureFallbackReason)
     };
@@ -3074,7 +3153,12 @@ void VulkanRenderer::DrawFrame() {
                 ? m_SceneRenderTargets->GBufferEmissiveFormat()
                 : VK_FORMAT_UNDEFINED,
             m_GBufferRenderPass != nullptr && m_GBufferFramebuffer != nullptr,
-            has3DMainPass && m_GBufferGraphicsPipeline != nullptr
+            has3DMainPass && m_GBufferGraphicsPipeline != nullptr,
+            frameReflectionProbes.activeLocalProbeCount > 0 &&
+                frameReflectionProbes.localProbe.sceneOwned,
+            frameStats.reflectionProbe.selectedCaptureSlotCount,
+            frameStats.reflectionProbe.selectedCaptureResourceReadyCount,
+            frameStats.reflectionProbe.selectedCaptureFallbackCount
         }
     );
 
@@ -5624,8 +5708,12 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
     const FrameMatrices* matrices
 ) const {
     FrameReflectionProbeSet probes{};
+    ResetFrameReflectionProbeCaptureDiagnostics(probes);
     probes.fallbackEnabled = m_ShadowSettings.reflectionProbeFallbackEnabled;
     probes.influenceMode = 1u;
+    const bool builtInCubemapReady = LocalReflectionProbeCubemapReady();
+    const u32 reflectionProbeDescriptorSetsBound =
+        m_ReflectionProbeResources.DescriptorSetsBound();
     std::span<const ReflectionProbe3D> sceneProbes{};
     if (m_MainScene3D != nullptr) {
         sceneProbes = m_MainScene3D->ReflectionProbes();
@@ -5711,27 +5799,24 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                 probes.boxProjectionEnabled =
                     probes.boxProjectionEnabled ||
                     ReflectionProbeBoxProjectionEnabled(selected.probe);
+                SetSelectedReflectionProbeCaptureDiagnostics(
+                    probes,
+                    index,
+                    selected.probe,
+                    m_ShadowSettings.reflectionProbeCubemapEnabled,
+                    builtInCubemapReady,
+                    reflectionProbeDescriptorSetsBound
+                );
             }
 
             probes.localProbe = probes.selectedProbes[0];
             probes.selectedSceneProbeIndex = probes.localProbe.sceneIndex;
             probes.parallaxCorrectionEnabled = probes.boxProjectionEnabled;
             probes.captureSource = probes.localProbe.captureSource;
-            probes.captureResourceReady =
-                probes.captureSource ==
-                    RendererReflectionProbeCaptureSource::BuiltInProcedural &&
-                LocalReflectionProbeCubemapReady();
-            probes.captureDescriptorBound =
-                probes.captureResourceReady &&
-                m_ReflectionProbeResources.DescriptorSetsBound() > 0u;
+            probes.captureResourceReady = probes.selectedCaptureResourceReady[0];
+            probes.captureDescriptorBound = probes.selectedCaptureDescriptorBound[0];
             probes.captureFallbackReason =
-                m_ShadowSettings.reflectionProbeCubemapEnabled
-                    ? CaptureFallbackReasonFor(
-                        probes.captureSource,
-                        probes.captureResourceReady
-                    )
-                    : RendererReflectionProbeCaptureFallbackReason::
-                        CubemapSamplingDisabled;
+                probes.selectedCaptureFallbackReasons[0];
             return probes;
         }
     }
@@ -5747,8 +5832,19 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
         probes.multiBlendEnabled = true;
         probes.maxBlendWeight = settingsProbe.blendStrength;
         probes.totalBlendWeight = settingsProbe.blendStrength;
+        SetSelectedReflectionProbeCaptureDiagnostics(
+            probes,
+            0u,
+            settingsProbe,
+            m_ShadowSettings.reflectionProbeCubemapEnabled,
+            builtInCubemapReady,
+            reflectionProbeDescriptorSetsBound
+        );
+        probes.captureSource = settingsProbe.captureSource;
+        probes.captureResourceReady = probes.selectedCaptureResourceReady[0];
+        probes.captureDescriptorBound = probes.selectedCaptureDescriptorBound[0];
         probes.captureFallbackReason =
-            RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe;
+            probes.selectedCaptureFallbackReasons[0];
     }
     return probes;
 }

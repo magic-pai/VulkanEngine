@@ -44,7 +44,7 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 RenderFramePassQueue::Graphics,
                 "SceneReflectionProbeSelection",
                 "SceneReflectionProbes",
-                "SceneReflectionProbeSelection",
+                "SceneReflectionProbeSelection, ReflectionCaptureSlotTable",
                 "Selects up to four scene-owned reflection probes for the current camera and records dropped probe diagnostics for multi-probe blending."
             );
         }
@@ -56,15 +56,15 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             "ReflectionCaptureSourceResolve",
             reflectionProbe.captureResourceReady > 0
                 ? context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbeSelection, ReflectionCaptureSource, SceneReflectionProbeCubemap"
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, SceneReflectionProbeCubemap"
                     : "ReflectionCaptureSource, SceneReflectionProbeCubemap"
                 : context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbeSelection, ReflectionCaptureSource"
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource"
                     : "ReflectionCaptureSource",
             "",
             reflectionProbe.captureResourceReady > 0
-                ? "Resolves the active reflection probe capture source to a renderer-owned cubemap descriptor."
-                : "Selects the active reflection probe source and records the explicit fallback reason."
+                ? "Resolves selected reflection probe capture sources to per-probe diagnostic slots and renderer-owned cubemap descriptors."
+                : "Selects the active reflection probe sources and records explicit per-probe fallback reasons."
         );
         AppendRenderFrameGraphPass(
             context.plan,
@@ -77,9 +77,9 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 ? "SceneReflectionProbeBlend"
                 : "LocalReflectionProbeBlend",
             sceneCubemapSampling
-                ? "SceneReflectionProbeSelection, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, SceneReflectionProbeCubemap, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : context.renderer.sceneReflectionProbeOwned
-                ? "SceneReflectionProbeSelection, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
                 : "ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
             sceneCubemapSampling

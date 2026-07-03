@@ -320,6 +320,10 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat gBufferEmissiveFormat = VK_FORMAT_UNDEFINED;
     bool gBufferRenderPassAllocated = false;
     bool gBufferGeometryEnabled = false;
+    bool reflectionCaptureSlotTableAllocated = false;
+    u32 reflectionCaptureSlotCount = 0;
+    u32 reflectionCaptureSlotReadyCount = 0;
+    u32 reflectionCaptureSlotFallbackCount = 0;
 };
 
 std::string_view RenderFramePassStatusName(RenderFramePassStatus status);
