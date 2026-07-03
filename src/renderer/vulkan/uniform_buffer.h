@@ -7,6 +7,8 @@
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 
+#include <array>
+
 namespace se {
 
 class VulkanBuffer;
@@ -20,6 +22,7 @@ inline constexpr std::size_t kMaxFrameLightsPerTile = 16;
 inline constexpr std::size_t kLightIndexGroupsPerTile =
     (kMaxFrameLightsPerTile + 3) / 4;
 inline constexpr std::size_t kMaxFrameLightTileOverflowIndices = 65536;
+inline constexpr std::size_t kMaxFrameReflectionProbes = 4;
 inline constexpr std::size_t kMaxFrameMaterials = 256;
 inline constexpr std::size_t kMaxFrameLocalShadowTiles = 64;
 inline constexpr std::size_t kAutoExposureHistogramBinCount = 64;
@@ -45,6 +48,11 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 localReflectionProbeControls{ 0.0f, 1.25f, 0.65f, 2.0f };
     alignas(16) glm::vec4 localReflectionProbeColor{ 1.0f, 0.82f, 0.62f, 0.0f };
     alignas(16) glm::vec4 localReflectionProbeBoxExtentsProjection{ 5.5f, 5.5f, 5.5f, 0.0f };
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbePositionRadius{};
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeControlsArray{};
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeColorArray{};
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeBoxExtentsProjectionArray{};
+    alignas(16) glm::vec4 reflectionProbeBlendControls{ 0.0f, 0.0f, 0.0f, 0.0f };
     alignas(16) glm::vec4 heightFogControls{ 0.0f, 0.035f, 0.08f, 3.0f };
     alignas(16) glm::vec4 heightFogColor{ 0.58f, 0.68f, 0.76f, 0.72f };
     alignas(16) glm::vec4 postProcessControls{ 0.0f, 0.35f, 1.0f, 2.5f };
@@ -158,7 +166,9 @@ struct ObjectPushConstants {
 };
 
 static_assert(
-    sizeof(UniformBufferObject) == sizeof(glm::mat4) * 5 + sizeof(glm::vec4) * 23,
+    sizeof(UniformBufferObject) ==
+        sizeof(glm::mat4) * 5 +
+        sizeof(glm::vec4) * (24 + kMaxFrameReflectionProbes * 4),
     "UniformBufferObject layout must match the shader uniform block"
 );
 

@@ -844,12 +844,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ibl.descriptorSetsBound
     );
     ImGui::Text(
-        "Local reflection probe: %s, scene %s, probes %u/%u, eligible %u, selected %d, dropped %u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",
+        "Local reflection probe: %s, scene %s, probes %u/%u, eligible %u, selected %u, top %d, dropped %u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",
         stats.reflectionProbe.localEnabled ? "enabled" : "off",
         stats.reflectionProbe.localSceneOwned ? "yes" : "no",
         stats.reflectionProbe.activeProbeCount,
         stats.reflectionProbe.sceneProbeCount,
         stats.reflectionProbe.sceneEligibleProbeCount,
+        stats.reflectionProbe.selectedProbeCount,
         stats.reflectionProbe.selectedProbeIndex,
         stats.reflectionProbe.droppedProbeCount,
         stats.reflectionProbe.localRadius,
@@ -859,6 +860,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.localIntensity,
         stats.reflectionProbe.localBlendStrength,
         stats.reflectionProbe.localFalloff
+    );
+    ImGui::Text(
+        "Reflection probe blend: %s, blended %u, max %.3f, total %.3f, top [%d, %d, %d, %d]",
+        stats.reflectionProbe.multiBlendEnabled ? "enabled" : "off",
+        stats.reflectionProbe.blendedProbeCount,
+        stats.reflectionProbe.maxBlendWeight,
+        stats.reflectionProbe.totalBlendWeight,
+        stats.reflectionProbe.selectedProbeIndices[0],
+        stats.reflectionProbe.selectedProbeIndices[1],
+        stats.reflectionProbe.selectedProbeIndices[2],
+        stats.reflectionProbe.selectedProbeIndices[3]
     );
     ImGui::Text(
         "Reflection probe cubemap: %s, face %u, mips %u, descriptors %u, shader %s, source %u",

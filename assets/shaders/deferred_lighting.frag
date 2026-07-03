@@ -22,14 +22,19 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 localReflectionProbeControls;
     vec4 localReflectionProbeColor;
     vec4 localReflectionProbeBoxExtentsProjection;
+    vec4 reflectionProbePositionRadius[4];
+    vec4 reflectionProbeControlsArray[4];
+    vec4 reflectionProbeColorArray[4];
+    vec4 reflectionProbeBoxExtentsProjectionArray[4];
+    vec4 reflectionProbeBlendControls;
     vec4 heightFogControls;
     vec4 heightFogColor;
     vec4 postProcessControls;
     vec4 colorGradingControls;
     vec4 toneMappingControls;
-    vec4 autoExposureControls;
     vec4 probeGridOriginSpacing;
     vec4 probeGridSizeBlend;
+    vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
 } frame;
@@ -135,6 +140,7 @@ const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_FRAME_MATERIALS = 256;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
+const int MAX_REFLECTION_PROBES = 4;
 
 float InterleavedGradientNoise(vec2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
@@ -310,37 +316,52 @@ vec3 SampleProbeGridIrradiance(vec3 worldPos) {
     return mix(c0,c1,frac.z);
 }
 
-float LocalReflectionProbeWeight(vec3 worldPosition) {
-    float enabled = clamp(frame.localReflectionProbeControls.x, 0.0, 1.0);
+float LocalReflectionProbeWeightAt(int probeIndex, vec3 worldPosition) {
+    vec4 controls = frame.reflectionProbeControlsArray[probeIndex];
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
+    float enabled = clamp(controls.x, 0.0, 1.0);
     if (enabled <= 0.0001) {
         return 0.0;
     }
 
-    float radius = max(frame.localReflectionProbePositionRadius.w, 0.001);
+    float radius = max(positionRadius.w, 0.001);
     float normalizedDistance =
-        length(worldPosition - frame.localReflectionProbePositionRadius.xyz) / radius;
-    float falloff = clamp(frame.localReflectionProbeControls.w, 0.25, 8.0);
+        length(worldPosition - positionRadius.xyz) / radius;
+    float falloff = clamp(controls.w, 0.25, 8.0);
     float influence = pow(clamp(1.0 - normalizedDistance, 0.0, 1.0), falloff);
-    if (frame.localReflectionProbeBoxExtentsProjection.w > 0.5) {
-        vec3 extents = max(frame.localReflectionProbeBoxExtentsProjection.xyz, vec3(0.001));
+    if (boxExtentsProjection.w > 0.5) {
+        vec3 extents = max(boxExtentsProjection.xyz, vec3(0.001));
         vec3 normalizedBox =
-            abs(worldPosition - frame.localReflectionProbePositionRadius.xyz) / extents;
+            abs(worldPosition - positionRadius.xyz) / extents;
         float maxAxis = max(max(normalizedBox.x, normalizedBox.y), normalizedBox.z);
         influence *= 1.0 - smoothstep(1.0, 1.25, maxAxis);
     }
-    return influence * clamp(frame.localReflectionProbeControls.z, 0.0, 1.0);
+    return influence * clamp(controls.z, 0.0, 1.0);
 }
 
-vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
+float LocalReflectionProbeWeight(vec3 worldPosition) {
+    return LocalReflectionProbeWeightAt(0, worldPosition);
+}
+
+vec3 BoxProjectedLocalReflectionDirectionAt(
+    int probeIndex,
+    vec3 direction,
+    vec3 worldPosition
+) {
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
     vec3 sampleDirection = dot(direction, direction) > 0.0001
         ? normalize(direction)
         : vec3(0.0, 1.0, 0.0);
-    if (frame.localReflectionProbeBoxExtentsProjection.w <= 0.5) {
+    if (boxExtentsProjection.w <= 0.5) {
         return sampleDirection;
     }
 
-    vec3 center = frame.localReflectionProbePositionRadius.xyz;
-    vec3 extents = max(frame.localReflectionProbeBoxExtentsProjection.xyz, vec3(0.001));
+    vec3 center = positionRadius.xyz;
+    vec3 extents = max(boxExtentsProjection.xyz, vec3(0.001));
     vec3 localPosition = worldPosition - center;
     vec3 safeDirection = sampleDirection;
     safeDirection.x = abs(safeDirection.x) < 0.0001
@@ -367,35 +388,74 @@ vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
         : sampleDirection;
 }
 
+vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
+    return BoxProjectedLocalReflectionDirectionAt(0, direction, worldPosition);
+}
+
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
 }
 
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec3 worldPosition) {
     vec3 globalRadiance = GlobalEnvironmentRadiance(direction, sunDirection, roughness);
-    float localWeight = LocalReflectionProbeWeight(worldPosition);
-    if (localWeight <= 0.0001) {
+    int probeCount = clamp(
+        int(frame.reflectionProbeBlendControls.x + 0.5),
+        0,
+        MAX_REFLECTION_PROBES
+    );
+    if (frame.reflectionProbeBlendControls.y <= 0.5 || probeCount <= 0) {
         return globalRadiance;
     }
 
-    vec3 localTint = max(frame.localReflectionProbeColor.rgb, vec3(0.0));
-    float localIntensity = clamp(frame.localReflectionProbeControls.y, 0.0, 4.0);
-    float glossBoost = mix(1.18, 0.88, clamp(roughness, 0.0, 1.0));
-    vec3 sampleDirection =
-        BoxProjectedLocalReflectionDirection(direction, worldPosition);
-    vec3 localRadiance = globalRadiance * localTint * localIntensity * glossBoost;
-    if (frame.localReflectionProbeColor.a > 0.5) {
-        localRadiance =
-            max(textureLod(
-                localReflectionProbeMap,
-                sampleDirection,
-                clamp(roughness, 0.0, 1.0) * 4.0
-            ).rgb, vec3(0.0)) *
-            localTint *
-            localIntensity *
-            glossBoost;
+    float weights[MAX_REFLECTION_PROBES];
+    float totalWeight = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        float weight = probeIndex < probeCount
+            ? LocalReflectionProbeWeightAt(probeIndex, worldPosition)
+            : 0.0;
+        weights[probeIndex] = weight;
+        totalWeight += weight;
     }
-    return mix(globalRadiance, localRadiance, localWeight);
+    if (totalWeight <= 0.0001) {
+        return globalRadiance;
+    }
+
+    vec3 localBlend = vec3(0.0);
+    float roughnessClamped = clamp(roughness, 0.0, 1.0);
+    float glossBoost = mix(1.18, 0.88, roughnessClamped);
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        float rawWeight = weights[probeIndex];
+        if (probeIndex >= probeCount || rawWeight <= 0.0001) {
+            continue;
+        }
+
+        vec4 color = frame.reflectionProbeColorArray[probeIndex];
+        vec4 controls = frame.reflectionProbeControlsArray[probeIndex];
+        vec3 localTint = max(color.rgb, vec3(0.0));
+        float localIntensity = clamp(controls.y, 0.0, 4.0);
+        vec3 sampleDirection =
+            BoxProjectedLocalReflectionDirectionAt(
+                probeIndex,
+                direction,
+                worldPosition
+            );
+        vec3 localRadiance =
+            globalRadiance * localTint * localIntensity * glossBoost;
+        if (color.a > 0.5) {
+            localRadiance =
+                max(textureLod(
+                    localReflectionProbeMap,
+                    sampleDirection,
+                    roughnessClamped * 4.0
+                ).rgb, vec3(0.0)) *
+                localTint *
+                localIntensity *
+                glossBoost;
+        }
+        localBlend += localRadiance * (rawWeight / totalWeight);
+    }
+
+    return mix(globalRadiance, localBlend, clamp(totalWeight, 0.0, 1.0));
 }
 
 vec3 ReflectionProbeDebugColor(
@@ -412,7 +472,19 @@ vec3 ReflectionProbeDebugColor(
     vec3 diffuseProbe = EnvironmentRadiance(normal, lightDir, 1.0, worldPosition);
     vec3 specularProbe = EnvironmentRadiance(reflection, lightDir, roughness, worldPosition);
     vec3 horizon = vec3(frame.reflectionProbeControls.w);
-    vec3 localDebug = vec3(LocalReflectionProbeWeight(worldPosition));
+    int probeCount = clamp(
+        int(frame.reflectionProbeBlendControls.x + 0.5),
+        0,
+        MAX_REFLECTION_PROBES
+    );
+    float totalLocalWeight = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        if (probeIndex < probeCount) {
+            totalLocalWeight +=
+                LocalReflectionProbeWeightAt(probeIndex, worldPosition);
+        }
+    }
+    vec3 localDebug = vec3(clamp(totalLocalWeight, 0.0, 1.0));
     return clamp(
         diffuseProbe * 0.45 +
             specularProbe * 0.65 +

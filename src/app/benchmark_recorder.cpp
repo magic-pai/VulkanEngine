@@ -318,8 +318,13 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.sceneProbeCount << ','
         << reflectionProbe.activeProbeCount << ','
         << reflectionProbe.sceneEligibleProbeCount << ','
+        << reflectionProbe.selectedProbeCount << ','
+        << reflectionProbe.blendedProbeCount << ','
         << reflectionProbe.selectedProbeIndex << ','
         << reflectionProbe.droppedProbeCount << ','
+        << reflectionProbe.maxBlendWeight << ','
+        << reflectionProbe.totalBlendWeight << ','
+        << reflectionProbe.multiBlendEnabled << ','
         << reflectionProbe.localEnabled << ','
         << reflectionProbe.localSceneOwned << ','
         << reflectionProbe.localRadius << ','
@@ -718,8 +723,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
         << "reflection_probe_scene_eligible_probe_count,"
+        << "reflection_probe_selected_probe_count,"
+        << "reflection_probe_blended_probe_count,"
         << "reflection_probe_selected_probe_index,"
         << "reflection_probe_dropped_probe_count,"
+        << "reflection_probe_max_blend_weight,"
+        << "reflection_probe_total_blend_weight,"
+        << "reflection_probe_multi_blend_enabled,"
         << "reflection_probe_local_enabled,reflection_probe_local_scene_owned,"
         << "reflection_probe_local_radius,"
         << "reflection_probe_local_box_extent_x,reflection_probe_local_box_extent_y,"

@@ -21,11 +21,18 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 localReflectionProbeControls;
     vec4 localReflectionProbeColor;
     vec4 localReflectionProbeBoxExtentsProjection;
+    vec4 reflectionProbePositionRadius[4];
+    vec4 reflectionProbeControlsArray[4];
+    vec4 reflectionProbeColorArray[4];
+    vec4 reflectionProbeBoxExtentsProjectionArray[4];
+    vec4 reflectionProbeBlendControls;
     vec4 heightFogControls;
     vec4 heightFogColor;
     vec4 postProcessControls;
     vec4 colorGradingControls;
     vec4 toneMappingControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;

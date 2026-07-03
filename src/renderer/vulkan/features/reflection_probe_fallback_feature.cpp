@@ -45,7 +45,7 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 "SceneReflectionProbeSelection",
                 "SceneReflectionProbes",
                 "SceneReflectionProbeSelection",
-                "Selects the best scene-owned reflection probe for the current camera and records dropped probe diagnostics before multi-probe blending is added."
+                "Selects up to four scene-owned reflection probes for the current camera and records dropped probe diagnostics for multi-probe blending."
             );
         }
         AppendRenderFrameGraphPass(
@@ -83,9 +83,9 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
                 : "ReflectionCaptureSource, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "",
             sceneCubemapSampling
-                ? "Scene-owned reflection probe samples a renderer-owned local cubemap in deferred, forward, and WBOIT environment lighting."
+                ? "Selected scene-owned reflection probes blend influence volumes and sample the current renderer-owned local cubemap in deferred, forward, and WBOIT environment lighting."
                 : context.renderer.sceneReflectionProbeOwned
-                ? "Scene-owned reflection probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
+                ? "Selected scene-owned reflection-probe influence volumes blend into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
                 : "Debug local reflection-probe influence volume blended into deferred, forward, and WBOIT environment lighting before real cubemap capture/import is added."
         );
     }

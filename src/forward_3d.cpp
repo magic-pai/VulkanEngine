@@ -350,6 +350,18 @@ bool BenchmarkSceneReflectionProbeMultiRequested() {
         value == "YES";
 }
 
+bool BenchmarkSceneReflectionProbeOverflowRequested() {
+    const std::string value =
+        ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_OVERFLOW");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkPartialLocalShadowCacheRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE");
     return value == "1" ||
@@ -1071,6 +1083,9 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
     }
 
     if (BenchmarkSceneReflectionProbeRequested()) {
+        const bool multiProbeRequested = BenchmarkSceneReflectionProbeMultiRequested();
+        const bool overflowProbeRequested =
+            BenchmarkSceneReflectionProbeOverflowRequested();
         scene.CreateReflectionProbe(
             "Benchmark Scene Reflection Probe",
             { 0.0f, 1.2f, 0.0f },
@@ -1081,7 +1096,7 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             0.72f,
             1.75f
         );
-        if (BenchmarkSceneReflectionProbeMultiRequested()) {
+        if (multiProbeRequested || overflowProbeRequested) {
             scene.CreateReflectionProbe(
                 "Benchmark Warm Reflection Probe",
                 { -3.8f, 1.1f, -2.4f },
@@ -1101,6 +1116,38 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 1.12f,
                 0.62f,
                 1.65f
+            );
+        }
+        if (overflowProbeRequested) {
+            scene.CreateReflectionProbe(
+                "Benchmark Garden Reflection Probe",
+                { -1.6f, 1.0f, 3.8f },
+                4.4f,
+                { 2.8f, 2.4f, 3.4f },
+                { 0.62f, 1.0f, 0.72f },
+                0.96f,
+                0.54f,
+                1.5f
+            );
+            scene.CreateReflectionProbe(
+                "Benchmark Ember Reflection Probe",
+                { 2.4f, 1.3f, -3.9f },
+                4.6f,
+                { 3.2f, 2.5f, 3.2f },
+                { 1.0f, 0.52f, 0.36f },
+                1.0f,
+                0.56f,
+                1.6f
+            );
+            scene.CreateReflectionProbe(
+                "Benchmark Neutral Reflection Probe",
+                { 4.4f, 1.2f, -0.4f },
+                4.2f,
+                { 2.8f, 2.4f, 2.8f },
+                { 0.82f, 0.86f, 0.9f },
+                0.9f,
+                0.5f,
+                1.45f
             );
         }
     }

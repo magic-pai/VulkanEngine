@@ -1624,8 +1624,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PerFrame,
             "SceneReflectionProbeSelection",
             "frame UBO payload",
-            "selected scene reflection-probe index and influence policy",
-            "single selected local probe"
+            "top-N selected scene reflection probes and influence policy",
+            "up to four selected local probes"
         );
     }
     if (inputs.reflectionCaptureSourceAllocated) {

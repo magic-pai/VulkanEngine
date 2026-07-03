@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/shadow_settings.h"
+#include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vulkan_common.h"
 
 #include <array>
@@ -187,8 +188,14 @@ struct RendererReflectionProbeStats {
     u32 sceneProbeCount = 0;
     u32 activeProbeCount = 0;
     u32 sceneEligibleProbeCount = 0;
+    u32 selectedProbeCount = 0;
+    u32 blendedProbeCount = 0;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
+    std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};
+    f32 maxBlendWeight = 0.0f;
+    f32 totalBlendWeight = 0.0f;
+    u32 multiBlendEnabled = 0;
     u32 localEnabled = 0;
     u32 localSceneOwned = 0;
     f32 localRadius = 0.0f;

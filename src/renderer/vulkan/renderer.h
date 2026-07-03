@@ -7,6 +7,7 @@
 #include "renderer/vulkan/render_feature_registry.h"
 #include "renderer/vulkan/renderer_stats.h"
 #include "renderer/vulkan/shadow_settings.h"
+#include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vertex.h"
 #include "renderer/render_queue.h"
 
@@ -142,14 +143,20 @@ struct RendererReflectionProbe {
 
 struct FrameReflectionProbeSet {
     RendererReflectionProbe localProbe{};
+    std::array<RendererReflectionProbe, kMaxFrameReflectionProbes> selectedProbes{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     u32 eligibleSceneProbeCount = 0;
+    u32 selectedProbeCount = 0;
+    u32 blendedProbeCount = 0;
     u32 droppedSceneProbeCount = 0;
     i32 selectedSceneProbeIndex = -1;
+    f32 maxBlendWeight = 0.0f;
+    f32 totalBlendWeight = 0.0f;
     bool fallbackEnabled = false;
     bool boxProjectionEnabled = false;
     bool parallaxCorrectionEnabled = false;
+    bool multiBlendEnabled = false;
     u32 influenceMode = 0;
     bool captureResourceReady = false;
     bool captureDescriptorBound = false;
