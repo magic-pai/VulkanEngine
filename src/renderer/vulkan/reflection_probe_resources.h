@@ -76,9 +76,14 @@ public:
     u32 AuthoredCubemapSixFaceLoadedCount() const;
     u32 AuthoredCubemapEquirectangularLoadedCount() const;
     u32 AuthoredCubemapEquirectangularConversionCount() const;
+    u32 AuthoredCubemapHdrLoadedCount() const;
+    u32 AuthoredCubemapCacheHitCount() const;
+    u32 AuthoredCubemapReloadCount() const;
+    u32 AuthoredCubemapRefreshCheckCount() const;
     u32 AuthoredCubemapFaceSize(std::string_view assetId) const;
     u32 AuthoredCubemapMipCount(std::string_view assetId) const;
     VkFormat AuthoredCubemapFormat(std::string_view assetId) const;
+    bool AuthoredCubemapHdr(std::string_view assetId) const;
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
@@ -91,8 +96,10 @@ private:
         std::unique_ptr<VulkanImage> image;
         AuthoredReflectionCubemapSourceType sourceType =
             AuthoredReflectionCubemapSourceType::Unknown;
+        u64 assetSignature = 0;
         bool assetFound = false;
         bool loadFailed = false;
+        bool hdr = false;
     };
 
 private:
@@ -101,6 +108,9 @@ private:
     std::unordered_map<std::string, AuthoredCubemapResource> m_AuthoredCubemaps;
     u32 m_AuthoredCubemapUploadCount = 0;
     u32 m_AuthoredCubemapEquirectangularConversionCount = 0;
+    u32 m_AuthoredCubemapCacheHitCount = 0;
+    u32 m_AuthoredCubemapReloadCount = 0;
+    u32 m_AuthoredCubemapRefreshCheckCount = 0;
     u32 m_DescriptorSetsBound = 0;
 };
 

@@ -2935,6 +2935,14 @@ void VulkanRenderer::DrawFrame() {
         m_ReflectionProbeResources.AuthoredCubemapEquirectangularLoadedCount();
     frameStats.reflectionProbe.authoredCubemapEquirectangularConversionCount =
         m_ReflectionProbeResources.AuthoredCubemapEquirectangularConversionCount();
+    frameStats.reflectionProbe.authoredCubemapHdrLoadedCount =
+        m_ReflectionProbeResources.AuthoredCubemapHdrLoadedCount();
+    frameStats.reflectionProbe.authoredCubemapCacheHitCount =
+        m_ReflectionProbeResources.AuthoredCubemapCacheHitCount();
+    frameStats.reflectionProbe.authoredCubemapReloadCount =
+        m_ReflectionProbeResources.AuthoredCubemapReloadCount();
+    frameStats.reflectionProbe.authoredCubemapRefreshCheckCount =
+        m_ReflectionProbeResources.AuthoredCubemapRefreshCheckCount();
     if (frameReflectionProbes.selectedProbeCount > 0 &&
         frameReflectionProbes.selectedProbes[0].captureSource ==
             RendererReflectionProbeCaptureSource::AuthoredCubemap) {
@@ -2954,6 +2962,12 @@ void VulkanRenderer::DrawFrame() {
             static_cast<u32>(m_ReflectionProbeResources.AuthoredCubemapSourceType(
                 frameReflectionProbes.selectedProbes[0].captureAssetId
             ));
+        frameStats.reflectionProbe.authoredCubemapHdr =
+            m_ReflectionProbeResources.AuthoredCubemapHdr(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            )
+                ? 1u
+                : 0u;
     }
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
@@ -3260,6 +3274,10 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapLoadedCount,
             frameStats.reflectionProbe.authoredCubemapEquirectangularLoadedCount,
             frameStats.reflectionProbe.authoredCubemapEquirectangularConversionCount,
+            frameStats.reflectionProbe.authoredCubemapHdrLoadedCount,
+            frameStats.reflectionProbe.authoredCubemapCacheHitCount,
+            frameStats.reflectionProbe.authoredCubemapReloadCount,
+            frameStats.reflectionProbe.authoredCubemapRefreshCheckCount,
             frameStats.postProcess.autoExposureHistogramEnabled > 0,
             frameStats.postProcess.autoExposureHistogramEnabled > 0 &&
                 m_AutoExposureBuffer != nullptr,

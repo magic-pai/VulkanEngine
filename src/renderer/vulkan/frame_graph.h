@@ -306,6 +306,10 @@ struct CurrentVulkanFrameGraphInputs {
     u32 authoredReflectionCubemapLoadedCount = 0;
     u32 authoredReflectionCubemapEquirectangularLoadedCount = 0;
     u32 authoredReflectionCubemapEquirectangularConversionCount = 0;
+    u32 authoredReflectionCubemapHdrLoadedCount = 0;
+    u32 authoredReflectionCubemapCacheHitCount = 0;
+    u32 authoredReflectionCubemapReloadCount = 0;
+    u32 authoredReflectionCubemapRefreshCheckCount = 0;
     bool autoExposureHistogramEnabled = false;
     bool autoExposureHistoryAllocated = false;
     bool deferredLightingEnabled = false;

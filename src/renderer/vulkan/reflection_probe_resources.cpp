@@ -13,8 +13,10 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -31,8 +33,10 @@ struct StbiImageDeleter {
 
 struct LoadedCubemapFace {
     std::unique_ptr<stbi_uc, StbiImageDeleter> pixels;
+    std::vector<float> hdrPixels;
     int width = 0;
     int height = 0;
+    bool hdr = false;
 };
 
 struct LoadedEquirectangularImage {
@@ -60,6 +64,14 @@ struct AuthoredCubemapLoadResult {
     std::unique_ptr<VulkanImage> image;
     AuthoredReflectionCubemapSourceType sourceType =
         AuthoredReflectionCubemapSourceType::Unknown;
+    bool hdr = false;
+};
+
+struct AuthoredCubemapPixelData {
+    std::vector<u8> pixels;
+    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    bool hdr = false;
+    u32 bytesPerTexel = 4;
 };
 
 std::string Lowercase(std::string value) {
@@ -115,6 +127,76 @@ bool RegularFileExists(const std::filesystem::path& path) {
 bool DirectoryExists(const std::filesystem::path& path) {
     std::error_code error;
     return std::filesystem::is_directory(path, error);
+}
+
+u64 HashCombine64(u64 seed, u64 value) {
+    return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6u) + (seed >> 2u));
+}
+
+u64 PathHash(const std::filesystem::path& path) {
+    return static_cast<u64>(std::hash<std::string>{}(
+        path.lexically_normal().string()
+    ));
+}
+
+u64 FileSignature(const std::filesystem::path& path) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) {
+        return 0;
+    }
+
+    const u64 size = static_cast<u64>(std::filesystem::file_size(path, error));
+    if (error) {
+        return PathHash(path);
+    }
+    const auto lastWriteTime = std::filesystem::last_write_time(path, error);
+    const u64 timestamp = error
+        ? 0u
+        : static_cast<u64>(lastWriteTime.time_since_epoch().count());
+
+    u64 signature = 0xcbf29ce484222325ull;
+    signature = HashCombine64(signature, PathHash(path));
+    signature = HashCombine64(signature, size);
+    signature = HashCombine64(signature, timestamp);
+    return signature;
+}
+
+u64 FileSystemEntrySignature(const std::filesystem::path& path) {
+    if (RegularFileExists(path)) {
+        return FileSignature(path);
+    }
+
+    std::error_code error;
+    if (!std::filesystem::is_directory(path, error) || error) {
+        return PathHash(path);
+    }
+
+    const auto lastWriteTime = std::filesystem::last_write_time(path, error);
+    const u64 timestamp = error
+        ? 0u
+        : static_cast<u64>(lastWriteTime.time_since_epoch().count());
+    return HashCombine64(PathHash(path), timestamp);
+}
+
+u64 AuthoredCubemapSourceSignature(
+    const ResolvedAuthoredCubemapSource& source,
+    const std::filesystem::path& rootPath
+) {
+    u64 signature = HashCombine64(
+        PathHash(rootPath),
+        static_cast<u64>(source.type)
+    );
+    if (RegularFileExists(rootPath)) {
+        signature = HashCombine64(signature, FileSignature(rootPath));
+    }
+    if (source.type == AuthoredReflectionCubemapSourceType::Equirectangular) {
+        return HashCombine64(signature, FileSignature(source.equirectangularPath));
+    }
+
+    for (const std::filesystem::path& facePath : source.facePaths) {
+        signature = HashCombine64(signature, FileSignature(facePath));
+    }
+    return signature;
 }
 
 std::optional<std::filesystem::path> FindFacePathInDirectory(
@@ -247,16 +329,38 @@ ResolvedAuthoredCubemapSource ResolveAuthoredCubemapSource(
 
 LoadedCubemapFace LoadCubemapFace(const std::filesystem::path& path) {
     LoadedCubemapFace face{};
+    const std::string pathString = path.string();
     int channels = 0;
-    face.pixels.reset(stbi_load(
-        path.string().c_str(),
-        &face.width,
-        &face.height,
-        &channels,
-        STBI_rgb_alpha
-    ));
-    if (face.pixels == nullptr || face.width <= 0 || face.height <= 0) {
-        throw std::runtime_error("Failed to load authored cubemap face");
+    face.hdr = stbi_is_hdr(pathString.c_str()) != 0;
+    if (face.hdr) {
+        float* pixels = stbi_loadf(
+            pathString.c_str(),
+            &face.width,
+            &face.height,
+            &channels,
+            STBI_rgb_alpha
+        );
+        if (pixels == nullptr || face.width <= 0 || face.height <= 0) {
+            stbi_image_free(pixels);
+            throw std::runtime_error("Failed to load authored HDR cubemap face");
+        }
+        const std::size_t valueCount =
+            static_cast<std::size_t>(face.width) *
+            static_cast<std::size_t>(face.height) *
+            4u;
+        face.hdrPixels.assign(pixels, pixels + valueCount);
+        stbi_image_free(pixels);
+    } else {
+        face.pixels.reset(stbi_load(
+            pathString.c_str(),
+            &face.width,
+            &face.height,
+            &channels,
+            STBI_rgb_alpha
+        ));
+        if (face.pixels == nullptr || face.width <= 0 || face.height <= 0) {
+            throw std::runtime_error("Failed to load authored cubemap face");
+        }
     }
     return face;
 }
@@ -435,16 +539,74 @@ u8 EncodeReflectionChannel(float value, bool hdr) {
     return static_cast<u8>(std::round(std::clamp(value, 0.0f, 1.0f) * 255.0f));
 }
 
-std::vector<u8> ConvertEquirectangularToCubemapPixels(
+u16 FloatToHalfBits(float value) {
+    u32 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+
+    const u32 sign = (bits >> 16u) & 0x8000u;
+    u32 exponent = (bits >> 23u) & 0xffu;
+    u32 mantissa = bits & 0x7fffffu;
+
+    if (exponent == 0xffu) {
+        if (mantissa == 0u) {
+            return static_cast<u16>(sign | 0x7c00u);
+        }
+        return static_cast<u16>(sign | 0x7c00u | (mantissa >> 13u));
+    }
+
+    const int halfExponent = static_cast<int>(exponent) - 127 + 15;
+    if (halfExponent >= 31) {
+        return static_cast<u16>(sign | 0x7c00u);
+    }
+    if (halfExponent <= 0) {
+        if (halfExponent < -10) {
+            return static_cast<u16>(sign);
+        }
+        mantissa |= 0x800000u;
+        const u32 shift = static_cast<u32>(14 - halfExponent);
+        const u32 rounded = (mantissa + (1u << (shift - 1u))) >> shift;
+        return static_cast<u16>(sign | rounded);
+    }
+
+    u32 roundedMantissa = mantissa + 0x1000u;
+    u32 roundedExponent = static_cast<u32>(halfExponent);
+    if ((roundedMantissa & 0x800000u) != 0u) {
+        roundedMantissa = 0u;
+        ++roundedExponent;
+        if (roundedExponent >= 31u) {
+            return static_cast<u16>(sign | 0x7c00u);
+        }
+    }
+
+    return static_cast<u16>(
+        sign |
+        (roundedExponent << 10u) |
+        ((roundedMantissa >> 13u) & 0x3ffu)
+    );
+}
+
+void StoreHalfFloat(std::vector<u8>& pixels, std::size_t offset, float value) {
+    const u16 half = FloatToHalfBits(value);
+    pixels[offset + 0u] = static_cast<u8>(half & 0xffu);
+    pixels[offset + 1u] = static_cast<u8>((half >> 8u) & 0xffu);
+}
+
+AuthoredCubemapPixelData ConvertEquirectangularToCubemapPixels(
     const LoadedEquirectangularImage& image,
     u32 faceSize
 ) {
     static constexpr float kPi = 3.14159265358979323846f;
-    std::vector<u8> pixels(
+    AuthoredCubemapPixelData result{};
+    result.hdr = image.hdr;
+    result.format = image.hdr
+        ? VK_FORMAT_R16G16B16A16_SFLOAT
+        : VK_FORMAT_R8G8B8A8_SRGB;
+    result.bytesPerTexel = image.hdr ? 8u : 4u;
+    result.pixels.resize(
         static_cast<std::size_t>(faceSize) *
         static_cast<std::size_t>(faceSize) *
         6u *
-        4u
+        result.bytesPerTexel
     );
 
     for (std::size_t face = 0; face < 6u; ++face) {
@@ -477,16 +639,101 @@ std::vector<u8> ConvertEquirectangularToCubemapPixels(
                        static_cast<std::size_t>(y)) *
                       static_cast<std::size_t>(faceSize)) +
                      static_cast<std::size_t>(x)) *
-                    4u;
-                pixels[offset + 0u] = EncodeReflectionChannel(sample.r, image.hdr);
-                pixels[offset + 1u] = EncodeReflectionChannel(sample.g, image.hdr);
-                pixels[offset + 2u] = EncodeReflectionChannel(sample.b, image.hdr);
-                pixels[offset + 3u] = EncodeReflectionChannel(sample.a, false);
+                    result.bytesPerTexel;
+                if (image.hdr) {
+                    StoreHalfFloat(result.pixels, offset + 0u, sample.r);
+                    StoreHalfFloat(result.pixels, offset + 2u, sample.g);
+                    StoreHalfFloat(result.pixels, offset + 4u, sample.b);
+                    StoreHalfFloat(result.pixels, offset + 6u, sample.a);
+                } else {
+                    result.pixels[offset + 0u] =
+                        EncodeReflectionChannel(sample.r, false);
+                    result.pixels[offset + 1u] =
+                        EncodeReflectionChannel(sample.g, false);
+                    result.pixels[offset + 2u] =
+                        EncodeReflectionChannel(sample.b, false);
+                    result.pixels[offset + 3u] =
+                        EncodeReflectionChannel(sample.a, false);
+                }
             }
         }
     }
 
-    return pixels;
+    return result;
+}
+
+AuthoredCubemapPixelData PackSixFaceCubemapPixels(
+    const std::array<LoadedCubemapFace, 6>& faces
+) {
+    const bool hdr = std::any_of(
+        faces.begin(),
+        faces.end(),
+        [](const LoadedCubemapFace& face) {
+            return face.hdr;
+        }
+    );
+    const u32 bytesPerTexel = hdr ? 8u : 4u;
+    const std::size_t faceTexelCount =
+        static_cast<std::size_t>(faces[0].width) *
+        static_cast<std::size_t>(faces[0].height);
+    const std::size_t faceSizeBytes = faceTexelCount * bytesPerTexel;
+
+    AuthoredCubemapPixelData result{};
+    result.hdr = hdr;
+    result.format = hdr
+        ? VK_FORMAT_R16G16B16A16_SFLOAT
+        : VK_FORMAT_R8G8B8A8_SRGB;
+    result.bytesPerTexel = bytesPerTexel;
+    result.pixels.resize(faceSizeBytes * faces.size());
+
+    for (std::size_t faceIndex = 0; faceIndex < faces.size(); ++faceIndex) {
+        const LoadedCubemapFace& face = faces[faceIndex];
+        const std::size_t faceOffset = faceSizeBytes * faceIndex;
+        if (!hdr) {
+            std::copy_n(
+                face.pixels.get(),
+                faceSizeBytes,
+                result.pixels.data() + faceOffset
+            );
+            continue;
+        }
+
+        for (std::size_t texel = 0; texel < faceTexelCount; ++texel) {
+            const std::size_t outputOffset =
+                faceOffset + texel * bytesPerTexel;
+            if (face.hdr) {
+                const std::size_t inputOffset = texel * 4u;
+                StoreHalfFloat(result.pixels, outputOffset + 0u, face.hdrPixels[inputOffset + 0u]);
+                StoreHalfFloat(result.pixels, outputOffset + 2u, face.hdrPixels[inputOffset + 1u]);
+                StoreHalfFloat(result.pixels, outputOffset + 4u, face.hdrPixels[inputOffset + 2u]);
+                StoreHalfFloat(result.pixels, outputOffset + 6u, face.hdrPixels[inputOffset + 3u]);
+            } else {
+                const stbi_uc* input = face.pixels.get() + texel * 4u;
+                StoreHalfFloat(
+                    result.pixels,
+                    outputOffset + 0u,
+                    static_cast<float>(input[0]) / 255.0f
+                );
+                StoreHalfFloat(
+                    result.pixels,
+                    outputOffset + 2u,
+                    static_cast<float>(input[1]) / 255.0f
+                );
+                StoreHalfFloat(
+                    result.pixels,
+                    outputOffset + 4u,
+                    static_cast<float>(input[2]) / 255.0f
+                );
+                StoreHalfFloat(
+                    result.pixels,
+                    outputOffset + 6u,
+                    static_cast<float>(input[3]) / 255.0f
+                );
+            }
+        }
+    }
+
+    return result;
 }
 
 std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
@@ -494,7 +741,8 @@ std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
     std::span<const u8> pixels,
-    u32 faceSize
+    u32 faceSize,
+    VkFormat format
 ) {
     auto stagingBuffer = std::make_unique<VulkanBuffer>(
         device,
@@ -506,15 +754,18 @@ std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
     stagingBuffer->Upload(std::as_bytes(pixels));
 
     const VkExtent2D extent{ faceSize, faceSize };
-    const u32 mipLevels = CalculateMipLevels(
+    const u32 requestedMipLevels = CalculateMipLevels(
         static_cast<int>(faceSize),
         static_cast<int>(faceSize)
     );
+    const u32 mipLevels = physicalDevice.SupportsLinearBlit(format)
+        ? requestedMipLevels
+        : 1u;
     auto image = std::make_unique<VulkanImage>(
         device,
         physicalDevice,
         extent,
-        VK_FORMAT_R8G8B8A8_SRGB,
+        format,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -534,7 +785,17 @@ std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
         mipLevels
     );
     image->CopyFromBuffer(device, commandPool, stagingBuffer->Handle(), 6u);
-    image->GenerateMipmaps(physicalDevice, device, commandPool, 6u);
+    if (mipLevels > 1u) {
+        image->GenerateMipmaps(physicalDevice, device, commandPool, 6u);
+    } else {
+        image->TransitionLayout(
+            device,
+            commandPool,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            mipLevels
+        );
+    }
     return image;
 }
 
@@ -552,17 +813,19 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             LoadEquirectangularImage(source.equirectangularPath);
         const u32 faceSize =
             std::max(1u, static_cast<u32>(equirectangular.height / 2));
-        std::vector<u8> pixels =
+        AuthoredCubemapPixelData pixelData =
             ConvertEquirectangularToCubemapPixels(equirectangular, faceSize);
         return AuthoredCubemapLoadResult{
             UploadAuthoredCubemapPixels(
                 device,
                 physicalDevice,
                 commandPool,
-                std::span<const u8>(pixels.data(), pixels.size()),
-                faceSize
+                std::span<const u8>(pixelData.pixels.data(), pixelData.pixels.size()),
+                faceSize,
+                pixelData.format
             ),
-            source.type
+            source.type,
+            pixelData.hdr
         };
     }
 
@@ -579,28 +842,19 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         throw std::runtime_error("Authored cubemap faces must be square");
     }
 
-    const VkDeviceSize faceSize =
-        static_cast<VkDeviceSize>(faces[0].width) *
-        static_cast<VkDeviceSize>(faces[0].height) *
-        4u;
-    std::vector<u8> pixels(static_cast<std::size_t>(faceSize) * faces.size());
-    for (std::size_t face = 0; face < faces.size(); ++face) {
-        std::copy_n(
-            faces[face].pixels.get(),
-            static_cast<std::size_t>(faceSize),
-            pixels.data() + static_cast<std::size_t>(faceSize) * face
-        );
-    }
+    AuthoredCubemapPixelData pixelData = PackSixFaceCubemapPixels(faces);
 
     return AuthoredCubemapLoadResult{
         UploadAuthoredCubemapPixels(
             device,
             physicalDevice,
             commandPool,
-            std::span<const u8>(pixels.data(), pixels.size()),
-            static_cast<u32>(faces[0].width)
+            std::span<const u8>(pixelData.pixels.data(), pixelData.pixels.size()),
+            static_cast<u32>(faces[0].width),
+            pixelData.format
         ),
-        source.type
+        source.type,
+        pixelData.hdr
     };
 }
 
@@ -632,15 +886,57 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
 
     const std::string key(assetId);
     AuthoredCubemapResource& resource = m_AuthoredCubemaps[key];
-    if (resource.image != nullptr || resource.loadFailed) {
-        return;
-    }
+    ++m_AuthoredCubemapRefreshCheckCount;
 
     const std::filesystem::path assetPath = ResolveAssetPath(assetId);
     resource.assetFound = RegularFileExists(assetPath) || DirectoryExists(assetPath);
     if (!resource.assetFound) {
+        if (resource.image != nullptr || resource.loadFailed) {
+            ++m_AuthoredCubemapReloadCount;
+        }
+        resource.image.reset();
+        resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
+        resource.assetSignature = 0;
+        resource.loadFailed = false;
+        resource.hdr = false;
         return;
     }
+
+    u64 assetSignature = 0;
+    try {
+        const ResolvedAuthoredCubemapSource source =
+            ResolveAuthoredCubemapSource(assetId);
+        assetSignature = AuthoredCubemapSourceSignature(source, assetPath);
+    } catch (...) {
+        assetSignature = FileSystemEntrySignature(assetPath);
+        if (resource.loadFailed && resource.assetSignature == assetSignature) {
+            ++m_AuthoredCubemapCacheHitCount;
+            return;
+        }
+        if (resource.image != nullptr || resource.loadFailed) {
+            ++m_AuthoredCubemapReloadCount;
+        }
+        resource.image.reset();
+        resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
+        resource.assetSignature = assetSignature;
+        resource.loadFailed = true;
+        resource.hdr = false;
+        return;
+    }
+
+    if ((resource.image != nullptr || resource.loadFailed) &&
+        resource.assetSignature == assetSignature) {
+        ++m_AuthoredCubemapCacheHitCount;
+        return;
+    }
+
+    if (resource.image != nullptr || resource.loadFailed) {
+        ++m_AuthoredCubemapReloadCount;
+    }
+    resource.image.reset();
+    resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
+    resource.loadFailed = false;
+    resource.hdr = false;
 
     try {
         AuthoredCubemapLoadResult loadResult = CreateAuthoredCubemapImage(
@@ -651,6 +947,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         );
         resource.image = std::move(loadResult.image);
         resource.sourceType = loadResult.sourceType;
+        resource.assetSignature = assetSignature;
+        resource.hdr = loadResult.hdr;
         ++m_AuthoredCubemapUploadCount;
         if (resource.sourceType ==
             AuthoredReflectionCubemapSourceType::Equirectangular) {
@@ -659,7 +957,9 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     } catch (...) {
         resource.image.reset();
         resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
+        resource.assetSignature = assetSignature;
         resource.loadFailed = true;
+        resource.hdr = false;
     }
 }
 
@@ -669,6 +969,9 @@ void VulkanReflectionProbeResources::Release() {
     m_AuthoredCubemaps.clear();
     m_AuthoredCubemapUploadCount = 0;
     m_AuthoredCubemapEquirectangularConversionCount = 0;
+    m_AuthoredCubemapCacheHitCount = 0;
+    m_AuthoredCubemapReloadCount = 0;
+    m_AuthoredCubemapRefreshCheckCount = 0;
     m_DescriptorSetsBound = 0;
 }
 
@@ -814,6 +1117,29 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapEquirectangularConversionCoun
     return m_AuthoredCubemapEquirectangularConversionCount;
 }
 
+u32 VulkanReflectionProbeResources::AuthoredCubemapHdrLoadedCount() const {
+    u32 count = 0;
+    for (const auto& [assetId, resource] : m_AuthoredCubemaps) {
+        (void)assetId;
+        if (resource.image != nullptr && resource.hdr) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapCacheHitCount() const {
+    return m_AuthoredCubemapCacheHitCount;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapReloadCount() const {
+    return m_AuthoredCubemapReloadCount;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapRefreshCheckCount() const {
+    return m_AuthoredCubemapRefreshCheckCount;
+}
+
 u32 VulkanReflectionProbeResources::AuthoredCubemapFaceSize(
     std::string_view assetId
 ) const {
@@ -839,6 +1165,15 @@ VkFormat VulkanReflectionProbeResources::AuthoredCubemapFormat(
     return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
         ? found->second.image->Format()
         : VK_FORMAT_UNDEFINED;
+}
+
+bool VulkanReflectionProbeResources::AuthoredCubemapHdr(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+        found->second.image != nullptr &&
+        found->second.hdr;
 }
 
 AuthoredReflectionCubemapSourceType VulkanReflectionProbeResources::AuthoredCubemapSourceType(

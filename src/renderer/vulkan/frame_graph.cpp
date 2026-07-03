@@ -1674,10 +1674,16 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
-            inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
+            inputs.authoredReflectionCubemapHdrLoadedCount > 0
+                ? "loaded HDR-preserving authored reflection-probe cubemaps with cache refresh diagnostics"
+                : inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
                 ? "loaded authored reflection-probe cubemaps with equirectangular conversions available for selected capture slots"
                 : "loaded authored reflection-probe cubemaps available for selected capture slots",
-            inputs.authoredReflectionCubemapEquirectangularLoadedCount > 0
+            inputs.authoredReflectionCubemapReloadCount > 0
+                ? "asset-signature reload observed"
+                : inputs.authoredReflectionCubemapCacheHitCount > 0
+                    ? "asset-signature cache hits observed"
+                    : inputs.authoredReflectionCubemapEquirectangularLoadedCount > 0
                 ? "equirectangular converted authored cube cache"
                 : inputs.authoredReflectionCubemapLoadedCount > 0
                     ? "loaded authored cube cache"
