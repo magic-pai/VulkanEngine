@@ -77,6 +77,8 @@ public:
     u32 AuthoredCubemapEquirectangularLoadedCount() const;
     u32 AuthoredCubemapEquirectangularConversionCount() const;
     u32 AuthoredCubemapHdrLoadedCount() const;
+    u32 AuthoredCubemapPrefilteredLoadedCount() const;
+    u32 AuthoredCubemapPrefilteredUploadCount() const;
     u32 AuthoredCubemapCacheHitCount() const;
     u32 AuthoredCubemapReloadCount() const;
     u32 AuthoredCubemapRefreshCheckCount() const;
@@ -84,6 +86,8 @@ public:
     u32 AuthoredCubemapMipCount(std::string_view assetId) const;
     VkFormat AuthoredCubemapFormat(std::string_view assetId) const;
     bool AuthoredCubemapHdr(std::string_view assetId) const;
+    bool AuthoredCubemapPrefiltered(std::string_view assetId) const;
+    u32 AuthoredCubemapGeneratedMipCount(std::string_view assetId) const;
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
@@ -100,6 +104,8 @@ private:
         bool assetFound = false;
         bool loadFailed = false;
         bool hdr = false;
+        bool prefiltered = false;
+        u32 generatedMipCount = 0;
     };
 
 private:
@@ -108,6 +114,7 @@ private:
     std::unordered_map<std::string, AuthoredCubemapResource> m_AuthoredCubemaps;
     u32 m_AuthoredCubemapUploadCount = 0;
     u32 m_AuthoredCubemapEquirectangularConversionCount = 0;
+    u32 m_AuthoredCubemapPrefilteredUploadCount = 0;
     u32 m_AuthoredCubemapCacheHitCount = 0;
     u32 m_AuthoredCubemapReloadCount = 0;
     u32 m_AuthoredCubemapRefreshCheckCount = 0;

@@ -211,6 +211,8 @@ struct RendererReflectionProbeStats {
     u32 authoredCubemapEquirectangularLoadedCount = 0;
     u32 authoredCubemapEquirectangularConversionCount = 0;
     u32 authoredCubemapHdrLoadedCount = 0;
+    u32 authoredCubemapPrefilteredLoadedCount = 0;
+    u32 authoredCubemapPrefilteredUploadCount = 0;
     u32 authoredCubemapCacheHitCount = 0;
     u32 authoredCubemapReloadCount = 0;
     u32 authoredCubemapRefreshCheckCount = 0;
@@ -219,6 +221,8 @@ struct RendererReflectionProbeStats {
     VkFormat authoredCubemapFormat = VK_FORMAT_UNDEFINED;
     u32 authoredCubemapSourceType = 0;
     u32 authoredCubemapHdr = 0;
+    u32 authoredCubemapPrefiltered = 0;
+    u32 authoredCubemapGeneratedMipCount = 0;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
     std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};

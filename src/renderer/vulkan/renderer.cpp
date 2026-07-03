@@ -2937,6 +2937,10 @@ void VulkanRenderer::DrawFrame() {
         m_ReflectionProbeResources.AuthoredCubemapEquirectangularConversionCount();
     frameStats.reflectionProbe.authoredCubemapHdrLoadedCount =
         m_ReflectionProbeResources.AuthoredCubemapHdrLoadedCount();
+    frameStats.reflectionProbe.authoredCubemapPrefilteredLoadedCount =
+        m_ReflectionProbeResources.AuthoredCubemapPrefilteredLoadedCount();
+    frameStats.reflectionProbe.authoredCubemapPrefilteredUploadCount =
+        m_ReflectionProbeResources.AuthoredCubemapPrefilteredUploadCount();
     frameStats.reflectionProbe.authoredCubemapCacheHitCount =
         m_ReflectionProbeResources.AuthoredCubemapCacheHitCount();
     frameStats.reflectionProbe.authoredCubemapReloadCount =
@@ -2968,6 +2972,16 @@ void VulkanRenderer::DrawFrame() {
             )
                 ? 1u
                 : 0u;
+        frameStats.reflectionProbe.authoredCubemapPrefiltered =
+            m_ReflectionProbeResources.AuthoredCubemapPrefiltered(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            )
+                ? 1u
+                : 0u;
+        frameStats.reflectionProbe.authoredCubemapGeneratedMipCount =
+            m_ReflectionProbeResources.AuthoredCubemapGeneratedMipCount(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            );
     }
     if (m_DirectionalShadowCascadeAtlas != nullptr) {
         const VkExtent2D cascadeAtlasExtent = m_DirectionalShadowCascadeAtlas->Extent();
@@ -3275,6 +3289,8 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapEquirectangularLoadedCount,
             frameStats.reflectionProbe.authoredCubemapEquirectangularConversionCount,
             frameStats.reflectionProbe.authoredCubemapHdrLoadedCount,
+            frameStats.reflectionProbe.authoredCubemapPrefilteredLoadedCount,
+            frameStats.reflectionProbe.authoredCubemapPrefilteredUploadCount,
             frameStats.reflectionProbe.authoredCubemapCacheHitCount,
             frameStats.reflectionProbe.authoredCubemapReloadCount,
             frameStats.reflectionProbe.authoredCubemapRefreshCheckCount,

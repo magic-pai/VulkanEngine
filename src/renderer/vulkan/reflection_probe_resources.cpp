@@ -65,12 +65,25 @@ struct AuthoredCubemapLoadResult {
     AuthoredReflectionCubemapSourceType sourceType =
         AuthoredReflectionCubemapSourceType::Unknown;
     bool hdr = false;
+    bool prefilteredMipChain = false;
+    u32 generatedMipCount = 0;
 };
 
 struct AuthoredCubemapPixelData {
     std::vector<u8> pixels;
     VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
     bool hdr = false;
+    u32 bytesPerTexel = 4;
+};
+
+struct AuthoredCubemapMipChain {
+    std::vector<u8> pixels;
+    std::vector<VkBufferImageCopy> copyRegions;
+    VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
+    bool hdr = false;
+    bool prefiltered = false;
+    u32 faceSize = 0;
+    u32 mipLevels = 1;
     u32 bytesPerTexel = 4;
 };
 
@@ -370,6 +383,75 @@ u32 CalculateMipLevels(int width, int height) {
     return static_cast<u32>(std::floor(std::log2(largestDimension))) + 1u;
 }
 
+u32 MipExtent(u32 faceSize, u32 mipLevel) {
+    return std::max(1u, faceSize >> mipLevel);
+}
+
+VkDeviceSize CubemapMipFaceByteSize(
+    u32 faceSize,
+    u32 mipLevel,
+    u32 bytesPerTexel
+) {
+    const u32 extent = MipExtent(faceSize, mipLevel);
+    return static_cast<VkDeviceSize>(extent) *
+        static_cast<VkDeviceSize>(extent) *
+        static_cast<VkDeviceSize>(bytesPerTexel);
+}
+
+VkCommandBuffer BeginReflectionProbeUploadCommands(
+    const VulkanDevice& device,
+    const VulkanCommandPool& commandPool
+) {
+    VkCommandBufferAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocateInfo.commandPool = commandPool.Handle();
+    allocateInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(
+            device.Handle(),
+            &allocateInfo,
+            &commandBuffer
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate reflection probe upload command buffer");
+    }
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device.Handle(), commandPool.Handle(), 1, &commandBuffer);
+        throw std::runtime_error("Failed to begin reflection probe upload command buffer");
+    }
+    return commandBuffer;
+}
+
+void EndReflectionProbeUploadCommands(
+    const VulkanDevice& device,
+    const VulkanCommandPool& commandPool,
+    VkCommandBuffer commandBuffer
+) {
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device.Handle(), commandPool.Handle(), 1, &commandBuffer);
+        throw std::runtime_error("Failed to end reflection probe upload command buffer");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    if (vkQueueSubmit(device.GraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE) !=
+        VK_SUCCESS) {
+        vkFreeCommandBuffers(device.Handle(), commandPool.Handle(), 1, &commandBuffer);
+        throw std::runtime_error("Failed to submit reflection probe upload command buffer");
+    }
+
+    vkQueueWaitIdle(device.GraphicsQueue());
+    vkFreeCommandBuffers(device.Handle(), commandPool.Handle(), 1, &commandBuffer);
+}
+
 LoadedEquirectangularImage LoadEquirectangularImage(
     const std::filesystem::path& path
 ) {
@@ -591,6 +673,46 @@ void StoreHalfFloat(std::vector<u8>& pixels, std::size_t offset, float value) {
     pixels[offset + 1u] = static_cast<u8>((half >> 8u) & 0xffu);
 }
 
+float HalfBitsToFloat(u16 half) {
+    const u32 sign = (static_cast<u32>(half & 0x8000u)) << 16u;
+    const u32 exponentBits = (half >> 10u) & 0x1fu;
+    u32 mantissa = half & 0x03ffu;
+    u32 bits = 0;
+
+    if (exponentBits == 0u) {
+        if (mantissa == 0u) {
+            bits = sign;
+        } else {
+            int exponent = 1;
+            while ((mantissa & 0x0400u) == 0u) {
+                mantissa <<= 1u;
+                --exponent;
+            }
+            mantissa &= 0x03ffu;
+            bits = sign |
+                (static_cast<u32>(exponent + (127 - 15)) << 23u) |
+                (mantissa << 13u);
+        }
+    } else if (exponentBits == 31u) {
+        bits = sign | 0x7f800000u | (mantissa << 13u);
+    } else {
+        bits = sign |
+            ((exponentBits + (127u - 15u)) << 23u) |
+            (mantissa << 13u);
+    }
+
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+u16 LoadHalfFloat(std::span<const u8> pixels, std::size_t offset) {
+    return static_cast<u16>(
+        static_cast<u16>(pixels[offset + 0u]) |
+        (static_cast<u16>(pixels[offset + 1u]) << 8u)
+    );
+}
+
 AuthoredCubemapPixelData ConvertEquirectangularToCubemapPixels(
     const LoadedEquirectangularImage& image,
     u32 faceSize
@@ -736,43 +858,221 @@ AuthoredCubemapPixelData PackSixFaceCubemapPixels(
     return result;
 }
 
-std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
+std::array<float, 4> LoadCubemapBaseTexel(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize,
+    std::size_t face,
+    u32 x,
+    u32 y
+) {
+    const std::size_t offset =
+        ((face * static_cast<std::size_t>(faceSize) *
+          static_cast<std::size_t>(faceSize)) +
+         (static_cast<std::size_t>(y) * static_cast<std::size_t>(faceSize)) +
+         static_cast<std::size_t>(x)) *
+        pixelData.bytesPerTexel;
+    if (pixelData.hdr) {
+        return {
+            HalfBitsToFloat(LoadHalfFloat(pixelData.pixels, offset + 0u)),
+            HalfBitsToFloat(LoadHalfFloat(pixelData.pixels, offset + 2u)),
+            HalfBitsToFloat(LoadHalfFloat(pixelData.pixels, offset + 4u)),
+            HalfBitsToFloat(LoadHalfFloat(pixelData.pixels, offset + 6u))
+        };
+    }
+
+    return {
+        static_cast<float>(pixelData.pixels[offset + 0u]) / 255.0f,
+        static_cast<float>(pixelData.pixels[offset + 1u]) / 255.0f,
+        static_cast<float>(pixelData.pixels[offset + 2u]) / 255.0f,
+        static_cast<float>(pixelData.pixels[offset + 3u]) / 255.0f
+    };
+}
+
+void StoreCubemapMipTexel(
+    AuthoredCubemapMipChain& mipChain,
+    std::size_t offset,
+    const std::array<float, 4>& color
+) {
+    if (mipChain.hdr) {
+        StoreHalfFloat(mipChain.pixels, offset + 0u, color[0]);
+        StoreHalfFloat(mipChain.pixels, offset + 2u, color[1]);
+        StoreHalfFloat(mipChain.pixels, offset + 4u, color[2]);
+        StoreHalfFloat(mipChain.pixels, offset + 6u, color[3]);
+        return;
+    }
+
+    mipChain.pixels[offset + 0u] = EncodeReflectionChannel(color[0], false);
+    mipChain.pixels[offset + 1u] = EncodeReflectionChannel(color[1], false);
+    mipChain.pixels[offset + 2u] = EncodeReflectionChannel(color[2], false);
+    mipChain.pixels[offset + 3u] = EncodeReflectionChannel(color[3], false);
+}
+
+std::array<float, 4> AverageCubemapBaseTexelsForMip(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize,
+    std::size_t face,
+    u32 mipLevel,
+    u32 mipX,
+    u32 mipY
+) {
+    const u32 mipExtent = MipExtent(faceSize, mipLevel);
+    const float scale =
+        static_cast<float>(faceSize) / static_cast<float>(mipExtent);
+    const int baseMinX = static_cast<int>(std::floor(
+        static_cast<float>(mipX) * scale
+    ));
+    const int baseMaxX = static_cast<int>(std::ceil(
+        static_cast<float>(mipX + 1u) * scale
+    ));
+    const int baseMinY = static_cast<int>(std::floor(
+        static_cast<float>(mipY) * scale
+    ));
+    const int baseMaxY = static_cast<int>(std::ceil(
+        static_cast<float>(mipY + 1u) * scale
+    ));
+    const int blurPad = static_cast<int>(std::max(0u, mipLevel - 1u));
+
+    std::array<float, 4> sum{ 0.0f, 0.0f, 0.0f, 0.0f };
+    u32 sampleCount = 0;
+    for (int y = baseMinY - blurPad; y < baseMaxY + blurPad; ++y) {
+        const u32 clampedY = static_cast<u32>(std::clamp(
+            y,
+            0,
+            static_cast<int>(faceSize) - 1
+        ));
+        for (int x = baseMinX - blurPad; x < baseMaxX + blurPad; ++x) {
+            const u32 clampedX = static_cast<u32>(std::clamp(
+                x,
+                0,
+                static_cast<int>(faceSize) - 1
+            ));
+            const std::array<float, 4> sample =
+                LoadCubemapBaseTexel(pixelData, faceSize, face, clampedX, clampedY);
+            for (std::size_t channel = 0; channel < sum.size(); ++channel) {
+                sum[channel] += sample[channel];
+            }
+            ++sampleCount;
+        }
+    }
+
+    const float invSampleCount =
+        sampleCount > 0u ? 1.0f / static_cast<float>(sampleCount) : 0.0f;
+    for (float& channel : sum) {
+        channel *= invSampleCount;
+    }
+    return sum;
+}
+
+AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize
+) {
+    AuthoredCubemapMipChain mipChain{};
+    mipChain.format = pixelData.format;
+    mipChain.hdr = pixelData.hdr;
+    mipChain.faceSize = faceSize;
+    mipChain.mipLevels = CalculateMipLevels(
+        static_cast<int>(faceSize),
+        static_cast<int>(faceSize)
+    );
+    mipChain.bytesPerTexel = pixelData.bytesPerTexel;
+    mipChain.prefiltered = mipChain.mipLevels > 1u;
+    mipChain.copyRegions.reserve(6u * mipChain.mipLevels);
+
+    VkDeviceSize bufferOffset = 0;
+    for (std::size_t face = 0; face < 6u; ++face) {
+        for (u32 mipLevel = 0; mipLevel < mipChain.mipLevels; ++mipLevel) {
+            const u32 extent = MipExtent(faceSize, mipLevel);
+            const VkDeviceSize mipByteSize =
+                CubemapMipFaceByteSize(faceSize, mipLevel, pixelData.bytesPerTexel);
+
+            VkBufferImageCopy region{};
+            region.bufferOffset = bufferOffset;
+            region.bufferRowLength = 0;
+            region.bufferImageHeight = 0;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = mipLevel;
+            region.imageSubresource.baseArrayLayer = static_cast<u32>(face);
+            region.imageSubresource.layerCount = 1;
+            region.imageOffset = { 0, 0, 0 };
+            region.imageExtent = { extent, extent, 1 };
+            mipChain.copyRegions.push_back(region);
+
+            const std::size_t outputOffset =
+                static_cast<std::size_t>(bufferOffset);
+            mipChain.pixels.resize(outputOffset + static_cast<std::size_t>(mipByteSize));
+            if (mipLevel == 0u) {
+                const std::size_t sourceFaceOffset =
+                    face *
+                    static_cast<std::size_t>(faceSize) *
+                    static_cast<std::size_t>(faceSize) *
+                    pixelData.bytesPerTexel;
+                std::copy_n(
+                    pixelData.pixels.data() + sourceFaceOffset,
+                    static_cast<std::size_t>(mipByteSize),
+                    mipChain.pixels.data() + outputOffset
+                );
+            } else {
+                for (u32 y = 0; y < extent; ++y) {
+                    for (u32 x = 0; x < extent; ++x) {
+                        const std::array<float, 4> color =
+                            AverageCubemapBaseTexelsForMip(
+                                pixelData,
+                                faceSize,
+                                face,
+                                mipLevel,
+                                x,
+                                y
+                            );
+                        const std::size_t texelOffset =
+                            outputOffset +
+                            ((static_cast<std::size_t>(y) *
+                              static_cast<std::size_t>(extent)) +
+                             static_cast<std::size_t>(x)) *
+                                pixelData.bytesPerTexel;
+                        StoreCubemapMipTexel(mipChain, texelOffset, color);
+                    }
+                }
+            }
+
+            bufferOffset += mipByteSize;
+        }
+    }
+
+    return mipChain;
+}
+
+std::unique_ptr<VulkanImage> UploadAuthoredCubemapMipChain(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
-    std::span<const u8> pixels,
-    u32 faceSize,
-    VkFormat format
+    const AuthoredCubemapMipChain& mipChain
 ) {
     auto stagingBuffer = std::make_unique<VulkanBuffer>(
         device,
         physicalDevice,
-        static_cast<VkDeviceSize>(pixels.size()),
+        static_cast<VkDeviceSize>(mipChain.pixels.size()),
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     );
-    stagingBuffer->Upload(std::as_bytes(pixels));
+    stagingBuffer->Upload(std::as_bytes(std::span<const u8>(
+        mipChain.pixels.data(),
+        mipChain.pixels.size()
+    )));
 
-    const VkExtent2D extent{ faceSize, faceSize };
-    const u32 requestedMipLevels = CalculateMipLevels(
-        static_cast<int>(faceSize),
-        static_cast<int>(faceSize)
-    );
-    const u32 mipLevels = physicalDevice.SupportsLinearBlit(format)
-        ? requestedMipLevels
-        : 1u;
+    const VkExtent2D extent{ mipChain.faceSize, mipChain.faceSize };
     auto image = std::make_unique<VulkanImage>(
         device,
         physicalDevice,
         extent,
-        format,
+        mipChain.format,
         VK_IMAGE_TILING_OPTIMAL,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        mipLevels,
+        mipChain.mipLevels,
         6u,
         VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
         VK_IMAGE_VIEW_TYPE_CUBE
@@ -782,20 +1082,47 @@ std::unique_ptr<VulkanImage> UploadAuthoredCubemapPixels(
         commandPool,
         VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        mipLevels
+        mipChain.mipLevels
     );
-    image->CopyFromBuffer(device, commandPool, stagingBuffer->Handle(), 6u);
-    if (mipLevels > 1u) {
-        image->GenerateMipmaps(physicalDevice, device, commandPool, 6u);
-    } else {
-        image->TransitionLayout(
-            device,
-            commandPool,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            mipLevels
-        );
-    }
+
+    VkCommandBuffer commandBuffer =
+        BeginReflectionProbeUploadCommands(device, commandPool);
+    vkCmdCopyBufferToImage(
+        commandBuffer,
+        stagingBuffer->Handle(),
+        image->Handle(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        static_cast<u32>(mipChain.copyRegions.size()),
+        mipChain.copyRegions.data()
+    );
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image->Handle();
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = mipChain.mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 6u;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+    EndReflectionProbeUploadCommands(device, commandPool, commandBuffer);
     return image;
 }
 
@@ -815,17 +1142,19 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             std::max(1u, static_cast<u32>(equirectangular.height / 2));
         AuthoredCubemapPixelData pixelData =
             ConvertEquirectangularToCubemapPixels(equirectangular, faceSize);
+        AuthoredCubemapMipChain mipChain =
+            BuildPrefilteredCubemapMipChain(pixelData, faceSize);
         return AuthoredCubemapLoadResult{
-            UploadAuthoredCubemapPixels(
+            UploadAuthoredCubemapMipChain(
                 device,
                 physicalDevice,
                 commandPool,
-                std::span<const u8>(pixelData.pixels.data(), pixelData.pixels.size()),
-                faceSize,
-                pixelData.format
+                mipChain
             ),
             source.type,
-            pixelData.hdr
+            pixelData.hdr,
+            mipChain.prefiltered,
+            mipChain.mipLevels
         };
     }
 
@@ -843,18 +1172,20 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
     }
 
     AuthoredCubemapPixelData pixelData = PackSixFaceCubemapPixels(faces);
+    AuthoredCubemapMipChain mipChain =
+        BuildPrefilteredCubemapMipChain(pixelData, static_cast<u32>(faces[0].width));
 
     return AuthoredCubemapLoadResult{
-        UploadAuthoredCubemapPixels(
-            device,
-            physicalDevice,
-            commandPool,
-            std::span<const u8>(pixelData.pixels.data(), pixelData.pixels.size()),
-            static_cast<u32>(faces[0].width),
-            pixelData.format
-        ),
+            UploadAuthoredCubemapMipChain(
+                device,
+                physicalDevice,
+                commandPool,
+                mipChain
+            ),
         source.type,
-        pixelData.hdr
+        pixelData.hdr,
+        mipChain.prefiltered,
+        mipChain.mipLevels
     };
 }
 
@@ -887,6 +1218,13 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     const std::string key(assetId);
     AuthoredCubemapResource& resource = m_AuthoredCubemaps[key];
     ++m_AuthoredCubemapRefreshCheckCount;
+    const auto releaseImageAfterIdle = [&]() {
+        if (resource.image == nullptr) {
+            return;
+        }
+        vkDeviceWaitIdle(device.Handle());
+        resource.image.reset();
+    };
 
     const std::filesystem::path assetPath = ResolveAssetPath(assetId);
     resource.assetFound = RegularFileExists(assetPath) || DirectoryExists(assetPath);
@@ -894,11 +1232,13 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         if (resource.image != nullptr || resource.loadFailed) {
             ++m_AuthoredCubemapReloadCount;
         }
-        resource.image.reset();
+        releaseImageAfterIdle();
         resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
         resource.assetSignature = 0;
         resource.loadFailed = false;
         resource.hdr = false;
+        resource.prefiltered = false;
+        resource.generatedMipCount = 0;
         return;
     }
 
@@ -916,11 +1256,13 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         if (resource.image != nullptr || resource.loadFailed) {
             ++m_AuthoredCubemapReloadCount;
         }
-        resource.image.reset();
+        releaseImageAfterIdle();
         resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
         resource.assetSignature = assetSignature;
         resource.loadFailed = true;
         resource.hdr = false;
+        resource.prefiltered = false;
+        resource.generatedMipCount = 0;
         return;
     }
 
@@ -933,10 +1275,12 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     if (resource.image != nullptr || resource.loadFailed) {
         ++m_AuthoredCubemapReloadCount;
     }
-    resource.image.reset();
+    releaseImageAfterIdle();
     resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
     resource.loadFailed = false;
     resource.hdr = false;
+    resource.prefiltered = false;
+    resource.generatedMipCount = 0;
 
     try {
         AuthoredCubemapLoadResult loadResult = CreateAuthoredCubemapImage(
@@ -949,17 +1293,24 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.sourceType = loadResult.sourceType;
         resource.assetSignature = assetSignature;
         resource.hdr = loadResult.hdr;
+        resource.prefiltered = loadResult.prefilteredMipChain;
+        resource.generatedMipCount = loadResult.generatedMipCount;
         ++m_AuthoredCubemapUploadCount;
+        if (resource.prefiltered) {
+            ++m_AuthoredCubemapPrefilteredUploadCount;
+        }
         if (resource.sourceType ==
             AuthoredReflectionCubemapSourceType::Equirectangular) {
             ++m_AuthoredCubemapEquirectangularConversionCount;
         }
     } catch (...) {
-        resource.image.reset();
+        releaseImageAfterIdle();
         resource.sourceType = AuthoredReflectionCubemapSourceType::Unknown;
         resource.assetSignature = assetSignature;
         resource.loadFailed = true;
         resource.hdr = false;
+        resource.prefiltered = false;
+        resource.generatedMipCount = 0;
     }
 }
 
@@ -969,6 +1320,7 @@ void VulkanReflectionProbeResources::Release() {
     m_AuthoredCubemaps.clear();
     m_AuthoredCubemapUploadCount = 0;
     m_AuthoredCubemapEquirectangularConversionCount = 0;
+    m_AuthoredCubemapPrefilteredUploadCount = 0;
     m_AuthoredCubemapCacheHitCount = 0;
     m_AuthoredCubemapReloadCount = 0;
     m_AuthoredCubemapRefreshCheckCount = 0;
@@ -1128,6 +1480,21 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapHdrLoadedCount() const {
     return count;
 }
 
+u32 VulkanReflectionProbeResources::AuthoredCubemapPrefilteredLoadedCount() const {
+    u32 count = 0;
+    for (const auto& [assetId, resource] : m_AuthoredCubemaps) {
+        (void)assetId;
+        if (resource.image != nullptr && resource.prefiltered) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapPrefilteredUploadCount() const {
+    return m_AuthoredCubemapPrefilteredUploadCount;
+}
+
 u32 VulkanReflectionProbeResources::AuthoredCubemapCacheHitCount() const {
     return m_AuthoredCubemapCacheHitCount;
 }
@@ -1174,6 +1541,24 @@ bool VulkanReflectionProbeResources::AuthoredCubemapHdr(
     return found != m_AuthoredCubemaps.end() &&
         found->second.image != nullptr &&
         found->second.hdr;
+}
+
+bool VulkanReflectionProbeResources::AuthoredCubemapPrefiltered(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+        found->second.image != nullptr &&
+        found->second.prefiltered;
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapGeneratedMipCount(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
+        ? found->second.generatedMipCount
+        : 0u;
 }
 
 AuthoredReflectionCubemapSourceType VulkanReflectionProbeResources::AuthoredCubemapSourceType(
