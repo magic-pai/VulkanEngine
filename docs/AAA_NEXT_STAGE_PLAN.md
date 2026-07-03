@@ -45,11 +45,12 @@ resolution work evidence-driven.
    - Feed deferred and forward ambient terms through the same grid data.
    - Add CSV, ImGui, FrameGraph, and on/off diagnostics.
 
-2. Probe-grid quality and fallback policy.
+2. Probe-grid quality and fallback policy. Implemented.
    - Add grid bounds, blend strength, fallback reason, and unsupported-scene
      diagnostics.
    - Add debug views for interpolated probe contribution and cell occupancy.
-   - Add smoke cases for disabled grid, missing/empty grid, and normal HDR path.
+   - Add smoke cases for disabled grid, blend-zero fallback, debug views, and
+     normal HDR path.
 
 3. Reflection capture resource deepening.
    - Add captured-scene resource placeholders with explicit readiness and
@@ -107,6 +108,42 @@ resource and proving the shader path can consume directional probe data.
   rows and 0 frame-graph validation issues.
 - The WBOIT smoke uses `SE_BENCHMARK_SCENE=grid` plus transparent material and
   reports 79 weighted-translucency draws, 79 WBOIT bind draws, and one resolve.
+
+## Slice 2 Execution Evidence
+
+- Probe-grid stats now separate configured state from shader integration and
+  report fallback reason values: `0` none, `1` disabled, `2` blend zero, `3`
+  buffer unavailable, `4` invalid layout, and `5` frame index out of range.
+- CSV and ImGui now expose grid bounds, cell count, fallback reason, contribution
+  debug state, and cell debug state. The deterministic grid reports 9 cells and
+  bounds min/max `-18/-4/-18` to `18/8/18`.
+- `SE_RENDER_VIEW=probe-grid` visualizes the interpolated diffuse probe-grid
+  contribution through deferred lighting debug index 15.
+- `SE_RENDER_VIEW=probe-grid-cell` visualizes probe-grid bounds, cell occupancy,
+  grid lines, and out-of-bounds fallback through deferred lighting debug index
+  16.
+- FrameGraph keeps the allocated `StaticLightProbeGrid` resource visible even
+  when the grid is disabled, records `StaticLightProbeGridDebug` for the
+  contribution view, and records `StaticLightProbeGridCellDebug` for the cell
+  occupancy view.
+- `_quick_build.bat` passes for `SelfEngineForward3D` after regenerating
+  `deferred_lighting.frag.spv`.
+- Smoke evidence:
+  `out/benchmarks/aaa_probe_grid_debug_smoke.csv`,
+  `out/benchmarks/aaa_probe_grid_cell_debug_smoke.csv`,
+  `out/benchmarks/aaa_probe_grid_debug_off_smoke.csv`,
+  `out/benchmarks/aaa_probe_grid_blend_zero_smoke.csv`, and
+  `out/benchmarks/aaa_probe_grid_quality_deferred_hdr_smoke.csv` all have
+  matching 555-column rows and 0 frame-graph validation issues.
+- The contribution debug smoke reports fallback reason `0`, shader integration
+  `1`, one probe-grid debug draw, and 21 active frame-graph passes. The cell
+  debug smoke reports one probe-grid cell debug draw. The disabled smoke reports
+  fallback reason `1`, shader integration `0`, no buffer update, and one debug
+  draw. The blend-zero smoke reports fallback reason `2`, shader integration
+  `0`, and no buffer update. The normal deferred-HDR smoke reports no probe-grid
+  debug draw while preserving shader integration and one deferred-lighting draw.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
 
 ## Non-Goals
 

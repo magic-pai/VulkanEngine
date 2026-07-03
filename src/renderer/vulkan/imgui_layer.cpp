@@ -572,9 +572,32 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Auto Exposure";
     case ForwardDebugView::Sharpening:
         return "Sharpening";
+    case ForwardDebugView::ProbeGrid:
+        return "Probe Grid";
+    case ForwardDebugView::ProbeGridCell:
+        return "Probe Grid Cell";
     }
 
     return "Lit";
+}
+
+const char* ProbeGridFallbackReasonName(u32 reason) {
+    switch (static_cast<RendererProbeGridFallbackReason>(reason)) {
+    case RendererProbeGridFallbackReason::None:
+        return "none";
+    case RendererProbeGridFallbackReason::Disabled:
+        return "disabled";
+    case RendererProbeGridFallbackReason::BlendZero:
+        return "blend zero";
+    case RendererProbeGridFallbackReason::BufferUnavailable:
+        return "buffer unavailable";
+    case RendererProbeGridFallbackReason::InvalidLayout:
+        return "invalid layout";
+    case RendererProbeGridFallbackReason::FrameIndexOutOfRange:
+        return "frame index out of range";
+    }
+
+    return "unknown";
 }
 
 void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
@@ -620,7 +643,9 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::ColorGrading,
         ForwardDebugView::ToneMapping,
         ForwardDebugView::AutoExposure,
-        ForwardDebugView::Sharpening
+        ForwardDebugView::Sharpening,
+        ForwardDebugView::ProbeGrid,
+        ForwardDebugView::ProbeGridCell
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -854,16 +879,30 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ibl.descriptorSetsBound
     );
     ImGui::Text(
-        "Probe grid: %s, %ux%ux%u (%u probes), %u vec4/probe, lobes %u, blend %.2f, updates %u",
+        "Probe grid: %s, shader %s, fallback %s, %ux%ux%u (%u probes, %u cells), %u vec4/probe, lobes %u, blend %.2f, updates %u",
         stats.probeGrid.enabled ? "enabled" : "off",
+        stats.probeGrid.shaderIntegrationEnabled ? "on" : "off",
+        ProbeGridFallbackReasonName(stats.probeGrid.fallbackReason),
         stats.probeGrid.sizeX,
         stats.probeGrid.sizeY,
         stats.probeGrid.sizeZ,
         stats.probeGrid.probeCount,
+        stats.probeGrid.cellCount,
         stats.probeGrid.vec4sPerProbe,
         stats.probeGrid.directionalLobeCount,
         stats.probeGrid.blendStrength,
         stats.probeGrid.bufferUpdates
+    );
+    ImGui::Text(
+        "Probe grid bounds: min %.1f %.1f %.1f, max %.1f %.1f %.1f, debug contribution %s, cells %s",
+        stats.probeGrid.boundsMinX,
+        stats.probeGrid.boundsMinY,
+        stats.probeGrid.boundsMinZ,
+        stats.probeGrid.boundsMaxX,
+        stats.probeGrid.boundsMaxY,
+        stats.probeGrid.boundsMaxZ,
+        stats.probeGrid.debugViewEnabled ? "on" : "off",
+        stats.probeGrid.cellDebugViewEnabled ? "on" : "off"
     );
     ImGui::Text(
         "Local reflection probe: %s, scene %s, probes %u/%u, eligible %u, selected %u, top %d, dropped %u, radius %.2f, box %.1f %.1f %.1f, intensity %.2f, blend %.2f, falloff %.2f",

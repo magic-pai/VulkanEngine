@@ -180,23 +180,42 @@ struct RendererIblStats {
     u32 shaderIntegrationEnabled = 0;
 };
 
+enum class RendererProbeGridFallbackReason : u32 {
+    None = 0,
+    Disabled = 1,
+    BlendZero = 2,
+    BufferUnavailable = 3,
+    InvalidLayout = 4,
+    FrameIndexOutOfRange = 5
+};
+
 struct RendererProbeGridStats {
     u32 allocated = 0;
     u32 enabled = 0;
     u32 shaderIntegrationEnabled = 0;
     u32 bufferUpdates = 0;
     u32 fallbackCount = 0;
+    u32 fallbackReason = 0;
     u32 probeCount = 0;
     u32 sizeX = 0;
     u32 sizeY = 0;
     u32 sizeZ = 0;
     u32 vec4sPerProbe = 0;
     u32 directionalLobeCount = 0;
+    u32 cellCount = 0;
     f32 originX = 0.0f;
     f32 originY = 0.0f;
     f32 originZ = 0.0f;
+    f32 boundsMinX = 0.0f;
+    f32 boundsMinY = 0.0f;
+    f32 boundsMinZ = 0.0f;
+    f32 boundsMaxX = 0.0f;
+    f32 boundsMaxY = 0.0f;
+    f32 boundsMaxZ = 0.0f;
     f32 spacing = 0.0f;
     f32 blendStrength = 0.0f;
+    u32 debugViewEnabled = 0;
+    u32 cellDebugViewEnabled = 0;
 };
 
 struct RendererReflectionProbeStats {
@@ -375,6 +394,12 @@ struct RendererBindStats {
     u32 heightFogDebugDraws = 0;
     u32 heightFogDebugFrameBinds = 0;
     u32 heightFogDebugGBufferBinds = 0;
+    u32 probeGridDebugDraws = 0;
+    u32 probeGridDebugFrameBinds = 0;
+    u32 probeGridDebugGBufferBinds = 0;
+    u32 probeGridCellDebugDraws = 0;
+    u32 probeGridCellDebugFrameBinds = 0;
+    u32 probeGridCellDebugGBufferBinds = 0;
     u32 bloomDebugDraws = 0;
     u32 bloomDebugFrameBinds = 0;
     u32 bloomDebugTextureBinds = 0;

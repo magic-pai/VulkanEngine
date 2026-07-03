@@ -114,6 +114,37 @@ std::size_t ProbeGridLinearIndex(
     return z * kProbeGridSizeY * kProbeGridSizeX + y * kProbeGridSizeX + x;
 }
 
+bool ProbeGridLayoutValid() {
+    return kProbeGridSpacing > 0.0f &&
+        kProbeGridSizeX >= 2 &&
+        kProbeGridSizeY >= 2 &&
+        kProbeGridSizeZ >= 2 &&
+        kProbeGridProbeCount == kProbeGridSizeX * kProbeGridSizeY * kProbeGridSizeZ &&
+        kProbeGridVec4sPerProbe == 1 + kProbeGridDirectionalLobeCount &&
+        kProbeGridDirectionalLobeCount == 6;
+}
+
+glm::vec3 ProbeGridBoundsMax() {
+    return kProbeGridOrigin +
+        glm::vec3(
+            static_cast<f32>(kProbeGridSizeX - 1),
+            static_cast<f32>(kProbeGridSizeY - 1),
+            static_cast<f32>(kProbeGridSizeZ - 1)
+        ) * kProbeGridSpacing;
+}
+
+u32 ProbeGridCellCount() {
+    if constexpr (kProbeGridSizeX < 2 || kProbeGridSizeY < 2 || kProbeGridSizeZ < 2) {
+        return 0;
+    }
+
+    return static_cast<u32>(
+        (kProbeGridSizeX - 1) *
+        (kProbeGridSizeY - 1) *
+        (kProbeGridSizeZ - 1)
+    );
+}
+
 ProbeGridBufferObject BuildDeterministicProbeGridData() {
     ProbeGridBufferObject data{};
     for (std::size_t z = 0; z < kProbeGridSizeZ; ++z) {
@@ -2045,6 +2076,10 @@ int DeferredPbrDebugViewIndex(ForwardDebugView view) {
         return 13;
     case ForwardDebugView::HeightFog:
         return 14;
+    case ForwardDebugView::ProbeGrid:
+        return 15;
+    case ForwardDebugView::ProbeGridCell:
+        return 16;
     default:
         return 0;
     }
@@ -2079,6 +2114,8 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::Ssr ||
         view == ForwardDebugView::ReflectionProbe ||
         view == ForwardDebugView::HeightFog ||
+        view == ForwardDebugView::ProbeGrid ||
+        view == ForwardDebugView::ProbeGridCell ||
         view == ForwardDebugView::Bloom ||
         view == ForwardDebugView::ColorGrading ||
         view == ForwardDebugView::ToneMapping ||
@@ -2211,6 +2248,20 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "reflection-fallback" ||
         value == "reflection_fallback") {
         return ForwardDebugView::ReflectionProbe;
+    }
+    if (value == "probe-grid" ||
+        value == "probe_grid" ||
+        value == "ProbeGrid" ||
+        value == "light-probe-grid" ||
+        value == "light_probe_grid") {
+        return ForwardDebugView::ProbeGrid;
+    }
+    if (value == "probe-grid-cell" ||
+        value == "probe_grid_cell" ||
+        value == "ProbeGridCell" ||
+        value == "probe-cell" ||
+        value == "probe_cell") {
+        return ForwardDebugView::ProbeGridCell;
     }
     if (value == "height-fog" ||
         value == "height_fog" ||
@@ -3413,13 +3464,17 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.selectedCaptureResourceReadyCount,
             frameStats.reflectionProbe.selectedCaptureFallbackCount,
             frameStats.probeGrid.allocated > 0,
-            frameStats.probeGrid.enabled > 0,
+            frameStats.probeGrid.shaderIntegrationEnabled > 0,
             frameStats.probeGrid.probeCount,
             frameStats.probeGrid.sizeX,
             frameStats.probeGrid.sizeY,
             frameStats.probeGrid.sizeZ,
             frameStats.probeGrid.vec4sPerProbe,
-            frameStats.probeGrid.directionalLobeCount
+            frameStats.probeGrid.directionalLobeCount,
+            frameStats.probeGrid.cellCount,
+            frameStats.probeGrid.fallbackReason,
+            frameStats.probeGrid.debugViewEnabled > 0,
+            frameStats.probeGrid.cellDebugViewEnabled > 0
         }
     );
 
@@ -5895,7 +5950,9 @@ void VulkanRenderer::UpdateMaterialBuffer(
 
 bool VulkanRenderer::ProbeGridEnabled() const {
     return m_ShadowSettings.probeGridEnabled &&
-        m_ShadowSettings.probeGridBlendStrength > 0.0001f;
+        m_ShadowSettings.probeGridBlendStrength > 0.0001f &&
+        m_ProbeGridBuffer != nullptr &&
+        ProbeGridLayoutValid();
 }
 
 void VulkanRenderer::PopulateProbeGridUniforms(
@@ -5920,27 +5977,58 @@ void VulkanRenderer::UpdateProbeGridBuffer(
     std::size_t imageIndex,
     RendererProbeGridStats& stats
 ) const {
+    const bool configured = m_ShadowSettings.probeGridEnabled;
+    const f32 blendStrength =
+        std::clamp(m_ShadowSettings.probeGridBlendStrength, 0.0f, 2.0f);
+    const bool layoutValid = ProbeGridLayoutValid();
+    const glm::vec3 boundsMax = ProbeGridBoundsMax();
+
     stats.allocated = m_ProbeGridBuffer != nullptr ? 1u : 0u;
-    stats.enabled = ProbeGridEnabled() ? 1u : 0u;
-    stats.shaderIntegrationEnabled = stats.enabled;
-    stats.fallbackCount = stats.enabled > 0 ? 0u : 1u;
+    stats.enabled = configured ? 1u : 0u;
     stats.probeCount = static_cast<u32>(kProbeGridProbeCount);
     stats.sizeX = static_cast<u32>(kProbeGridSizeX);
     stats.sizeY = static_cast<u32>(kProbeGridSizeY);
     stats.sizeZ = static_cast<u32>(kProbeGridSizeZ);
     stats.vec4sPerProbe = static_cast<u32>(kProbeGridVec4sPerProbe);
     stats.directionalLobeCount = static_cast<u32>(kProbeGridDirectionalLobeCount);
+    stats.cellCount = ProbeGridCellCount();
     stats.originX = kProbeGridOrigin.x;
     stats.originY = kProbeGridOrigin.y;
     stats.originZ = kProbeGridOrigin.z;
+    stats.boundsMinX = kProbeGridOrigin.x;
+    stats.boundsMinY = kProbeGridOrigin.y;
+    stats.boundsMinZ = kProbeGridOrigin.z;
+    stats.boundsMaxX = boundsMax.x;
+    stats.boundsMaxY = boundsMax.y;
+    stats.boundsMaxZ = boundsMax.z;
     stats.spacing = kProbeGridSpacing;
-    stats.blendStrength = stats.enabled > 0
-        ? std::clamp(m_ShadowSettings.probeGridBlendStrength, 0.0f, 2.0f)
-        : 0.0f;
+    stats.blendStrength = configured ? blendStrength : 0.0f;
+    stats.debugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::ProbeGrid ? 1u : 0u;
+    stats.cellDebugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::ProbeGridCell ? 1u : 0u;
 
-    if (m_ProbeGridBuffer == nullptr ||
-        stats.enabled == 0 ||
-        imageIndex >= m_ProbeGridBuffer->Count()) {
+    RendererProbeGridFallbackReason fallbackReason =
+        RendererProbeGridFallbackReason::None;
+    if (!configured) {
+        fallbackReason = RendererProbeGridFallbackReason::Disabled;
+    } else if (blendStrength <= 0.0001f) {
+        fallbackReason = RendererProbeGridFallbackReason::BlendZero;
+    } else if (m_ProbeGridBuffer == nullptr) {
+        fallbackReason = RendererProbeGridFallbackReason::BufferUnavailable;
+    } else if (!layoutValid) {
+        fallbackReason = RendererProbeGridFallbackReason::InvalidLayout;
+    } else if (imageIndex >= m_ProbeGridBuffer->Count()) {
+        fallbackReason = RendererProbeGridFallbackReason::FrameIndexOutOfRange;
+    }
+
+    stats.fallbackReason = static_cast<u32>(fallbackReason);
+    stats.fallbackCount =
+        fallbackReason == RendererProbeGridFallbackReason::None ? 0u : 1u;
+    stats.shaderIntegrationEnabled =
+        fallbackReason == RendererProbeGridFallbackReason::None ? 1u : 0u;
+
+    if (fallbackReason != RendererProbeGridFallbackReason::None) {
         return;
     }
 

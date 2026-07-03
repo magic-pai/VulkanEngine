@@ -1606,7 +1606,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.iblPrefilteredMipCount > 0 ? "mipped cube cache" : "unknown cube"
         );
     }
-    if (inputs.probeGridAllocated && inputs.probeGridEnabled) {
+    if (inputs.probeGridAllocated) {
         AppendResource(
             plan,
             RenderGraphResourceStatus::Physical,
@@ -1616,9 +1616,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.probeGridDirectionalLobeCount > 0
                 ? "diffuse irradiance plus directional lobe records"
                 : "diffuse irradiance records",
-            inputs.probeGridProbeCount > 0
-                ? "renderer-owned static probe grid"
-                : "empty probe-grid carrier"
+            inputs.probeGridEnabled
+                ? "renderer-owned static probe grid with bounded cells"
+                : "allocated probe-grid carrier with explicit fallback"
         );
     }
     if (inputs.sceneReflectionProbesAllocated) {
@@ -1960,6 +1960,34 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "StaticLightProbeGrid, SceneDepth, GBufferNormalRoughness",
             "",
             "Trilinear static light-probe irradiance with first directional lobes integrated into deferred and forward ambient lighting."
+        );
+    }
+    if (inputs.probeGridDebugViewEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::GlobalIllumination,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "StaticLightProbeGridDebug",
+            inputs.probeGridAllocated
+                ? "StaticLightProbeGrid, SceneDepth, GBufferNormalRoughness, GBufferAlbedo, GBufferMaterial"
+                : "SceneDepth, GBufferNormalRoughness, GBufferAlbedo, GBufferMaterial",
+            "HDRSceneColor",
+            "Deferred debug view visualizes interpolated static light-probe contribution and keeps fallback state measurable."
+        );
+    }
+    if (inputs.probeGridCellDebugViewEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::GlobalIllumination,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "StaticLightProbeGridCellDebug",
+            inputs.probeGridAllocated
+                ? "StaticLightProbeGrid, SceneDepth, GBufferNormalRoughness"
+                : "SceneDepth, GBufferNormalRoughness",
+            "HDRSceneColor",
+            "Deferred debug view visualizes static light-probe grid bounds, cell occupancy, and out-of-bounds fallback."
         );
     }
     if (inputs.weightedTranslucencyRenderPassAllocated &&

@@ -291,6 +291,21 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     return mix(procedural, sampled, 0.65) * enabled;
 }
 
+bool ProbeGridAvailable() {
+    vec3 gs = frame.probeGridSizeBlend.xyz;
+    ivec3 gridSize = ivec3(gs + vec3(0.5));
+    return frame.probeGridOriginSpacing.w > 0.0 &&
+        clamp(frame.probeGridSizeBlend.w, 0.0, 2.0) > 0.0001 &&
+        gridSize.x >= 2 &&
+        gridSize.y >= 2 &&
+        gridSize.z >= 2;
+}
+
+vec3 ProbeGridLocalPosition(vec3 worldPos) {
+    return (worldPos - frame.probeGridOriginSpacing.xyz) /
+        max(frame.probeGridOriginSpacing.w, 0.0001);
+}
+
 vec3 ProbeGridProbeIrradiance(uint probeIndex, vec3 normal) {
     uint baseIndex = probeIndex * 7u;
     vec3 n = dot(normal, normal) > 0.0001
@@ -312,11 +327,7 @@ vec3 SampleProbeGridIrradiance(vec3 worldPos, vec3 normal) {
     vec3 gs = frame.probeGridSizeBlend.xyz;
     float blendStrength = clamp(frame.probeGridSizeBlend.w, 0.0, 2.0);
     ivec3 gridSize = ivec3(gs + vec3(0.5));
-    if (spacing <= 0.0 ||
-        blendStrength <= 0.0001 ||
-        gridSize.x < 2 ||
-        gridSize.y < 2 ||
-        gridSize.z < 2) {
+    if (!ProbeGridAvailable()) {
         return vec3(0.0);
     }
 
@@ -359,6 +370,71 @@ vec3 SampleProbeGridIrradiance(vec3 worldPos, vec3 normal) {
     vec3 c0 = mix(c00, c10, frac.y);
     vec3 c1 = mix(c01, c11, frac.y);
     return mix(c0, c1, frac.z) * blendStrength;
+}
+
+vec3 ProbeGridContributionDebugColor(
+    vec3 worldPos,
+    vec3 normal,
+    vec3 baseColor,
+    float occlusion,
+    float metallic
+) {
+    if (!ProbeGridAvailable()) {
+        return vec3(0.12, 0.02, 0.05);
+    }
+
+    vec3 contribution =
+        SampleProbeGridIrradiance(worldPos, normal) *
+        baseColor *
+        clamp(occlusion, 0.0, 1.0) *
+        (1.0 - clamp(metallic, 0.0, 1.0));
+    vec3 display = contribution / (contribution + vec3(1.0));
+    return clamp(display * 1.35 + contribution * 0.35, vec3(0.0), vec3(1.0));
+}
+
+vec3 ProbeGridCellDebugColor(vec3 worldPos) {
+    if (!ProbeGridAvailable()) {
+        return vec3(0.12, 0.02, 0.05);
+    }
+
+    ivec3 gridSize = ivec3(frame.probeGridSizeBlend.xyz + vec3(0.5));
+    vec3 local = ProbeGridLocalPosition(worldPos);
+    vec3 maxProbe = vec3(gridSize) - vec3(1.0);
+    bool inside =
+        all(greaterThanEqual(local, vec3(0.0))) &&
+        all(lessThanEqual(local, maxProbe));
+    if (!inside) {
+        vec3 nearest = clamp(local, vec3(0.0), maxProbe);
+        float edgeDistance = length(local - nearest);
+        return mix(
+            vec3(0.20, 0.03, 0.035),
+            vec3(0.72, 0.07, 0.035),
+            smoothstep(0.0, 2.5, edgeDistance)
+        );
+    }
+
+    ivec3 cell = clamp(
+        ivec3(floor(local)),
+        ivec3(0),
+        gridSize - ivec3(2)
+    );
+    vec3 frac = clamp(local - vec3(cell), vec3(0.0), vec3(1.0));
+    float parity = mod(float(cell.x + cell.y + cell.z), 2.0);
+    vec3 cellA = vec3(0.05, 0.28, 0.54);
+    vec3 cellB = vec3(0.10, 0.48, 0.30);
+    vec3 color = mix(cellA, cellB, parity);
+    color += frac * vec3(0.18, 0.12, 0.22);
+    float gridLine =
+        step(frac.x, 0.035) +
+        step(frac.y, 0.035) +
+        step(frac.z, 0.035) +
+        step(0.965, frac.x) +
+        step(0.965, frac.y) +
+        step(0.965, frac.z);
+    if (gridLine > 0.0) {
+        color = mix(color, vec3(1.0, 0.96, 0.72), 0.72);
+    }
+    return clamp(color, vec3(0.0), vec3(1.0));
 }
 
 float LocalReflectionProbeWeightAt(int probeIndex, vec3 worldPosition) {
@@ -2306,6 +2382,23 @@ void main() {
         vec3 fogDebug = mix(thin, mid, smoothstep(0.0, 0.55, fogFactor));
         fogDebug = mix(fogDebug, HeightFogColor(), smoothstep(0.45, 1.0, fogFactor));
         outColor = vec4(fogDebug + vec3(fogFactor) * 0.08, 1.0);
+        return;
+    }
+    if (deferredDebugView == 15) {
+        outColor = vec4(
+            ProbeGridContributionDebugColor(
+                worldPosition,
+                normal,
+                baseColor,
+                occlusion,
+                metallic
+            ),
+            1.0
+        );
+        return;
+    }
+    if (deferredDebugView == 16) {
+        outColor = vec4(ProbeGridCellDebugColor(worldPosition), 1.0);
         return;
     }
 

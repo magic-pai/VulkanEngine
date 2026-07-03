@@ -328,6 +328,16 @@ void BenchmarkRecorder::RecordFrame(
         << probeGrid.originZ << ','
         << probeGrid.spacing << ','
         << probeGrid.blendStrength << ','
+        << probeGrid.fallbackReason << ','
+        << probeGrid.cellCount << ','
+        << probeGrid.boundsMinX << ','
+        << probeGrid.boundsMinY << ','
+        << probeGrid.boundsMinZ << ','
+        << probeGrid.boundsMaxX << ','
+        << probeGrid.boundsMaxY << ','
+        << probeGrid.boundsMaxZ << ','
+        << probeGrid.debugViewEnabled << ','
+        << probeGrid.cellDebugViewEnabled << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -565,6 +575,12 @@ void BenchmarkRecorder::RecordFrame(
         << binds.heightFogDebugDraws << ','
         << binds.heightFogDebugFrameBinds << ','
         << binds.heightFogDebugGBufferBinds << ','
+        << binds.probeGridDebugDraws << ','
+        << binds.probeGridDebugFrameBinds << ','
+        << binds.probeGridDebugGBufferBinds << ','
+        << binds.probeGridCellDebugDraws << ','
+        << binds.probeGridCellDebugFrameBinds << ','
+        << binds.probeGridCellDebugGBufferBinds << ','
         << binds.bloomDebugDraws << ','
         << binds.bloomDebugFrameBinds << ','
         << binds.bloomDebugTextureBinds << ','
@@ -799,6 +815,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "probe_grid_vec4s_per_probe,probe_grid_directional_lobe_count,"
         << "probe_grid_origin_x,probe_grid_origin_y,probe_grid_origin_z,"
         << "probe_grid_spacing,probe_grid_blend_strength,"
+        << "probe_grid_fallback_reason,probe_grid_cell_count,"
+        << "probe_grid_bounds_min_x,probe_grid_bounds_min_y,probe_grid_bounds_min_z,"
+        << "probe_grid_bounds_max_x,probe_grid_bounds_max_y,probe_grid_bounds_max_z,"
+        << "probe_grid_debug_view_enabled,probe_grid_cell_debug_view_enabled,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
@@ -951,6 +971,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"
         << "height_fog_debug_gbuffer_binds,"
+        << "probe_grid_debug_draws,probe_grid_debug_frame_binds,"
+        << "probe_grid_debug_gbuffer_binds,"
+        << "probe_grid_cell_debug_draws,probe_grid_cell_debug_frame_binds,"
+        << "probe_grid_cell_debug_gbuffer_binds,"
         << "bloom_debug_draws,bloom_debug_frame_binds,"
         << "bloom_debug_texture_binds,"
         << "bloom_downsample_draws,bloom_downsample_frame_binds,"

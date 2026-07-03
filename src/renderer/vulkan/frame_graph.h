@@ -348,6 +348,10 @@ struct CurrentVulkanFrameGraphInputs {
     u32 probeGridSizeZ = 0;
     u32 probeGridVec4sPerProbe = 0;
     u32 probeGridDirectionalLobeCount = 0;
+    u32 probeGridCellCount = 0;
+    u32 probeGridFallbackReason = 0;
+    bool probeGridDebugViewEnabled = false;
+    bool probeGridCellDebugViewEnabled = false;
 };
 
 std::string_view RenderFramePassStatusName(RenderFramePassStatus status);
