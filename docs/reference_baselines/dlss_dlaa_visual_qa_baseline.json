@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_grid_dlaa_full_resolution",
+  "target": "SelfEngineForward3D",
+  "scene": "grid",
+  "description": "Reference contract for the full-resolution DLAA quality route in the experimental DLSS-present path. This baseline keeps the renderer at native internal resolution, selects DLSS DLAA mode, and validates that DLAA can become the visible post-process source while the production-quality gate remains satisfied for the controlled opaque grid route.",
+  "environment": {
+    "native": {
+      "SE_RENDER_SCALE": "1.0",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    },
+    "dlssPresent": {
+      "SE_RENDER_SCALE": "1.0",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_QUALITY": "dlaa",
+      "SE_DLSS_PRESENT": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "native": {
+      "postSource": "0/0/1",
+      "qualityGate": "0/0/1",
+      "renderScaleActive": "1",
+      "renderScaleApplied": "0"
+    },
+    "dlssPresent": {
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "renderScale": "1/1/0",
+      "renderScaleActive": "1",
+      "renderScaleApplied": "0",
+      "qualityMode": "6",
+      "recommendedPreset": "11"
+    }
+  },
+  "thresholds": {
+    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMax": 12000,
+    "comparisonMeanDeltaMin": 0.0,
+    "comparisonMeanDeltaMax": 160.0,
+    "comparisonMaxDeltaMax": 765,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-04T23:43:56+08:00",
+    "nativeColumns": "780/780",
+    "dlssColumns": "780/780",
+    "qualityMode": 6,
+    "recommendedPreset": 11,
+    "renderScale": "1/1/0",
+    "dlssExtents": "1280x720->1280x720",
+    "qualityGate": "1/1/0",
+    "qualityMasks": "255/255/0",
+    "comparisonChangedPixels": 3487,
+    "comparisonMeanDelta": 22.7193,
+    "comparisonMaxDelta": 578
+  }
+}

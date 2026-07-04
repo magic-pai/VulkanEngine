@@ -100,16 +100,48 @@ machines or incomplete packages.
      placeholders, and DLSS-specific debug views.
    - Add reference screenshots/visual QA before claiming production readiness.
 
-## Next Slice To Execute Now
+## Next Stage Plan: Forward DLSS/DLAA Production Quality
 
-Implement Slice 4.10: move from benchmark-grid coverage toward imported model
-content or start removing the forward/WBOIT object-motion blocker with real
-residual/transparent velocity or an explicit pre-upscale ordering policy. Slice
-4.9 proves a complex opaque material stress scene can pass the production DLSS
-quality gate. The next slice should either add an imported-model visual baseline
-or make one blocked residual/transparent route genuinely object-motion ready.
-Do not expand into Frame Generation, Ray Reconstruction, Streamline
-interposition, or default presentation changes yet.
+The next stage focuses on visible Forward 3D anti-aliasing quality. Treat the
+recent jagged Forward scene as a renderer-input problem first: DLSS/DLAA must be
+fed stable velocity, depth, mask, jitter, exposure, and post-ordering inputs
+before model upgrades can be judged honestly.
+
+1. Full-resolution DLAA quality lane. Implemented as Slice 4.14.
+   - Add a native-vs-DLAA visual QA pair that keeps render scale at 1.0.
+   - Require `SE_DLSS_QUALITY=dlaa`, post-source activation, full-resolution
+     DLSS render/output extents, and production-quality gate readiness.
+   - Record a separate DLAA baseline so anti-aliasing-oriented QA is not mixed
+     with the 0.75 render-scale Super Resolution route.
+
+2. Imported/static model DLSS baseline.
+   - Add an imported-model capture path that exercises real asset geometry,
+     UVs, materials, mesh identity, previous transforms, and velocity output.
+   - Require the DLSS object-motion gate to pass on imported static content
+     without special-casing the benchmark grid.
+
+3. Animated/skinned velocity readiness.
+   - Add previous-pose/previous-bone or explicit skinned velocity carriers.
+   - Keep the production gate blocked for animated content until every animated
+     draw route writes matching pre-upscale motion vectors.
+
+4. Material-authored mask tuning.
+   - Expand the current mask shader/policy for particles, emissive, water,
+     refraction, opacity-textured alpha test/blend, and high-frequency
+     transparency.
+   - Add per-route counters and baselines so masks cannot silently disappear or
+     pollute opaque-only scenes.
+
+5. Temporal stability and tuning.
+   - Add moving-camera and moving-object visual references, edge/flicker
+     metrics, and DLSS/DLAA preset/sharpness/mip-bias tuning evidence.
+   - Keep default presentation unchanged until broad content, not just grid
+     captures, remains stable.
+
+6. Scope guard.
+   - Do not expand into Frame Generation, Ray Reconstruction, Streamline
+     interposition, or default presentation changes until the Forward/DLSS
+     input contract above is covered by automated evidence.
 
 ## Slice 4.4 Execution Plan
 
@@ -1073,3 +1105,37 @@ after the evaluate contract is stable.
   authored/material-specific mask tuning for particles, water, emissive,
   refraction, animated imported/skinned content, and larger moving-scene
   temporal evidence.
+
+## Slice 4.14 Execution Evidence
+
+- Added a full-resolution DLAA visual-QA lane for the Forward 3D jagged-edge
+  follow-up. `scripts\Test-DlssVisualQa.ps1` now loads
+  `docs/reference_baselines/dlss_dlaa_visual_qa_baseline.json`, runs paired
+  `dlaa_native_deferred_hdr` and `dlaa_present` benchmark/capture passes, and
+  clears `SE_DLSS_QUALITY` / `SE_DLSS_MODE` between runs so DLSS quality-mode
+  selection cannot leak across scenarios.
+- The DLAA path keeps `SE_RENDER_SCALE=1.0` with the render-scale carrier
+  applied, requests `SE_UPSCALER_PLUGIN=dlss`, selects
+  `SE_DLSS_QUALITY=dlaa`, and requires the visible post source to activate
+  through `SE_DLSS_PRESENT=1`.
+- The new baseline requires quality mode `6` (DLAA), transformer preset K
+  (`11`), render scale `1/1/0`, full-resolution DLSS extents
+  `1280x720->1280x720`, quality gate `1/1/0`, masks `255/255/0`, and the same
+  eight production-quality input bits ready for the controlled opaque grid
+  route.
+- Verification:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  passes. The run reports matching `780/780` CSV columns and 0 frame-graph
+  validation issues for the new DLAA pair. `dlaa_present.csv` reports DLSS
+  evaluate/output `1/1`, post source `1/1/0`, quality gate `1/1/0`, quality
+  masks `255/255/0`, render scale `1/1/0`, quality mode/preset `6/11`, and
+  DLSS render/output extents `1280x720->1280x720`.
+- Latest DLAA native-vs-DLAA screenshot comparison samples 14352 pixels with
+  3487 changed pixels, mean RGB delta `22.7193`, and max delta `578`. The
+  existing SR/WBOIT/forward-special/material-stress visual-QA pairs still pass
+  in the same run.
+- This is the first anti-aliasing-oriented DLAA baseline for the controlled
+  Forward 3D path. It is not yet broad production DLSS quality: imported/static
+  model coverage, skinned/animated velocity, material-specific mask policy,
+  larger moving-scene temporal references, and DLSS/DLAA tuning evidence remain
+  the next required slices.
