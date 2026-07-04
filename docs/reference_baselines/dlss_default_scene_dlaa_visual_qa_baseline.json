@@ -1,12 +1,11 @@
 {
   "schemaVersion": 1,
-  "name": "dlss_visual_qa_grid_dlaa_full_resolution",
+  "name": "dlss_visual_qa_default_scene_dlaa_full_resolution",
   "target": "SelfEngineForward3D",
-  "scene": "grid",
-  "description": "Reference contract for the full-resolution DLAA quality route in the experimental DLSS-present path. This baseline keeps the renderer at native internal resolution, selects DLSS DLAA mode, and validates that DLAA can become the visible post-process source while the production-quality gate remains satisfied for the controlled opaque grid route.",
+  "scene": "default-application-scene",
+  "description": "Reference contract for the real default Forward 3D application scene shown at startup: large viewport grid/ground, three cube renderables, local lights, and one scene reflection probe. This baseline keeps the renderer at native internal resolution, selects DLSS DLAA mode, and validates that the default app scene itself can enter the visible DLAA post-source route with production-quality inputs ready.",
   "environment": {
     "native": {
-      "SE_BENCHMARK_SCENE": "grid",
       "SE_RENDER_SCALE": "1.0",
       "SE_RENDER_SCALE_APPLY": "1",
       "SE_TAA": "1",
@@ -14,7 +13,6 @@
       "SE_RENDER_VIEW": "deferred-hdr"
     },
     "dlssPresent": {
-      "SE_BENCHMARK_SCENE": "grid",
       "SE_RENDER_SCALE": "1.0",
       "SE_RENDER_SCALE_APPLY": "1",
       "SE_TAA": "1",
@@ -30,7 +28,16 @@
       "postSource": "0/0/1",
       "qualityGate": "0/0/1",
       "renderScaleActive": "1",
-      "renderScaleApplied": "0"
+      "renderScaleApplied": "0",
+      "mainDraws": "5",
+      "gbufferDraws": "5",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0",
+      "frameMaterialCount": "5",
+      "frameLightTotalCount": "6",
+      "frameLocalLightCount": "5",
+      "frameRectLightCount": "1",
+      "reflectionProbeSceneProbeCount": "1"
     },
     "dlssPresent": {
       "postSource": "1/1/0",
@@ -41,7 +48,16 @@
       "renderScaleActive": "1",
       "renderScaleApplied": "0",
       "qualityMode": "6",
-      "recommendedPreset": "11"
+      "recommendedPreset": "11",
+      "mainDraws": "5",
+      "gbufferDraws": "5",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0",
+      "frameMaterialCount": "5",
+      "frameLightTotalCount": "6",
+      "frameLocalLightCount": "5",
+      "frameRectLightCount": "1",
+      "reflectionProbeSceneProbeCount": "1"
     }
   },
   "thresholds": {
@@ -62,8 +78,10 @@
     "dlssExtents": "1280x720->1280x720",
     "qualityGate": "1/1/0",
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 211,
-    "comparisonMeanDelta": 1.0774,
-    "comparisonMaxDelta": 564
+    "drawRoute": "5/5/0/0",
+    "sceneCounters": "materials=5,lights=6,local=5,rect=1,probes=1",
+    "comparisonChangedPixels": 11569,
+    "comparisonMeanDelta": 89.3985,
+    "comparisonMaxDelta": 662
   }
 }

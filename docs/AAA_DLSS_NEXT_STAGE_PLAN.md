@@ -113,6 +113,9 @@ before model upgrades can be judged honestly.
      DLSS render/output extents, and production-quality gate readiness.
    - Record a separate DLAA baseline so anti-aliasing-oriented QA is not mixed
      with the 0.75 render-scale Super Resolution route.
+   - Add the real default Forward 3D application scene to the same DLAA queue
+     as Slice 4.15 so startup-scene jagged edges are covered by CSV and
+     screenshot evidence, not only by benchmark-grid captures.
 
 2. Imported/static model DLSS baseline.
    - Add an imported-model capture path that exercises real asset geometry,
@@ -1139,3 +1142,42 @@ after the evaluate contract is stable.
   model coverage, skinned/animated velocity, material-specific mask policy,
   larger moving-scene temporal references, and DLSS/DLAA tuning evidence remain
   the next required slices.
+
+## Slice 4.15 Execution Evidence
+
+- Added the real default Forward 3D application scene to the DLAA visual-QA
+  queue. This is the startup scene with the large viewport grid/ground, three
+  cube renderables, six total lights, five local lights, one rect light, and one
+  scene reflection probe; it is the scene used for the reported visible jagged
+  edges, not the benchmark-grid stress scene.
+- `scripts\Test-DlssVisualQa.ps1` now distinguishes explicit benchmark-grid
+  scenarios from default application-scene scenarios. `Invoke-BenchmarkRun`
+  still defaults to `SE_BENCHMARK_SCENE=grid` for legacy grid routes, but the
+  new `-UseApplicationScene` switch keeps `SE_BENCHMARK_SCENE` unset so the CSV
+  and screenshot both exercise the real default scene. The existing SR and grid
+  DLAA environments now explicitly set `SE_BENCHMARK_SCENE=grid` to avoid
+  mixing grid CSV evidence with default-scene screenshots.
+- Added
+  `docs/reference_baselines/dlss_default_scene_dlaa_visual_qa_baseline.json`.
+  The baseline requires native/DLAA render scale `1/1/0`, DLSS quality
+  mode/preset `6/11`, full-resolution DLSS extents `1280x720->1280x720`,
+  post source `1/1/0`, quality gate `1/1/0`, quality masks `255/255/0`, draw
+  route `5/5/0/0`, and scene counters
+  `materials=5,lights=6,local=5,rect=1,probes=1`.
+- Verification:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  passes with matching `780/780` CSV columns and 0 frame-graph validation
+  issues. `default_scene_dlaa_present.csv` reports evaluate/output `1/1`,
+  post source `1/1/0`, quality gate `1/1/0`, quality masks `255/255/0`, render
+  scale `1/1/0`, quality mode/preset `6/11`, and DLSS extents
+  `1280x720->1280x720`.
+- The default-scene native-vs-DLAA screenshot comparison samples 14352 pixels
+  with 11569 changed pixels, mean RGB delta `89.3985`, and max delta `662`.
+  The generated image
+  `out/reference_captures/dlss_visual_qa/default_scene_dlaa_present.png`
+  visually confirms the startup application scene rather than the benchmark
+  cube grid.
+- This makes the user's visible default Forward 3D scene part of the DLAA
+  quality queue. It still does not prove broad production DLSS quality for
+  imported models, skinned animation, particles/water/refraction masks, or
+  larger moving-scene temporal stability.
