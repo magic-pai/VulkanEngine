@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <limits>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace se {
 
@@ -117,14 +118,45 @@ struct ImportMessage {
     std::string text;
 };
 
+struct ImportedAnimationVec3Key {
+    f64 time = 0.0;
+    glm::vec3 value{ 0.0f };
+};
+
+struct ImportedAnimationQuatKey {
+    f64 time = 0.0;
+    glm::quat value{ 1.0f, 0.0f, 0.0f, 0.0f };
+};
+
+struct ImportedAnimationChannel3D {
+    std::string nodeName;
+    std::vector<ImportedAnimationVec3Key> positions;
+    std::vector<ImportedAnimationQuatKey> rotations;
+    std::vector<ImportedAnimationVec3Key> scales;
+};
+
+struct ImportedAnimationClip3D {
+    std::string name;
+    f64 durationTicks = 0.0;
+    f64 ticksPerSecond = 0.0;
+    std::vector<ImportedAnimationChannel3D> channels;
+};
+
 struct ImportedModel3D {
     std::filesystem::path sourcePath;
     std::vector<ImportedMesh3D> meshes;
     std::vector<ImportedMaterial3D> materials;
+    std::vector<ImportedAnimationClip3D> animations;
     std::vector<ImportMessage> messages;
     u32 sourceMeshCount = 0;
     u32 sourceMaterialCount = 0;
     u32 sourceAnimationCount = 0;
+    u32 sourceAnimationChannelCount = 0;
+    u32 sourceAnimationPositionKeyCount = 0;
+    u32 sourceAnimationRotationKeyCount = 0;
+    u32 sourceAnimationScaleKeyCount = 0;
+    u32 sourceAnimationKeyCount = 0;
+    u32 sourceMaxAnimationKeysPerChannel = 0;
     u32 sourceMeshWithBonesCount = 0;
     u32 sourceBoneCount = 0;
     u32 sourceSkinnedVertexCount = 0;

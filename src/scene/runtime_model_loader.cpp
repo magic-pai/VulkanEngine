@@ -410,6 +410,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 static_cast<u32>(cached.meshes.size()),
                 static_cast<u32>(cached.materials.size()),
                 cached.sourceAnimationCount,
+                cached.sourceAnimationChannelCount,
+                cached.sourceAnimationPositionKeyCount,
+                cached.sourceAnimationRotationKeyCount,
+                cached.sourceAnimationScaleKeyCount,
+                cached.sourceAnimationKeyCount,
+                cached.sourceMaxAnimationKeysPerChannel,
                 cached.sourceMeshWithBonesCount,
                 cached.sourceBoneCount,
                 cached.sourceSkinnedVertexCount,
@@ -975,6 +981,18 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         const std::size_t meshCount = importedModelData.meshes.size();
         const std::size_t materialCount = importedModelData.materials.size();
         loadedModel->sourceAnimationCount = importedModelData.sourceAnimationCount;
+        loadedModel->sourceAnimationChannelCount =
+            importedModelData.sourceAnimationChannelCount;
+        loadedModel->sourceAnimationPositionKeyCount =
+            importedModelData.sourceAnimationPositionKeyCount;
+        loadedModel->sourceAnimationRotationKeyCount =
+            importedModelData.sourceAnimationRotationKeyCount;
+        loadedModel->sourceAnimationScaleKeyCount =
+            importedModelData.sourceAnimationScaleKeyCount;
+        loadedModel->sourceAnimationKeyCount =
+            importedModelData.sourceAnimationKeyCount;
+        loadedModel->sourceMaxAnimationKeysPerChannel =
+            importedModelData.sourceMaxAnimationKeysPerChannel;
         loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
         loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
         loadedModel->sourceSkinnedVertexCount = importedModelData.sourceSkinnedVertexCount;
@@ -995,6 +1013,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             static_cast<u32>(meshCount),
             static_cast<u32>(materialCount),
             importedModelData.sourceAnimationCount,
+            importedModelData.sourceAnimationChannelCount,
+            importedModelData.sourceAnimationPositionKeyCount,
+            importedModelData.sourceAnimationRotationKeyCount,
+            importedModelData.sourceAnimationScaleKeyCount,
+            importedModelData.sourceAnimationKeyCount,
+            importedModelData.sourceMaxAnimationKeysPerChannel,
             importedModelData.sourceMeshWithBonesCount,
             importedModelData.sourceBoneCount,
             importedModelData.sourceSkinnedVertexCount,

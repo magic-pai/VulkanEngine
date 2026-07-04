@@ -2369,6 +2369,18 @@ int main() {
     sceneDiagnostics.runtimeImportMeshCount = defaultModelLoad.meshCount;
     sceneDiagnostics.runtimeImportMaterialCount = defaultModelLoad.materialCount;
     sceneDiagnostics.runtimeImportAnimationCount = defaultModelLoad.sourceAnimationCount;
+    sceneDiagnostics.runtimeImportAnimationChannelCount =
+        defaultModelLoad.sourceAnimationChannelCount;
+    sceneDiagnostics.runtimeImportAnimationPositionKeyCount =
+        defaultModelLoad.sourceAnimationPositionKeyCount;
+    sceneDiagnostics.runtimeImportAnimationRotationKeyCount =
+        defaultModelLoad.sourceAnimationRotationKeyCount;
+    sceneDiagnostics.runtimeImportAnimationScaleKeyCount =
+        defaultModelLoad.sourceAnimationScaleKeyCount;
+    sceneDiagnostics.runtimeImportAnimationKeyCount =
+        defaultModelLoad.sourceAnimationKeyCount;
+    sceneDiagnostics.runtimeImportMaxAnimationKeysPerChannel =
+        defaultModelLoad.sourceMaxAnimationKeysPerChannel;
     sceneDiagnostics.runtimeImportMeshWithBonesCount =
         defaultModelLoad.sourceMeshWithBonesCount;
     sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;

@@ -55,6 +55,10 @@ glm::mat4 ToMat4(const aiMatrix4x4& value) {
     );
 }
 
+glm::quat ToQuat(const aiQuaternion& value) {
+    return glm::quat(value.w, value.x, value.y, value.z);
+}
+
 std::string ToString(const aiString& value) {
     return std::string(value.C_Str());
 }
@@ -630,6 +634,90 @@ void PopulateModelSourceDiagnostics(ImportedModel3D& model, const aiScene* scene
         model.sourceBoneCount > 0;
 }
 
+void PopulateModelAnimations(ImportedModel3D& model, const aiScene* scene) {
+    SE_ASSERT(scene != nullptr, "Assimp scene must not be null");
+
+    model.animations.clear();
+    model.animations.reserve(scene->mNumAnimations);
+    model.sourceAnimationChannelCount = 0;
+    model.sourceAnimationPositionKeyCount = 0;
+    model.sourceAnimationRotationKeyCount = 0;
+    model.sourceAnimationScaleKeyCount = 0;
+    model.sourceAnimationKeyCount = 0;
+    model.sourceMaxAnimationKeysPerChannel = 0;
+
+    for (u32 animationIndex = 0;
+         animationIndex < scene->mNumAnimations;
+         ++animationIndex) {
+        const aiAnimation* sourceAnimation = scene->mAnimations[animationIndex];
+        if (sourceAnimation == nullptr) {
+            continue;
+        }
+
+        ImportedAnimationClip3D clip;
+        clip.name = sourceAnimation->mName.length > 0
+            ? ToString(sourceAnimation->mName)
+            : "Animation" + std::to_string(animationIndex);
+        clip.durationTicks = sourceAnimation->mDuration;
+        clip.ticksPerSecond = sourceAnimation->mTicksPerSecond;
+        clip.channels.reserve(sourceAnimation->mNumChannels);
+
+        for (u32 channelIndex = 0;
+             channelIndex < sourceAnimation->mNumChannels;
+             ++channelIndex) {
+            const aiNodeAnim* sourceChannel =
+                sourceAnimation->mChannels[channelIndex];
+            if (sourceChannel == nullptr) {
+                continue;
+            }
+
+            ImportedAnimationChannel3D channel;
+            channel.nodeName = ToString(sourceChannel->mNodeName);
+            channel.positions.reserve(sourceChannel->mNumPositionKeys);
+            channel.rotations.reserve(sourceChannel->mNumRotationKeys);
+            channel.scales.reserve(sourceChannel->mNumScalingKeys);
+
+            for (u32 keyIndex = 0;
+                 keyIndex < sourceChannel->mNumPositionKeys;
+                 ++keyIndex) {
+                const aiVectorKey& key = sourceChannel->mPositionKeys[keyIndex];
+                channel.positions.push_back({ key.mTime, ToVec3(key.mValue) });
+            }
+            for (u32 keyIndex = 0;
+                 keyIndex < sourceChannel->mNumRotationKeys;
+                 ++keyIndex) {
+                const aiQuatKey& key = sourceChannel->mRotationKeys[keyIndex];
+                channel.rotations.push_back({ key.mTime, ToQuat(key.mValue) });
+            }
+            for (u32 keyIndex = 0;
+                 keyIndex < sourceChannel->mNumScalingKeys;
+                 ++keyIndex) {
+                const aiVectorKey& key = sourceChannel->mScalingKeys[keyIndex];
+                channel.scales.push_back({ key.mTime, ToVec3(key.mValue) });
+            }
+
+            const u32 channelKeyCount =
+                static_cast<u32>(channel.positions.size() +
+                    channel.rotations.size() +
+                    channel.scales.size());
+            ++model.sourceAnimationChannelCount;
+            model.sourceAnimationPositionKeyCount +=
+                static_cast<u32>(channel.positions.size());
+            model.sourceAnimationRotationKeyCount +=
+                static_cast<u32>(channel.rotations.size());
+            model.sourceAnimationScaleKeyCount +=
+                static_cast<u32>(channel.scales.size());
+            model.sourceAnimationKeyCount += channelKeyCount;
+            model.sourceMaxAnimationKeysPerChannel =
+                std::max(model.sourceMaxAnimationKeysPerChannel, channelKeyCount);
+
+            clip.channels.push_back(std::move(channel));
+        }
+
+        model.animations.push_back(std::move(clip));
+    }
+}
+
 void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
     SE_ASSERT(source != nullptr, "Assimp mesh must not be null");
     if (source->mNumBones == 0 || source->mNumVertices == 0) {
@@ -907,6 +995,7 @@ ImportedModel3D ModelImporter::LoadModel3D(
     model.boundsMin = glm::vec3(std::numeric_limits<f32>::max());
     model.boundsMax = glm::vec3(std::numeric_limits<f32>::lowest());
     PopulateModelSourceDiagnostics(model, scene);
+    PopulateModelAnimations(model, scene);
 
     model.materials.reserve(scene->mNumMaterials > 0 ? scene->mNumMaterials : 1);
     for (u32 materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex) {
@@ -939,7 +1028,9 @@ ImportedModel3D ModelImporter::LoadModel3D(
                 std::to_string(model.sourceBoneCount) +
                 " bone reference(s) across " +
                 std::to_string(model.sourceBoneInfluenceCount) +
-                " vertex influence(s); runtime import currently treats it as rigid mesh data."
+                " vertex influence(s) and " +
+                std::to_string(model.sourceAnimationChannelCount) +
+                " animation channel(s); runtime import currently treats it as rigid mesh data."
         });
     }
 

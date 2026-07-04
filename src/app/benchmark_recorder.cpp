@@ -215,6 +215,12 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportMeshCount << ','
         << sceneDiagnostics.runtimeImportMaterialCount << ','
         << sceneDiagnostics.runtimeImportAnimationCount << ','
+        << sceneDiagnostics.runtimeImportAnimationChannelCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPositionKeyCount << ','
+        << sceneDiagnostics.runtimeImportAnimationRotationKeyCount << ','
+        << sceneDiagnostics.runtimeImportAnimationScaleKeyCount << ','
+        << sceneDiagnostics.runtimeImportAnimationKeyCount << ','
+        << sceneDiagnostics.runtimeImportMaxAnimationKeysPerChannel << ','
         << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
         << sceneDiagnostics.runtimeImportBoneCount << ','
         << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
@@ -1008,6 +1014,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_model_requested,runtime_import_model_loaded,"
         << "runtime_import_cache_hit,runtime_import_mesh_count,"
         << "runtime_import_material_count,runtime_import_animation_count,"
+        << "runtime_import_animation_channel_count,"
+        << "runtime_import_animation_position_key_count,"
+        << "runtime_import_animation_rotation_key_count,"
+        << "runtime_import_animation_scale_key_count,"
+        << "runtime_import_animation_key_count,"
+        << "runtime_import_max_animation_keys_per_channel,"
         << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
         << "runtime_import_skinned_vertex_count,"
         << "runtime_import_bone_influence_count,"

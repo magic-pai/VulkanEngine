@@ -695,6 +695,54 @@ The remaining hard work is animation clip/node sampling, skinned vertex buffers
 or shader skinning, previous-bone/previous-pose storage, and skinned velocity
 output.
 
+## Slice 4.27 Execution Plan
+
+Slice 4.27 extends the skinned import carrier from weights into animation clip
+data. Slice 4.26 preserved bone weights; this slice preserves animation clips,
+node channels, and transform keys so future pose evaluation has source data to
+sample.
+
+1. Animation carriers.
+   - Add imported animation clips with name, duration ticks, ticks-per-second,
+     and node channels.
+   - Preserve position, rotation, and scale keys per channel.
+   - Keep the carrier independent from rendering so current rigid import output
+     remains unchanged.
+
+2. Runtime diagnostics.
+   - Aggregate animation channel count, position/rotation/scale key counts,
+     total key count, and max keys per channel.
+   - Carry those values through runtime load results, cache entries, benchmark
+     scene diagnostics, CSV output, and quick QA metrics.
+
+3. QA contract.
+   - Extend `imported-skinned-diagnostic` to assert the clip/channel/key counts
+     from `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at zero for the new fields.
+   - Keep DLSS quality expected-blocked because there is still no animation
+     sampling, pose evaluation, or skinned velocity output.
+
+## Slice 4.27 Execution Evidence
+
+Slice 4.27 is implemented and verified. `ImportedModel3D` now stores
+`ImportedAnimationClip3D` entries with node channels and position/rotation/scale
+keys. Runtime import diagnostics now include animation channel and key counters.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- CSV shape: `800/800` columns.
+- Runtime import diagnostics:
+  `requested/loaded/cache/mesh/material/animation/channels/posKeys/rotKeys/scaleKeys/keys/maxChannelKeys/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/1/1/2/2/2/6/6/1/2/3/5/2/1`.
+- DLSS quality remains expected-blocked:
+  `qualityGate=1/0/4`, masks `255/251/4`.
+
+This creates the animation source-data carrier for future pose sampling. The
+remaining work is node hierarchy binding, animation sampling, current/previous
+bone palette storage, skinned vertex output, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

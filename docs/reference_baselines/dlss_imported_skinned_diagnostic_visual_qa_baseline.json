@@ -61,6 +61,12 @@
       "runtimeImportMeshCount": "1",
       "runtimeImportMaterialCount": "1",
       "runtimeImportAnimationCount": "1",
+      "runtimeImportAnimationChannelCount": "1",
+      "runtimeImportAnimationPositionKeyCount": "2",
+      "runtimeImportAnimationRotationKeyCount": "2",
+      "runtimeImportAnimationScaleKeyCount": "2",
+      "runtimeImportAnimationKeyCount": "6",
+      "runtimeImportMaxAnimationKeysPerChannel": "6",
       "runtimeImportMeshWithBonesCount": "1",
       "runtimeImportBoneCount": "2",
       "runtimeImportSkinnedVertexCount": "3",
@@ -70,9 +76,9 @@
     }
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T06:23:07.7493572+08:00",
+    "capturedAt": "2026-07-05T06:32:34.0141480+08:00",
     "captureMode": "benchmark-only; no screenshot capture",
-    "dlssColumns": "794/794",
+    "dlssColumns": "800/800",
     "model": "assets/models/skinned_probe.dae",
     "qualityMode": 6,
     "recommendedPreset": 11,
@@ -90,6 +96,6 @@
     "objectMotion": "1/0",
     "drawRoute": "1/1/0/0",
     "materialCounters": "materials=1,textured=0,lights=4,local=3,rect=0",
-    "runtimeImport": "requested/loaded/cache/mesh/material/animation/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/1/1/2/3/5/2/1"
+    "runtimeImport": "requested/loaded/cache/mesh/material/animation/channels/posKeys/rotKeys/scaleKeys/keys/maxChannelKeys/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/1/1/2/2/2/6/6/1/2/3/5/2/1"
   }
 }

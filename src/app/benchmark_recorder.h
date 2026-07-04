@@ -48,6 +48,12 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportMeshCount = 0;
     u32 runtimeImportMaterialCount = 0;
     u32 runtimeImportAnimationCount = 0;
+    u32 runtimeImportAnimationChannelCount = 0;
+    u32 runtimeImportAnimationPositionKeyCount = 0;
+    u32 runtimeImportAnimationRotationKeyCount = 0;
+    u32 runtimeImportAnimationScaleKeyCount = 0;
+    u32 runtimeImportAnimationKeyCount = 0;
+    u32 runtimeImportMaxAnimationKeysPerChannel = 0;
     u32 runtimeImportMeshWithBonesCount = 0;
     u32 runtimeImportBoneCount = 0;
     u32 runtimeImportSkinnedVertexCount = 0;
