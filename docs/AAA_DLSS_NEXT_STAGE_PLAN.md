@@ -102,13 +102,13 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.7: broaden DLSS production-quality coverage beyond the
-current opaque deferred grid baseline. Slice 4.6 proves the experimental
-DLSS-present route can pass the production-quality gate for the controlled grid
-scene when the renderer-owned baseline manifest is present. The next slice
-should extend coverage to transparent/WBOIT, forward-special residuals, imported
-model/material stress content, and stricter per-scene visual baselines before
-DLSS is considered a default presentation path. Do not expand into Frame
+Implement Slice 4.8: broaden DLSS coverage from opaque grid and WBOIT
+transparent-grid cases into forward-special residuals and imported/material
+stress content. Slice 4.7 adds WBOIT coverage to the visual-QA runner and proves
+that transparent content produces DLSS output while the production-quality gate
+remains correctly blocked on object-motion/transparent coverage. The next slice
+should add at least one forward-special or imported/material stress baseline
+before DLSS is considered a default presentation path. Do not expand into Frame
 Generation, Ray Reconstruction, Streamline interposition, or default
 presentation changes yet.
 
@@ -820,3 +820,41 @@ after the evaluate contract is stable.
   broad-content production claim; transparent/WBOIT, forward-special residuals,
   animated/skinned/imported assets, and stricter per-scene baselines remain the
   next coverage work.
+
+## Slice 4.7 Execution Evidence
+
+- Added a second renderer-owned DLSS visual-QA baseline manifest at
+  `docs/reference_baselines/dlss_wboit_visual_qa_baseline.json` for the
+  transparent grid / WBOIT route. This manifest intentionally expects DLSS
+  output and post-source activation while preserving a production-quality gate
+  blocker for object-motion coverage.
+- Extended `scripts/Test-DlssVisualQa.ps1` so the default visual-QA run now
+  executes four scenarios: native opaque deferred HDR, DLSS-present opaque
+  deferred HDR, native WBOIT transparent deferred HDR, and DLSS-present WBOIT
+  transparent deferred HDR. The script validates both baseline manifests, CSV
+  quality-gate strings, WBOIT draw/resolve counters, screenshots, and image
+  comparison thresholds.
+- Verification command:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/summary.json` reports both baseline
+  manifests, matching 769-column rows for every CSV, and 0 frame-graph
+  validation issues.
+- Opaque DLSS-present remains production-quality ready for the controlled grid
+  baseline with evaluate/output `1/1`, post source `1/1/0`, quality gate
+  `1/1/0`, quality masks `255/255/0`, and per-input readiness
+  `1/1/1/1/1/1/1/1`.
+- WBOIT DLSS-present reports evaluate/output `1/1`, post source `1/1/0`,
+  quality gate `1/0/4`, quality masks `255/251/4`, and per-input readiness
+  `1/1/0/1/1/1/1/1`, proving transparent coverage is visible but not
+  production-cleared. It records 79 WBOIT draws, one WBOIT resolve, and 0
+  forward-residual draws.
+- Latest screenshots are nonblank. Opaque native-vs-DLSS comparison samples
+  14352 pixels with 3494 changed pixels, mean RGB delta `22.9112`, and max
+  delta `581`. WBOIT native-vs-DLSS comparison samples 14352 pixels with 257
+  changed pixels, mean RGB delta `0.9693`, and max delta `564`, within the
+  WBOIT baseline manifest thresholds.
+- This expands DLSS coverage to the transparent WBOIT path without weakening
+  the production-quality gate. Remaining broad-content work includes
+  forward-special residuals, imported/material stress scenes, animated/skinned
+  object velocity, and real non-neutral reactive/transparency masks.
