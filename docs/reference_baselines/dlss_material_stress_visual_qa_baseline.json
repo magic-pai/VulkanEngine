@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_grid_material_stress_render_scale_075",
+  "target": "SelfEngineForward3D",
+  "scene": "grid",
+  "description": "Reference contract for opaque complex-material DLSS coverage. This baseline exercises specular, UV transform, double-sided, clearcoat texture, clearcoat roughness texture, transmission texture, and volume material inputs while requiring the production DLSS quality gate to pass.",
+  "environment": {
+    "native": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_SPECULAR_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_UV_TRANSFORM_MATERIAL": "1",
+      "SE_BENCHMARK_DOUBLE_SIDED_MATERIAL": "1",
+      "SE_BENCHMARK_CLEARCOAT_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_CLEARCOAT_ROUGHNESS_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_TRANSMISSION_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_VOLUME_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    },
+    "dlssPresent": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_SPECULAR_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_UV_TRANSFORM_MATERIAL": "1",
+      "SE_BENCHMARK_DOUBLE_SIDED_MATERIAL": "1",
+      "SE_BENCHMARK_CLEARCOAT_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_CLEARCOAT_ROUGHNESS_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_TRANSMISSION_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_VOLUME_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_PRESENT": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "native": {
+      "postSource": "0/0/1",
+      "qualityGate": "0/0/1",
+      "gbufferDraws": "242",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0"
+    },
+    "dlssPresent": {
+      "evaluateOutput": "1/1",
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "gbufferDraws": "242",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0",
+      "specularTextureMaterials": "1",
+      "uvTransformMaterials": "1",
+      "doubleSidedMaterials": "1",
+      "clearcoatTextureMaterials": "1",
+      "clearcoatRoughnessTextureMaterials": "1",
+      "transmissionTextureMaterials": "1",
+      "volumeMaterials": "1",
+      "texturedMaterials": "3"
+    }
+  },
+  "thresholds": {
+    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMax": 14000,
+    "comparisonMeanDeltaMin": 0.0,
+    "comparisonMeanDeltaMax": 180.0,
+    "comparisonMaxDeltaMax": 765,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-04T20:49:00+08:00",
+    "dlssColumns": "769/769",
+    "gbufferDraws": 242,
+    "forwardResidualDraws": 0,
+    "weightedTranslucencyDraws": 0,
+    "qualityMasks": "255/255/0",
+    "materialCounters": {
+      "specularTextureMaterials": 1,
+      "uvTransformMaterials": 1,
+      "doubleSidedMaterials": 1,
+      "clearcoatTextureMaterials": 1,
+      "clearcoatRoughnessTextureMaterials": 1,
+      "transmissionTextureMaterials": 1,
+      "volumeMaterials": 1,
+      "texturedMaterials": 3
+    },
+    "comparisonChangedPixels": 284,
+    "comparisonMeanDelta": 1.0845,
+    "comparisonMaxDelta": 564
+  }
+}

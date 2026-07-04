@@ -102,15 +102,14 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.9: broaden DLSS coverage from the controlled opaque, WBOIT,
-and forward-special benchmark grids into imported/material stress content, then
-start removing the forward-residual object-motion blocker with real residual
-velocity or an explicit pre-upscale ordering policy. Slice 4.8 proves
-forward-special residual content produces visible DLSS output while remaining
-blocked from production-clear status. The next slice should add at least one
-imported or complex material stress baseline and should not expand into Frame
-Generation, Ray Reconstruction, Streamline interposition, or default
-presentation changes yet.
+Implement Slice 4.10: move from benchmark-grid coverage toward imported model
+content or start removing the forward/WBOIT object-motion blocker with real
+residual/transparent velocity or an explicit pre-upscale ordering policy. Slice
+4.9 proves a complex opaque material stress scene can pass the production DLSS
+quality gate. The next slice should either add an imported-model visual baseline
+or make one blocked residual/transparent route genuinely object-motion ready.
+Do not expand into Frame Generation, Ray Reconstruction, Streamline
+interposition, or default presentation changes yet.
 
 ## Slice 4.4 Execution Plan
 
@@ -899,3 +898,44 @@ after the evaluate contract is stable.
   imported/material stress scenes, animated/skinned object velocity, forward
   residual motion-vector policy, and real non-neutral reactive/transparency
   masks.
+
+## Slice 4.9 Execution Evidence
+
+- Added a fourth renderer-owned DLSS visual-QA baseline manifest at
+  `docs/reference_baselines/dlss_material_stress_visual_qa_baseline.json` for a
+  complex opaque material stress route. The scene enables specular texture, UV
+  transform, double-sided, clearcoat texture, clearcoat roughness texture,
+  transmission texture, and volume material inputs while staying fully in the
+  deferred opaque/GBuffer route.
+- Extended `scripts/Test-DlssVisualQa.ps1` so the default visual-QA run now
+  executes eight captures: native/DLSS pairs for opaque, WBOIT,
+  forward-special residual, and material stress. The script validates all four
+  baseline manifests, CSV quality-gate strings, draw-route counters, material
+  counters, screenshots, and image comparison thresholds. The default screenshot
+  delay is now 3 seconds so the expanded matrix remains practical.
+- Verification command:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/summary.json` reports all four
+  baseline manifests, matching 769-column rows for every CSV, and 0
+  frame-graph validation issues.
+- Material-stress DLSS-present reports evaluate/output `1/1`, post source
+  `1/1/0`, production quality gate `1/1/0`, quality masks `255/255/0`, and
+  per-input readiness `1/1/1/1/1/1/1/1`, proving this complex opaque material
+  scene is production-cleared by the current DLSS gate. It records draw route
+  `242/0/0` for GBuffer/forward-residual/WBOIT, one each of specular-texture,
+  UV-transform, double-sided, clearcoat-texture,
+  clearcoat-roughness-texture, transmission-texture, and volume material
+  counters, plus three textured materials.
+- Latest screenshots are nonblank. Opaque native-vs-DLSS comparison samples
+  14352 pixels with 3957 changed pixels, mean RGB delta `19.2564`, and max
+  delta `670`; WBOIT comparison samples 14352 pixels with 301 changed pixels,
+  mean RGB delta `1.16`, and max delta `564`; forward-special comparison
+  samples 14352 pixels with 168 changed pixels, mean RGB delta `0.9347`, and
+  max delta `564`; material-stress comparison samples 14352 pixels with 284
+  changed pixels, mean RGB delta `1.0845`, and max delta `564`.
+- This expands production-cleared DLSS coverage beyond the controlled opaque
+  grid into complex opaque material inputs. Remaining broad-content work
+  includes imported-model baselines, animated/skinned object velocity, forward
+  residual and WBOIT object-motion policy, and real non-neutral
+  reactive/transparency masks.

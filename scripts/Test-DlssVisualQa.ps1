@@ -4,12 +4,13 @@ param(
     [string]$WindowTitle = "SelfEngine Forward 3D",
     [string]$OutputDirectory = "out\reference_captures\dlss_visual_qa",
     [int]$TimeoutSeconds = 15,
-    [int]$CaptureDelaySeconds = 8,
+    [int]$CaptureDelaySeconds = 3,
     [int]$MinChangedPixels = 512,
     [double]$MaxMeanDelta = 160.0,
     [string]$BaselinePath = "docs\reference_baselines\dlss_visual_qa_baseline.json",
     [string]$WboitBaselinePath = "docs\reference_baselines\dlss_wboit_visual_qa_baseline.json",
     [string]$ForwardSpecialBaselinePath = "docs\reference_baselines\dlss_forward_special_visual_qa_baseline.json",
+    [string]$MaterialStressBaselinePath = "docs\reference_baselines\dlss_material_stress_visual_qa_baseline.json",
     [switch]$SkipBuild
 )
 
@@ -75,6 +76,18 @@ $forwardSpecialBaselineManifest = Get-Content -Raw -LiteralPath $forwardSpecialB
 if ($forwardSpecialBaselineManifest.target -ne $Target) {
     throw "DLSS forward-special visual QA baseline target mismatch: expected $Target, manifest has $($forwardSpecialBaselineManifest.target)"
 }
+$materialStressBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($MaterialStressBaselinePath)) {
+    [System.IO.Path]::GetFullPath($MaterialStressBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $MaterialStressBaselinePath))
+}
+if (!(Test-Path -LiteralPath $materialStressBaselineManifestPath)) {
+    throw "DLSS material-stress visual QA baseline manifest not found: $materialStressBaselineManifestPath"
+}
+$materialStressBaselineManifest = Get-Content -Raw -LiteralPath $materialStressBaselineManifestPath | ConvertFrom-Json
+if ($materialStressBaselineManifest.target -ne $Target) {
+    throw "DLSS material-stress visual QA baseline target mismatch: expected $Target, manifest has $($materialStressBaselineManifest.target)"
+}
 
 Add-Type -AssemblyName System.Drawing
 if (-not ("SelfEngineVisualQaWin32" -as [type])) {
@@ -131,6 +144,13 @@ $managedEnvironmentKeys = @(
     "SE_BENCHMARK_SCENE",
     "SE_BENCHMARK_TRANSPARENT_MATERIAL",
     "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL",
+    "SE_BENCHMARK_SPECULAR_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_UV_TRANSFORM_MATERIAL",
+    "SE_BENCHMARK_DOUBLE_SIDED_MATERIAL",
+    "SE_BENCHMARK_CLEARCOAT_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_CLEARCOAT_ROUGHNESS_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_TRANSMISSION_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_VOLUME_MATERIAL",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_BENCHMARK_CSV",
@@ -566,6 +586,27 @@ $forwardSpecialDlssPresentEnvironment = @{
     "SE_DLSS_REFERENCE_BASELINE_PATH" = $forwardSpecialBaselineManifestPath
     "SE_RENDER_VIEW" = "deferred-hdr"
 }
+$materialStressEnvironmentBase = @{
+    "SE_BENCHMARK_SCENE" = "grid"
+    "SE_BENCHMARK_SPECULAR_TEXTURE_MATERIAL" = "1"
+    "SE_BENCHMARK_UV_TRANSFORM_MATERIAL" = "1"
+    "SE_BENCHMARK_DOUBLE_SIDED_MATERIAL" = "1"
+    "SE_BENCHMARK_CLEARCOAT_TEXTURE_MATERIAL" = "1"
+    "SE_BENCHMARK_CLEARCOAT_ROUGHNESS_TEXTURE_MATERIAL" = "1"
+    "SE_BENCHMARK_TRANSMISSION_TEXTURE_MATERIAL" = "1"
+    "SE_BENCHMARK_VOLUME_MATERIAL" = "1"
+    "SE_RENDER_SCALE" = "0.75"
+    "SE_RENDER_SCALE_APPLY" = "1"
+    "SE_TAA" = "1"
+    "SE_TEMPORAL_JITTER" = "1"
+    "SE_RENDER_VIEW" = "deferred-hdr"
+}
+$materialStressNativeEnvironment = $materialStressEnvironmentBase.Clone()
+$materialStressDlssPresentEnvironment = $materialStressEnvironmentBase.Clone()
+$materialStressDlssPresentEnvironment["SE_UPSCALER_PLUGIN"] = "dlss"
+$materialStressDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
+$materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
+    $materialStressBaselineManifestPath
 
 $nativeBenchmark = Invoke-BenchmarkRun -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssBenchmark = Invoke-BenchmarkRun -Name "dlss_present" -Environment $dlssPresentEnvironment
@@ -573,6 +614,8 @@ $wboitNativeBenchmark = Invoke-BenchmarkRun -Name "wboit_native_deferred_hdr" -E
 $wboitDlssBenchmark = Invoke-BenchmarkRun -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeBenchmark = Invoke-BenchmarkRun -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
 $forwardSpecialDlssBenchmark = Invoke-BenchmarkRun -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
+$materialStressNativeBenchmark = Invoke-BenchmarkRun -Name "material_stress_native_deferred_hdr" -Environment $materialStressNativeEnvironment
+$materialStressDlssBenchmark = Invoke-BenchmarkRun -Name "material_stress_dlss_present" -Environment $materialStressDlssPresentEnvironment
 
 $nativeRow = $nativeBenchmark.LastRow
 $dlssRow = $dlssBenchmark.LastRow
@@ -580,6 +623,8 @@ $wboitNativeRow = $wboitNativeBenchmark.LastRow
 $wboitDlssRow = $wboitDlssBenchmark.LastRow
 $forwardSpecialNativeRow = $forwardSpecialNativeBenchmark.LastRow
 $forwardSpecialDlssRow = $forwardSpecialDlssBenchmark.LastRow
+$materialStressNativeRow = $materialStressNativeBenchmark.LastRow
+$materialStressDlssRow = $materialStressDlssBenchmark.LastRow
 if ($nativeRow.framegraph_validation_issues -ne "0") {
     throw "Native frame graph validation issues: $($nativeRow.framegraph_validation_issues)"
 }
@@ -689,21 +734,64 @@ if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -n
     throw "Forward-special DLSS quality gate did not report the expected object/baseline readiness"
 }
 
+if ($materialStressNativeRow.framegraph_validation_issues -ne "0") {
+    throw "Material-stress native frame graph validation issues: $($materialStressNativeRow.framegraph_validation_issues)"
+}
+if ($materialStressDlssRow.framegraph_validation_issues -ne "0") {
+    throw "Material-stress DLSS frame graph validation issues: $($materialStressDlssRow.framegraph_validation_issues)"
+}
+if ($materialStressNativeRow.gbuffer_draws -ne $materialStressBaselineManifest.expected.native.gbufferDraws -or
+    $materialStressNativeRow.forward_residual_draws -ne $materialStressBaselineManifest.expected.native.forwardResidualDraws -or
+    $materialStressNativeRow.weighted_translucency_draws -ne $materialStressBaselineManifest.expected.native.weightedTranslucencyDraws) {
+    throw "Material-stress native draw route mismatch"
+}
+if ($materialStressDlssRow.temporal_upscaler_dlss_output_ready -ne "1" -or
+    $materialStressDlssRow.temporal_upscale_post_source_active -ne "1") {
+    throw "Material-stress DLSS-present run did not produce visible DLSS output"
+}
+if ($materialStressDlssRow.gbuffer_draws -ne $materialStressBaselineManifest.expected.dlssPresent.gbufferDraws -or
+    $materialStressDlssRow.forward_residual_draws -ne $materialStressBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
+    $materialStressDlssRow.weighted_translucency_draws -ne $materialStressBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
+    throw "Material-stress DLSS draw route mismatch"
+}
+if ($materialStressDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $materialStressDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "Material-stress DLSS quality gate did not pass"
+}
+if ($materialStressDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
+    $materialStressDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
+    throw "Material-stress DLSS quality gate did not report object/baseline readiness"
+}
+if ($materialStressDlssRow.frame_material_specular_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.specularTextureMaterials -or
+    $materialStressDlssRow.frame_material_uv_transform_count -ne $materialStressBaselineManifest.expected.dlssPresent.uvTransformMaterials -or
+    $materialStressDlssRow.frame_material_double_sided_count -ne $materialStressBaselineManifest.expected.dlssPresent.doubleSidedMaterials -or
+    $materialStressDlssRow.frame_material_clearcoat_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.clearcoatTextureMaterials -or
+    $materialStressDlssRow.frame_material_clearcoat_roughness_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.clearcoatRoughnessTextureMaterials -or
+    $materialStressDlssRow.frame_material_transmission_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.transmissionTextureMaterials -or
+    $materialStressDlssRow.frame_material_volume_count -ne $materialStressBaselineManifest.expected.dlssPresent.volumeMaterials) {
+    throw "Material-stress DLSS material counter mismatch"
+}
+
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssImage = Capture-WindowImage -Name "dlss_present" -Environment $dlssPresentEnvironment
 $wboitNativeImage = Capture-WindowImage -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssImage = Capture-WindowImage -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeImage = Capture-WindowImage -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
 $forwardSpecialDlssImage = Capture-WindowImage -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
+$materialStressNativeImage = Capture-WindowImage -Name "material_stress_native_deferred_hdr" -Environment $materialStressNativeEnvironment
+$materialStressDlssImage = Capture-WindowImage -Name "material_stress_dlss_present" -Environment $materialStressDlssPresentEnvironment
 $nativeImageStats = Get-ImageVariationStats -Path $nativeImage
 $dlssImageStats = Get-ImageVariationStats -Path $dlssImage
 $wboitNativeImageStats = Get-ImageVariationStats -Path $wboitNativeImage
 $wboitDlssImageStats = Get-ImageVariationStats -Path $wboitDlssImage
 $forwardSpecialNativeImageStats = Get-ImageVariationStats -Path $forwardSpecialNativeImage
 $forwardSpecialDlssImageStats = Get-ImageVariationStats -Path $forwardSpecialDlssImage
+$materialStressNativeImageStats = Get-ImageVariationStats -Path $materialStressNativeImage
+$materialStressDlssImageStats = Get-ImageVariationStats -Path $materialStressDlssImage
 $comparison = Compare-Images -A $nativeImage -B $dlssImage
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
 $forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
+$materialStressComparison = Compare-Images -A $materialStressNativeImage -B $materialStressDlssImage
 if ($comparison.ChangedPixels -lt $MinChangedPixels) {
     throw "Native/DLSS comparison changed only $($comparison.ChangedPixels) sampled pixels; expected at least $MinChangedPixels"
 }
@@ -753,6 +841,20 @@ $forwardSpecialDlssQualityMasks =
     "$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_required_mask)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
 $forwardSpecialDlssQualityInputs =
     "output/camera/object/reactive/transparency/exposure/post/baseline=$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+$materialStressNativePostSource =
+    "$($materialStressNativeRow.temporal_upscale_post_source_requested)/$($materialStressNativeRow.temporal_upscale_post_source_active)/$($materialStressNativeRow.temporal_upscale_post_source_fallback_reason)"
+$materialStressNativeQualityGate =
+    "$($materialStressNativeRow.temporal_upscaler_dlss_quality_gate_requested)/$($materialStressNativeRow.temporal_upscaler_dlss_quality_gate_ready)/$($materialStressNativeRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$materialStressDlssEvaluateOutput =
+    "$($materialStressDlssRow.temporal_upscaler_dlss_evaluate_result)/$($materialStressDlssRow.temporal_upscaler_dlss_output_ready)"
+$materialStressDlssPostSource =
+    "$($materialStressDlssRow.temporal_upscale_post_source_requested)/$($materialStressDlssRow.temporal_upscale_post_source_active)/$($materialStressDlssRow.temporal_upscale_post_source_fallback_reason)"
+$materialStressDlssQualityGate =
+    "$($materialStressDlssRow.temporal_upscaler_dlss_quality_gate_requested)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_gate_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$materialStressDlssQualityMasks =
+    "$($materialStressDlssRow.temporal_upscaler_dlss_quality_required_mask)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
+$materialStressDlssQualityInputs =
+    "output/camera/object/reactive/transparency/exposure/post/baseline=$($materialStressDlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($materialStressDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
 
 Assert-BaselineText -Name "native.postSource" -Actual $nativePostSource -Expected $baselineManifest.expected.native.postSource
 Assert-BaselineText -Name "native.qualityGate" -Actual $nativeQualityGate -Expected $baselineManifest.expected.native.qualityGate
@@ -775,6 +877,13 @@ Assert-BaselineText -Name "forwardSpecial.dlssPresent.postSource" -Actual $forwa
 Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityGate" -Actual $forwardSpecialDlssQualityGate -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityGate
 Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityMasks" -Actual $forwardSpecialDlssQualityMasks -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityMasks
 Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityInputs" -Actual $forwardSpecialDlssQualityInputs -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityInputs
+Assert-BaselineText -Name "materialStress.native.postSource" -Actual $materialStressNativePostSource -Expected $materialStressBaselineManifest.expected.native.postSource
+Assert-BaselineText -Name "materialStress.native.qualityGate" -Actual $materialStressNativeQualityGate -Expected $materialStressBaselineManifest.expected.native.qualityGate
+Assert-BaselineText -Name "materialStress.dlssPresent.evaluateOutput" -Actual $materialStressDlssEvaluateOutput -Expected $materialStressBaselineManifest.expected.dlssPresent.evaluateOutput
+Assert-BaselineText -Name "materialStress.dlssPresent.postSource" -Actual $materialStressDlssPostSource -Expected $materialStressBaselineManifest.expected.dlssPresent.postSource
+Assert-BaselineText -Name "materialStress.dlssPresent.qualityGate" -Actual $materialStressDlssQualityGate -Expected $materialStressBaselineManifest.expected.dlssPresent.qualityGate
+Assert-BaselineText -Name "materialStress.dlssPresent.qualityMasks" -Actual $materialStressDlssQualityMasks -Expected $materialStressBaselineManifest.expected.dlssPresent.qualityMasks
+Assert-BaselineText -Name "materialStress.dlssPresent.qualityInputs" -Actual $materialStressDlssQualityInputs -Expected $materialStressBaselineManifest.expected.dlssPresent.qualityInputs
 Assert-BaselineRange `
     -Name "native.imageStats.differentPixels" `
     -Actual $nativeImageStats.DifferentPixels `
@@ -850,6 +959,31 @@ Assert-BaselineRange `
     -Actual $forwardSpecialComparison.MaxDelta `
     -Min 0 `
     -Max $forwardSpecialBaselineManifest.thresholds.comparisonMaxDeltaMax
+Assert-BaselineRange `
+    -Name "materialStress.native.imageStats.differentPixels" `
+    -Actual $materialStressNativeImageStats.DifferentPixels `
+    -Min $materialStressBaselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $materialStressNativeImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "materialStress.dlssPresent.imageStats.differentPixels" `
+    -Actual $materialStressDlssImageStats.DifferentPixels `
+    -Min $materialStressBaselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $materialStressDlssImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "materialStress.comparison.changedPixels" `
+    -Actual $materialStressComparison.ChangedPixels `
+    -Min $materialStressBaselineManifest.thresholds.comparisonChangedPixelsMin `
+    -Max $materialStressBaselineManifest.thresholds.comparisonChangedPixelsMax
+Assert-BaselineRange `
+    -Name "materialStress.comparison.meanDelta" `
+    -Actual $materialStressComparison.MeanDelta `
+    -Min $materialStressBaselineManifest.thresholds.comparisonMeanDeltaMin `
+    -Max $materialStressBaselineManifest.thresholds.comparisonMeanDeltaMax
+Assert-BaselineRange `
+    -Name "materialStress.comparison.maxDelta" `
+    -Actual $materialStressComparison.MaxDelta `
+    -Min 0 `
+    -Max $materialStressBaselineManifest.thresholds.comparisonMaxDeltaMax
 
 $summary = [pscustomobject]@{
     target = $Target
@@ -862,6 +996,8 @@ $summary = [pscustomobject]@{
         wboitName = $wboitBaselineManifest.name
         forwardSpecialManifest = $forwardSpecialBaselineManifestPath
         forwardSpecialName = $forwardSpecialBaselineManifest.name
+        materialStressManifest = $materialStressBaselineManifestPath
+        materialStressName = $materialStressBaselineManifest.name
     }
     thresholds = [pscustomobject]@{
         minChangedPixels = $MinChangedPixels
@@ -881,6 +1017,11 @@ $summary = [pscustomobject]@{
         forwardSpecialComparisonMeanDeltaMin = [double]$forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMin
         forwardSpecialComparisonMeanDeltaMax = [double]$forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMax
         forwardSpecialComparisonMaxDeltaMax = [int]$forwardSpecialBaselineManifest.thresholds.comparisonMaxDeltaMax
+        materialStressComparisonChangedPixelsMin = [int]$materialStressBaselineManifest.thresholds.comparisonChangedPixelsMin
+        materialStressComparisonChangedPixelsMax = [int]$materialStressBaselineManifest.thresholds.comparisonChangedPixelsMax
+        materialStressComparisonMeanDeltaMin = [double]$materialStressBaselineManifest.thresholds.comparisonMeanDeltaMin
+        materialStressComparisonMeanDeltaMax = [double]$materialStressBaselineManifest.thresholds.comparisonMeanDeltaMax
+        materialStressComparisonMaxDeltaMax = [int]$materialStressBaselineManifest.thresholds.comparisonMaxDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
@@ -949,9 +1090,35 @@ $summary = [pscustomobject]@{
         forwardResidual = "$($forwardSpecialDlssRow.hybrid_forward_special_draws)/$($forwardSpecialDlssRow.forward_residual_draws)/$($forwardSpecialDlssRow.forward_residual_shared_light_list_draws)/$($forwardSpecialDlssRow.frame_material_forward_special_count)"
         imageStats = $forwardSpecialDlssImageStats
     }
+    materialStressNative = [pscustomobject]@{
+        csv = $materialStressNativeBenchmark.CsvPath
+        image = $materialStressNativeImage
+        columns = "$($materialStressNativeBenchmark.HeaderColumns)/$($materialStressNativeBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$materialStressNativeRow.framegraph_validation_issues
+        postSource = $materialStressNativePostSource
+        qualityGate = $materialStressNativeQualityGate
+        drawRoute = "$($materialStressNativeRow.gbuffer_draws)/$($materialStressNativeRow.forward_residual_draws)/$($materialStressNativeRow.weighted_translucency_draws)"
+        materialCounters = "specTex=$($materialStressNativeRow.frame_material_specular_texture_count),uv=$($materialStressNativeRow.frame_material_uv_transform_count),double=$($materialStressNativeRow.frame_material_double_sided_count),clearcoatTex=$($materialStressNativeRow.frame_material_clearcoat_texture_count),clearcoatRoughTex=$($materialStressNativeRow.frame_material_clearcoat_roughness_texture_count),transTex=$($materialStressNativeRow.frame_material_transmission_texture_count),volume=$($materialStressNativeRow.frame_material_volume_count)"
+        imageStats = $materialStressNativeImageStats
+    }
+    materialStressDlssPresent = [pscustomobject]@{
+        csv = $materialStressDlssBenchmark.CsvPath
+        image = $materialStressDlssImage
+        columns = "$($materialStressDlssBenchmark.HeaderColumns)/$($materialStressDlssBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$materialStressDlssRow.framegraph_validation_issues
+        evaluateOutput = $materialStressDlssEvaluateOutput
+        postSource = $materialStressDlssPostSource
+        qualityGate = $materialStressDlssQualityGate
+        qualityMasks = $materialStressDlssQualityMasks
+        qualityInputs = $materialStressDlssQualityInputs
+        drawRoute = "$($materialStressDlssRow.gbuffer_draws)/$($materialStressDlssRow.forward_residual_draws)/$($materialStressDlssRow.weighted_translucency_draws)"
+        materialCounters = "specTex=$($materialStressDlssRow.frame_material_specular_texture_count),uv=$($materialStressDlssRow.frame_material_uv_transform_count),double=$($materialStressDlssRow.frame_material_double_sided_count),clearcoatTex=$($materialStressDlssRow.frame_material_clearcoat_texture_count),clearcoatRoughTex=$($materialStressDlssRow.frame_material_clearcoat_roughness_texture_count),transTex=$($materialStressDlssRow.frame_material_transmission_texture_count),volume=$($materialStressDlssRow.frame_material_volume_count)"
+        imageStats = $materialStressDlssImageStats
+    }
     comparison = $comparison
     wboitComparison = $wboitComparison
     forwardSpecialComparison = $forwardSpecialComparison
+    materialStressComparison = $materialStressComparison
 }
 
 $summaryPath = Join-Path $outputRoot "summary.json"
@@ -966,3 +1133,5 @@ Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
 Write-Host "  forward: $forwardSpecialDlssImage"
 Write-Host "  fdiff: sampled=$($forwardSpecialComparison.SampledPixels) changed=$($forwardSpecialComparison.ChangedPixels) mean=$($forwardSpecialComparison.MeanDelta) max=$($forwardSpecialComparison.MaxDelta)"
+Write-Host "  material: $materialStressDlssImage"
+Write-Host "  mdiff: sampled=$($materialStressComparison.SampledPixels) changed=$($materialStressComparison.ChangedPixels) mean=$($materialStressComparison.MeanDelta) max=$($materialStressComparison.MaxDelta)"
