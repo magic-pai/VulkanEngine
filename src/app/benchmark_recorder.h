@@ -68,6 +68,10 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportPosePreviousBonePaletteEntryCount = 0;
     u32 runtimeImportPoseChangedBonePaletteEntryCount = 0;
     u32 runtimeImportPoseBonePaletteReady = 0;
+    u32 runtimeImportPoseCarrierBonePaletteEntryCount = 0;
+    u32 runtimeImportPoseCarrierPreviousBonePaletteEntryCount = 0;
+    u32 runtimeImportPoseCarrierChangedBonePaletteEntryCount = 0;
+    u32 runtimeImportPoseCarrierReady = 0;
     u32 runtimeImportMeshWithBonesCount = 0;
     u32 runtimeImportBoneCount = 0;
     u32 runtimeImportSkinnedVertexCount = 0;

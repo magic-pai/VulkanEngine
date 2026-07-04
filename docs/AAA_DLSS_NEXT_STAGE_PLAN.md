@@ -859,6 +859,58 @@ The remaining work is carrying renderer-owned current/previous bone palettes to
 the draw path, outputting skinned vertices or shader skinning, and writing
 skinned motion vectors before skinned DLSS/DLAA can be production-cleared.
 
+## Slice 4.30 Execution Plan
+
+Slice 4.30 moves the sampled bone-palette data from an importer-only diagnostic
+into the runtime model cache. The goal is to prove that current and previous
+bone palette matrices survive `RuntimeModelLoader` and are available from a
+runtime-owned object for future renderer upload work.
+
+1. Runtime palette carrier.
+   - Copy the first diagnostic pose sample's current and previous bone palettes
+     into `LoadedRuntimeModel`.
+   - Preserve those vectors across the runtime model cache path.
+   - Compute changed-palette entries from the stored runtime vectors, not from
+     importer counters.
+
+2. Runtime diagnostics.
+   - Expose runtime carrier current/previous palette entry counts,
+     changed-entry count, and carrier readiness through `RuntimeModelLoadResult`.
+   - Carry those values into Forward 3D benchmark scene diagnostics, CSV, quick
+     visual-QA metrics, and focused baselines.
+
+3. QA contract.
+   - Extend `imported-skinned-diagnostic` to assert the runtime carrier counts
+     from `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at zero for the runtime carrier fields.
+   - Keep DLSS quality expected-blocked because the renderer still does not
+     upload the palette to shaders, skin vertices, store previous skinned
+     vertices, or write skinned motion vectors.
+
+## Slice 4.30 Execution Evidence
+
+Slice 4.30 is implemented and verified. `RuntimeModelLoader` now stores sampled
+current/previous bone palettes in `LoadedRuntimeModel`, computes changed
+palette entries from those stored vectors, and returns carrier diagnostics for
+both fresh loads and cached loads.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct benchmark CSV probe for `assets/models/skinned_probe.dae` reports
+  `818/818` CSV columns.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- Runtime carrier diagnostics:
+  `runtimePoseBonePalette/runtimePosePreviousBonePalette/runtimePoseChangedBonePalette/runtimePoseReady=2/2/1/1`.
+- Source pose diagnostics remain:
+  `poseClip/poseChannel/poseNode/poseAnimatedNode/poseBonePalette/posePreviousBonePalette/poseChangedBonePalette/poseReady=1/1/4/1/2/2/1/1`.
+- DLSS quality remains expected-blocked at `qualityGate=1/0/4`.
+
+This closes the importer-to-runtime palette carrier gap. The next skinned
+quality work is renderer-facing palette upload/binding, skinned vertex output or
+shader skinning, previous-skinned state, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

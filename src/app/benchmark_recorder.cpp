@@ -235,6 +235,10 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportPosePreviousBonePaletteEntryCount << ','
         << sceneDiagnostics.runtimeImportPoseChangedBonePaletteEntryCount << ','
         << sceneDiagnostics.runtimeImportPoseBonePaletteReady << ','
+        << sceneDiagnostics.runtimeImportPoseCarrierBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPoseCarrierPreviousBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPoseCarrierChangedBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPoseCarrierReady << ','
         << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
         << sceneDiagnostics.runtimeImportBoneCount << ','
         << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
@@ -1048,6 +1052,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_pose_previous_bone_palette_entry_count,"
         << "runtime_import_pose_changed_bone_palette_entry_count,"
         << "runtime_import_pose_bone_palette_ready,"
+        << "runtime_import_pose_carrier_bone_palette_entry_count,"
+        << "runtime_import_pose_carrier_previous_bone_palette_entry_count,"
+        << "runtime_import_pose_carrier_changed_bone_palette_entry_count,"
+        << "runtime_import_pose_carrier_ready,"
         << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
         << "runtime_import_skinned_vertex_count,"
         << "runtime_import_bone_influence_count,"

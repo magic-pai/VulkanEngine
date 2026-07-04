@@ -7,6 +7,7 @@
 #include "renderer/vulkan/upload_batch.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -25,6 +26,37 @@ struct ResolvedTextureSource {
         return texture == nullptr;
     }
 };
+
+bool MatrixChanged(
+    const glm::mat4& previous,
+    const glm::mat4& current,
+    f32 epsilon = 0.0001f
+) {
+    for (u32 column = 0; column < 4; ++column) {
+        for (u32 row = 0; row < 4; ++row) {
+            if (std::abs(previous[column][row] - current[column][row]) > epsilon) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+u32 CountChangedMatrices(
+    const std::vector<glm::mat4>& previous,
+    const std::vector<glm::mat4>& current
+) {
+    const std::size_t count = std::min(previous.size(), current.size());
+    u32 changed = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (MatrixChanged(previous[index], current[index])) {
+            ++changed;
+        }
+    }
+
+    return changed;
+}
 
 std::optional<ResolvedTextureSource> ResolveImportedTextureSource(
     const ImportedTexture3D& texture
@@ -430,6 +462,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourcePosePreviousBonePaletteEntryCount,
                 cached.sourcePoseChangedBonePaletteEntryCount,
                 cached.sourcePoseBonePaletteReady,
+                static_cast<u32>(cached.runtimeCurrentBonePalette.size()),
+                static_cast<u32>(cached.runtimePreviousBonePalette.size()),
+                cached.runtimePoseCarrierChangedBonePaletteEntryCount,
+                cached.runtimePoseCarrierReady,
                 cached.sourceMeshWithBonesCount,
                 cached.sourceBoneCount,
                 cached.sourceSkinnedVertexCount,
@@ -1033,6 +1069,26 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourcePoseChangedBonePaletteEntryCount;
         loadedModel->sourcePoseBonePaletteReady =
             importedModelData.sourcePoseBonePaletteReady;
+        if (!importedModelData.diagnosticPoseSamples.empty()) {
+            const ImportedPoseSample3D& poseSample =
+                importedModelData.diagnosticPoseSamples.front();
+            loadedModel->runtimePreviousBonePalette =
+                poseSample.previousBonePalette;
+            loadedModel->runtimeCurrentBonePalette =
+                poseSample.currentBonePalette;
+            loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount =
+                CountChangedMatrices(
+                    loadedModel->runtimePreviousBonePalette,
+                    loadedModel->runtimeCurrentBonePalette
+                );
+            loadedModel->runtimePoseCarrierReady =
+                importedModelData.sourcePoseBonePaletteReady != 0u &&
+                !loadedModel->runtimeCurrentBonePalette.empty() &&
+                loadedModel->runtimeCurrentBonePalette.size() ==
+                    loadedModel->runtimePreviousBonePalette.size()
+                    ? 1u
+                    : 0u;
+        }
         loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
         loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
         loadedModel->sourceSkinnedVertexCount = importedModelData.sourceSkinnedVertexCount;
@@ -1041,6 +1097,14 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceMaxBoneInfluencesPerVertex;
         loadedModel->skinnedAnimationUnsupported =
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u;
+        const u32 runtimePoseCarrierBonePaletteEntryCount =
+            static_cast<u32>(loadedModel->runtimeCurrentBonePalette.size());
+        const u32 runtimePoseCarrierPreviousBonePaletteEntryCount =
+            static_cast<u32>(loadedModel->runtimePreviousBonePalette.size());
+        const u32 runtimePoseCarrierChangedBonePaletteEntryCount =
+            loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount;
+        const u32 runtimePoseCarrierReady =
+            loadedModel->runtimePoseCarrierReady;
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -1073,6 +1137,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourcePosePreviousBonePaletteEntryCount,
             importedModelData.sourcePoseChangedBonePaletteEntryCount,
             importedModelData.sourcePoseBonePaletteReady,
+            runtimePoseCarrierBonePaletteEntryCount,
+            runtimePoseCarrierPreviousBonePaletteEntryCount,
+            runtimePoseCarrierChangedBonePaletteEntryCount,
+            runtimePoseCarrierReady,
             importedModelData.sourceMeshWithBonesCount,
             importedModelData.sourceBoneCount,
             importedModelData.sourceSkinnedVertexCount,
