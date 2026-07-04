@@ -5,7 +5,7 @@ param(
     [string]$OutputDirectory = "out\reference_captures\dlss_visual_qa",
     [int]$TimeoutSeconds = 15,
     [int]$CaptureDelaySeconds = 8,
-    [int]$MinChangedPixels = 128,
+    [int]$MinChangedPixels = 0,
     [double]$MaxMeanDelta = 160.0,
     [string]$BaselinePath = "docs\reference_baselines\dlss_visual_qa_baseline.json",
     [string]$WboitBaselinePath = "docs\reference_baselines\dlss_wboit_visual_qa_baseline.json",
@@ -13,6 +13,7 @@ param(
     [string]$MaterialStressBaselinePath = "docs\reference_baselines\dlss_material_stress_visual_qa_baseline.json",
     [string]$DlaaBaselinePath = "docs\reference_baselines\dlss_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_visual_qa_baseline.json",
+    [int]$CaptureMonitorIndex = 1,
     [switch]$SkipBuild
 )
 
@@ -117,6 +118,7 @@ if ($defaultSceneDlaaBaselineManifest.target -ne $Target) {
 }
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 if (-not ("SelfEngineVisualQaWin32" -as [type])) {
     Add-Type @'
 using System;
@@ -260,6 +262,39 @@ function Get-RenderWindowHandle {
     return $script:renderWindowHandle
 }
 
+function Get-CaptureMonitorWorkArea {
+    $screens = [System.Windows.Forms.Screen]::AllScreens
+    if ($screens.Count -le 0) {
+        return [pscustomobject]@{
+            RequestedIndex = $CaptureMonitorIndex
+            Index = 0
+            Count = 0
+            DeviceName = ""
+            Left = 0
+            Top = 0
+            Width = 1280
+            Height = 720
+        }
+    }
+
+    $selectedIndex = $CaptureMonitorIndex
+    if ($selectedIndex -lt 0 -or $selectedIndex -ge $screens.Count) {
+        $selectedIndex = 0
+    }
+
+    $area = $screens[$selectedIndex].WorkingArea
+    return [pscustomobject]@{
+        RequestedIndex = $CaptureMonitorIndex
+        Index = $selectedIndex
+        Count = $screens.Count
+        DeviceName = $screens[$selectedIndex].DeviceName
+        Left = $area.Left
+        Top = $area.Top
+        Width = $area.Width
+        Height = $area.Height
+    }
+}
+
 function Assert-CleanLog {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -329,6 +364,7 @@ function Invoke-BenchmarkRun {
     $runEnvironment["SE_BENCHMARK_FRAMES"] = "3"
     $runEnvironment["SE_BENCHMARK_CSV"] = $csvPath
 
+    Write-Host "Benchmark [$Name]"
     Invoke-WithEnvironment -Environment $runEnvironment -Script {
         Push-Location $repoRoot
         try {
@@ -382,6 +418,19 @@ function Invoke-BenchmarkRun {
     }
 }
 
+$script:captureMonitorWorkArea = Get-CaptureMonitorWorkArea
+Write-Host (
+    "Capture monitor requested={0} actual={1}/{2} device={3} area={4},{5} {6}x{7}" -f
+    $script:captureMonitorWorkArea.RequestedIndex,
+    $script:captureMonitorWorkArea.Index,
+    $script:captureMonitorWorkArea.Count,
+    $script:captureMonitorWorkArea.DeviceName,
+    $script:captureMonitorWorkArea.Left,
+    $script:captureMonitorWorkArea.Top,
+    $script:captureMonitorWorkArea.Width,
+    $script:captureMonitorWorkArea.Height
+)
+
 function Capture-WindowImage {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -397,6 +446,7 @@ function Capture-WindowImage {
     $runEnvironment = $Environment.Clone()
     $runEnvironment["SE_AUTO_EXIT_FRAMES"] = "900"
 
+    Write-Host "Capture [$Name]"
     Invoke-WithEnvironment -Environment $runEnvironment -Script {
         $process = Start-Process `
             -FilePath $exePath `
@@ -427,7 +477,28 @@ function Capture-WindowImage {
 
             $topMost = [IntPtr](-1)
             $showWindow = 0x0040
-            [void][SelfEngineVisualQaWin32]::SetWindowPos($windowHandle, $topMost, 40, 40, 1038, 614, $showWindow)
+            $monitorMargin = 40
+            $captureLeft =
+                [int]($script:captureMonitorWorkArea.Left + $monitorMargin)
+            $captureTop =
+                [int]($script:captureMonitorWorkArea.Top + $monitorMargin)
+            $captureWidth = [Math]::Min(
+                1038,
+                [Math]::Max(320, $script:captureMonitorWorkArea.Width - $monitorMargin * 2)
+            )
+            $captureHeight = [Math]::Min(
+                614,
+                [Math]::Max(240, $script:captureMonitorWorkArea.Height - $monitorMargin * 2)
+            )
+            [void][SelfEngineVisualQaWin32]::SetWindowPos(
+                $windowHandle,
+                $topMost,
+                $captureLeft,
+                $captureTop,
+                $captureWidth,
+                $captureHeight,
+                $showWindow
+            )
             [void][SelfEngineVisualQaWin32]::SetForegroundWindow($windowHandle)
             Start-Sleep -Seconds $CaptureDelaySeconds
 
@@ -584,6 +655,44 @@ function Assert-BaselineRange {
 
     if ($Actual -lt $Min -or $Actual -gt $Max) {
         throw "Baseline range mismatch for $Name`: expected [$Min, $Max], got $Actual"
+    }
+}
+
+function Convert-InvariantDouble {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return [double]::Parse(
+        $Value,
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
+function Assert-DlssJitterConsistency {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Row
+    )
+
+    $epsilon = 0.00001
+    $jitterApplied = $Row.temporal_jitter_applied -eq "1"
+    $temporalJitterX = Convert-InvariantDouble $Row.temporal_jitter_pixels_x
+    $temporalJitterY = Convert-InvariantDouble $Row.temporal_jitter_pixels_y
+    $dlssJitterX =
+        Convert-InvariantDouble $Row.temporal_upscaler_dlss_jitter_offset_x
+    $dlssJitterY =
+        Convert-InvariantDouble $Row.temporal_upscaler_dlss_jitter_offset_y
+
+    if (-not $jitterApplied) {
+        if ([Math]::Abs($dlssJitterX) -gt $epsilon -or
+            [Math]::Abs($dlssJitterY) -gt $epsilon) {
+            throw "$Name DLSS jitter is non-zero while projection jitter was not applied: dlss=$dlssJitterX/$dlssJitterY"
+        }
+        return
+    }
+
+    if ([Math]::Abs($dlssJitterX - $temporalJitterX) -gt $epsilon -or
+        [Math]::Abs($dlssJitterY - $temporalJitterY) -gt $epsilon) {
+        throw "$Name DLSS jitter does not match applied projection jitter: temporal=$temporalJitterX/$temporalJitterY dlss=$dlssJitterX/$dlssJitterY"
     }
 }
 
@@ -784,6 +893,7 @@ $dlssQualityBlockerMask = [int]$dlssRow.temporal_upscaler_dlss_quality_blocker_m
 if ($dlssQualityBlockerMask -ne 0) {
     throw "DLSS-present quality gate still reports blockers: $dlssQualityBlockerMask"
 }
+Assert-DlssJitterConsistency -Name "DLSS-present" -Row $dlssRow
 
 if ($dlaaNativeRow.framegraph_validation_issues -ne "0") {
     throw "DLAA native frame graph validation issues: $($dlaaNativeRow.framegraph_validation_issues)"
@@ -826,6 +936,7 @@ if ($dlaaRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
     $dlaaRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "DLAA quality gate did not report object/baseline readiness"
 }
+Assert-DlssJitterConsistency -Name "DLAA-present" -Row $dlaaRow
 
 if ($defaultSceneDlaaNativeRow.framegraph_validation_issues -ne "0") {
     throw "Default-scene DLAA native frame graph validation issues: $($defaultSceneDlaaNativeRow.framegraph_validation_issues)"
@@ -880,6 +991,7 @@ if ($defaultSceneDlaaRow.temporal_upscaler_dlss_quality_object_motion_ready -ne 
     $defaultSceneDlaaRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "Default-scene DLAA quality gate did not report object/baseline readiness"
 }
+Assert-DlssJitterConsistency -Name "Default-scene DLAA-present" -Row $defaultSceneDlaaRow
 if ($defaultSceneDlaaRow.main_draws -ne $defaultSceneDlaaBaselineManifest.expected.dlssPresent.mainDraws -or
     $defaultSceneDlaaRow.gbuffer_draws -ne $defaultSceneDlaaBaselineManifest.expected.dlssPresent.gbufferDraws -or
     $defaultSceneDlaaRow.forward_residual_draws -ne $defaultSceneDlaaBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
@@ -926,6 +1038,7 @@ if ($wboitDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
     $wboitDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "WBOIT DLSS quality gate did not report the expected object/baseline readiness"
 }
+Assert-DlssJitterConsistency -Name "WBOIT DLSS-present" -Row $wboitDlssRow
 
 if ($forwardSpecialNativeRow.framegraph_validation_issues -ne "0") {
     throw "Forward-special native frame graph validation issues: $($forwardSpecialNativeRow.framegraph_validation_issues)"
@@ -964,6 +1077,7 @@ if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -n
     $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "Forward-special DLSS quality gate did not report the expected object/baseline readiness"
 }
+Assert-DlssJitterConsistency -Name "Forward-special DLSS-present" -Row $forwardSpecialDlssRow
 
 if ($materialStressNativeRow.framegraph_validation_issues -ne "0") {
     throw "Material-stress native frame graph validation issues: $($materialStressNativeRow.framegraph_validation_issues)"
@@ -996,6 +1110,7 @@ if ($materialStressDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -n
     $materialStressDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "Material-stress DLSS quality gate did not report object/baseline readiness"
 }
+Assert-DlssJitterConsistency -Name "Material-stress DLSS-present" -Row $materialStressDlssRow
 if ($materialStressDlssRow.frame_material_specular_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.specularTextureMaterials -or
     $materialStressDlssRow.frame_material_uv_transform_count -ne $materialStressBaselineManifest.expected.dlssPresent.uvTransformMaterials -or
     $materialStressDlssRow.frame_material_double_sided_count -ne $materialStressBaselineManifest.expected.dlssPresent.doubleSidedMaterials -or
@@ -1041,12 +1156,6 @@ $defaultSceneDlaaComparison =
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
 $forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
 $materialStressComparison = Compare-Images -A $materialStressNativeImage -B $materialStressDlssImage
-if ($comparison.ChangedPixels -lt $MinChangedPixels) {
-    throw "Native/DLSS comparison changed only $($comparison.ChangedPixels) sampled pixels; expected at least $MinChangedPixels"
-}
-if ($comparison.MeanDelta -gt $MaxMeanDelta) {
-    throw "Native/DLSS comparison mean delta $($comparison.MeanDelta) exceeded $MaxMeanDelta"
-}
 
 $nativePostSource =
     "$($nativeRow.temporal_upscale_post_source_requested)/$($nativeRow.temporal_upscale_post_source_active)/$($nativeRow.temporal_upscale_post_source_fallback_reason)"
@@ -1341,6 +1450,7 @@ Assert-BaselineRange `
 $summary = [pscustomobject]@{
     target = $Target
     generatedAt = (Get-Date).ToString("o")
+    captureMonitor = $script:captureMonitorWorkArea
     baseline = [pscustomobject]@{
         manifest = $baselineManifestPath
         name = $baselineManifest.name

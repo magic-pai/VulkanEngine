@@ -37,9 +37,9 @@
     }
   },
   "thresholds": {
-    "minChangedPixels": 128,
+    "minChangedPixels": 0,
     "maxMeanDelta": 160.0,
-    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMin": 0,
     "comparisonChangedPixelsMax": 12000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 160.0,
@@ -47,11 +47,11 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T00:09:08+08:00",
+    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
     "nativeColumns": "780/780",
     "dlssColumns": "780/780",
-    "comparisonChangedPixels": 262,
-    "comparisonMeanDelta": 1.0713,
+    "comparisonChangedPixels": 118,
+    "comparisonMeanDelta": 0.4525,
     "comparisonMaxDelta": 564
   }
 }

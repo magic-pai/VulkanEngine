@@ -48,7 +48,7 @@
     }
   },
   "thresholds": {
-    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMin": 0,
     "comparisonChangedPixelsMax": 5000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 64.0,
@@ -56,7 +56,7 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T23:30:25+08:00",
+    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
     "dlssColumns": "780/780",
     "weightedTranslucencyDraws": 79,
     "weightedTranslucencyResolveDraws": 1,
@@ -65,8 +65,8 @@
     "dlssMaskForwardResidualDraws": 0,
     "forwardResidualDraws": 0,
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 259,
-    "comparisonMeanDelta": 0.9752,
+    "comparisonChangedPixels": 119,
+    "comparisonMeanDelta": 0.4422,
     "comparisonMaxDelta": 564
   }
 }

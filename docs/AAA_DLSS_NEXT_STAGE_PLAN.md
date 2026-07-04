@@ -1181,3 +1181,47 @@ after the evaluate contract is stable.
   quality queue. It still does not prove broad production DLSS quality for
   imported models, skinned animation, particles/water/refraction masks, or
   larger moving-scene temporal stability.
+
+## Slice 4.16 Execution Evidence
+
+- Fixed a DLSS/DLAA temporal-input mismatch found from the real default-scene
+  DLAA row. The renderer still prepared Halton jitter when
+  `SE_TEMPORAL_JITTER=1`, but projection jitter was not actually applied
+  unless the TAA jitter-application gate was active; DLSS nevertheless received
+  the non-zero prepared jitter offsets. `RecordTemporalUpscalerEvaluate` now
+  sends `0/0` jitter offsets to DLSS whenever `temporal_jitter_applied=0`, and
+  only forwards the Halton pixel offsets when projection jitter was actually
+  applied.
+- `scripts\Test-DlssVisualQa.ps1` now asserts DLSS jitter consistency across
+  every DLSS-present route. If projection jitter is not applied, DLSS jitter
+  must be zero; if projection jitter is applied, DLSS jitter must match the
+  temporal frame jitter. The original failing signal was
+  `temporal_jitter_applied=0` with DLSS jitter `-0.125/-0.277778`; the latest
+  default-scene DLAA row reports DLSS jitter `0/0` with output ready and quality
+  gate ready.
+- The visual-QA window placement is now deterministic for multi-monitor
+  desktops. `scripts\Test-DlssVisualQa.ps1` and `scripts\Test-2DRenderSmoke.ps1`
+  default capture placement to monitor index `1`, clamp to monitor `0` when the
+  requested index is unavailable, and size the capture inside that monitor's
+  working area instead of using global `(40,40)` coordinates. The DLSS summary
+  records the selected capture monitor; the latest run reports requested `1`,
+  actual `1/2`, device `\\.\DISPLAY2`, area `2048,0 2048x1104`.
+- The visual-QA script now prints each `Benchmark [...]` and `Capture [...]`
+  phase so the on-screen sharp/blurred/jagged changes can be tied to the active
+  configuration. The minimum native-vs-DLSS changed-pixel thresholds were
+  removed from the baselines because "different from native" is not an image
+  quality goal now that CSV gates directly prove DLSS output readiness, post
+  source activation, quality input readiness, and jitter consistency.
+- Verification: `_quick_build.bat` passes for `SelfEngineForward3D`.
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  passes with matching `780/780` CSV rows, 0 frame-graph validation issues, and
+  all captures on `\\.\DISPLAY2`. Latest comparisons are SR `118` changed /
+  mean `0.4525`, grid DLAA `49` / `0.3232`, default-scene DLAA `30` / `0.2349`,
+  WBOIT `119` / `0.4422`, forward-special `89` / `0.3914`, and material-stress
+  `122` / `0.4556`, each with max delta `564`.
+- This removes one concrete source of moving-camera shimmer: DLSS is no longer
+  told about jitter that was not present in the rendered color/depth/velocity
+  inputs. It is still not broad production DLSS/DLAA quality; true production
+  status still needs applied jitter policy, jitter-aware history storage,
+  motion-vector validation under camera motion, larger moving-scene captures,
+  imported/skinned content, and material-specific mask tuning.

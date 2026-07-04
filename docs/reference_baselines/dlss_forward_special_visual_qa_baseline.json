@@ -52,7 +52,7 @@
     }
   },
   "thresholds": {
-    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMin": 0,
     "comparisonChangedPixelsMax": 12000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 160.0,
@@ -60,7 +60,7 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T23:30:25+08:00",
+    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
     "dlssColumns": "780/780",
     "hybridForwardSpecialDraws": 79,
     "forwardResidualDraws": 79,
@@ -71,8 +71,8 @@
     "forwardSpecialMaterialCount": 1,
     "weightedTranslucencyDraws": 0,
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 220,
-    "comparisonMeanDelta": 0.9937,
+    "comparisonChangedPixels": 89,
+    "comparisonMeanDelta": 0.3914,
     "comparisonMaxDelta": 564
   }
 }

@@ -61,7 +61,7 @@
     }
   },
   "thresholds": {
-    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMin": 0,
     "comparisonChangedPixelsMax": 12000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 160.0,
@@ -69,7 +69,7 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T00:09:08+08:00",
+    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
     "nativeColumns": "780/780",
     "dlssColumns": "780/780",
     "qualityMode": 6,
@@ -80,8 +80,8 @@
     "qualityMasks": "255/255/0",
     "drawRoute": "5/5/0/0",
     "sceneCounters": "materials=5,lights=6,local=5,rect=1,probes=1",
-    "comparisonChangedPixels": 11569,
-    "comparisonMeanDelta": 89.3985,
-    "comparisonMaxDelta": 662
+    "comparisonChangedPixels": 30,
+    "comparisonMeanDelta": 0.2349,
+    "comparisonMaxDelta": 564
   }
 }

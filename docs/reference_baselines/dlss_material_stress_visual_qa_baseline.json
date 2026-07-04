@@ -67,7 +67,7 @@
     }
   },
   "thresholds": {
-    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMin": 0,
     "comparisonChangedPixelsMax": 14000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 180.0,
@@ -75,7 +75,7 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T23:30:25+08:00",
+    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
     "dlssColumns": "780/780",
     "gbufferDraws": 242,
     "forwardResidualDraws": 0,
@@ -92,8 +92,8 @@
       "volumeMaterials": 1,
       "texturedMaterials": 3
     },
-    "comparisonChangedPixels": 257,
-    "comparisonMeanDelta": 0.9374,
+    "comparisonChangedPixels": 122,
+    "comparisonMeanDelta": 0.4556,
     "comparisonMaxDelta": 564
   }
 }

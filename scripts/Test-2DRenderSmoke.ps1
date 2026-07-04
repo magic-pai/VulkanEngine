@@ -1,6 +1,7 @@
 param(
     [string]$Target = "SelfEngine",
     [string]$WindowTitle = "MagicPai Engine",
+    [int]$CaptureMonitorIndex = 1,
     [int]$TimeoutSeconds = 10
 )
 
@@ -13,6 +14,7 @@ Set-Location $repoRoot
 cmake --build out\build --target $Target | Out-Host
 
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'
 using System;
 using System.Text;
@@ -90,10 +92,38 @@ function Get-RenderWindowHandle {
     return $script:renderWindowHandle
 }
 
+function Get-CaptureMonitorWorkArea {
+    $screens = [System.Windows.Forms.Screen]::AllScreens
+    if ($screens.Count -le 0) {
+        return [pscustomobject]@{
+            Index = 0
+            Left = 0
+            Top = 0
+            Width = 1280
+            Height = 720
+        }
+    }
+
+    $selectedIndex = $CaptureMonitorIndex
+    if ($selectedIndex -lt 0 -or $selectedIndex -ge $screens.Count) {
+        $selectedIndex = 0
+    }
+
+    $area = $screens[$selectedIndex].WorkingArea
+    return [pscustomobject]@{
+        Index = $selectedIndex
+        Left = $area.Left
+        Top = $area.Top
+        Width = $area.Width
+        Height = $area.Height
+    }
+}
+
 $exePath = Join-Path $repoRoot "out\build\$Target.exe"
 $stdoutPath = Join-Path $repoRoot "out\build\$Target.render-smoke.out.log"
 $stderrPath = Join-Path $repoRoot "out\build\$Target.render-smoke.err.log"
 $screenshotPath = Join-Path $repoRoot "out\build\$Target.render-smoke.png"
+$captureMonitorWorkArea = Get-CaptureMonitorWorkArea
 
 $process = Start-Process `
     -FilePath $exePath `
@@ -124,7 +154,26 @@ try {
 
     $topMost = [IntPtr](-1)
     $showWindow = 0x0040
-    [void][SelfEngineSmokeWin32]::SetWindowPos($windowHandle, $topMost, 40, 40, 1038, 614, $showWindow)
+    $monitorMargin = 40
+    $captureLeft = [int]($captureMonitorWorkArea.Left + $monitorMargin)
+    $captureTop = [int]($captureMonitorWorkArea.Top + $monitorMargin)
+    $captureWidth = [Math]::Min(
+        1038,
+        [Math]::Max(320, $captureMonitorWorkArea.Width - $monitorMargin * 2)
+    )
+    $captureHeight = [Math]::Min(
+        614,
+        [Math]::Max(240, $captureMonitorWorkArea.Height - $monitorMargin * 2)
+    )
+    [void][SelfEngineSmokeWin32]::SetWindowPos(
+        $windowHandle,
+        $topMost,
+        $captureLeft,
+        $captureTop,
+        $captureWidth,
+        $captureHeight,
+        $showWindow
+    )
     [void][SelfEngineSmokeWin32]::SetForegroundWindow($windowHandle)
     Start-Sleep -Seconds 2
 

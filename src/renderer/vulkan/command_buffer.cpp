@@ -942,6 +942,9 @@ void RecordTemporalUpscalerEvaluate(
 
     const VkExtent2D renderExtent = renderTargets.Extent();
     const VkExtent2D outputExtent = renderTargets.DisplayExtent();
+    const glm::vec2 dlssJitterPixels = temporalState.jitterApplied
+        ? temporalState.jitterPixels
+        : glm::vec2(0.0f);
     evaluateStatus = EvaluateTemporalUpscaler(
         TemporalUpscalerEvaluateRequest{
             temporalUpscaleState.upscalerRuntime,
@@ -999,8 +1002,8 @@ void RecordTemporalUpscalerEvaluate(
             outputExtent,
             temporalUpscaleState.dlssQualityMode,
             temporalState.historyReset ? 1u : 0u,
-            temporalState.jitterPixels.x,
-            temporalState.jitterPixels.y,
+            dlssJitterPixels.x,
+            dlssJitterPixels.y,
             1.0f,
             1.0f,
             temporalUpscaleState.upscalerRuntime.sharpness
