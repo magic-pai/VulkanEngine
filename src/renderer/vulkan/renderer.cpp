@@ -1149,6 +1149,14 @@ bool TemporalUpscaleRequestedFromEnvironment() {
         EnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE");
 }
 
+std::string TemporalUpscalerProviderFromEnvironment() {
+    std::string value = ReadEnvironmentString("SE_UPSCALER_PLUGIN");
+    if (value.empty()) {
+        value = ReadEnvironmentString("SE_TEMPORAL_UPSCALER_PLUGIN");
+    }
+    return value;
+}
+
 bool UpscalerProviderRequested(const std::string& value) {
     return !value.empty() &&
         value != "0" &&
@@ -1160,8 +1168,15 @@ bool UpscalerProviderRequested(const std::string& value) {
 }
 
 bool TemporalUpscalerPluginRequestedFromEnvironment() {
-    return UpscalerProviderRequested(ReadEnvironmentString("SE_UPSCALER_PLUGIN")) ||
-        UpscalerProviderRequested(ReadEnvironmentString("SE_TEMPORAL_UPSCALER_PLUGIN"));
+    return UpscalerProviderRequested(TemporalUpscalerProviderFromEnvironment());
+}
+
+std::filesystem::path TemporalUpscalerSdkRootFromEnvironment() {
+    std::string value = ReadEnvironmentString("SE_NVIDIA_DLSS_SDK_DIR");
+    if (value.empty()) {
+        value = ReadEnvironmentString("SE_DLSS_SDK_DIR");
+    }
+    return value.empty() ? std::filesystem::path{} : std::filesystem::path(value);
 }
 
 f32 TaaHistoryWeightFromEnvironment() {
@@ -3998,6 +4013,11 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalUpscaleContractReady > 0,
             frameStats.temporal.temporalUpscalerPluginRequested > 0,
             frameStats.temporal.temporalUpscalerPluginAvailable > 0,
+            frameStats.temporal.temporalUpscalerProviderKind,
+            frameStats.temporal.temporalUpscalerPackageFallbackReason,
+            frameStats.temporal.temporalUpscalerPackageReady > 0,
+            frameStats.temporal.temporalUpscalerDlssSuperResolutionSymbolsFound > 0,
+            frameStats.temporal.temporalUpscalerEvaluateAdapterAvailable > 0,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
@@ -6198,8 +6218,15 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.requestedInternalExtent.height < displayExtent.height;
     state.dynamicResolutionRequested = DynamicResolutionRequestedFromEnvironment();
     state.taauRequested = TemporalUpscaleRequestedFromEnvironment();
+    state.upscalerPackage = ProbeTemporalUpscalerPackage(
+        TemporalUpscalerProbeRequest{
+            TemporalUpscalerProviderFromEnvironment(),
+            TemporalUpscalerSdkRootFromEnvironment()
+        }
+    );
     state.upscalerPluginRequested =
-        TemporalUpscalerPluginRequestedFromEnvironment();
+        TemporalUpscalerPluginRequestedFromEnvironment() ||
+        state.upscalerPackage.requested > 0u;
     state.temporalUpscaleRequested =
         state.taauRequested ||
         renderScaleReduced ||
@@ -6229,7 +6256,8 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
     state.renderScaleApplied = false;
     state.dynamicResolutionEnabled = false;
     state.temporalUpscaleEnabled = false;
-    state.upscalerPluginAvailable = false;
+    state.upscalerPluginAvailable =
+        state.upscalerPackage.evaluateAdapterAvailable > 0u;
     if (!state.temporalUpscaleRequested) {
         state.fallbackReason =
             RendererTemporalUpscaleFallbackReason::Disabled;
@@ -6407,6 +6435,36 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleState.upscalerPluginRequested ? 1u : 0u;
     stats.temporalUpscalerPluginAvailable =
         temporalUpscaleState.upscalerPluginAvailable ? 1u : 0u;
+    stats.temporalUpscalerProviderKind =
+        static_cast<u32>(temporalUpscaleState.upscalerPackage.providerKind);
+    stats.temporalUpscalerPackageFallbackReason =
+        static_cast<u32>(temporalUpscaleState.upscalerPackage.fallbackReason);
+    stats.temporalUpscalerPackageDirectoryFound =
+        temporalUpscaleState.upscalerPackage.packageDirectoryFound;
+    stats.temporalUpscalerHeadersFound =
+        temporalUpscaleState.upscalerPackage.headersFound;
+    stats.temporalUpscalerImportLibraryFound =
+        temporalUpscaleState.upscalerPackage.importLibraryFound;
+    stats.temporalUpscalerRuntimeFound =
+        temporalUpscaleState.upscalerPackage.runtimeFound;
+    stats.temporalUpscalerDlssSuperResolutionSymbolsFound =
+        temporalUpscaleState.upscalerPackage.superResolutionSymbolsFound;
+    stats.temporalUpscalerDlssFrameGenerationSymbolsFound =
+        temporalUpscaleState.upscalerPackage.frameGenerationSymbolsFound;
+    stats.temporalUpscalerDlssRayReconstructionSymbolsFound =
+        temporalUpscaleState.upscalerPackage.rayReconstructionSymbolsFound;
+    stats.temporalUpscalerDlssTransformerPresetSymbolsFound =
+        temporalUpscaleState.upscalerPackage.transformerPresetSymbolsFound;
+    stats.temporalUpscalerSdkVersionMajor =
+        temporalUpscaleState.upscalerPackage.sdkVersionMajor;
+    stats.temporalUpscalerSdkVersionMinor =
+        temporalUpscaleState.upscalerPackage.sdkVersionMinor;
+    stats.temporalUpscalerSdkVersionPatch =
+        temporalUpscaleState.upscalerPackage.sdkVersionPatch;
+    stats.temporalUpscalerPackageReady =
+        temporalUpscaleState.upscalerPackage.packageReady;
+    stats.temporalUpscalerEvaluateAdapterAvailable =
+        temporalUpscaleState.upscalerPackage.evaluateAdapterAvailable;
 }
 
 void VulkanRenderer::UpdateUniformBuffer(

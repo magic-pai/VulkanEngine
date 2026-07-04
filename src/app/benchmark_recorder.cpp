@@ -635,6 +635,21 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscaleContractReady << ','
         << temporal.temporalUpscalerPluginRequested << ','
         << temporal.temporalUpscalerPluginAvailable << ','
+        << temporal.temporalUpscalerProviderKind << ','
+        << temporal.temporalUpscalerPackageFallbackReason << ','
+        << temporal.temporalUpscalerPackageDirectoryFound << ','
+        << temporal.temporalUpscalerHeadersFound << ','
+        << temporal.temporalUpscalerImportLibraryFound << ','
+        << temporal.temporalUpscalerRuntimeFound << ','
+        << temporal.temporalUpscalerDlssSuperResolutionSymbolsFound << ','
+        << temporal.temporalUpscalerDlssFrameGenerationSymbolsFound << ','
+        << temporal.temporalUpscalerDlssRayReconstructionSymbolsFound << ','
+        << temporal.temporalUpscalerDlssTransformerPresetSymbolsFound << ','
+        << temporal.temporalUpscalerSdkVersionMajor << ','
+        << temporal.temporalUpscalerSdkVersionMinor << ','
+        << temporal.temporalUpscalerSdkVersionPatch << ','
+        << temporal.temporalUpscalerPackageReady << ','
+        << temporal.temporalUpscalerEvaluateAdapterAvailable << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1156,6 +1171,21 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscale_contract_ready,"
         << "temporal_upscaler_plugin_requested,"
         << "temporal_upscaler_plugin_available,"
+        << "temporal_upscaler_provider_kind,"
+        << "temporal_upscaler_package_fallback_reason,"
+        << "temporal_upscaler_package_directory_found,"
+        << "temporal_upscaler_headers_found,"
+        << "temporal_upscaler_import_library_found,"
+        << "temporal_upscaler_runtime_found,"
+        << "temporal_upscaler_dlss_super_resolution_symbols_found,"
+        << "temporal_upscaler_dlss_frame_generation_symbols_found,"
+        << "temporal_upscaler_dlss_ray_reconstruction_symbols_found,"
+        << "temporal_upscaler_dlss_transformer_preset_symbols_found,"
+        << "temporal_upscaler_sdk_version_major,"
+        << "temporal_upscaler_sdk_version_minor,"
+        << "temporal_upscaler_sdk_version_patch,"
+        << "temporal_upscaler_package_ready,"
+        << "temporal_upscaler_evaluate_adapter_available,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

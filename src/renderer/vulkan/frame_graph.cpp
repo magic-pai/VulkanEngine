@@ -2185,6 +2185,24 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Reports render-scale, dynamic-resolution, TAAU, and plugin handoff contract before native TSR/upscaler implementation."
         );
     }
+    if (inputs.temporalUpscalerPluginRequested ||
+        inputs.temporalUpscalerPackageReady ||
+        inputs.temporalUpscalerProviderKind != 0u) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.temporalUpscalerPackageReady
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TemporalUpscalerPackageProbe",
+            "",
+            "",
+            inputs.temporalUpscalerEvaluateAdapterAvailable
+                ? "Temporal upscaler package and evaluate adapter are available."
+                : "Reports DLSS package/header/runtime/symbol readiness before any NGX or Streamline evaluate adapter is enabled."
+        );
+    }
 
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(

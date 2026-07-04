@@ -10,6 +10,7 @@
 #include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vertex.h"
 #include "renderer/render_queue.h"
+#include "renderer/temporal_upscaler.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -128,6 +129,7 @@ struct FrameTemporalUpscaleState {
     bool temporalUpscaleContractReady = false;
     bool upscalerPluginRequested = false;
     bool upscalerPluginAvailable = false;
+    TemporalUpscalerPackageStatus upscalerPackage{};
     RendererTemporalUpscaleFallbackReason fallbackReason =
         RendererTemporalUpscaleFallbackReason::Disabled;
 };

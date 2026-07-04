@@ -1202,6 +1202,24 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalerPluginAvailable
     );
     ImGui::Text(
+        "Temporal upscaler package: provider %u fallback %u dir/header/lib/runtime %u/%u/%u/%u SR/FG/RR/transformer %u/%u/%u/%u version %u.%u.%u package %u adapter %u",
+        stats.temporal.temporalUpscalerProviderKind,
+        stats.temporal.temporalUpscalerPackageFallbackReason,
+        stats.temporal.temporalUpscalerPackageDirectoryFound,
+        stats.temporal.temporalUpscalerHeadersFound,
+        stats.temporal.temporalUpscalerImportLibraryFound,
+        stats.temporal.temporalUpscalerRuntimeFound,
+        stats.temporal.temporalUpscalerDlssSuperResolutionSymbolsFound,
+        stats.temporal.temporalUpscalerDlssFrameGenerationSymbolsFound,
+        stats.temporal.temporalUpscalerDlssRayReconstructionSymbolsFound,
+        stats.temporal.temporalUpscalerDlssTransformerPresetSymbolsFound,
+        stats.temporal.temporalUpscalerSdkVersionMajor,
+        stats.temporal.temporalUpscalerSdkVersionMinor,
+        stats.temporal.temporalUpscalerSdkVersionPatch,
+        stats.temporal.temporalUpscalerPackageReady,
+        stats.temporal.temporalUpscalerEvaluateAdapterAvailable
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,

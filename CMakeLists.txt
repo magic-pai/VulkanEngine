@@ -101,6 +101,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/assets/model_importer.cpp
     src/assets/unreal_project_bridge.cpp
     src/renderer/render_queue.cpp
+    src/renderer/temporal_upscaler.cpp
     src/scene/transform.cpp
     src/scene/renderable_2d.cpp
     src/scene/renderable_3d.cpp

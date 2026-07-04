@@ -645,6 +645,21 @@ struct RendererTemporalStats {
     u32 temporalUpscaleContractReady = 0;
     u32 temporalUpscalerPluginRequested = 0;
     u32 temporalUpscalerPluginAvailable = 0;
+    u32 temporalUpscalerProviderKind = 0;
+    u32 temporalUpscalerPackageFallbackReason = 0;
+    u32 temporalUpscalerPackageDirectoryFound = 0;
+    u32 temporalUpscalerHeadersFound = 0;
+    u32 temporalUpscalerImportLibraryFound = 0;
+    u32 temporalUpscalerRuntimeFound = 0;
+    u32 temporalUpscalerDlssSuperResolutionSymbolsFound = 0;
+    u32 temporalUpscalerDlssFrameGenerationSymbolsFound = 0;
+    u32 temporalUpscalerDlssRayReconstructionSymbolsFound = 0;
+    u32 temporalUpscalerDlssTransformerPresetSymbolsFound = 0;
+    u32 temporalUpscalerSdkVersionMajor = 0;
+    u32 temporalUpscalerSdkVersionMinor = 0;
+    u32 temporalUpscalerSdkVersionPatch = 0;
+    u32 temporalUpscalerPackageReady = 0;
+    u32 temporalUpscalerEvaluateAdapterAvailable = 0;
 };
 
 struct RendererStats {
