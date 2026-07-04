@@ -284,6 +284,11 @@ struct RendererReflectionProbeStats {
     f32 authoredCubemapDiffuseLobeEnergy = 0.0f;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
+    u32 selectedProbeMask = 0;
+    u32 selectedBoxProjectionMask = 0;
+    u32 selectedSceneOwnedMask = 0;
+    u32 selectedPositiveInfluenceMask = 0;
+    u32 blendWeightNormalizationFallbackCount = 0;
     std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};
     std::array<i32, kMaxFrameReflectionProbes> selectedCaptureSlots{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCaptureSourceTypes{};
@@ -294,6 +299,9 @@ struct RendererReflectionProbeStats {
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
+    f32 normalizedBlendWeightSum = 0.0f;
+    std::array<f32, kMaxFrameReflectionProbes> selectedBlendWeights{};
+    std::array<f32, kMaxFrameReflectionProbes> selectedNormalizedBlendWeights{};
     u32 multiBlendEnabled = 0;
     u32 localEnabled = 0;
     u32 localSceneOwned = 0;

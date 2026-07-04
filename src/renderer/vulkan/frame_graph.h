@@ -292,6 +292,11 @@ struct CurrentVulkanFrameGraphInputs {
     bool sceneReflectionProbesAllocated = false;
     u32 sceneReflectionProbeCount = 0;
     bool sceneReflectionProbeSelectionAllocated = false;
+    u32 sceneReflectionProbeSelectedMask = 0;
+    u32 sceneReflectionProbeBoxProjectionMask = 0;
+    u32 sceneReflectionProbePositiveInfluenceMask = 0;
+    f32 sceneReflectionProbeNormalizedBlendWeightSum = 0.0f;
+    u32 sceneReflectionProbeBlendNormalizationFallbackCount = 0;
     bool reflectionCaptureSourceAllocated = false;
     u32 reflectionCaptureSourceType = 0;
     u32 reflectionCaptureFallbackReason = 0;

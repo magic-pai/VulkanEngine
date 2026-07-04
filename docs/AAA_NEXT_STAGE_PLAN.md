@@ -66,7 +66,7 @@ resolution work evidence-driven.
      of single-color diffuse fallback.
    - Add quality tiers and sample-count diagnostics.
 
-5. Multi-probe blending evidence.
+5. Multi-probe blending evidence. Implemented.
    - Strengthen top-4 probe blending with weight normalization, box-projection
      diagnostics, and selected-probe masks.
    - Cover deferred, forward, and WBOIT paths with the same selected-probe set.
@@ -255,6 +255,37 @@ resource and proving the shader path can consume directional probe data.
 - This is still a first production-filtering policy and authored diffuse-lobe
   carrier. It does not implement full irradiance cubemap convolution, baked
   SH import, dynamic scene capture filtering, or final artist quality presets.
+
+## Slice 5 Execution Evidence
+
+- Top-4 reflection-probe selection now reports selected-probe, box-projection,
+  scene-owned, and positive-influence masks alongside raw and normalized
+  per-slot blend weights.
+- When the selection point has zero total raw influence, the renderer records an
+  explicit normalization fallback and assigns equal normalized weights instead
+  of leaving blend evidence undefined.
+- CSV and ImGui expose normalized blend-weight sum, fallback count, masks, and
+  top-4 raw/normalized weights. FrameGraph describes
+  `SceneReflectionProbeSelection` as selected/box/influence masks and
+  normalized weights when available.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_reflection_probe_blend_weights_three_smoke.csv`,
+  `out/benchmarks/aaa_reflection_probe_blend_weights_overflow_smoke.csv`, and
+  `out/benchmarks/aaa_reflection_probe_blend_weights_wboit_smoke.csv` all have
+  matching 596-column rows and 0 frame-graph validation issues.
+- The three-probe and WBOIT smokes report selected count `3`, mask `7`,
+  box/scene masks `7/7`, normalized sum `1`, equal weights
+  `0.333333/0.333333/0.333333/0`, normalization fallback `1`, and cubemap
+  sampling `3`. The WBOIT smoke also reports 79 weighted-translucency draws.
+- The overflow smoke reports selected count `4`, dropped count `2`, masks
+  `15`, normalized sum `1`, equal weights `0.25` across all four slots,
+  normalization fallback `1`, and cubemap sampling `4`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is diagnostic strengthening for the existing top-4 blend path. It does
+  not add new capture images, priority-volume authoring, dynamic scene capture,
+  or final artist blending controls.
 
 ## Non-Goals
 

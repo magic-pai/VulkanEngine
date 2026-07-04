@@ -1640,7 +1640,13 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "SceneReflectionProbeSelection",
             "frame UBO payload",
             "top-N selected scene reflection probes and influence policy",
-            "up to four selected local probes"
+            inputs.sceneReflectionProbeBlendNormalizationFallbackCount > 0
+                ? "selected probe weights used equal-weight normalization fallback"
+                : inputs.sceneReflectionProbePositiveInfluenceMask > 0
+                ? "selected/box/influence masks and normalized weights ready"
+                : inputs.sceneReflectionProbeSelectedMask > 0
+                    ? "selected probe mask ready without positive influence"
+                    : "up to four selected local probes"
         );
     }
     if (inputs.reflectionCaptureSourceAllocated) {

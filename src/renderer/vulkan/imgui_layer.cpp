@@ -1089,6 +1089,19 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.influenceMode
     );
     ImGui::Text(
+        "Reflection blend masks: selected 0x%X, box 0x%X, scene 0x%X, influence 0x%X, normalized %.3f, fallback %u, weights [%.3f %.3f %.3f %.3f]",
+        stats.reflectionProbe.selectedProbeMask,
+        stats.reflectionProbe.selectedBoxProjectionMask,
+        stats.reflectionProbe.selectedSceneOwnedMask,
+        stats.reflectionProbe.selectedPositiveInfluenceMask,
+        stats.reflectionProbe.normalizedBlendWeightSum,
+        stats.reflectionProbe.blendWeightNormalizationFallbackCount,
+        stats.reflectionProbe.selectedNormalizedBlendWeights[0],
+        stats.reflectionProbe.selectedNormalizedBlendWeights[1],
+        stats.reflectionProbe.selectedNormalizedBlendWeights[2],
+        stats.reflectionProbe.selectedNormalizedBlendWeights[3]
+    );
+    ImGui::Text(
         "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
         stats.heightFog.enabled ? "enabled" : "off",
         stats.heightFog.density,

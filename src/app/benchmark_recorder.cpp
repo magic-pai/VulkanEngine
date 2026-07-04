@@ -433,6 +433,20 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.droppedProbeCount << ','
         << reflectionProbe.maxBlendWeight << ','
         << reflectionProbe.totalBlendWeight << ','
+        << reflectionProbe.normalizedBlendWeightSum << ','
+        << reflectionProbe.blendWeightNormalizationFallbackCount << ','
+        << reflectionProbe.selectedProbeMask << ','
+        << reflectionProbe.selectedBoxProjectionMask << ','
+        << reflectionProbe.selectedSceneOwnedMask << ','
+        << reflectionProbe.selectedPositiveInfluenceMask << ','
+        << reflectionProbe.selectedBlendWeights[0] << ','
+        << reflectionProbe.selectedBlendWeights[1] << ','
+        << reflectionProbe.selectedBlendWeights[2] << ','
+        << reflectionProbe.selectedBlendWeights[3] << ','
+        << reflectionProbe.selectedNormalizedBlendWeights[0] << ','
+        << reflectionProbe.selectedNormalizedBlendWeights[1] << ','
+        << reflectionProbe.selectedNormalizedBlendWeights[2] << ','
+        << reflectionProbe.selectedNormalizedBlendWeights[3] << ','
         << reflectionProbe.multiBlendEnabled << ','
         << reflectionProbe.localEnabled << ','
         << reflectionProbe.localSceneOwned << ','
@@ -938,6 +952,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_dropped_probe_count,"
         << "reflection_probe_max_blend_weight,"
         << "reflection_probe_total_blend_weight,"
+        << "reflection_probe_normalized_blend_weight_sum,"
+        << "reflection_probe_blend_weight_normalization_fallback_count,"
+        << "reflection_probe_selected_probe_mask,"
+        << "reflection_probe_selected_box_projection_mask,"
+        << "reflection_probe_selected_scene_owned_mask,"
+        << "reflection_probe_selected_positive_influence_mask,"
+        << "reflection_probe_selected_blend_weight_0,"
+        << "reflection_probe_selected_blend_weight_1,"
+        << "reflection_probe_selected_blend_weight_2,"
+        << "reflection_probe_selected_blend_weight_3,"
+        << "reflection_probe_selected_normalized_blend_weight_0,"
+        << "reflection_probe_selected_normalized_blend_weight_1,"
+        << "reflection_probe_selected_normalized_blend_weight_2,"
+        << "reflection_probe_selected_normalized_blend_weight_3,"
         << "reflection_probe_multi_blend_enabled,"
         << "reflection_probe_local_enabled,reflection_probe_local_scene_owned,"
         << "reflection_probe_local_radius,"

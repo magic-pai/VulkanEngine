@@ -166,6 +166,8 @@ struct FrameReflectionProbeSet {
         kMaxFrameReflectionProbes
     > selectedDiffuseIrradianceLobes{};
     std::array<bool, kMaxFrameReflectionProbes> selectedDiffuseIrradianceLobesReady{};
+    std::array<f32, kMaxFrameReflectionProbes> selectedBlendWeights{};
+    std::array<f32, kMaxFrameReflectionProbes> selectedNormalizedBlendWeights{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     u32 eligibleSceneProbeCount = 0;
@@ -187,6 +189,11 @@ struct FrameReflectionProbeSet {
     u32 selectedDiffuseIrradianceLobesReadyCount = 0;
     u32 selectedDiffuseIrradianceLobesReadyMask = 0;
     u32 selectedDiffuseIrradianceLobeCount = 0;
+    u32 selectedProbeMask = 0;
+    u32 selectedBoxProjectionMask = 0;
+    u32 selectedSceneOwnedMask = 0;
+    u32 selectedPositiveInfluenceMask = 0;
+    u32 blendWeightNormalizationFallbackCount = 0;
     u32 capturedSceneRequestedCount = 0;
     u32 capturedScenePlaceholderAllocatedCount = 0;
     u32 capturedScenePlaceholderReadyCount = 0;
@@ -196,6 +203,7 @@ struct FrameReflectionProbeSet {
     i32 selectedSceneProbeIndex = -1;
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
+    f32 normalizedBlendWeightSum = 0.0f;
     bool fallbackEnabled = false;
     bool boxProjectionEnabled = false;
     bool parallaxCorrectionEnabled = false;

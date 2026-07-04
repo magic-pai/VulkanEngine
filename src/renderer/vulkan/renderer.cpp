@@ -1355,6 +1355,8 @@ void ResetFrameReflectionProbeCaptureDiagnostics(FrameReflectionProbeSet& probes
     probes.selectedAuthoredAssetSpecified.fill(false);
     probes.selectedAuthoredAssetFound.fill(false);
     probes.selectedDiffuseIrradianceLobesReady.fill(false);
+    probes.selectedBlendWeights.fill(0.0f);
+    probes.selectedNormalizedBlendWeights.fill(0.0f);
 }
 
 void SetSelectedReflectionProbeCaptureDiagnostics(
@@ -1595,6 +1597,14 @@ void WriteFrameReflectionProbeStats(
     stats.selectedDiffuseLobeReadyMask =
         frameProbes.selectedDiffuseIrradianceLobesReadyMask;
     stats.authoredCubemapDiffuseLobeEnergy = 0.0f;
+    stats.selectedProbeMask = frameProbes.selectedProbeMask;
+    stats.selectedBoxProjectionMask = frameProbes.selectedBoxProjectionMask;
+    stats.selectedSceneOwnedMask = frameProbes.selectedSceneOwnedMask;
+    stats.selectedPositiveInfluenceMask =
+        frameProbes.selectedPositiveInfluenceMask;
+    stats.blendWeightNormalizationFallbackCount =
+        frameProbes.blendWeightNormalizationFallbackCount;
+    stats.normalizedBlendWeightSum = frameProbes.normalizedBlendWeightSum;
     stats.capturedSceneRequestedCount =
         frameProbes.capturedSceneRequestedCount;
     stats.capturedScenePlaceholderAllocatedCount =
@@ -1625,6 +1635,8 @@ void WriteFrameReflectionProbeStats(
     stats.selectedCapturedScenePlaceholderReady.fill(0u);
     stats.selectedCapturedSceneInvalidated.fill(0u);
     stats.selectedAuthoredAssetHashes.fill(0u);
+    stats.selectedBlendWeights.fill(0.0f);
+    stats.selectedNormalizedBlendWeights.fill(0.0f);
     const u32 selectedProbeCount = std::min<u32>(
         frameProbes.selectedProbeCount,
         static_cast<u32>(stats.selectedProbeIndices.size())
@@ -1646,6 +1658,10 @@ void WriteFrameReflectionProbeStats(
             frameProbes.selectedCapturedSceneInvalidated[index] ? 1u : 0u;
         stats.selectedAuthoredAssetHashes[index] =
             frameProbes.selectedAuthoredAssetHashes[index];
+        stats.selectedBlendWeights[index] =
+            frameProbes.selectedBlendWeights[index];
+        stats.selectedNormalizedBlendWeights[index] =
+            frameProbes.selectedNormalizedBlendWeights[index];
         if (frameProbes.selectedDiffuseIrradianceLobesReady[index]) {
             for (const glm::vec4& lobe :
                 frameProbes.selectedDiffuseIrradianceLobes[index]) {
@@ -3603,6 +3619,11 @@ void VulkanRenderer::DrawFrame() {
             frameReflectionProbes.sceneProbeCount,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
+            frameStats.reflectionProbe.selectedProbeMask,
+            frameStats.reflectionProbe.selectedBoxProjectionMask,
+            frameStats.reflectionProbe.selectedPositiveInfluenceMask,
+            frameStats.reflectionProbe.normalizedBlendWeightSum,
+            frameStats.reflectionProbe.blendWeightNormalizationFallbackCount,
             frameReflectionProbes.activeLocalProbeCount > 0,
             frameStats.reflectionProbe.captureSourceType,
             frameStats.reflectionProbe.captureFallbackReason,
@@ -6453,6 +6474,17 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             for (u32 index = 0; index < probes.selectedProbeCount; ++index) {
                 const ReflectionProbeCandidate& selected = candidates[index];
                 probes.selectedProbes[index] = selected.probe;
+                probes.selectedBlendWeights[index] = selected.blendWeight;
+                probes.selectedProbeMask |= 1u << index;
+                if (selected.probe.sceneOwned) {
+                    probes.selectedSceneOwnedMask |= 1u << index;
+                }
+                if (ReflectionProbeBoxProjectionEnabled(selected.probe)) {
+                    probes.selectedBoxProjectionMask |= 1u << index;
+                }
+                if (selected.blendWeight > 0.0001f) {
+                    probes.selectedPositiveInfluenceMask |= 1u << index;
+                }
                 probes.totalBlendWeight += selected.blendWeight;
                 probes.maxBlendWeight =
                     std::max(probes.maxBlendWeight, selected.blendWeight);
@@ -6536,6 +6568,29 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                 );
             }
 
+            if (probes.selectedProbeCount > 0u) {
+                if (probes.totalBlendWeight > 0.0001f) {
+                    for (u32 index = 0; index < probes.selectedProbeCount;
+                         ++index) {
+                        probes.selectedNormalizedBlendWeights[index] =
+                            probes.selectedBlendWeights[index] /
+                            probes.totalBlendWeight;
+                        probes.normalizedBlendWeightSum +=
+                            probes.selectedNormalizedBlendWeights[index];
+                    }
+                } else {
+                    ++probes.blendWeightNormalizationFallbackCount;
+                    const f32 equalWeight =
+                        1.0f / static_cast<f32>(probes.selectedProbeCount);
+                    for (u32 index = 0; index < probes.selectedProbeCount;
+                         ++index) {
+                        probes.selectedNormalizedBlendWeights[index] =
+                            equalWeight;
+                        probes.normalizedBlendWeightSum += equalWeight;
+                    }
+                }
+            }
+
             probes.localProbe = probes.selectedProbes[0];
             probes.selectedSceneProbeIndex = probes.localProbe.sceneIndex;
             probes.parallaxCorrectionEnabled = probes.boxProjectionEnabled;
@@ -6568,6 +6623,16 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
         probes.multiBlendEnabled = true;
         probes.maxBlendWeight = settingsProbe.blendStrength;
         probes.totalBlendWeight = settingsProbe.blendStrength;
+        probes.normalizedBlendWeightSum = 1.0f;
+        probes.selectedProbeMask = 1u;
+        probes.selectedBlendWeights[0] = settingsProbe.blendStrength;
+        probes.selectedNormalizedBlendWeights[0] = 1.0f;
+        if (settingsProbe.blendStrength > 0.0001f) {
+            probes.selectedPositiveInfluenceMask = 1u;
+        }
+        if (ReflectionProbeBoxProjectionEnabled(settingsProbe)) {
+            probes.selectedBoxProjectionMask = 1u;
+        }
         SetSelectedReflectionProbeCaptureDiagnostics(
             probes,
             0u,
