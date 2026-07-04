@@ -58,7 +58,7 @@ feature explicitly off/fallback-safe by default.
    - Report fallback/rejection reasons and debug the rejected-history mask.
    - Cover fast camera motion, forced reset, and no-history cases.
 
-3. Jitter application gate.
+3. Jitter application gate. Implemented.
    - Apply camera jitter only when explicitly enabled and when TAA resolve is
      active enough to hide shimmer.
    - Keep default presentation unjittered.
@@ -174,6 +174,41 @@ change unless explicitly enabled by environment.
   implement final neighborhood variance clipping, normal-aware rejection,
   reactive/transparency masks, object motion vectors, jittered projection
   application, TAAU, dynamic resolution, or temporal denoising consumers.
+
+## Slice 3 Execution Evidence
+
+- Camera jitter application is now explicitly gated by
+  `SE_TAA_APPLY_JITTER=1`, `SE_TEMPORAL_APPLY_JITTER=1`, or
+  `SE_CAMERA_JITTER_APPLY=1`.
+- Jitter is applied to the current frame projection only when jitter is prepared
+  and the TAA resolve is actually enabled. Default presentation and cold/reset
+  temporal states remain unjittered.
+- The existing `SE_TEMPORAL_JITTER=1` / `SE_CAMERA_JITTER=1` path still prepares
+  Halton jitter pixels/UVs without applying projection jitter unless the new
+  apply gate is also set.
+- FrameGraph `TemporalFoundation` now reports explicit TAA-gated projection
+  jitter when `temporal_jitter_applied=1`.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_taa_jitter_prepared_smoke.csv`,
+  `out/benchmarks/aaa_taa_jitter_applied_smoke.csv`, and
+  `out/benchmarks/aaa_taa_jitter_forced_reset_smoke.csv` all have matching
+  629-column rows and 0 frame-graph validation issues.
+- The prepared-only smoke reports TAA configured/enabled `1/1`, jitter enabled
+  `1`, jitter applied `0`, non-zero jitter pixels/UVs, temporal history valid
+  `1`, reset `0`, and fallback `0`.
+- The applied smoke reports TAA configured/enabled `1/1`, jitter enabled/applied
+  `1/1`, the same non-zero jitter pixels/UVs, temporal history valid `1`, and
+  fallback `0`.
+- The forced-reset smoke reports TAA configured/enabled `1/0`, jitter enabled
+  `1`, jitter applied `0`, history valid `0`, reset `1`, reset reason `4`, and
+  fallback reason `3`, proving the apply gate does not jitter cold/reset frames.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is a first explicit jitter-application gate. It does not yet implement
+  final jittered-history storage, per-pass jitter policy, jitter-aware UI
+  stabilization, dynamic-resolution jitter scaling, or upscaler plugin
+  handoff.
 
 ## Previous Stage Summary
 

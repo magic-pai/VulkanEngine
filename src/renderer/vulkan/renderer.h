@@ -406,7 +406,8 @@ private:
         bool taaRejectionEnabled,
         bool taaNeighborhoodClampEnabled,
         f32 taaVelocityRejectionThreshold,
-        f32 taaDepthRejectionThreshold
+        f32 taaDepthRejectionThreshold,
+        bool temporalJitterApplyRequested
     ) const;
     void StoreTemporalHistory(
         const FrameMatrices* matrices,

@@ -953,6 +953,12 @@ bool TemporalHistoryForceResetFromEnvironment() {
         EnvironmentFlagEnabled("SE_TEMPORAL_FORCE_HISTORY_RESET");
 }
 
+bool TemporalJitterApplicationEnabledFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TAA_APPLY_JITTER") ||
+        EnvironmentFlagEnabled("SE_TEMPORAL_APPLY_JITTER") ||
+        EnvironmentFlagEnabled("SE_CAMERA_JITTER_APPLY");
+}
+
 bool TaaResolveEnabledFromEnvironment() {
     return EnvironmentFlagEnabled("SE_TAA") ||
         EnvironmentFlagEnabled("SE_TAA_RESOLVE");
@@ -3053,6 +3059,8 @@ void VulkanRenderer::DrawFrame() {
         TaaVelocityRejectionThresholdFromEnvironment();
     const f32 taaDepthRejectionThreshold =
         TaaDepthRejectionThresholdFromEnvironment();
+    const bool temporalJitterApplyRequested =
+        TemporalJitterApplicationEnabledFromEnvironment();
     const FrameTemporalState temporalState = BuildFrameTemporalState(
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         extent,
@@ -3066,7 +3074,8 @@ void VulkanRenderer::DrawFrame() {
         taaRejectionEnabled,
         taaNeighborhoodClampEnabled,
         taaVelocityRejectionThreshold,
-        taaDepthRejectionThreshold
+        taaDepthRejectionThreshold,
+        temporalJitterApplyRequested
     );
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     PrepareReflectionProbeCaptureResources();
@@ -5927,7 +5936,8 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     bool taaRejectionEnabled,
     bool taaNeighborhoodClampEnabled,
     f32 taaVelocityRejectionThreshold,
-    f32 taaDepthRejectionThreshold
+    f32 taaDepthRejectionThreshold,
+    bool temporalJitterApplyRequested
 ) const {
     FrameTemporalState state{};
     state.previousMatrices = m_PreviousTemporalMatrices;
@@ -5996,6 +6006,10 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
         state.taaFallbackReason = RendererTaaFallbackReason::None;
         state.taaResolveEnabled = true;
     }
+    state.jitterApplied =
+        state.jitterEnabled &&
+        temporalJitterApplyRequested &&
+        state.taaResolveEnabled;
     if (!state.historyValid && matricesAvailable) {
         state.previousMatrices = *matrices;
     }
@@ -6038,6 +6052,10 @@ void VulkanRenderer::PopulateTemporalUniforms(
         temporalState->jitterPixels,
         temporalState->jitterUv
     );
+    if (temporalState->jitterApplied) {
+        uniformData.proj[2][0] += temporalState->jitterUv.x * 2.0f;
+        uniformData.proj[2][1] += temporalState->jitterUv.y * 2.0f;
+    }
     uniformData.temporalControls = glm::vec4(
         temporalState->velocityCameraMotionReady ? 1.0f : 0.0f,
         temporalState->historyValid ? 1.0f : 0.0f,

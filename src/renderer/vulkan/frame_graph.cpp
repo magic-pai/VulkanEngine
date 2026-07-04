@@ -1931,7 +1931,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "TemporalFoundation",
             inputs.temporalHistoryValid ? "TemporalFrameState" : "",
             "TemporalFrameState",
-            inputs.velocityCameraMotionReady
+            inputs.temporalJitterApplied
+                ? "Frame setup publishes previous camera matrices and applies explicit TAA-gated projection jitter for the current frame."
+                : inputs.velocityCameraMotionReady
                 ? "Frame setup publishes previous camera matrices for GBuffer velocity and records jitter/history state without enabling TAA resolve."
                 : "Frame setup records temporal history reset/fallback state before TAA resolve is enabled."
         );
