@@ -17,6 +17,8 @@ param(
     [string]$DefaultSceneDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json",
     [string]$ImportedDynamicDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
+    [ValidateSet("full", "default", "default-motion", "default-object-motion", "imported-dynamic")]
+    [string[]]$Suite = @("full"),
     [switch]$SkipBuild
 )
 
@@ -1190,6 +1192,427 @@ $materialStressDlssPresentEnvironment["SE_UPSCALER_PLUGIN"] = "dlss"
 $materialStressDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
 $materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
     $materialStressBaselineManifestPath
+
+$selectedSuites =
+    @($Suite | ForEach-Object { $_.ToString().ToLowerInvariant() } | Select-Object -Unique)
+if ($selectedSuites.Count -eq 0) {
+    $selectedSuites = @("full")
+}
+if (($selectedSuites -contains "full") -and $selectedSuites.Count -gt 1) {
+    throw "-Suite full cannot be combined with focused suites"
+}
+
+function New-QuickNativeMetrics {
+    param([Parameter(Mandatory = $true)]$Row)
+
+    return [pscustomobject]@{
+        postSource = "$($Row.temporal_upscale_post_source_requested)/$($Row.temporal_upscale_post_source_active)/$($Row.temporal_upscale_post_source_fallback_reason)"
+        qualityGate = "$($Row.temporal_upscaler_dlss_quality_gate_requested)/$($Row.temporal_upscaler_dlss_quality_gate_ready)/$($Row.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+        renderScaleActive = "$($Row.temporal_render_scale_active)"
+        renderScaleApplied = "$($Row.temporal_render_scale_applied)"
+        mainDraws = "$($Row.main_draws)"
+        gbufferDraws = "$($Row.gbuffer_draws)"
+        forwardResidualDraws = "$($Row.forward_residual_draws)"
+        weightedTranslucencyDraws = "$($Row.weighted_translucency_draws)"
+        frameMaterialCount = "$($Row.frame_material_count)"
+        frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
+        frameLightTotalCount = "$($Row.frame_light_total_count)"
+        frameLocalLightCount = "$($Row.frame_local_light_count)"
+        frameRectLightCount = "$($Row.frame_rect_light_count)"
+        reflectionProbeSceneProbeCount = "$($Row.reflection_probe_scene_probe_count)"
+    }
+}
+
+function New-QuickDlssPresentMetrics {
+    param([Parameter(Mandatory = $true)]$Row)
+
+    return [pscustomobject]@{
+        postSource = "$($Row.temporal_upscale_post_source_requested)/$($Row.temporal_upscale_post_source_active)/$($Row.temporal_upscale_post_source_fallback_reason)"
+        qualityGate = "$($Row.temporal_upscaler_dlss_quality_gate_requested)/$($Row.temporal_upscaler_dlss_quality_gate_ready)/$($Row.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+        qualityMasks = "$($Row.temporal_upscaler_dlss_quality_required_mask)/$($Row.temporal_upscaler_dlss_quality_ready_mask)/$($Row.temporal_upscaler_dlss_quality_blocker_mask)"
+        qualityInputs = "output/camera/object/reactive/transparency/exposure/post/baseline=$($Row.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($Row.temporal_upscaler_dlss_quality_camera_motion_ready)/$($Row.temporal_upscaler_dlss_quality_object_motion_ready)/$($Row.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($Row.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($Row.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($Row.temporal_upscaler_dlss_quality_post_ordering_ready)/$($Row.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+        renderScale = "$($Row.temporal_render_scale_requested)/$($Row.temporal_render_scale_active)/$($Row.temporal_render_scale_applied)"
+        renderScaleActive = "$($Row.temporal_render_scale_active)"
+        renderScaleApplied = "$($Row.temporal_render_scale_applied)"
+        jitterApplied = "$($Row.temporal_jitter_applied)"
+        temporalUpscaleInputReady = "$($Row.temporal_upscale_input_ready)"
+        nativeTaaResolveEnabled = "$($Row.temporal_taa_resolve_enabled)"
+        nativeTaaResolveSuppressedForUpscaler = "$($Row.temporal_taa_resolve_suppressed_for_upscaler)"
+        qualityMode = "$($Row.temporal_upscaler_dlss_quality_mode)"
+        recommendedPreset = "$($Row.temporal_upscaler_dlss_recommended_preset)"
+        cameraMotionReady = "$($Row.temporal_upscaler_dlss_quality_camera_motion_ready)"
+        objectMotionReady = "$($Row.temporal_upscaler_dlss_quality_object_motion_ready)"
+        mainDraws = "$($Row.main_draws)"
+        gbufferDraws = "$($Row.gbuffer_draws)"
+        forwardResidualDraws = "$($Row.forward_residual_draws)"
+        weightedTranslucencyDraws = "$($Row.weighted_translucency_draws)"
+        frameMaterialCount = "$($Row.frame_material_count)"
+        frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
+        frameLightTotalCount = "$($Row.frame_light_total_count)"
+        frameLocalLightCount = "$($Row.frame_local_light_count)"
+        frameRectLightCount = "$($Row.frame_rect_light_count)"
+        reflectionProbeSceneProbeCount = "$($Row.reflection_probe_scene_probe_count)"
+        dlssExtents = "$($Row.temporal_upscaler_dlss_render_width)x$($Row.temporal_upscaler_dlss_render_height)->$($Row.temporal_upscaler_dlss_output_width)x$($Row.temporal_upscaler_dlss_output_height)"
+    }
+}
+
+function Assert-ExpectedMetricText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Metrics,
+        [Parameter(Mandatory = $true)]$Expected
+    )
+
+    foreach ($property in $Expected.PSObject.Properties) {
+        $actualProperty = $Metrics.PSObject.Properties[$property.Name]
+        if ($null -eq $actualProperty) {
+            throw "Metric '$($property.Name)' is not available for $Name"
+        }
+        Assert-BaselineText `
+            -Name "$Name.$($property.Name)" `
+            -Actual ([string]$actualProperty.Value) `
+            -Expected ([string]$property.Value)
+    }
+}
+
+function Assert-QuickNativeRow {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Row,
+        [Parameter(Mandatory = $true)]$Expected
+    )
+
+    if ($Row.framegraph_validation_issues -ne "0") {
+        throw "$Name frame graph validation issues: $($Row.framegraph_validation_issues)"
+    }
+    if ($Row.temporal_upscale_post_source_active -ne "0") {
+        throw "$Name unexpectedly activated temporal-upscale post source"
+    }
+
+    $metrics = New-QuickNativeMetrics -Row $Row
+    Assert-ExpectedMetricText -Name $Name -Metrics $metrics -Expected $Expected
+    return $metrics
+}
+
+function Assert-QuickDlssPresentRow {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Row,
+        [Parameter(Mandatory = $true)]$Expected
+    )
+
+    if ($Row.framegraph_validation_issues -ne "0") {
+        throw "$Name frame graph validation issues: $($Row.framegraph_validation_issues)"
+    }
+    if ($Row.temporal_upscaler_dlss_output_ready -ne "1") {
+        throw "$Name did not produce DLSS output"
+    }
+    if ($Row.temporal_upscaler_dlss_quality_blocker_mask -ne "0") {
+        throw "$Name quality gate still reports blockers: $($Row.temporal_upscaler_dlss_quality_blocker_mask)"
+    }
+
+    $metrics = New-QuickDlssPresentMetrics -Row $Row
+    Assert-ExpectedMetricText -Name $Name -Metrics $metrics -Expected $Expected
+    Assert-DlssJitterConsistency -Name $Name -Row $Row
+    return $metrics
+}
+
+function Assert-QuickImageStats {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Stats,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    $index = 0
+    foreach ($stat in @($Stats)) {
+        Assert-BaselineRange `
+            -Name "$Name.imageStats[$index].differentPixels" `
+            -Actual $stat.DifferentPixels `
+            -Min $Manifest.thresholds.centralDifferentPixelsMin `
+            -Max $stat.SampledPixels
+        ++$index
+    }
+}
+
+function Assert-QuickComparison {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Comparison,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    Assert-BaselineRange `
+        -Name "$Name.comparison.changedPixels" `
+        -Actual $Comparison.ChangedPixels `
+        -Min $Manifest.thresholds.comparisonChangedPixelsMin `
+        -Max $Manifest.thresholds.comparisonChangedPixelsMax
+    Assert-BaselineRange `
+        -Name "$Name.comparison.meanDelta" `
+        -Actual $Comparison.MeanDelta `
+        -Min $Manifest.thresholds.comparisonMeanDeltaMin `
+        -Max $Manifest.thresholds.comparisonMeanDeltaMax
+    Assert-BaselineRange `
+        -Name "$Name.comparison.maxDelta" `
+        -Actual $Comparison.MaxDelta `
+        -Min 0 `
+        -Max $Manifest.thresholds.comparisonMaxDeltaMax
+}
+
+function Assert-QuickSequenceComparison {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$Comparison,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    Assert-BaselineRange `
+        -Name "$Name.sequence.minChangedPixels" `
+        -Actual $Comparison.minChangedPixels `
+        -Min $Manifest.thresholds.sequencePairChangedPixelsMin `
+        -Max $Comparison.pairs[0].SampledPixels
+    Assert-BaselineRange `
+        -Name "$Name.sequence.maxMeanDelta" `
+        -Actual $Comparison.maxMeanDelta `
+        -Min 0 `
+        -Max $Manifest.thresholds.sequencePairMeanDeltaMax
+    Assert-BaselineRange `
+        -Name "$Name.sequence.minEdgePixels" `
+        -Actual $Comparison.minEdgePixels `
+        -Min $Manifest.thresholds.sequencePairEdgePixelsMin `
+        -Max $Comparison.pairs[0].SampledPixels
+    Assert-BaselineRange `
+        -Name "$Name.sequence.maxMeanEdgeDelta" `
+        -Actual $Comparison.maxMeanEdgeDelta `
+        -Min 0 `
+        -Max $Manifest.thresholds.sequencePairMeanEdgeDeltaMax
+    Assert-BaselineRange `
+        -Name "$Name.sequence.maxEdgeDelta" `
+        -Actual $Comparison.maxEdgeDelta `
+        -Min 0 `
+        -Max $Manifest.thresholds.sequencePairMaxEdgeDeltaMax
+}
+
+function New-QuickLaneSummary {
+    param(
+        [Parameter(Mandatory = $true)]$Benchmark,
+        [Parameter(Mandatory = $true)]$Metrics,
+        [string[]]$Images = @(),
+        [object[]]$ImageStats = @(),
+        $Comparison = $null,
+        $SequenceComparison = $null,
+        [string]$Model = ""
+    )
+
+    $lane = [ordered]@{
+        csv = $Benchmark.CsvPath
+        columns = "$($Benchmark.HeaderColumns)/$($Benchmark.LastColumns)"
+        metrics = $Metrics
+    }
+
+    if ($Images.Count -eq 1) {
+        $lane["image"] = $Images[0]
+    } elseif ($Images.Count -gt 1) {
+        $lane["images"] = $Images
+    }
+    if ($ImageStats.Count -eq 1) {
+        $lane["imageStats"] = $ImageStats[0]
+    } elseif ($ImageStats.Count -gt 1) {
+        $lane["imageStats"] = $ImageStats
+    }
+    if ($null -ne $Comparison) {
+        $lane["comparison"] = $Comparison
+    }
+    if ($null -ne $SequenceComparison) {
+        $lane["sequenceComparison"] = $SequenceComparison
+    }
+    if ($Model.Length -gt 0) {
+        $lane["model"] = $Model
+    }
+
+    return $lane
+}
+
+function Invoke-QuickDlaaSequenceSuite {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$LaneKey,
+        [Parameter(Mandatory = $true)][hashtable]$Environment,
+        [Parameter(Mandatory = $true)]$Manifest,
+        [string]$Model = ""
+    )
+
+    $benchmark = Invoke-BenchmarkRun `
+        -Name $Name `
+        -Environment $Environment `
+        -UseApplicationScene
+    $metrics = Assert-QuickDlssPresentRow `
+        -Name $LaneKey `
+        -Row $benchmark.LastRow `
+        -Expected $Manifest.expected.dlssPresent
+    $images = Capture-WindowImageSequence `
+        -Name $Name `
+        -Environment $Environment `
+        -FrameCount 3 `
+        -InitialDelaySeconds 4 `
+        -IntervalSeconds 2
+    $imageStats = @()
+    foreach ($image in $images) {
+        $imageStats += Get-ImageVariationStats -Path $image
+    }
+    $sequenceComparison = Compare-ImageSequence -Paths $images
+
+    Assert-QuickImageStats -Name $LaneKey -Stats $imageStats -Manifest $Manifest
+    Assert-QuickSequenceComparison `
+        -Name $LaneKey `
+        -Comparison $sequenceComparison `
+        -Manifest $Manifest
+
+    return New-QuickLaneSummary `
+        -Benchmark $benchmark `
+        -Metrics $metrics `
+        -Images $images `
+        -ImageStats $imageStats `
+        -SequenceComparison $sequenceComparison `
+        -Model $Model
+}
+
+if (-not ($selectedSuites -contains "full")) {
+    Write-Host "Focused DLSS visual QA suites: $($selectedSuites -join ', ')"
+    $quickSummary = [ordered]@{
+        target = $Target
+        generatedAt = (Get-Date).ToString("o")
+        selectedSuites = $selectedSuites
+        captureMonitor = $script:captureMonitorWorkArea
+        baselines = [ordered]@{}
+        lanes = [ordered]@{}
+    }
+
+    if ($selectedSuites -contains "default") {
+        $quickSummary["baselines"]["default"] = [ordered]@{
+            manifest = $defaultSceneDlaaBaselineManifestPath
+            name = $defaultSceneDlaaBaselineManifest.name
+        }
+
+        $defaultSceneDlaaNativeBenchmark = Invoke-BenchmarkRun `
+            -Name "default_scene_dlaa_native_deferred_hdr" `
+            -Environment $defaultSceneDlaaNativeEnvironment `
+            -UseApplicationScene
+        $defaultSceneDlaaNativeMetrics = Assert-QuickNativeRow `
+            -Name "defaultSceneDlaa.native" `
+            -Row $defaultSceneDlaaNativeBenchmark.LastRow `
+            -Expected $defaultSceneDlaaBaselineManifest.expected.native
+        $defaultSceneDlaaBenchmark = Invoke-BenchmarkRun `
+            -Name "default_scene_dlaa_present" `
+            -Environment $defaultSceneDlaaPresentEnvironment `
+            -UseApplicationScene
+        $defaultSceneDlaaMetrics = Assert-QuickDlssPresentRow `
+            -Name "defaultSceneDlaa.dlssPresent" `
+            -Row $defaultSceneDlaaBenchmark.LastRow `
+            -Expected $defaultSceneDlaaBaselineManifest.expected.dlssPresent
+
+        $defaultSceneDlaaNativeImage = Capture-WindowImage `
+            -Name "default_scene_dlaa_native_deferred_hdr" `
+            -Environment $defaultSceneDlaaNativeEnvironment
+        $defaultSceneDlaaImage = Capture-WindowImage `
+            -Name "default_scene_dlaa_present" `
+            -Environment $defaultSceneDlaaPresentEnvironment
+        $defaultSceneDlaaNativeImageStats =
+            Get-ImageVariationStats -Path $defaultSceneDlaaNativeImage
+        $defaultSceneDlaaImageStats =
+            Get-ImageVariationStats -Path $defaultSceneDlaaImage
+        $defaultSceneDlaaComparison =
+            Compare-Images -A $defaultSceneDlaaNativeImage -B $defaultSceneDlaaImage
+
+        Assert-QuickImageStats `
+            -Name "defaultSceneDlaa.native" `
+            -Stats $defaultSceneDlaaNativeImageStats `
+            -Manifest $defaultSceneDlaaBaselineManifest
+        Assert-QuickImageStats `
+            -Name "defaultSceneDlaa.dlssPresent" `
+            -Stats $defaultSceneDlaaImageStats `
+            -Manifest $defaultSceneDlaaBaselineManifest
+        Assert-QuickComparison `
+            -Name "defaultSceneDlaa" `
+            -Comparison $defaultSceneDlaaComparison `
+            -Manifest $defaultSceneDlaaBaselineManifest
+
+        $quickSummary["lanes"]["defaultSceneDlaaNative"] = New-QuickLaneSummary `
+            -Benchmark $defaultSceneDlaaNativeBenchmark `
+            -Metrics $defaultSceneDlaaNativeMetrics `
+            -Images @($defaultSceneDlaaNativeImage) `
+            -ImageStats @($defaultSceneDlaaNativeImageStats)
+        $quickSummary["lanes"]["defaultSceneDlaaPresent"] = New-QuickLaneSummary `
+            -Benchmark $defaultSceneDlaaBenchmark `
+            -Metrics $defaultSceneDlaaMetrics `
+            -Images @($defaultSceneDlaaImage) `
+            -ImageStats @($defaultSceneDlaaImageStats) `
+            -Comparison $defaultSceneDlaaComparison
+    }
+
+    if ($selectedSuites -contains "default-motion") {
+        $quickSummary["baselines"]["defaultMotion"] = [ordered]@{
+            manifest = $defaultSceneDlaaMotionBaselineManifestPath
+            name = $defaultSceneDlaaMotionBaselineManifest.name
+        }
+        $quickSummary["lanes"]["defaultSceneDlaaMotionPresent"] =
+            Invoke-QuickDlaaSequenceSuite `
+                -Name "default_scene_dlaa_motion_present" `
+                -LaneKey "defaultSceneDlaaMotion" `
+                -Environment $defaultSceneDlaaMotionPresentEnvironment `
+                -Manifest $defaultSceneDlaaMotionBaselineManifest
+    }
+
+    if ($selectedSuites -contains "default-object-motion") {
+        $quickSummary["baselines"]["defaultObjectMotion"] = [ordered]@{
+            manifest = $defaultSceneDlaaObjectMotionBaselineManifestPath
+            name = $defaultSceneDlaaObjectMotionBaselineManifest.name
+        }
+        $quickSummary["lanes"]["defaultSceneDlaaObjectMotionPresent"] =
+            Invoke-QuickDlaaSequenceSuite `
+                -Name "default_scene_dlaa_object_motion_present" `
+                -LaneKey "defaultSceneDlaaObjectMotion" `
+                -Environment $defaultSceneDlaaObjectMotionPresentEnvironment `
+                -Manifest $defaultSceneDlaaObjectMotionBaselineManifest
+    }
+
+    if ($selectedSuites -contains "imported-dynamic") {
+        $quickSummary["baselines"]["importedDynamic"] = [ordered]@{
+            manifest = $importedDynamicDlaaObjectMotionBaselineManifestPath
+            name = $importedDynamicDlaaObjectMotionBaselineManifest.name
+            model = $importedDynamicModelPath
+        }
+        $quickSummary["lanes"]["importedDynamicDlaaObjectMotionPresent"] =
+            Invoke-QuickDlaaSequenceSuite `
+                -Name "imported_dynamic_dlaa_object_motion_present" `
+                -LaneKey "importedDynamicDlaaObjectMotion" `
+                -Environment $importedDynamicDlaaObjectMotionPresentEnvironment `
+                -Manifest $importedDynamicDlaaObjectMotionBaselineManifest `
+                -Model $importedDynamicModelPath
+    }
+
+    $summaryPath = Join-Path $outputRoot "summary.json"
+    $quickSummary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+
+    Write-Host "Focused DLSS visual QA passed"
+    Write-Host "  summary: $summaryPath"
+    foreach ($lane in $quickSummary["lanes"].GetEnumerator()) {
+        if ($lane.Value.Contains("image")) {
+            Write-Host "  $($lane.Key): $($lane.Value["image"])"
+        } elseif ($lane.Value.Contains("images")) {
+            Write-Host "  $($lane.Key): $($lane.Value["images"] -join ', ')"
+        }
+        if ($lane.Value.Contains("comparison")) {
+            $comparison = $lane.Value["comparison"]
+            Write-Host "  $($lane.Key) diff: sampled=$($comparison.SampledPixels) changed=$($comparison.ChangedPixels) mean=$($comparison.MeanDelta) max=$($comparison.MaxDelta)"
+        }
+        if ($lane.Value.Contains("sequenceComparison")) {
+            $sequenceComparison = $lane.Value["sequenceComparison"]
+            Write-Host "  $($lane.Key) sequence: pairs=$($sequenceComparison.pairCount) minChanged=$($sequenceComparison.minChangedPixels) maxMean=$($sequenceComparison.maxMeanDelta) edgeMin=$($sequenceComparison.minEdgePixels) edgeMeanMax=$($sequenceComparison.maxMeanEdgeDelta)"
+        }
+    }
+    return
+}
 
 $nativeBenchmark = Invoke-BenchmarkRun -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssBenchmark = Invoke-BenchmarkRun -Name "dlss_present" -Environment $dlssPresentEnvironment
