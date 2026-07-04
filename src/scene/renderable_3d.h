@@ -5,6 +5,7 @@
 #include "scene/transform.h"
 
 #include <functional>
+#include <string>
 
 namespace se {
 
@@ -28,6 +29,8 @@ public:
     void SetMeshId(std::string meshId);
     std::string_view MaterialId() const;
     void SetMaterialId(std::string materialId);
+    std::string_view BonePaletteResourceId() const;
+    void SetBonePaletteResourceId(std::string resourceId);
     i32 DrawOrder() const;
     void SetDrawOrder(i32 drawOrder);
     u64 RenderIdentity() const;
@@ -46,6 +49,7 @@ private:
 
     RenderableCore m_Core;
     Transform3D m_Transform;
+    std::string m_BonePaletteResourceId;
     u64 m_RenderIdentity = 0;
     u64 m_RenderStateVersion = 1;
     bool m_Pickable = true;

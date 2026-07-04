@@ -1071,6 +1071,65 @@ probe. The next skinned quality work is draw-time descriptor binding and shader
 visibility, then shader skinning or skinned vertex output, previous-skinned
 state, and skinned velocity output.
 
+## Slice 4.34 Execution Plan
+
+Slice 4.34 carries the imported bone-palette resource identity into the main
+draw queue as diagnostic metadata. The goal is to prove that a visible imported
+skinned draw can be associated with a ready renderer bone-palette resource
+without changing pipeline layouts or binding the diagnostic descriptor set.
+
+1. Renderable and draw-command carrier.
+   - Add an optional bone-palette resource id to `Renderable3D`.
+   - Assign that id to imported skinned renderables only when the runtime pose
+     carrier is ready.
+   - Resolve the id in `RenderQueue` into stable command diagnostics:
+     command/resource readiness and current/previous/changed palette counts.
+
+2. Renderer and QA diagnostics.
+   - Aggregate unique bone-palette resources from the main draw queue into
+     `RendererStats`.
+   - Add `bone_palette_draw_*` CSV columns and quick visual-QA metrics.
+   - Keep rigid imported lanes at zero and keep the skinned diagnostic quality
+     gate expected-blocked.
+
+3. Verification discipline.
+   - Use one direct 1-frame benchmark CSV probe while iterating.
+   - Use the focused `-SkipBuild -Suite imported-skinned-diagnostic` script only
+     once as the commit gate.
+   - Do not run the full visual-QA matrix for this slice.
+
+4. Non-goals.
+   - Do not bind the diagnostic descriptor set during command recording.
+   - Do not add bone-palette descriptors to the production pipeline layout.
+   - Do not claim shader skinning, skinned vertex output, previous-skinned
+     state, skinned velocity, or production DLSS/DLAA image quality.
+
+## Slice 4.34 Execution Evidence
+
+Slice 4.34 is implemented and verified. `Renderable3D` now carries an optional
+bone-palette resource id, imported skinned runtime parts set that id once the
+runtime pose carrier is ready, and `RenderQueue` resolves it through
+`VulkanRenderResources2D` into draw-command diagnostics. `VulkanRenderer`
+aggregates the main draw queue into `bone_palette_draw_*` CSV fields.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct 1-frame CSV probe for `assets/models/skinned_probe.dae` reports
+  `842/842` CSV columns, descriptor diagnostics `1/1/1`, and draw diagnostics
+  `commands/readyCommands/resources/readyResources/current/previous/changed/ready=1/1/1/1/2/2/1/1`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as the single focused script run.
+- Focused CSV reports `842/842` columns, descriptor
+  `setAllocated/setWritten/setReady/binding/rangeBytes=1/1/1/0/256`, draw
+  diagnostics `1/1/1/1/2/2/1/1`, and DLSS quality remains expected-blocked at
+  `qualityGate=1/0/4` with masks `255/251/4`.
+
+This closes draw-queue metadata visibility for the skinned probe. The next
+skinned quality work is actual draw-time descriptor binding and shader
+consumption, then shader skinning or skinned vertex output, previous-skinned
+state, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

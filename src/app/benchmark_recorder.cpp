@@ -128,6 +128,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererSsrStats& ssr = stats.ssr;
     const RendererIblStats& ibl = stats.ibl;
     const RendererProbeGridStats& probeGrid = stats.probeGrid;
+    const RendererBonePaletteDrawStats& bonePaletteDraw = stats.bonePaletteDraw;
     const RendererReflectionProbeStats& reflectionProbe = stats.reflectionProbe;
     const RendererHeightFogStats& heightFog = stats.heightFog;
     const RendererPostProcessStats& postProcess = stats.postProcess;
@@ -391,6 +392,14 @@ void BenchmarkRecorder::RecordFrame(
         << probeGrid.boundsMaxZ << ','
         << probeGrid.debugViewEnabled << ','
         << probeGrid.cellDebugViewEnabled << ','
+        << bonePaletteDraw.commandCount << ','
+        << bonePaletteDraw.readyCommandCount << ','
+        << bonePaletteDraw.resourceCount << ','
+        << bonePaletteDraw.readyResourceCount << ','
+        << bonePaletteDraw.currentEntryCount << ','
+        << bonePaletteDraw.previousEntryCount << ','
+        << bonePaletteDraw.changedEntryCount << ','
+        << bonePaletteDraw.drawPathReady << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -1147,6 +1156,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "probe_grid_bounds_min_x,probe_grid_bounds_min_y,probe_grid_bounds_min_z,"
         << "probe_grid_bounds_max_x,probe_grid_bounds_max_y,probe_grid_bounds_max_z,"
         << "probe_grid_debug_view_enabled,probe_grid_cell_debug_view_enabled,"
+        << "bone_palette_draw_command_count,bone_palette_draw_ready_command_count,"
+        << "bone_palette_draw_resource_count,bone_palette_draw_ready_resource_count,"
+        << "bone_palette_draw_current_entry_count,"
+        << "bone_palette_draw_previous_entry_count,"
+        << "bone_palette_draw_changed_entry_count,bone_palette_draw_path_ready,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"

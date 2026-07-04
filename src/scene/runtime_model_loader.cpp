@@ -710,6 +710,7 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                     cached.runtimePoseCarrierChangedBonePaletteEntryCount,
                     cached.runtimePoseCarrierReady
                 );
+            const std::string cachedBonePaletteResourceId = idPrefix + "_BonePalette";
 
             u32 partIdx = 0;
             for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
@@ -723,6 +724,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 part.Transform().SetRotationDegrees(rotationDegrees);
                 part.Transform().SetScale(scale);
                 part.Transform().SetAnimateRotation(false);
+                if (rendererBonePalette.ready != 0u) {
+                    part.SetBonePaletteResourceId(cachedBonePaletteResourceId);
+                }
             }
 
             return RuntimeModelLoadResult{true,
@@ -1316,6 +1320,36 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             }
         }
 
+        loadedModel->sourcePoseBonePaletteEntryCount =
+            importedModelData.sourcePoseBonePaletteEntryCount;
+        loadedModel->sourcePosePreviousBonePaletteEntryCount =
+            importedModelData.sourcePosePreviousBonePaletteEntryCount;
+        loadedModel->sourcePoseChangedBonePaletteEntryCount =
+            importedModelData.sourcePoseChangedBonePaletteEntryCount;
+        loadedModel->sourcePoseBonePaletteReady =
+            importedModelData.sourcePoseBonePaletteReady;
+        if (!importedModelData.diagnosticPoseSamples.empty()) {
+            const ImportedPoseSample3D& poseSample =
+                importedModelData.diagnosticPoseSamples.front();
+            loadedModel->runtimePreviousBonePalette =
+                poseSample.previousBonePalette;
+            loadedModel->runtimeCurrentBonePalette =
+                poseSample.currentBonePalette;
+            loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount =
+                CountChangedMatrices(
+                    loadedModel->runtimePreviousBonePalette,
+                    loadedModel->runtimeCurrentBonePalette
+                );
+            loadedModel->runtimePoseCarrierReady =
+                importedModelData.sourcePoseBonePaletteReady != 0u &&
+                !loadedModel->runtimeCurrentBonePalette.empty() &&
+                loadedModel->runtimeCurrentBonePalette.size() ==
+                    loadedModel->runtimePreviousBonePalette.size()
+                    ? 1u
+                    : 0u;
+        }
+        loadedModel->bonePaletteResourceId = idPrefix + "_BonePalette";
+
         for (std::size_t meshIndex = 0; meshIndex < importedModelData.meshes.size(); ++meshIndex) {
             const ImportedMesh3D& mesh = importedModelData.meshes[meshIndex];
             const std::size_t materialIndex = std::min<std::size_t>(
@@ -1335,6 +1369,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedPart.Transform().SetScale(scale);
             importedPart.Transform().SetAnimateRotation(false);
             importedPart.Transform().SetRotationSpeedDegreesPerSecond({ 0.0f, 0.0f, 0.0f });
+            if (loadedModel->runtimePoseCarrierReady != 0u &&
+                !loadedModel->bonePaletteResourceId.empty()) {
+                importedPart.SetBonePaletteResourceId(loadedModel->bonePaletteResourceId);
+            }
         }
 
         const std::size_t meshCount = importedModelData.meshes.size();
@@ -1370,34 +1408,6 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourcePoseSampledNodeCount;
         loadedModel->sourcePoseAnimatedNodeCount =
             importedModelData.sourcePoseAnimatedNodeCount;
-        loadedModel->sourcePoseBonePaletteEntryCount =
-            importedModelData.sourcePoseBonePaletteEntryCount;
-        loadedModel->sourcePosePreviousBonePaletteEntryCount =
-            importedModelData.sourcePosePreviousBonePaletteEntryCount;
-        loadedModel->sourcePoseChangedBonePaletteEntryCount =
-            importedModelData.sourcePoseChangedBonePaletteEntryCount;
-        loadedModel->sourcePoseBonePaletteReady =
-            importedModelData.sourcePoseBonePaletteReady;
-        if (!importedModelData.diagnosticPoseSamples.empty()) {
-            const ImportedPoseSample3D& poseSample =
-                importedModelData.diagnosticPoseSamples.front();
-            loadedModel->runtimePreviousBonePalette =
-                poseSample.previousBonePalette;
-            loadedModel->runtimeCurrentBonePalette =
-                poseSample.currentBonePalette;
-            loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount =
-                CountChangedMatrices(
-                    loadedModel->runtimePreviousBonePalette,
-                    loadedModel->runtimeCurrentBonePalette
-                );
-            loadedModel->runtimePoseCarrierReady =
-                importedModelData.sourcePoseBonePaletteReady != 0u &&
-                !loadedModel->runtimeCurrentBonePalette.empty() &&
-                loadedModel->runtimeCurrentBonePalette.size() ==
-                    loadedModel->runtimePreviousBonePalette.size()
-                    ? 1u
-                    : 0u;
-        }
         loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
         loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
         loadedModel->sourceSkinnedVertexCount = importedModelData.sourceSkinnedVertexCount;
@@ -1414,7 +1424,6 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount;
         const u32 runtimePoseCarrierReady =
             loadedModel->runtimePoseCarrierReady;
-        loadedModel->bonePaletteResourceId = idPrefix + "_BonePalette";
         const RendererBonePaletteRegistration rendererBonePalette =
             RegisterRendererBonePaletteResource(
                 m_RenderResources,

@@ -1523,6 +1523,14 @@ function New-QuickDlssPresentMetrics {
         runtimeImportBoneInfluenceCount = "$($Row.runtime_import_bone_influence_count)"
         runtimeImportMaxBoneInfluencesPerVertex = "$($Row.runtime_import_max_bone_influences_per_vertex)"
         runtimeImportSkinnedAnimationUnsupported = "$($Row.runtime_import_skinned_animation_unsupported)"
+        bonePaletteDrawCommandCount = "$($Row.bone_palette_draw_command_count)"
+        bonePaletteDrawReadyCommandCount = "$($Row.bone_palette_draw_ready_command_count)"
+        bonePaletteDrawResourceCount = "$($Row.bone_palette_draw_resource_count)"
+        bonePaletteDrawReadyResourceCount = "$($Row.bone_palette_draw_ready_resource_count)"
+        bonePaletteDrawCurrentEntryCount = "$($Row.bone_palette_draw_current_entry_count)"
+        bonePaletteDrawPreviousEntryCount = "$($Row.bone_palette_draw_previous_entry_count)"
+        bonePaletteDrawChangedEntryCount = "$($Row.bone_palette_draw_changed_entry_count)"
+        bonePaletteDrawPathReady = "$($Row.bone_palette_draw_path_ready)"
         dlssExtents = "$($Row.temporal_upscaler_dlss_render_width)x$($Row.temporal_upscaler_dlss_render_height)->$($Row.temporal_upscaler_dlss_output_width)x$($Row.temporal_upscaler_dlss_output_height)"
     }
 }

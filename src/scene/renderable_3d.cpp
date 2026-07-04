@@ -56,6 +56,17 @@ void Renderable3D::SetMaterialId(std::string materialId) {
     m_Core.SetMaterialId(std::move(materialId));
 }
 
+std::string_view Renderable3D::BonePaletteResourceId() const {
+    return m_BonePaletteResourceId;
+}
+
+void Renderable3D::SetBonePaletteResourceId(std::string resourceId) {
+    if (m_BonePaletteResourceId != resourceId) {
+        MarkRenderStateChanged();
+    }
+    m_BonePaletteResourceId = std::move(resourceId);
+}
+
 i32 Renderable3D::DrawOrder() const {
     return m_Core.DrawOrder();
 }

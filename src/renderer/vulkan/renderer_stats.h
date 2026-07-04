@@ -219,6 +219,17 @@ struct RendererProbeGridStats {
     u32 cellDebugViewEnabled = 0;
 };
 
+struct RendererBonePaletteDrawStats {
+    u32 commandCount = 0;
+    u32 readyCommandCount = 0;
+    u32 resourceCount = 0;
+    u32 readyResourceCount = 0;
+    u32 currentEntryCount = 0;
+    u32 previousEntryCount = 0;
+    u32 changedEntryCount = 0;
+    u32 drawPathReady = 0;
+};
+
 struct RendererReflectionProbeStats {
     u32 fallbackEnabled = 0;
     f32 diffuseIntensity = 0.0f;
@@ -796,6 +807,7 @@ struct RendererStats {
     RendererSsrStats ssr;
     RendererIblStats ibl;
     RendererProbeGridStats probeGrid;
+    RendererBonePaletteDrawStats bonePaletteDraw;
     RendererReflectionProbeStats reflectionProbe;
     RendererHeightFogStats heightFog;
     RendererPostProcessStats postProcess;

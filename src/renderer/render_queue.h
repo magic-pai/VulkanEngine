@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <string>
 #include <unordered_map>
 
 namespace se {
@@ -94,6 +95,11 @@ struct RenderCommand {
     std::uintptr_t materialSortKey = 0;
     std::uintptr_t meshSortKey = 0;
     std::size_t submissionIndex = 0;
+    std::string bonePaletteResourceId;
+    u32 bonePaletteCurrentEntryCount = 0;
+    u32 bonePalettePreviousEntryCount = 0;
+    u32 bonePaletteChangedEntryCount = 0;
+    u32 bonePaletteReady = 0;
 };
 
 struct RenderInstanceBatch {

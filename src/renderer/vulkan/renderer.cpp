@@ -56,6 +56,7 @@
 #include <optional>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include <imgui.h>
@@ -342,6 +343,47 @@ RendererDrawStats DrawStatsForQueues(
     stats.mainTriangles = triangleCount(mainCommands);
     stats.overlayTriangles = triangleCount(overlayCommands);
     stats.shadowTriangles = triangleCount(shadowCommands);
+
+    return stats;
+}
+
+RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
+    std::span<const RenderCommand> mainCommands
+) {
+    RendererBonePaletteDrawStats stats{};
+    std::unordered_set<std::string> seenResources;
+    for (const RenderCommand& command : mainCommands) {
+        if (command.bonePaletteResourceId.empty()) {
+            continue;
+        }
+
+        ++stats.commandCount;
+        if (command.bonePaletteReady != 0u) {
+            ++stats.readyCommandCount;
+        }
+
+        if (!seenResources.insert(command.bonePaletteResourceId).second) {
+            continue;
+        }
+
+        ++stats.resourceCount;
+        stats.currentEntryCount += command.bonePaletteCurrentEntryCount;
+        stats.previousEntryCount += command.bonePalettePreviousEntryCount;
+        stats.changedEntryCount += command.bonePaletteChangedEntryCount;
+        if (command.bonePaletteReady != 0u) {
+            ++stats.readyResourceCount;
+        }
+    }
+
+    stats.drawPathReady =
+        stats.commandCount > 0u &&
+        stats.commandCount == stats.readyCommandCount &&
+        stats.resourceCount > 0u &&
+        stats.resourceCount == stats.readyResourceCount &&
+        stats.currentEntryCount > 0u &&
+        stats.currentEntryCount == stats.previousEntryCount
+            ? 1u
+            : 0u;
 
     return stats;
 }
@@ -3546,6 +3588,7 @@ void VulkanRenderer::DrawFrame() {
         overlayCommands,
         shadowCommands
     );
+    frameStats.bonePaletteDraw = BonePaletteDrawStatsFor(mainCommands);
     frameStats.shadowCascades = ShadowCascadeStatsFor(directionalShadowCascades);
     frameStats.shadowCascades.pcfKernelRadius =
         std::clamp<u32>(m_ShadowSettings.pcfKernelRadius, 0u, 2u);

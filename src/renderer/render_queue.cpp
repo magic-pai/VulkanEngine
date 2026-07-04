@@ -172,6 +172,7 @@ RenderCommand CommandForRenderable(
 }
 
 RenderCommand CommandForRenderable(
+    const VulkanRenderResources2D& renderResources,
     const VulkanMesh& mesh,
     const VulkanMaterial& material,
     const Renderable3D& renderable,
@@ -188,6 +189,18 @@ RenderCommand CommandForRenderable(
     command.drawOrder = renderable.DrawOrder();
     command.worldBounds = worldBounds;
     command.castShadow = renderable.CastShadow();
+    command.bonePaletteResourceId = std::string(renderable.BonePaletteResourceId());
+    if (!command.bonePaletteResourceId.empty() &&
+        renderResources.ContainsBonePalette(command.bonePaletteResourceId)) {
+        const VulkanRenderResources2D::BonePaletteResource& palette =
+            renderResources.BonePalette(command.bonePaletteResourceId);
+        command.bonePaletteCurrentEntryCount =
+            static_cast<u32>(palette.currentPalette.size());
+        command.bonePalettePreviousEntryCount =
+            static_cast<u32>(palette.previousPalette.size());
+        command.bonePaletteChangedEntryCount = palette.changedEntryCount;
+        command.bonePaletteReady = palette.ready;
+    }
 
     return command;
 }
@@ -495,6 +508,7 @@ RenderCommand RenderQueue::CommandForRenderable3D(
         previousModel = found->second.command.model;
     }
     RenderCommand command = CommandForRenderable(
+        renderResources,
         mesh,
         material,
         renderable,
