@@ -65,8 +65,8 @@ struct ShadowDepthPushConstants {
 constexpr std::size_t kShadowPushConstantBytes = sizeof(ShadowDepthPushConstants);
 
 static_assert(
-    kObjectPushConstantBytes == sizeof(glm::mat4) + sizeof(glm::vec4),
-    "Object push constant segment must contain model and tint"
+    kObjectPushConstantBytes == sizeof(glm::mat4) * 2 + sizeof(glm::vec4),
+    "Object push constant segment must contain model, previous model, and tint"
 );
 static_assert(
     sizeof(RenderMaterialPushConstants) == kMaterialPushConstantBytes,
@@ -156,6 +156,7 @@ void PushObjectConstants(
 ) {
     ObjectPushConstants objectData{};
     objectData.model = renderCommand.model;
+    objectData.previousModel = renderCommand.previousModel;
     objectData.tint = renderCommand.tint;
 
     PushConstants(
@@ -1308,6 +1309,7 @@ void DrawInstancedRenderCommand(
 
     ObjectPushConstants objectData{};
     objectData.model = glm::mat4(1.0f);
+    objectData.previousModel = glm::mat4(1.0f);
     objectData.tint = renderCommand.tint;
     PushConstants(
         commandBuffer,

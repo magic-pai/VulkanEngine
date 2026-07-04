@@ -184,6 +184,7 @@ struct MaterialBufferObject {
 
 struct ObjectPushConstants {
     alignas(16) glm::mat4 model{ 1.0f };
+    alignas(16) glm::mat4 previousModel{ 1.0f };
     alignas(16) glm::vec4 tint{ 1.0f };
     alignas(16) glm::vec4 materialBaseColorFactor{ 1.0f };
     alignas(16) glm::vec4 materialControls{ 1.0f, 0.0f, 0.0f, 0.0f };
@@ -281,7 +282,7 @@ static_assert(
 );
 
 static_assert(
-    sizeof(ObjectPushConstants) == sizeof(glm::mat4) + sizeof(glm::vec4) * 8,
+    sizeof(ObjectPushConstants) == sizeof(glm::mat4) * 2 + sizeof(glm::vec4) * 8,
     "ObjectPushConstants layout must match the shader push constant block"
 );
 

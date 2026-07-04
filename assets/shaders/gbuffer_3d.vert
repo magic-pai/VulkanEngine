@@ -57,6 +57,7 @@ layout(set = 0, binding = 0) uniform FrameData {
 
 layout(push_constant) uniform ObjectPushConstants {
     mat4 model;
+    mat4 previousModel;
     vec4 tint;
     vec4 materialBaseColorFactor;
     vec4 materialControls;
@@ -78,7 +79,8 @@ void main() {
     fragTangent = vec4(normalize(modelLinear * inTangent.xyz), inTangent.w);
     gl_Position = frame.proj * frame.view * worldPosition;
     fragCurrentClip = gl_Position;
+    vec4 previousWorldPosition = objectData.previousModel * vec4(inPosition, 1.0);
     fragPreviousClip = frame.temporalControls.x > 0.5
-        ? frame.previousProj * frame.previousView * worldPosition
+        ? frame.previousProj * frame.previousView * previousWorldPosition
         : gl_Position;
 }

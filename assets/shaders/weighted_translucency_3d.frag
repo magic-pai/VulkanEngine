@@ -12,6 +12,7 @@ layout(location = 1) out float outRevealage;
 
 layout(push_constant) uniform ObjectPushConstants {
     mat4 model;
+    mat4 previousModel;
     vec4 tint;
     vec4 materialBaseColorFactor;
     vec4 materialControls;

@@ -217,6 +217,24 @@ void FinalizeDlssQualityGateStats(RendererTemporalStats& stats) {
         ));
 }
 
+bool DlssObjectMotionVectorsReady(
+    bool has3DMainPass,
+    bool gBufferPipelineReady,
+    bool velocityTargetAllocated,
+    const FrameTemporalState& temporalState,
+    std::span<const RenderCommand> gBufferCommands,
+    std::span<const RenderCommand> weightedTranslucencyCommands,
+    std::span<const RenderCommand> forwardResidualCommands
+) {
+    return has3DMainPass &&
+        gBufferPipelineReady &&
+        velocityTargetAllocated &&
+        temporalState.velocityCameraMotionReady &&
+        !gBufferCommands.empty() &&
+        weightedTranslucencyCommands.empty() &&
+        forwardResidualCommands.empty();
+}
+
 std::size_t ProbeGridLinearIndex(
     std::size_t x,
     std::size_t y,
@@ -3878,6 +3896,28 @@ void VulkanRenderer::DrawFrame() {
             frameStats.draw
         );
     }
+    const bool objectMotionVectorsReady = DlssObjectMotionVectorsReady(
+        has3DMainPass,
+        m_GBufferGraphicsPipeline != nullptr &&
+            m_GBufferRenderPass != nullptr &&
+            m_GBufferFramebuffer != nullptr,
+        velocityTargetAllocated,
+        temporalState,
+        std::span<const RenderCommand>(gBufferCommands.data(), gBufferCommands.size()),
+        std::span<const RenderCommand>(
+            weightedTranslucencyCommands.data(),
+            weightedTranslucencyCommands.size()
+        ),
+        std::span<const RenderCommand>(
+            forwardResidualCommands.data(),
+            forwardResidualCommands.size()
+        )
+    );
+    frameStats.temporal.velocityObjectMotionReady =
+        objectMotionVectorsReady ? 1u : 0u;
+    frameStats.temporal.temporalUpscalerDlssQualityObjectMotionReady =
+        objectMotionVectorsReady ? 1u : 0u;
+    FinalizeDlssQualityGateStats(frameStats.temporal);
     frameStats.binds.forwardResidualAlphaReferenceEnabled =
         recordTransparentAlphaReference ? 1u : 0u;
     if (recordTransparentAlphaReference) {

@@ -162,6 +162,7 @@ RenderCommand CommandForRenderable(
     command.mesh = &renderResources.Mesh(renderable.MeshId());
     command.material = &renderResources.Material(renderable.MaterialId());
     command.model = model;
+    command.previousModel = model;
     command.tint = tint;
     command.drawOrder = renderable.DrawOrder();
     command.materialPushConstants = MaterialPushConstantsFor(*command.material);
@@ -175,12 +176,14 @@ RenderCommand CommandForRenderable(
     const VulkanMaterial& material,
     const Renderable3D& renderable,
     const glm::mat4& model,
+    const glm::mat4& previousModel,
     const RenderBounds& worldBounds
 ) {
     RenderCommand command{};
     command.mesh = &mesh;
     command.material = &material;
     command.model = model;
+    command.previousModel = previousModel;
     command.tint = glm::vec4(0.0f);
     command.drawOrder = renderable.DrawOrder();
     command.worldBounds = worldBounds;
@@ -473,6 +476,7 @@ RenderCommand RenderQueue::CommandForRenderable3D(
             cached.command.material != nullptr &&
             cached.command.worldBounds.valid) {
             RenderCommand command = cached.command;
+            command.previousModel = command.model;
             if (cacheStats != nullptr) {
                 ++cacheStats->commandCacheHits;
                 ++cacheStats->boundsCacheHits;
@@ -485,11 +489,17 @@ RenderCommand RenderQueue::CommandForRenderable3D(
     const VulkanMesh& mesh = renderResources.Mesh(renderable.MeshId());
     const VulkanMaterial& material = renderResources.Material(renderable.MaterialId());
     const glm::mat4 model = transform.Matrix();
+    glm::mat4 previousModel = model;
+    if (found != m_3DCommandCache.end() &&
+        found->second.renderableIdentity == renderableIdentity) {
+        previousModel = found->second.command.model;
+    }
     RenderCommand command = CommandForRenderable(
         mesh,
         material,
         renderable,
         model,
+        previousModel,
         WorldBoundsFor(mesh, model)
     );
 
@@ -602,6 +612,9 @@ bool RenderQueue::TryReuseScene3DQueue(
 
     if (m_Commands.size() != m_3DSceneCache.commands.size()) {
         m_Commands = m_3DSceneCache.commands;
+    }
+    for (RenderCommand& command : m_Commands) {
+        command.previousModel = command.model;
     }
     m_NextSubmissionIndex = m_Commands.size();
     Refresh3DMaterialPushConstants();

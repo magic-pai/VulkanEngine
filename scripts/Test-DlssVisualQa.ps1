@@ -496,13 +496,18 @@ if ($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready -ne "1" -or
     $dlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready -ne "1") {
     throw "DLSS-present quality gate did not observe DLSS mask carriers"
 }
+if ($dlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1") {
+    throw "DLSS-present quality gate did not observe object motion vectors"
+}
 $dlssQualityBlockerMask = [int]$dlssRow.temporal_upscaler_dlss_quality_blocker_mask
 if ($dlssQualityBlockerMask -le 0) {
     throw "DLSS-present quality gate did not report remaining blockers"
 }
-if (($dlssQualityBlockerMask -band 4) -eq 0 -or
-    ($dlssQualityBlockerMask -band 128) -eq 0) {
-    throw "DLSS-present quality gate did not preserve object-motion/baseline blockers"
+if (($dlssQualityBlockerMask -band 128) -eq 0) {
+    throw "DLSS-present quality gate did not preserve reference-baseline blocker"
+}
+if (($dlssQualityBlockerMask -band 4) -ne 0) {
+    throw "DLSS-present quality gate still reports object-motion blocker"
 }
 if (($dlssQualityBlockerMask -band 8) -ne 0 -or
     ($dlssQualityBlockerMask -band 16) -ne 0) {

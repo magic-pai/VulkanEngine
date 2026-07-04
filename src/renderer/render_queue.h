@@ -83,6 +83,7 @@ struct RenderCommand {
     const VulkanMesh* mesh = nullptr;
     const VulkanMaterial* material = nullptr;
     glm::mat4 model{ 1.0f };
+    glm::mat4 previousModel{ 1.0f };
     glm::vec4 tint{ 0.0f };
     RenderBounds worldBounds{};
     RenderMaterialPushConstants materialPushConstants{};

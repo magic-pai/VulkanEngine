@@ -8,6 +8,7 @@ layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform ObjectPushConstants {
     mat4 model;
+    mat4 previousModel;
     vec4 tint;
     vec4 materialBaseColorFactor;
     vec4 materialControls;

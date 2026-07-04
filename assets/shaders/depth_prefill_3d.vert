@@ -45,6 +45,7 @@ layout(set = 0, binding = 0) uniform FrameData {
 
 layout(push_constant) uniform ObjectPushConstants {
     mat4 model;
+    mat4 previousModel;
     vec4 tint;
     vec4 materialBaseColorFactor;
     vec4 materialControls;
