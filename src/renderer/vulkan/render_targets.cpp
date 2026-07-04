@@ -445,6 +445,27 @@ VkImageView VulkanSceneRenderTargets::HdrSceneColorView(std::size_t index) const
     return m_HdrSceneColorImages[index]->View();
 }
 
+VkImage VulkanSceneRenderTargets::HdrSceneColorImage(std::size_t index) const {
+    SE_ASSERT(index < m_HdrSceneColorImages.size(), "HDR scene color index is out of range");
+    return m_HdrSceneColorImages[index]->Handle();
+}
+
+VkImageView VulkanSceneRenderTargets::TemporalHistoryColorView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_TemporalHistoryColorImages.size(),
+        "Temporal history color index is out of range"
+    );
+    return m_TemporalHistoryColorImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::TemporalHistoryColorImage(std::size_t index) const {
+    SE_ASSERT(
+        index < m_TemporalHistoryColorImages.size(),
+        "Temporal history color index is out of range"
+    );
+    return m_TemporalHistoryColorImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::WeightedTranslucencyAccumView(std::size_t index) const {
     SE_ASSERT(
         index < m_WeightedTranslucencyAccumImages.size(),
@@ -508,6 +529,10 @@ VkImageView VulkanSceneRenderTargets::GBufferMaterialAuxView(std::size_t index) 
 }
 
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
+    return kHdrSceneColorFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::TemporalHistoryColorFormat() const {
     return kHdrSceneColorFormat;
 }
 
@@ -576,6 +601,17 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_HdrSceneColorImages
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kHdrSceneColorFormat,
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_TemporalHistoryColorImages
     );
     CreateImageArray(
         device,
@@ -677,6 +713,7 @@ void VulkanSceneRenderTargets::Recreate(
 
 void VulkanSceneRenderTargets::Release() {
     m_HdrSceneColorImages.clear();
+    m_TemporalHistoryColorImages.clear();
     m_WeightedTranslucencyAccumImages.clear();
     m_WeightedTranslucencyRevealageImages.clear();
     m_SceneDepthImages.clear();

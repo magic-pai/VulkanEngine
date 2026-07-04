@@ -1889,6 +1889,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                     : "history cold"
         );
     }
+    if (inputs.temporalHistoryColorAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentHistory,
+            "TemporalHistoryColor",
+            VulkanFormatName(inputs.temporalHistoryColorFormat),
+            "sampled, transfer dst",
+            inputs.temporalHistoryColorReady
+                ? "previous HDR scene color ready for temporal resolve"
+                : "history color cold"
+        );
+    }
     if (inputs.lightTileCullComputeEnabled) {
         AppendResource(
             plan,
@@ -1921,6 +1934,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             inputs.velocityCameraMotionReady
                 ? "Frame setup publishes previous camera matrices for GBuffer velocity and records jitter/history state without enabling TAA resolve."
                 : "Frame setup records temporal history reset/fallback state before TAA resolve is enabled."
+        );
+    }
+    if (inputs.temporalHistoryColorReady) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::FrameSetup,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "TemporalHistoryColorImport",
+            "",
+            "TemporalHistoryColor",
+            "Imports persistent HDR history from the previous frame for same-frame temporal resolve validation."
         );
     }
     if (inputs.gBufferRenderPassAllocated) {
@@ -2107,6 +2132,25 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         );
     }
 
+    if (inputs.taaResolveConfigured || inputs.temporalHistoryColorAllocated) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.taaResolveEnabled
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TAAResolve",
+            inputs.taaResolveEnabled
+                ? "HDRSceneColor, TemporalHistoryColor, Velocity, TemporalFrameState"
+                : "",
+            inputs.taaResolveEnabled ? "HDRSceneColor" : "",
+            inputs.taaResolveEnabled
+                ? "HDR composite blends current HDR scene color with velocity-reprojected temporal history."
+                : "TAA resolve is allocated/configured but currently falls back before sampling history."
+        );
+    }
+
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(
             plan,
@@ -2168,6 +2212,19 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "SwapchainColor",
             "SwapchainColor",
             "Runtime controls, pass visibility, and performance diagnostics."
+        );
+    }
+
+    if (inputs.temporalHistoryColorCopyEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "TemporalHistoryColorUpdate",
+            "HDRSceneColor",
+            "TemporalHistoryColor",
+            "Frame-end transfer copies current HDR scene color into temporal history for the next frame."
         );
     }
 

@@ -658,6 +658,139 @@ void BarrierComputeAutoExposureForFragmentRead(VkCommandBuffer commandBuffer) {
     );
 }
 
+void TransitionColorImage(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    VkAccessFlags srcAccessMask,
+    VkAccessFlags dstAccessMask,
+    VkPipelineStageFlags srcStage,
+    VkPipelineStageFlags dstStage
+) {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = srcAccessMask;
+    barrier.dstAccessMask = dstAccessMask;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        srcStage,
+        dstStage,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+}
+
+void PrepareTemporalHistoryColorForSampling(
+    VkCommandBuffer commandBuffer,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        TransitionColorImage(
+            commandBuffer,
+            renderTargets.TemporalHistoryColorImage(index),
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            0,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        );
+    }
+}
+
+void CopyHdrSceneColorToTemporalHistory(
+    VkCommandBuffer commandBuffer,
+    const VulkanSceneRenderTargets& renderTargets,
+    std::size_t sourceImageIndex
+) {
+    if (sourceImageIndex >= renderTargets.Count()) {
+        return;
+    }
+
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.HdrSceneColorImage(sourceImageIndex),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_TRANSFER_READ_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+
+    const VkExtent2D extent = renderTargets.Extent();
+    VkImageCopy copyRegion{};
+    copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.srcSubresource.mipLevel = 0;
+    copyRegion.srcSubresource.baseArrayLayer = 0;
+    copyRegion.srcSubresource.layerCount = 1;
+    copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.dstSubresource.mipLevel = 0;
+    copyRegion.dstSubresource.baseArrayLayer = 0;
+    copyRegion.dstSubresource.layerCount = 1;
+    copyRegion.extent = { extent.width, extent.height, 1 };
+
+    for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        TransitionColorImage(
+            commandBuffer,
+            renderTargets.TemporalHistoryColorImage(index),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT
+        );
+        vkCmdCopyImage(
+            commandBuffer,
+            renderTargets.HdrSceneColorImage(sourceImageIndex),
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            renderTargets.TemporalHistoryColorImage(index),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &copyRegion
+        );
+        TransitionColorImage(
+            commandBuffer,
+            renderTargets.TemporalHistoryColorImage(index),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        );
+    }
+
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.HdrSceneColorImage(sourceImageIndex),
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_TRANSFER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+}
+
 void RecordBloomFullscreenPass(
     VkCommandBuffer commandBuffer,
     const VulkanBloomRenderPass& renderPass,
@@ -1041,6 +1174,8 @@ void VulkanCommandBuffer::Record(
     bool autoExposureDebugView,
     bool colorGradingDebugView,
     bool sharpeningDebugView,
+    bool temporalHistoryColorInitialized,
+    bool recordTemporalHistoryColorCopy,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -1941,6 +2076,12 @@ void VulkanCommandBuffer::Record(
         );
     }
 
+    if (useHdrCompositeAsMain &&
+        sceneRenderTargets != nullptr &&
+        !temporalHistoryColorInitialized) {
+        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
+    }
+
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color = { { 0.05f, 0.07f, 0.10f, 1.0f } };
     clearValues[1].depthStencil = { 1.0f, 0 };
@@ -2443,6 +2584,14 @@ void VulkanCommandBuffer::Record(
     }
 
     vkCmdEndRenderPass(commandBuffer);
+
+    if (recordTemporalHistoryColorCopy && sceneRenderTargets != nullptr) {
+        CopyHdrSceneColorToTemporalHistory(
+            commandBuffer,
+            *sceneRenderTargets,
+            imageIndex
+        );
+    }
 
     if (gpuTimer != nullptr) {
         gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::FrameEnd);

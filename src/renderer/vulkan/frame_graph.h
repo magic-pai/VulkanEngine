@@ -363,6 +363,14 @@ struct CurrentVulkanFrameGraphInputs {
     bool velocityCameraMotionReady = false;
     bool velocityObjectMotionReady = false;
     bool velocityMaterialAuxMigrated = false;
+    bool temporalHistoryColorAllocated = false;
+    VkFormat temporalHistoryColorFormat = VK_FORMAT_UNDEFINED;
+    bool temporalHistoryColorReady = false;
+    bool temporalHistoryColorCopyEnabled = false;
+    bool taaResolveConfigured = false;
+    bool taaResolveEnabled = false;
+    bool taaVelocityReprojectionEnabled = false;
+    u32 taaFallbackReason = 0;
     bool reflectionCaptureSlotTableAllocated = false;
     u32 reflectionCaptureSlotCount = 0;
     u32 reflectionCaptureSlotReadyCount = 0;

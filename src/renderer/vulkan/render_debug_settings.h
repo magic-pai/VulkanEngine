@@ -48,7 +48,8 @@ enum class ForwardDebugView : int {
     AutoExposure = 40,
     Sharpening = 41,
     ProbeGrid = 42,
-    ProbeGridCell = 43
+    ProbeGridCell = 43,
+    Taa = 44
 };
 
 struct VulkanRenderDebugSettings {

@@ -38,6 +38,11 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
     vec4 reflectionProbeDiffuseLobes[24];
+    mat4 previousView;
+    mat4 previousProj;
+    vec4 temporalJitter;
+    vec4 temporalControls;
+    vec4 temporalResolveControls;
 } frame;
 
 layout(set = 0, binding = 10) readonly buffer AutoExposureState {
@@ -48,12 +53,15 @@ layout(set = 0, binding = 10) readonly buffer AutoExposureState {
 layout(set = 1, binding = 0) uniform sampler2D hdrSceneColor;
 layout(set = 1, binding = 1) uniform sampler2D bloomTexture;
 layout(set = 1, binding = 2) uniform sampler2D colorGradingLut;
+layout(set = 1, binding = 3) uniform sampler2D temporalHistoryColor;
+layout(set = 1, binding = 4) uniform sampler2D gBufferVelocity;
 
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
 const int DEBUG_VIEW_TONE_MAPPING = 39;
 const int DEBUG_VIEW_AUTO_EXPOSURE = 40;
 const int DEBUG_VIEW_SHARPENING = 41;
+const int DEBUG_VIEW_TAA = 44;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -196,9 +204,26 @@ vec3 ApplySharpening(vec3 color, float exposure, out vec3 sharpeningDelta) {
 
 void main() {
     float exposure = EffectiveExposure();
-    vec3 hdrColor = texture(hdrSceneColor, fragUv).rgb * exposure;
+    vec3 currentHdrColor = texture(hdrSceneColor, fragUv).rgb;
+    vec2 velocity = texture(gBufferVelocity, fragUv).rg;
+    vec2 historyUv = clamp(fragUv - velocity, vec2(0.0), vec2(1.0));
+    vec3 historyHdrColor = texture(temporalHistoryColor, historyUv).rgb;
+    float taaEnabled = clamp(frame.temporalResolveControls.x, 0.0, 1.0);
+    float historyWeight = clamp(frame.temporalResolveControls.y, 0.0, 0.95);
+    float historyReady = clamp(frame.temporalResolveControls.z, 0.0, 1.0);
+    float reprojectionEnabled = clamp(frame.temporalResolveControls.w, 0.0, 1.0);
+    vec3 resolvedHdrColor = currentHdrColor;
+    if (taaEnabled > 0.5 && historyReady > 0.5 && reprojectionEnabled > 0.5) {
+        resolvedHdrColor = mix(currentHdrColor, historyHdrColor, historyWeight);
+    }
+    vec3 hdrColor = resolvedHdrColor * exposure;
     vec3 bloom = BloomContribution();
     int debugView = int(frame.shadowFiltering.z + 0.5);
+    if (debugView == DEBUG_VIEW_TAA) {
+        vec3 delta = abs(currentHdrColor - historyHdrColor) * exposure;
+        outColor = vec4(ToneMapHdr(delta), 1.0);
+        return;
+    }
     if (debugView == DEBUG_VIEW_BLOOM) {
         outColor = vec4(ToneMapHdr(bloom), 1.0);
         return;

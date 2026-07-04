@@ -590,6 +590,15 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.jitterUvX << ','
         << temporal.jitterUvY << ','
         << temporal.taaResolveEnabled << ','
+        << temporal.taaResolveConfigured << ','
+        << temporal.taaHistoryColorTargetAllocated << ','
+        << static_cast<int>(temporal.taaHistoryColorFormat) << ','
+        << temporal.taaHistoryColorReady << ','
+        << temporal.taaHistoryColorCopies << ','
+        << temporal.taaHistoryWeight << ','
+        << temporal.taaVelocityReprojectionEnabled << ','
+        << temporal.taaFallbackReason << ','
+        << temporal.taaDebugViewEnabled << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1066,6 +1075,15 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_jitter_pixels_x,temporal_jitter_pixels_y,"
         << "temporal_jitter_uv_x,temporal_jitter_uv_y,"
         << "temporal_taa_resolve_enabled,"
+        << "temporal_taa_resolve_configured,"
+        << "temporal_taa_history_color_target_allocated,"
+        << "temporal_taa_history_color_format,"
+        << "temporal_taa_history_color_ready,"
+        << "temporal_taa_history_color_copies,"
+        << "temporal_taa_history_weight,"
+        << "temporal_taa_velocity_reprojection_enabled,"
+        << "temporal_taa_fallback_reason,"
+        << "temporal_taa_debug_view_enabled,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

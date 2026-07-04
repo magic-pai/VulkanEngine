@@ -608,6 +608,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "Probe Grid";
     case ForwardDebugView::ProbeGridCell:
         return "Probe Grid Cell";
+    case ForwardDebugView::Taa:
+        return "TAA";
     }
 
     return "Lit";
@@ -677,7 +679,8 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::AutoExposure,
         ForwardDebugView::Sharpening,
         ForwardDebugView::ProbeGrid,
-        ForwardDebugView::ProbeGridCell
+        ForwardDebugView::ProbeGridCell,
+        ForwardDebugView::Taa
     };
 
     ImGui::SeparatorText("Render Debug");
@@ -1144,7 +1147,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureFallbacks
     );
     ImGui::Text(
-        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s",
+        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s/%s history %s copies %u weight %.2f fallback %u",
         stats.temporal.velocityCameraMotionReady ? "camera-ready" : "cold",
         stats.temporal.historyValid ? "valid" : "cold",
         stats.temporal.historyReset,
@@ -1154,7 +1157,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.jitterPixelsX,
         stats.temporal.jitterPixelsY,
         stats.temporal.velocityMaterialAuxMigrated ? "split" : "missing",
-        stats.temporal.taaResolveEnabled ? "enabled" : "off"
+        stats.temporal.taaResolveConfigured ? "configured" : "off",
+        stats.temporal.taaResolveEnabled ? "enabled" : "fallback",
+        stats.temporal.taaHistoryColorReady ? "ready" : "cold",
+        stats.temporal.taaHistoryColorCopies,
+        stats.temporal.taaHistoryWeight,
+        stats.temporal.taaFallbackReason
     );
     ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",

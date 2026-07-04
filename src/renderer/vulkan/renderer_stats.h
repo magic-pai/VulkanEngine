@@ -562,6 +562,15 @@ enum class RendererTemporalHistoryResetReason : u32 {
     Forced = 4
 };
 
+enum class RendererTaaFallbackReason : u32 {
+    None = 0,
+    Disabled = 1,
+    CompositeUnavailable = 2,
+    HistoryInvalid = 3,
+    HistoryColorCold = 4,
+    VelocityUnavailable = 5
+};
+
 struct RendererTemporalStats {
     u32 velocityTargetAllocated = 0;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;
@@ -581,7 +590,16 @@ struct RendererTemporalStats {
     f32 jitterPixelsY = 0.0f;
     f32 jitterUvX = 0.0f;
     f32 jitterUvY = 0.0f;
+    u32 taaResolveConfigured = 0;
     u32 taaResolveEnabled = 0;
+    u32 taaHistoryColorTargetAllocated = 0;
+    VkFormat taaHistoryColorFormat = VK_FORMAT_UNDEFINED;
+    u32 taaHistoryColorReady = 0;
+    u32 taaHistoryColorCopies = 0;
+    f32 taaHistoryWeight = 0.0f;
+    u32 taaVelocityReprojectionEnabled = 0;
+    u32 taaFallbackReason = 0;
+    u32 taaDebugViewEnabled = 0;
 };
 
 struct RendererStats {

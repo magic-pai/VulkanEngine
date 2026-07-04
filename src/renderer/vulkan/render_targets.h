@@ -138,6 +138,9 @@ public:
     SE_DISABLE_MOVE(VulkanSceneRenderTargets);
 
     VkImageView HdrSceneColorView(std::size_t index) const;
+    VkImage HdrSceneColorImage(std::size_t index) const;
+    VkImageView TemporalHistoryColorView(std::size_t index) const;
+    VkImage TemporalHistoryColorImage(std::size_t index) const;
     VkImageView WeightedTranslucencyAccumView(std::size_t index) const;
     VkImageView WeightedTranslucencyRevealageView(std::size_t index) const;
     VkImage SceneDepthImage(std::size_t index) const;
@@ -149,6 +152,7 @@ public:
     VkImageView GBufferEmissiveView(std::size_t index) const;
     VkImageView GBufferMaterialAuxView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
+    VkFormat TemporalHistoryColorFormat() const;
     VkFormat WeightedTranslucencyAccumFormat() const;
     VkFormat WeightedTranslucencyRevealageFormat() const;
     VkFormat SceneDepthFormat() const;
@@ -198,6 +202,7 @@ private:
 
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_TemporalHistoryColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyAccumImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyRevealageImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SceneDepthImages;

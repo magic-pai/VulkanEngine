@@ -97,6 +97,14 @@ struct FrameTemporalState {
     bool velocityCameraMotionReady = false;
     bool velocityObjectMotionReady = false;
     bool velocityMaterialAuxMigrated = false;
+    bool taaResolveConfigured = false;
+    bool taaResolveEnabled = false;
+    bool taaHistoryColorTargetAllocated = false;
+    bool taaHistoryColorReady = false;
+    bool taaVelocityReprojectionEnabled = false;
+    f32 taaHistoryWeight = 0.0f;
+    RendererTaaFallbackReason taaFallbackReason =
+        RendererTaaFallbackReason::Disabled;
 };
 
 struct FrameLightConstants {
@@ -385,7 +393,12 @@ private:
         const FrameMatrices* matrices,
         const VkExtent2D& extent,
         bool velocityTargetAllocated,
-        bool materialAuxTargetAllocated
+        bool materialAuxTargetAllocated,
+        bool hdrCompositeAvailable,
+        bool historyColorTargetAllocated,
+        bool historyColorReady,
+        bool taaResolveConfigured,
+        f32 taaHistoryWeight
     ) const;
     void StoreTemporalHistory(
         const FrameMatrices* matrices,
@@ -401,6 +414,9 @@ private:
         VkFormat velocityFormat,
         bool materialAuxTargetAllocated,
         VkFormat materialAuxFormat,
+        bool historyColorTargetAllocated,
+        VkFormat historyColorFormat,
+        u32 historyColorCopyCount,
         RendererTemporalStats& stats
     ) const;
     bool LocalReflectionProbeCubemapReady() const;
@@ -530,6 +546,7 @@ private:
     VkExtent2D m_PreviousTemporalExtent{};
     u32 m_TemporalFrameCounter = 0;
     bool m_TemporalHistoryValid = false;
+    bool m_TemporalHistoryColorValid = false;
 
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;

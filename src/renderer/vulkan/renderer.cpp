@@ -953,6 +953,11 @@ bool TemporalHistoryForceResetFromEnvironment() {
         EnvironmentFlagEnabled("SE_TEMPORAL_FORCE_HISTORY_RESET");
 }
 
+bool TaaResolveEnabledFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TAA") ||
+        EnvironmentFlagEnabled("SE_TAA_RESOLVE");
+}
+
 std::optional<bool> EnvironmentFlagOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -1097,6 +1102,12 @@ std::optional<f32> EnvironmentFloatOverride(const char* name) {
     }
 
     return parsed;
+}
+
+f32 TaaHistoryWeightFromEnvironment() {
+    const std::optional<f32> overrideValue =
+        EnvironmentFloatOverride("SE_TAA_HISTORY_WEIGHT");
+    return glm::clamp(overrideValue.value_or(0.10f), 0.0f, 0.95f);
 }
 
 bool WeightedTranslucencyAlphaReferenceEnabled() {
@@ -2346,6 +2357,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::ToneMapping ||
         view == ForwardDebugView::AutoExposure ||
         view == ForwardDebugView::Sharpening ||
+        view == ForwardDebugView::Taa ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -2529,6 +2541,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "sharpness" ||
         value == "Sharpening") {
         return ForwardDebugView::Sharpening;
+    }
+    if (value == "taa" ||
+        value == "TAA" ||
+        value == "temporal-aa" ||
+        value == "temporal_aa" ||
+        value == "temporal-antialiasing" ||
+        value == "temporal_antialiasing") {
+        return ForwardDebugView::Taa;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -2986,11 +3006,19 @@ void VulkanRenderer::DrawFrame() {
         m_HdrDescriptorSets != nullptr;
     const bool velocityTargetAllocated = m_SceneRenderTargets != nullptr;
     const bool materialAuxTargetAllocated = m_SceneRenderTargets != nullptr;
+    const bool historyColorTargetAllocated = m_SceneRenderTargets != nullptr;
+    const bool taaResolveConfigured = TaaResolveEnabledFromEnvironment();
+    const f32 taaHistoryWeight = TaaHistoryWeightFromEnvironment();
     const FrameTemporalState temporalState = BuildFrameTemporalState(
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         extent,
         velocityTargetAllocated,
-        materialAuxTargetAllocated
+        materialAuxTargetAllocated,
+        hdrCompositeAvailable,
+        historyColorTargetAllocated,
+        m_TemporalHistoryColorValid,
+        taaResolveConfigured,
+        taaHistoryWeight
     );
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     PrepareReflectionProbeCaptureResources();
@@ -3182,6 +3210,8 @@ void VulkanRenderer::DrawFrame() {
         m_BloomPyramid != nullptr ? m_BloomPyramid->MipCount() : 0u;
     frameStats.postProcess.bloomPyramidFallbacks =
         frameStats.postProcess.bloomEnabled > 0 && !recordBloomPyramid ? 1u : 0u;
+    const bool recordTemporalHistoryColorCopy =
+        hdrCompositeAvailable && m_SceneRenderTargets != nullptr;
     const bool colorGradingLutReady =
         m_ColorGradingLut != nullptr && m_ColorGradingLut->Uploaded();
     frameStats.postProcess.colorGradingLutEnabled =
@@ -3438,8 +3468,17 @@ void VulkanRenderer::DrawFrame() {
         m_SceneRenderTargets != nullptr
             ? m_SceneRenderTargets->GBufferMaterialAuxFormat()
             : VK_FORMAT_UNDEFINED,
+        historyColorTargetAllocated,
+        m_SceneRenderTargets != nullptr
+            ? m_SceneRenderTargets->TemporalHistoryColorFormat()
+            : VK_FORMAT_UNDEFINED,
+        recordTemporalHistoryColorCopy
+            ? static_cast<u32>(m_SceneRenderTargets->Count())
+            : 0u,
         frameStats.temporal
     );
+    frameStats.temporal.taaDebugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::Taa ? 1u : 0u;
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,
@@ -3747,6 +3786,14 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.velocityCameraMotionReady > 0,
             frameStats.temporal.velocityObjectMotionReady > 0,
             frameStats.temporal.velocityMaterialAuxMigrated > 0,
+            frameStats.temporal.taaHistoryColorTargetAllocated > 0,
+            frameStats.temporal.taaHistoryColorFormat,
+            frameStats.temporal.taaHistoryColorReady > 0,
+            frameStats.temporal.taaHistoryColorCopies > 0,
+            frameStats.temporal.taaResolveConfigured > 0,
+            frameStats.temporal.taaResolveEnabled > 0,
+            frameStats.temporal.taaVelocityReprojectionEnabled > 0,
+            frameStats.temporal.taaFallbackReason,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
@@ -3830,6 +3877,8 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::AutoExposure,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ColorGrading,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Sharpening,
+        m_TemporalHistoryColorValid,
+        recordTemporalHistoryColorCopy,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -3979,6 +4028,9 @@ void VulkanRenderer::DrawFrame() {
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         extent
     );
+    if (hdrCompositeAvailable && m_SceneRenderTargets != nullptr) {
+        m_TemporalHistoryColorValid = true;
+    }
     m_CurrentFrame = (m_CurrentFrame + 1) % VulkanSyncObjects::kMaxFramesInFlight;
 }
 
@@ -4904,6 +4956,7 @@ void VulkanRenderer::RecreateSwapchain() {
             m_PhysicalDevice,
             *m_Swapchain
         );
+        m_TemporalHistoryColorValid = false;
     }
     if (m_BloomPyramid != nullptr) {
         m_BloomPyramid->Recreate(
@@ -5815,7 +5868,12 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     const FrameMatrices* matrices,
     const VkExtent2D& extent,
     bool velocityTargetAllocated,
-    bool materialAuxTargetAllocated
+    bool materialAuxTargetAllocated,
+    bool hdrCompositeAvailable,
+    bool historyColorTargetAllocated,
+    bool historyColorReady,
+    bool taaResolveConfigured,
+    f32 taaHistoryWeight
 ) const {
     FrameTemporalState state{};
     state.previousMatrices = m_PreviousTemporalMatrices;
@@ -5860,6 +5918,26 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     state.velocityCameraMotionReady =
         velocityTargetAllocated && matricesAvailable && state.historyValid;
     state.velocityObjectMotionReady = false;
+    state.taaResolveConfigured = taaResolveConfigured;
+    state.taaHistoryColorTargetAllocated = historyColorTargetAllocated;
+    state.taaHistoryColorReady = historyColorReady;
+    state.taaHistoryWeight = taaHistoryWeight;
+    state.taaVelocityReprojectionEnabled =
+        state.velocityCameraMotionReady && velocityTargetAllocated;
+    if (!taaResolveConfigured) {
+        state.taaFallbackReason = RendererTaaFallbackReason::Disabled;
+    } else if (!hdrCompositeAvailable) {
+        state.taaFallbackReason = RendererTaaFallbackReason::CompositeUnavailable;
+    } else if (!state.historyValid) {
+        state.taaFallbackReason = RendererTaaFallbackReason::HistoryInvalid;
+    } else if (!historyColorReady) {
+        state.taaFallbackReason = RendererTaaFallbackReason::HistoryColorCold;
+    } else if (!state.velocityCameraMotionReady) {
+        state.taaFallbackReason = RendererTaaFallbackReason::VelocityUnavailable;
+    } else {
+        state.taaFallbackReason = RendererTaaFallbackReason::None;
+        state.taaResolveEnabled = true;
+    }
     if (!state.historyValid && matricesAvailable) {
         state.previousMatrices = *matrices;
     }
@@ -5891,6 +5969,7 @@ void VulkanRenderer::PopulateTemporalUniforms(
         uniformData.previousProj = uniformData.proj;
         uniformData.temporalJitter = glm::vec4(0.0f);
         uniformData.temporalControls = glm::vec4(0.0f);
+        uniformData.temporalResolveControls = glm::vec4(0.0f);
         return;
     }
 
@@ -5906,6 +5985,12 @@ void VulkanRenderer::PopulateTemporalUniforms(
         temporalState->jitterApplied ? 1.0f : 0.0f,
         static_cast<f32>(temporalState->jitterSequenceIndex)
     );
+    uniformData.temporalResolveControls = glm::vec4(
+        temporalState->taaResolveEnabled ? 1.0f : 0.0f,
+        temporalState->taaHistoryWeight,
+        temporalState->taaHistoryColorReady ? 1.0f : 0.0f,
+        temporalState->taaVelocityReprojectionEnabled ? 1.0f : 0.0f
+    );
 }
 
 void VulkanRenderer::WriteTemporalStats(
@@ -5914,6 +5999,9 @@ void VulkanRenderer::WriteTemporalStats(
     VkFormat velocityFormat,
     bool materialAuxTargetAllocated,
     VkFormat materialAuxFormat,
+    bool historyColorTargetAllocated,
+    VkFormat historyColorFormat,
+    u32 historyColorCopyCount,
     RendererTemporalStats& stats
 ) const {
     stats.velocityTargetAllocated = velocityTargetAllocated ? 1u : 0u;
@@ -5940,7 +6028,22 @@ void VulkanRenderer::WriteTemporalStats(
     stats.jitterPixelsY = temporalState.jitterPixels.y;
     stats.jitterUvX = temporalState.jitterUv.x;
     stats.jitterUvY = temporalState.jitterUv.y;
-    stats.taaResolveEnabled = 0u;
+    stats.taaResolveConfigured =
+        temporalState.taaResolveConfigured ? 1u : 0u;
+    stats.taaResolveEnabled =
+        temporalState.taaResolveEnabled ? 1u : 0u;
+    stats.taaHistoryColorTargetAllocated =
+        historyColorTargetAllocated ? 1u : 0u;
+    stats.taaHistoryColorFormat =
+        historyColorTargetAllocated ? historyColorFormat : VK_FORMAT_UNDEFINED;
+    stats.taaHistoryColorReady =
+        temporalState.taaHistoryColorReady ? 1u : 0u;
+    stats.taaHistoryColorCopies = historyColorCopyCount;
+    stats.taaHistoryWeight = temporalState.taaHistoryWeight;
+    stats.taaVelocityReprojectionEnabled =
+        temporalState.taaVelocityReprojectionEnabled ? 1u : 0u;
+    stats.taaFallbackReason =
+        static_cast<u32>(temporalState.taaFallbackReason);
 }
 
 void VulkanRenderer::UpdateUniformBuffer(

@@ -950,6 +950,16 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
             colorGradingLutInfo.sampler = sampler.Handle();
         }
 
+        VkDescriptorImageInfo temporalHistoryColorInfo = hdrImageInfo;
+        temporalHistoryColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        temporalHistoryColorInfo.imageView = renderTargets.TemporalHistoryColorView(index);
+        temporalHistoryColorInfo.sampler = sampler.Handle();
+
+        VkDescriptorImageInfo velocityInfo = hdrImageInfo;
+        velocityInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        velocityInfo.imageView = renderTargets.VelocityView(index);
+        velocityInfo.sampler = sampler.Handle();
+
         std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
         for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
             descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -962,6 +972,10 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
                 descriptorWrites[binding].pImageInfo = &bloomImageInfo;
             } else if (binding == 2) {
                 descriptorWrites[binding].pImageInfo = &colorGradingLutInfo;
+            } else if (binding == 3) {
+                descriptorWrites[binding].pImageInfo = &temporalHistoryColorInfo;
+            } else if (binding == 4) {
+                descriptorWrites[binding].pImageInfo = &velocityInfo;
             } else {
                 descriptorWrites[binding].pImageInfo = &hdrImageInfo;
             }

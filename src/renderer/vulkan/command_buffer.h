@@ -102,6 +102,8 @@ public:
         bool autoExposureDebugView = false,
         bool colorGradingDebugView = false,
         bool sharpeningDebugView = false,
+        bool temporalHistoryColorInitialized = false,
+        bool recordTemporalHistoryColorCopy = false,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
         int gBufferDebugView = -1,
