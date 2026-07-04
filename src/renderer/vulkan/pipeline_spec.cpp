@@ -67,6 +67,7 @@ PipelineSpec PipelineSpec::WeightedTranslucency3D(
     spec.colorAttachmentCount = 2;
     spec.colorBlendModes[0] = ColorBlendMode::Additive;
     spec.colorBlendModes[1] = ColorBlendMode::ZeroSource;
+    spec.dynamicViewportScissor = true;
     return spec;
 }
 
@@ -99,6 +100,7 @@ PipelineSpec PipelineSpec::GBuffer3D(
     spec.instancedVertexShaderPath.clear();
     spec.colorAttachmentCount = 6;
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
+    spec.dynamicViewportScissor = true;
     return spec;
 }
 
@@ -117,6 +119,7 @@ PipelineSpec PipelineSpec::DeferredLighting(
     spec.alphaBlendEnabled = false;
     spec.colorAttachmentCount = 1;
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
+    spec.dynamicViewportScissor = true;
     return spec;
 }
 

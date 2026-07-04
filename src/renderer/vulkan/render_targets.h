@@ -129,7 +129,8 @@ public:
     VulkanSceneRenderTargets(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        const VulkanSwapchain& swapchain
+        const VulkanSwapchain& swapchain,
+        VkExtent2D extent = {}
     );
 
     ~VulkanSceneRenderTargets();
@@ -168,7 +169,8 @@ public:
     void Recreate(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        const VulkanSwapchain& swapchain
+        const VulkanSwapchain& swapchain,
+        VkExtent2D extent = {}
     );
     void Release();
 

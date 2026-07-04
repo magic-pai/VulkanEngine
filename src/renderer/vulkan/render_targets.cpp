@@ -431,9 +431,10 @@ void VulkanBloomRenderPass::Release() {
 VulkanSceneRenderTargets::VulkanSceneRenderTargets(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    const VulkanSwapchain& swapchain
+    const VulkanSwapchain& swapchain,
+    VkExtent2D extent
 ) {
-    Recreate(device, physicalDevice, swapchain);
+    Recreate(device, physicalDevice, swapchain, extent);
 }
 
 VulkanSceneRenderTargets::~VulkanSceneRenderTargets() {
@@ -583,10 +584,12 @@ std::size_t VulkanSceneRenderTargets::Count() const {
 void VulkanSceneRenderTargets::Recreate(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    const VulkanSwapchain& swapchain
+    const VulkanSwapchain& swapchain,
+    VkExtent2D extent
 ) {
     Release();
-    m_Extent = swapchain.Extent();
+    m_Extent =
+        extent.width > 0u && extent.height > 0u ? extent : swapchain.Extent();
     const std::size_t count = swapchain.Images().size();
 
     CreateImageArray(

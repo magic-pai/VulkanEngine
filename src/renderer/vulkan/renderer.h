@@ -434,6 +434,7 @@ private:
     ) const;
     FrameTemporalUpscaleState BuildFrameTemporalUpscaleState(
         const VkExtent2D& displayExtent,
+        const VkExtent2D& activeInternalExtent,
         bool hdrSceneColorReady,
         bool sceneDepthReady,
         const FrameTemporalState& temporalState

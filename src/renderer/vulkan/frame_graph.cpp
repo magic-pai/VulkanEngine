@@ -1471,6 +1471,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     RenderFrameGraphPlan plan{};
     plan.name = "SelfEngine Hybrid Renderer";
     plan.target = "UE5-class AAA frame graph";
+    const std::string sceneExtentScale = inputs.temporalRenderScaleApplied
+        ? "internal scene extent"
+        : "display extent";
 
     AppendResource(
         plan,
@@ -1548,7 +1551,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "HDRSceneColor",
             VulkanFormatName(inputs.hdrSceneColorFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
     }
     if (inputs.bloomPyramidAllocated) {
@@ -1795,7 +1798,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "WeightedTranslucencyAccum",
             VulkanFormatName(inputs.weightedTranslucencyAccumFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1804,7 +1807,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "WeightedTranslucencyRevealage",
             VulkanFormatName(inputs.weightedTranslucencyRevealageFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
     }
     if (inputs.deferredTargetsAllocated) {
@@ -1815,7 +1818,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "SceneDepth",
             VulkanFormatName(inputs.sceneDepthFormat),
             "depth attachment, sampled, Hi-Z source",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1824,7 +1827,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Velocity",
             VulkanFormatName(inputs.velocityFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1833,7 +1836,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferAlbedo",
             VulkanFormatName(inputs.gBufferAlbedoFormat),
             "color attachment, sampled",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1842,7 +1845,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferNormalRoughness",
             VulkanFormatName(inputs.gBufferNormalRoughnessFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1851,7 +1854,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferMaterial",
             VulkanFormatName(inputs.gBufferMaterialFormat),
             "color attachment, sampled",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1860,7 +1863,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferEmissive",
             VulkanFormatName(inputs.gBufferEmissiveFormat),
             "color attachment, sampled, storage",
-            "window extent"
+            sceneExtentScale
         );
         AppendResource(
             plan,
@@ -1869,7 +1872,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "GBufferMaterialAux",
             VulkanFormatName(inputs.gBufferMaterialAuxFormat),
             "color attachment, sampled",
-            inputs.velocityMaterialAuxMigrated
+            inputs.temporalRenderScaleApplied
+                ? sceneExtentScale
+                : inputs.velocityMaterialAuxMigrated
                 ? "clearcoat roughness/transmission payload split out of Velocity"
                 : "material auxiliary payload"
         );
@@ -1897,7 +1902,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "TemporalHistoryColor",
             VulkanFormatName(inputs.temporalHistoryColorFormat),
             "sampled, transfer dst",
-            inputs.temporalHistoryColorReady
+            inputs.temporalRenderScaleApplied
+                ? sceneExtentScale
+                : inputs.temporalHistoryColorReady
                 ? "previous HDR scene color ready for temporal resolve"
                 : "history color cold"
         );

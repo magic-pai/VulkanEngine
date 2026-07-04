@@ -63,7 +63,7 @@ machines or incomplete packages.
    - Keep `temporalUpscalerPluginAvailable=0` until an actual evaluate adapter
      exists; report package readiness separately.
 
-2. Internal render-scale resource carrier.
+2. Internal render-scale resource carrier. Implemented.
    - Make render-scale affect internal scene target extents under an explicit
      experimental gate.
    - Keep swapchain/display extent unchanged.
@@ -89,11 +89,13 @@ machines or incomplete packages.
      placeholders, and DLSS-specific debug views.
    - Add reference screenshots/visual QA before claiming production readiness.
 
-## First Slice To Execute Now
+## Next Slice To Execute Now
 
-Implement Slice 1: DLSS package/capability probe and diagnostics only. This
-does not initialize NGX/Streamline, link against DLSS, evaluate DLSS, resize
-render targets, or change presentation.
+Implement Slice 3: DLSS adapter initialization and capability query. This
+should initialize the selected DLSS Vulkan integration path only when
+`SE_UPSCALER_PLUGIN=dlss` is requested and the package probe is ready, then
+publish support/driver/quality-mode/recommended-resolution state without
+evaluating DLSS yet.
 
 ## Slice 1 Execution Evidence
 
@@ -133,3 +135,55 @@ render targets, or change presentation.
 - This is package/capability readiness only. It does not initialize NGX or
   Streamline, link DLSS libraries into the engine, evaluate DLSS, resize render
   targets, enable Frame Generation/Ray Reconstruction, or change presentation.
+
+## Slice 2 Execution Evidence
+
+- Added an explicit internal render-scale apply gate. `SE_RENDER_SCALE`,
+  `SE_TEMPORAL_RENDER_SCALE`, and `SE_INTERNAL_RENDER_SCALE` still request a
+  diagnostic internal scale by default. The renderer only applies that scale to
+  scene targets when `SE_RENDER_SCALE_APPLY=1` or
+  `SE_INTERNAL_RENDER_SCALE_APPLY=1` is set.
+- `VulkanSceneRenderTargets` can now be created/recreated with an explicit
+  internal extent. HDR scene color, temporal history color, weighted
+  translucency targets, scene depth, velocity, and GBuffer attachments follow
+  that internal extent while the swapchain and display extent remain unchanged.
+- Temporal state now tracks the active internal scene extent for jitter UVs,
+  history extent checks, and temporal-upscale diagnostics. Light-tile assignment
+  also uses the active internal extent so deferred lighting tile indices match
+  the resized GBuffer/HDR path.
+- Fullscreen deferred/HDR/debug pipelines and internal GBuffer/WBOIT geometry
+  passes now use dynamic viewport/scissor where they render into framebuffer
+  extents that can differ from the swapchain. The forward-residual depth-copy
+  path refuses unsafe scene-depth copies when scene and swapchain extents differ,
+  falling back to depth prefill instead.
+- FrameGraph resource scale text now distinguishes display extent from internal
+  scene extent for HDRSceneColor, SceneDepth, Velocity, GBuffer, weighted
+  translucency, and temporal history resources.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_dlss_render_scale_requested_smoke.csv`,
+  `out/benchmarks/aaa_dlss_render_scale_applied_smoke.csv`, and
+  `out/benchmarks/aaa_dlss_render_scale_dlss_requested_smoke.csv` all report
+  0 frame-graph validation issues.
+- The requested-only smoke reports render scale requested/active/applied
+  `0.75/1/0`, display extent `1280x720`, requested extent `960x540`, active
+  extent `1280x720`, temporal upscale requested/enabled `1/0`, fallback reason
+  `4`, and contract ready `1`.
+- The apply-gated smoke reports render scale requested/active/applied
+  `0.75/0.75/1`, display extent `1280x720`, requested and active extent
+  `960x540`, light tile grid `60x34`, temporal upscale requested/enabled
+  `1/0`, fallback reason `4`, and contract ready `1`.
+- The DLSS-requested apply-gated smoke reports the same active internal extent,
+  provider kind `1`, package ready `1`, SR/transformer symbols `1/1`, SDK
+  version `310.7.0`, evaluate adapter `0`, temporal-upscale fallback reason
+  `4`, and contract ready `1`.
+- The WBOIT apply-gated smoke
+  `out/benchmarks/aaa_dlss_render_scale_wboit_smoke.csv` reports active extent
+  `960x540`, weighted translucency accum/revealage extent `960x540`, 5 WBOIT
+  draws, one WBOIT resolve, 0 forward-residual draws, 0 depth-copy ops, and 0
+  frame-graph validation issues.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is an internal render-scale carrier only. It does not initialize NGX or
+  Streamline, query DLSS runtime support, evaluate DLSS, enable dynamic
+  resolution policy, add a native TAAU/TSR pass, or change default presentation.

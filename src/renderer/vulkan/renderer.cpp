@@ -1138,6 +1138,71 @@ f32 TemporalRenderScaleFromEnvironment() {
     return glm::clamp(overrideValue.value_or(1.0f), 0.5f, 1.0f);
 }
 
+bool TemporalRenderScaleApplyEnabledFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_RENDER_SCALE_APPLY") ||
+        EnvironmentFlagEnabled("SE_INTERNAL_RENDER_SCALE_APPLY");
+}
+
+VkExtent2D TemporalRequestedInternalExtent(
+    const VkExtent2D& displayExtent,
+    f32 renderScale
+) {
+    if (displayExtent.width == 0u || displayExtent.height == 0u) {
+        return {};
+    }
+
+    return VkExtent2D{
+        std::max(
+            1u,
+            static_cast<u32>(std::round(
+                static_cast<f32>(displayExtent.width) * renderScale
+            ))
+        ),
+        std::max(
+            1u,
+            static_cast<u32>(std::round(
+                static_cast<f32>(displayExtent.height) * renderScale
+            ))
+        )
+    };
+}
+
+VkExtent2D TemporalActiveInternalExtentForDisplay(const VkExtent2D& displayExtent) {
+    const f32 renderScale = TemporalRenderScaleFromEnvironment();
+    if (!TemporalRenderScaleApplyEnabledFromEnvironment() ||
+        renderScale >= 0.999f ||
+        displayExtent.width == 0u ||
+        displayExtent.height == 0u) {
+        return displayExtent;
+    }
+
+    return TemporalRequestedInternalExtent(displayExtent, renderScale);
+}
+
+f32 TemporalRenderScaleForExtents(
+    const VkExtent2D& displayExtent,
+    const VkExtent2D& internalExtent
+) {
+    if (displayExtent.width == 0u ||
+        displayExtent.height == 0u ||
+        internalExtent.width == 0u ||
+        internalExtent.height == 0u) {
+        return 1.0f;
+    }
+
+    const f32 scaleX =
+        static_cast<f32>(internalExtent.width) /
+        static_cast<f32>(displayExtent.width);
+    const f32 scaleY =
+        static_cast<f32>(internalExtent.height) /
+        static_cast<f32>(displayExtent.height);
+    return glm::clamp(std::min(scaleX, scaleY), 0.5f, 1.0f);
+}
+
+bool ExtentsDiffer(const VkExtent2D& left, const VkExtent2D& right) {
+    return left.width != right.width || left.height != right.height;
+}
+
 bool DynamicResolutionRequestedFromEnvironment() {
     return EnvironmentFlagEnabled("SE_DYNAMIC_RESOLUTION") ||
         EnvironmentFlagEnabled("SE_DYNAMIC_RESOLUTION_ENABLED");
@@ -3022,6 +3087,9 @@ void VulkanRenderer::DrawFrame() {
     sectionStart = sectionEnd;
 
     const VkExtent2D extent = m_Swapchain->Extent();
+    const VkExtent2D sceneExtent = m_SceneRenderTargets != nullptr
+        ? m_SceneRenderTargets->Extent()
+        : extent;
     const f32 aspectRatio = static_cast<f32>(extent.width) / static_cast<f32>(extent.height);
     std::optional<FrameMatrices> mainFrameMatrices;
     if (m_FrameMatricesProvider) {
@@ -3150,7 +3218,7 @@ void VulkanRenderer::DrawFrame() {
         TemporalJitterApplicationEnabledFromEnvironment();
     const FrameTemporalState temporalState = BuildFrameTemporalState(
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
-        extent,
+        sceneExtent,
         velocityTargetAllocated,
         materialAuxTargetAllocated,
         hdrCompositeAvailable,
@@ -3167,6 +3235,7 @@ void VulkanRenderer::DrawFrame() {
     const FrameTemporalUpscaleState temporalUpscaleState =
         BuildFrameTemporalUpscaleState(
             extent,
+            sceneExtent,
             hdrCompositeAvailable,
             m_SceneRenderTargets != nullptr,
             temporalState
@@ -3248,7 +3317,7 @@ void VulkanRenderer::DrawFrame() {
     UpdateLightBuffer(
         imageIndex,
         frameLightSet,
-        extent,
+        sceneExtent,
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         &lightTileStats
     );
@@ -4250,7 +4319,7 @@ void VulkanRenderer::DrawFrame() {
 
     StoreTemporalHistory(
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
-        extent
+        sceneExtent
     );
     if (hdrCompositeAvailable && m_SceneRenderTargets != nullptr) {
         m_TemporalHistoryColorValid = true;
@@ -4444,10 +4513,13 @@ void VulkanRenderer::CreateSwapchainResources() {
     );
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_DepthBuffer = std::make_unique<VulkanDepthBuffer>(m_Device, m_PhysicalDevice, *m_Swapchain);
+    const VkExtent2D sceneExtent =
+        TemporalActiveInternalExtentForDisplay(m_Swapchain->Extent());
     m_SceneRenderTargets = std::make_unique<VulkanSceneRenderTargets>(
         m_Device,
         m_PhysicalDevice,
-        *m_Swapchain
+        *m_Swapchain,
+        sceneExtent
     );
     m_BloomPyramid = std::make_unique<VulkanBloomPyramid>(
         m_Device,
@@ -5175,10 +5247,13 @@ void VulkanRenderer::RecreateSwapchain() {
     m_SyncObjects->RecreateSwapchainSyncObjects(m_Swapchain->Images().size());
     m_DepthBuffer->Recreate(m_Device, m_PhysicalDevice, *m_Swapchain);
     if (m_SceneRenderTargets != nullptr) {
+        const VkExtent2D sceneExtent =
+            TemporalActiveInternalExtentForDisplay(m_Swapchain->Extent());
         m_SceneRenderTargets->Recreate(
             m_Device,
             m_PhysicalDevice,
-            *m_Swapchain
+            *m_Swapchain,
+            sceneExtent
         );
         m_TemporalHistoryColorValid = false;
     }
@@ -6184,34 +6259,23 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
 
 FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
     const VkExtent2D& displayExtent,
+    const VkExtent2D& activeInternalExtent,
     bool hdrSceneColorReady,
     bool sceneDepthReady,
     const FrameTemporalState& temporalState
 ) const {
     FrameTemporalUpscaleState state{};
     state.displayExtent = displayExtent;
-    state.activeInternalExtent = displayExtent;
+    state.activeInternalExtent =
+        activeInternalExtent.width > 0u && activeInternalExtent.height > 0u
+            ? activeInternalExtent
+            : displayExtent;
     state.requestedRenderScale = TemporalRenderScaleFromEnvironment();
-    state.activeRenderScale = 1.0f;
+    state.activeRenderScale =
+        TemporalRenderScaleForExtents(displayExtent, state.activeInternalExtent);
     state.requiredInputMask = kTemporalUpscaleRequiredInputMask;
-    if (displayExtent.width > 0u && displayExtent.height > 0u) {
-        state.requestedInternalExtent = VkExtent2D{
-            std::max(
-                1u,
-                static_cast<u32>(std::round(
-                    static_cast<f32>(displayExtent.width) *
-                    state.requestedRenderScale
-                ))
-            ),
-            std::max(
-                1u,
-                static_cast<u32>(std::round(
-                    static_cast<f32>(displayExtent.height) *
-                    state.requestedRenderScale
-                ))
-            )
-        };
-    }
+    state.requestedInternalExtent =
+        TemporalRequestedInternalExtent(displayExtent, state.requestedRenderScale);
 
     const bool renderScaleReduced =
         state.requestedInternalExtent.width < displayExtent.width ||
@@ -6253,7 +6317,9 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         (state.inputReadinessMask & state.requiredInputMask) ==
             state.requiredInputMask;
 
-    state.renderScaleApplied = false;
+    state.renderScaleApplied =
+        TemporalRenderScaleApplyEnabledFromEnvironment() &&
+        ExtentsDiffer(state.activeInternalExtent, displayExtent);
     state.dynamicResolutionEnabled = false;
     state.temporalUpscaleEnabled = false;
     state.upscalerPluginAvailable =

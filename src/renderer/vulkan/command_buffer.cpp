@@ -391,7 +391,7 @@ void DrawShadowCommand(
     vkCmdDrawIndexed(commandBuffer, renderCommand.mesh->IndexCount(), 1, 0, 0, 0);
 }
 
-void SetShadowViewportAndScissor(
+void SetViewportAndScissor(
     VkCommandBuffer commandBuffer,
     VkOffset2D offset,
     VkExtent2D extent
@@ -409,6 +409,14 @@ void SetShadowViewportAndScissor(
     scissor.offset = offset;
     scissor.extent = extent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+}
+
+void SetShadowViewportAndScissor(
+    VkCommandBuffer commandBuffer,
+    VkOffset2D offset,
+    VkExtent2D extent
+) {
+    SetViewportAndScissor(commandBuffer, offset, extent);
 }
 
 void DrawShadowCommands(
@@ -921,6 +929,11 @@ bool CopySceneDepthToSwapchainDepth(
     }
     if (imageIndex >= sceneRenderTargets->Count() ||
         imageIndex >= swapchainDepthBuffer->Count()) {
+        return false;
+    }
+
+    if (sceneRenderTargets->Extent().width != extent.width ||
+        sceneRenderTargets->Extent().height != extent.height) {
         return false;
     }
 
@@ -1564,6 +1577,7 @@ void VulkanCommandBuffer::Record(
             &gBufferPassInfo,
             VK_SUBPASS_CONTENTS_INLINE
         );
+        SetViewportAndScissor(commandBuffer, { 0, 0 }, gBufferFramebuffer->Extent());
 
         if (gBufferGraphicsPipeline != nullptr &&
             gBufferDescriptorSets != nullptr &&
@@ -1712,6 +1726,11 @@ void VulkanCommandBuffer::Record(
             &translucencyPassInfo,
             VK_SUBPASS_CONTENTS_INLINE
         );
+        SetViewportAndScissor(
+            commandBuffer,
+            { 0, 0 },
+            weightedTranslucencyFramebuffer->Extent()
+        );
 
         if (weightedTranslucencyGraphicsPipeline != nullptr &&
             !weightedTranslucencyRenderCommands.empty()) {
@@ -1815,6 +1834,8 @@ void VulkanCommandBuffer::Record(
                 0,
                 nullptr
             );
+
+            SetViewportAndScissor(commandBuffer, { 0, 0 }, hdrFramebuffer->Extent());
 
             const ObjectPushConstants lightingConstants =
                 DeferredLightingPushConstants(gBufferRenderCommands);
@@ -1930,6 +1951,8 @@ void VulkanCommandBuffer::Record(
                 0,
                 nullptr
             );
+
+            SetViewportAndScissor(commandBuffer, { 0, 0 }, hdrFramebuffer->Extent());
 
             ObjectPushConstants resolveConstants =
                 DeferredLightingPushConstants(gBufferRenderCommands);
@@ -2235,6 +2258,8 @@ void VulkanCommandBuffer::Record(
             nullptr
         );
 
+        SetViewportAndScissor(commandBuffer, { 0, 0 }, renderPassInfo.renderArea.extent);
+
         ObjectPushConstants debugConstants =
             DeferredLightingPushConstants(gBufferRenderCommands);
         debugConstants.materialControls = glm::vec4(static_cast<f32>(gBufferDebugView), 0.0f, 0.0f, 0.0f);
@@ -2331,6 +2356,8 @@ void VulkanCommandBuffer::Record(
             0,
             nullptr
         );
+
+        SetViewportAndScissor(commandBuffer, { 0, 0 }, renderPassInfo.renderArea.extent);
 
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         if (bindStats != nullptr) {
