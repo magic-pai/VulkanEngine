@@ -939,3 +939,31 @@ after the evaluate contract is stable.
   includes imported-model baselines, animated/skinned object velocity, forward
   residual and WBOIT object-motion policy, and real non-neutral
   reactive/transparency masks.
+
+## Slice 4.10 Execution Evidence
+
+- Moved forward-special/residual composition for the deferred-HDR route into
+  the pre-upscale HDR path instead of drawing it only after DLSS in the
+  swapchain main pass. `VulkanHdrRenderPass` now loads `SceneDepth` as a
+  read-only depth attachment, `VulkanHdrFramebuffer` binds `HDRSceneColor` plus
+  `SceneDepth`, and command recording draws the residual commands into
+  `HDRSceneColor` before auto exposure, DLSS evaluate, bloom, and final
+  composite.
+- Added HDR forward-residual graphics pipeline variants and kept the older
+  swapchain residual path as a fallback/reference. `forward_3d.frag` now skips
+  display tone mapping for the HDR residual route so the pass writes linear HDR
+  into `HDRSceneColor`.
+- Added a FrameGraph-visible `ForwardResidualHdrPreUpscale` pass between
+  weighted-translucency resolve and temporal upscaler evaluation. It reads
+  `HDRSceneColor`, `SceneDepth`, the shared light-list carrier when present,
+  and IBL resources when allocated, then writes `HDRSceneColor`.
+- Verification: `_quick_build.bat` passes for `SelfEngineForward3D`. The focused
+  probe `out/benchmarks/aaa_dlss_forward_special_preupscale_probe_dlss.csv`
+  reports `framegraph_validation_issues=0`, DLSS evaluate/output `1/1`,
+  post source `1/1/0`, quality gate `1/0/4`, quality masks `255/251/4`,
+  object motion ready `0`, 79 forward-residual draws, 79 shared-light-list
+  residual draws, and `depth_copy_ops=0`.
+- The production DLSS gate intentionally remains blocked for forward-special
+  content. The pass-ordering problem is now addressed, but residual/transparent
+  content still needs real velocity/depth/material policy before the gate can
+  mark object motion ready.

@@ -2180,6 +2180,34 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Resolves weighted blended translucency accum/revealage back into HDR scene color."
         );
     }
+    if (inputs.forwardResidualPreUpscaleEnabled) {
+        const bool iblResourcesReady =
+            inputs.iblBrdfLutAllocated &&
+            inputs.iblIrradianceMapAllocated &&
+            inputs.iblPrefilteredMapAllocated;
+        const char* reads = nullptr;
+        if (inputs.lightTileCullComputeEnabled && iblResourcesReady) {
+            reads =
+                "HDRSceneColor, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap";
+        } else if (inputs.lightTileCullComputeEnabled) {
+            reads = "HDRSceneColor, SceneDepth, LightTileLists";
+        } else if (iblResourcesReady) {
+            reads =
+                "HDRSceneColor, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap";
+        } else {
+            reads = "HDRSceneColor, SceneDepth";
+        }
+        AppendPass(
+            plan,
+            RenderFramePassKind::Forward,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "ForwardResidualHdrPreUpscale",
+            reads,
+            "HDRSceneColor",
+            "Composites forward residual and special-material draws into HDR scene color before TAA/DLSS evaluate."
+        );
+    }
 
     if (inputs.taaResolveConfigured || inputs.temporalHistoryColorAllocated) {
         AppendPass(

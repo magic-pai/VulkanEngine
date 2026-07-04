@@ -3095,6 +3095,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
     m_WeightedTranslucencyGraphicsPipeline.reset();
     m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
+    m_ForwardResidualHdrGraphicsPipeline.reset();
+    m_DoubleSidedForwardResidualHdrGraphicsPipeline.reset();
     m_ForwardResidualGraphicsPipeline.reset();
     m_DoubleSidedForwardResidualGraphicsPipeline.reset();
     m_ShadowGraphicsPipeline.reset();
@@ -4205,6 +4207,12 @@ void VulkanRenderer::DrawFrame() {
             frameStats.weightedTranslucency.revealageFormat,
             frameStats.weightedTranslucency.renderPassAllocated > 0,
             frameStats.weightedTranslucency.framebufferCount,
+            has3DMainPass &&
+                !forwardResidualCommands.empty() &&
+                m_ForwardResidualHdrGraphicsPipeline != nullptr &&
+                m_HdrRenderPass != nullptr &&
+                m_HdrFramebuffer != nullptr &&
+                m_SceneRenderTargets != nullptr,
             m_SceneRenderTargets != nullptr,
             m_SceneRenderTargets != nullptr
                 ? m_SceneRenderTargets->SceneDepthFormat()
@@ -4449,6 +4457,8 @@ void VulkanRenderer::DrawFrame() {
         recordAutoExposureCompute ? m_DescriptorSets.get() : nullptr,
         recordAutoExposureCompute ? m_HdrDescriptorSets.get() : nullptr,
         recordAutoExposureCompute,
+        has3DMainPass ? m_ForwardResidualHdrGraphicsPipeline.get() : nullptr,
+        has3DMainPass ? m_DoubleSidedForwardResidualHdrGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_ForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedForwardResidualGraphicsPipeline.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(forwardResidualCommands.data(), forwardResidualCommands.size()) : std::span<const RenderCommand>{},
@@ -4877,7 +4887,7 @@ void VulkanRenderer::CreateSwapchainResources() {
     );
     m_HdrRenderPass = std::make_unique<VulkanHdrRenderPass>(
         m_Device,
-        m_SceneRenderTargets->HdrSceneColorFormat()
+        *m_SceneRenderTargets
     );
     m_BloomDownsampleRenderPass = std::make_unique<VulkanBloomRenderPass>(
         m_Device,
@@ -5110,6 +5120,23 @@ void VulkanRenderer::CreateSwapchainResources() {
                 m_PipelineSpec.vertexShaderPath,
                 m_PipelineSpec.fragmentShaderPath
             );
+        m_ForwardResidualHdrGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_HdrRenderPass->Handle(),
+            *m_Swapchain,
+            forwardResidualSpec
+        );
+        m_DoubleSidedForwardResidualHdrGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_HdrRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(forwardResidualSpec)
+            );
         m_ForwardResidualGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
             *m_DescriptorSetLayout,
@@ -5131,6 +5158,8 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
         m_WeightedTranslucencyGraphicsPipeline.reset();
         m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
+        m_ForwardResidualHdrGraphicsPipeline.reset();
+        m_DoubleSidedForwardResidualHdrGraphicsPipeline.reset();
         m_ForwardResidualGraphicsPipeline.reset();
         m_DoubleSidedForwardResidualGraphicsPipeline.reset();
     }
@@ -5403,6 +5432,12 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_WeightedTranslucencyGraphicsPipeline != nullptr) {
         m_WeightedTranslucencyGraphicsPipeline->Release();
     }
+    if (m_DoubleSidedForwardResidualHdrGraphicsPipeline != nullptr) {
+        m_DoubleSidedForwardResidualHdrGraphicsPipeline->Release();
+    }
+    if (m_ForwardResidualHdrGraphicsPipeline != nullptr) {
+        m_ForwardResidualHdrGraphicsPipeline->Release();
+    }
     if (m_DoubleSidedForwardResidualGraphicsPipeline != nullptr) {
         m_DoubleSidedForwardResidualGraphicsPipeline->Release();
     }
@@ -5646,7 +5681,7 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_HdrRenderPass != nullptr && m_SceneRenderTargets != nullptr) {
         m_HdrRenderPass->Recreate(
             m_Device,
-            m_SceneRenderTargets->HdrSceneColorFormat()
+            *m_SceneRenderTargets
         );
     }
     if (m_BloomDownsampleRenderPass != nullptr && m_BloomPyramid != nullptr) {
@@ -5900,6 +5935,28 @@ void VulkanRenderer::RecreateSwapchain() {
                 m_PipelineSpec.vertexShaderPath,
                 m_PipelineSpec.fragmentShaderPath
             );
+        if (m_ForwardResidualHdrGraphicsPipeline != nullptr &&
+            m_HdrRenderPass != nullptr) {
+            m_ForwardResidualHdrGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_HdrRenderPass->Handle(),
+                *m_Swapchain,
+                forwardResidualSpec
+            );
+        }
+        if (m_DoubleSidedForwardResidualHdrGraphicsPipeline != nullptr &&
+            m_HdrRenderPass != nullptr) {
+            m_DoubleSidedForwardResidualHdrGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_HdrRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(forwardResidualSpec)
+            );
+        }
         m_ForwardResidualGraphicsPipeline->Recreate(
             m_Device,
             *m_DescriptorSetLayout,

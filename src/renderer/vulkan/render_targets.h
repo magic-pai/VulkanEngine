@@ -12,7 +12,10 @@ class VulkanSwapchain;
 
 class VulkanHdrRenderPass {
 public:
-    VulkanHdrRenderPass(const VulkanDevice& device, VkFormat hdrColorFormat);
+    VulkanHdrRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
     ~VulkanHdrRenderPass();
 
     SE_DISABLE_COPY(VulkanHdrRenderPass);
@@ -20,11 +23,17 @@ public:
 
     VkRenderPass Handle() const;
 
-    void Recreate(const VulkanDevice& device, VkFormat hdrColorFormat);
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
     void Release();
 
 private:
-    void CreateRenderPass(const VulkanDevice& device, VkFormat hdrColorFormat);
+    void CreateRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;

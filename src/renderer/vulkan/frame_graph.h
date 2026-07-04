@@ -344,6 +344,7 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat weightedTranslucencyRevealageFormat = VK_FORMAT_UNDEFINED;
     bool weightedTranslucencyRenderPassAllocated = false;
     u32 weightedTranslucencyFramebufferCount = 0;
+    bool forwardResidualPreUpscaleEnabled = false;
     bool deferredTargetsAllocated = false;
     VkFormat sceneDepthFormat = VK_FORMAT_UNDEFINED;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;

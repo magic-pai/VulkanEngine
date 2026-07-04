@@ -124,14 +124,15 @@ void PushMaterialConstants(
     const VkExtent2D& extent,
     f32 materialId,
     u32& pushConstantUpdateCount,
-    u64& pushConstantByteCount
+    u64& pushConstantByteCount,
+    f32 hdrOutputFlag = 0.0f
 ) {
     RenderMaterialPushConstants materialData = renderCommand.materialPushConstants;
     materialData.materialControls.w = materialId;
     materialData.viewport = glm::vec4(
         static_cast<f32>(extent.width),
         static_cast<f32>(extent.height),
-        0.0f,
+        hdrOutputFlag,
         0.0f
     );
 
@@ -251,7 +252,8 @@ void DrawRenderCommand(
     u32& materialBindCount,
     u32& meshBindCount,
     u32& pushConstantUpdateCount,
-    u64& pushConstantByteCount
+    u64& pushConstantByteCount,
+    f32 hdrOutputFlag = 0.0f
 ) {
     SE_ASSERT(renderCommand.mesh != nullptr, "RenderCommand must reference a mesh");
     SE_ASSERT(renderCommand.material != nullptr, "RenderCommand must reference a material");
@@ -272,7 +274,8 @@ void DrawRenderCommand(
             extent,
             materialId,
             pushConstantUpdateCount,
-            pushConstantByteCount
+            pushConstantByteCount,
+            hdrOutputFlag
         );
     }
 
@@ -304,7 +307,8 @@ void DrawForwardCommands(
     u32& materialBindCount,
     u32& meshBindCount,
     u32& pushConstantUpdateCount,
-    u64& pushConstantByteCount
+    u64& pushConstantByteCount,
+    f32 hdrOutputFlag = 0.0f
 ) {
     if (renderCommands.empty()) {
         return;
@@ -360,7 +364,8 @@ void DrawForwardCommands(
             materialBindCount,
             meshBindCount,
             pushConstantUpdateCount,
-            pushConstantByteCount
+            pushConstantByteCount,
+            hdrOutputFlag
         );
     }
 }
@@ -498,7 +503,8 @@ u32 DrawForwardResidualCommands(
     u32& materialBindCount,
     u32& meshBindCount,
     u32& pushConstantUpdateCount,
-    u64& pushConstantByteCount
+    u64& pushConstantByteCount,
+    f32 hdrOutputFlag = 0.0f
 ) {
     if (residualPipeline == nullptr || renderCommands.empty()) {
         return 0;
@@ -519,7 +525,8 @@ u32 DrawForwardResidualCommands(
         materialBindCount,
         meshBindCount,
         pushConstantUpdateCount,
-        pushConstantByteCount
+        pushConstantByteCount,
+        hdrOutputFlag
     );
     return static_cast<u32>(renderCommands.size());
 }
@@ -1490,6 +1497,8 @@ void VulkanCommandBuffer::Record(
     const VulkanDescriptorSets* autoExposureFrameDescriptorSets,
     const VulkanHdrDescriptorSets* autoExposureHdrDescriptorSets,
     bool recordAutoExposureCompute,
+    const VulkanGraphicsPipeline* forwardResidualHdrGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedForwardResidualHdrGraphicsPipeline,
     const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline,
     std::span<const RenderCommand> forwardResidualRenderCommands,
@@ -2051,9 +2060,11 @@ void VulkanCommandBuffer::Record(
         }
     }
 
+    bool forwardResidualDrawnInHdr = false;
     if (hdrRenderPass != nullptr && hdrFramebuffer != nullptr) {
-        VkClearValue hdrClearValue{};
-        hdrClearValue.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+        std::array<VkClearValue, 2> hdrClearValues{};
+        hdrClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+        hdrClearValues[1].depthStencil = { 1.0f, 0 };
 
         VkRenderPassBeginInfo hdrPassInfo{};
         hdrPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -2061,8 +2072,8 @@ void VulkanCommandBuffer::Record(
         hdrPassInfo.framebuffer = hdrFramebuffer->Handle(imageIndex);
         hdrPassInfo.renderArea.offset = { 0, 0 };
         hdrPassInfo.renderArea.extent = hdrFramebuffer->Extent();
-        hdrPassInfo.clearValueCount = 1;
-        hdrPassInfo.pClearValues = &hdrClearValue;
+        hdrPassInfo.clearValueCount = static_cast<u32>(hdrClearValues.size());
+        hdrPassInfo.pClearValues = hdrClearValues.data();
 
         vkCmdBeginRenderPass(
             commandBuffer,
@@ -2259,6 +2270,44 @@ void VulkanCommandBuffer::Record(
             }
         }
 
+        if (forwardResidualHdrGraphicsPipeline != nullptr &&
+            !forwardResidualRenderCommands.empty()) {
+            SetViewportAndScissor(commandBuffer, { 0, 0 }, hdrFramebuffer->Extent());
+
+            u32 residualMaterialBinds = 0;
+            u32 residualMeshBinds = 0;
+            u32 residualPushConstantUpdates = 0;
+            u64 residualPushConstantBytes = 0;
+            const u32 residualDraws = DrawForwardResidualCommands(
+                commandBuffer,
+                forwardResidualHdrGraphicsPipeline,
+                doubleSidedForwardResidualHdrGraphicsPipeline,
+                descriptorSets,
+                materialDescriptorSets,
+                frameMaterials,
+                forwardResidualRenderCommands,
+                hdrFramebuffer->Extent(),
+                imageIndex,
+                residualMaterialBinds,
+                residualMeshBinds,
+                residualPushConstantUpdates,
+                residualPushConstantBytes,
+                1.0f
+            );
+            forwardResidualDrawnInHdr = residualDraws > 0;
+            if (bindStats != nullptr) {
+                bindStats->forwardResidualDraws += residualDraws;
+                if (residualDraws > 0) {
+                    ++bindStats->forwardResidualFrameBinds;
+                    bindStats->forwardResidualSharedLightListDraws += residualDraws;
+                }
+                bindStats->forwardResidualMaterialBinds += residualMaterialBinds;
+                bindStats->forwardResidualMeshBinds += residualMeshBinds;
+                bindStats->pushConstantUpdates += residualPushConstantUpdates;
+                bindStats->pushConstantBytes += residualPushConstantBytes;
+            }
+        }
+
         vkCmdEndRenderPass(commandBuffer);
     }
 
@@ -2444,6 +2493,7 @@ void VulkanCommandBuffer::Record(
             activeHdrCompositeDescriptorSets != nullptr);
     const bool needsResidualDepth =
         useDeferredCompositeAsMain &&
+        !forwardResidualDrawnInHdr &&
         !forwardResidualRenderCommands.empty() &&
         !gBufferRenderCommands.empty();
     bool copiedSceneDepth = false;
@@ -2624,30 +2674,32 @@ void VulkanCommandBuffer::Record(
         u32 residualMeshBinds = 0;
         u32 residualPushConstantUpdates = 0;
         u64 residualPushConstantBytes = 0;
-        const u32 residualDraws = DrawForwardResidualCommands(
-            commandBuffer,
-            forwardResidualGraphicsPipeline,
-            doubleSidedForwardResidualGraphicsPipeline,
-            descriptorSets,
-            materialDescriptorSets,
-            frameMaterials,
-            forwardResidualRenderCommands,
-            extent,
-            imageIndex,
-            residualMaterialBinds,
-            residualMeshBinds,
-            residualPushConstantUpdates,
-            residualPushConstantBytes
-        );
-    if (bindStats != nullptr) {
-        bindStats->forwardResidualDraws += residualDraws;
-        if (residualDraws > 0) {
-            ++bindStats->forwardResidualFrameBinds;
-            bindStats->forwardResidualSharedLightListDraws += residualDraws;
-        }
-        bindStats->forwardResidualMaterialBinds += residualMaterialBinds;
-        bindStats->forwardResidualMeshBinds += residualMeshBinds;
-        bindStats->pushConstantUpdates += residualPushConstantUpdates;
+        const u32 residualDraws = forwardResidualDrawnInHdr
+            ? 0u
+            : DrawForwardResidualCommands(
+                commandBuffer,
+                forwardResidualGraphicsPipeline,
+                doubleSidedForwardResidualGraphicsPipeline,
+                descriptorSets,
+                materialDescriptorSets,
+                frameMaterials,
+                forwardResidualRenderCommands,
+                extent,
+                imageIndex,
+                residualMaterialBinds,
+                residualMeshBinds,
+                residualPushConstantUpdates,
+                residualPushConstantBytes
+            );
+        if (bindStats != nullptr) {
+            bindStats->forwardResidualDraws += residualDraws;
+            if (residualDraws > 0) {
+                ++bindStats->forwardResidualFrameBinds;
+                bindStats->forwardResidualSharedLightListDraws += residualDraws;
+            }
+            bindStats->forwardResidualMaterialBinds += residualMaterialBinds;
+            bindStats->forwardResidualMeshBinds += residualMeshBinds;
+            bindStats->pushConstantUpdates += residualPushConstantUpdates;
             bindStats->pushConstantBytes += residualPushConstantBytes;
         }
     } else if (useHdrCompositeAsMain &&
@@ -2721,30 +2773,32 @@ void VulkanCommandBuffer::Record(
         u32 residualMeshBinds = 0;
         u32 residualPushConstantUpdates = 0;
         u64 residualPushConstantBytes = 0;
-        const u32 residualDraws = DrawForwardResidualCommands(
-            commandBuffer,
-            forwardResidualGraphicsPipeline,
-            doubleSidedForwardResidualGraphicsPipeline,
-            descriptorSets,
-            materialDescriptorSets,
-            frameMaterials,
-            forwardResidualRenderCommands,
-            extent,
-            imageIndex,
-            residualMaterialBinds,
-            residualMeshBinds,
-            residualPushConstantUpdates,
-            residualPushConstantBytes
-        );
-    if (bindStats != nullptr) {
-        bindStats->forwardResidualDraws += residualDraws;
-        if (residualDraws > 0) {
-            ++bindStats->forwardResidualFrameBinds;
-            bindStats->forwardResidualSharedLightListDraws += residualDraws;
-        }
-        bindStats->forwardResidualMaterialBinds += residualMaterialBinds;
-        bindStats->forwardResidualMeshBinds += residualMeshBinds;
-        bindStats->pushConstantUpdates += residualPushConstantUpdates;
+        const u32 residualDraws = forwardResidualDrawnInHdr
+            ? 0u
+            : DrawForwardResidualCommands(
+                commandBuffer,
+                forwardResidualGraphicsPipeline,
+                doubleSidedForwardResidualGraphicsPipeline,
+                descriptorSets,
+                materialDescriptorSets,
+                frameMaterials,
+                forwardResidualRenderCommands,
+                extent,
+                imageIndex,
+                residualMaterialBinds,
+                residualMeshBinds,
+                residualPushConstantUpdates,
+                residualPushConstantBytes
+            );
+        if (bindStats != nullptr) {
+            bindStats->forwardResidualDraws += residualDraws;
+            if (residualDraws > 0) {
+                ++bindStats->forwardResidualFrameBinds;
+                bindStats->forwardResidualSharedLightListDraws += residualDraws;
+            }
+            bindStats->forwardResidualMaterialBinds += residualMaterialBinds;
+            bindStats->forwardResidualMeshBinds += residualMeshBinds;
+            bindStats->pushConstantUpdates += residualPushConstantUpdates;
             bindStats->pushConstantBytes += residualPushConstantBytes;
         }
     } else {

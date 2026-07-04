@@ -1812,7 +1812,9 @@ void main() {
         fragWorldPosition,
         objectData.cameraPosition.xyz
     );
-    litColor = ToneMapAces(litColor);
+    if (objectData.viewport.z < 0.5) {
+        litColor = ToneMapAces(litColor);
+    }
     float tintMix = clamp(objectData.tint.a, 0.0, 1.0);
 
     outColor = vec4(

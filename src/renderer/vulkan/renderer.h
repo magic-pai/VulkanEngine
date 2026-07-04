@@ -685,6 +685,8 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedWeightedTranslucencyGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyResolvePipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualHdrGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedForwardResidualHdrGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedForwardResidualGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ShadowGraphicsPipeline;

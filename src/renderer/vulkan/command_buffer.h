@@ -162,6 +162,8 @@ public:
         const VulkanDescriptorSets* autoExposureFrameDescriptorSets = nullptr,
         const VulkanHdrDescriptorSets* autoExposureHdrDescriptorSets = nullptr,
         bool recordAutoExposureCompute = false,
+        const VulkanGraphicsPipeline* forwardResidualHdrGraphicsPipeline = nullptr,
+        const VulkanGraphicsPipeline* doubleSidedForwardResidualHdrGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* forwardResidualGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* doubleSidedForwardResidualGraphicsPipeline = nullptr,
         std::span<const RenderCommand> forwardResidualRenderCommands = {},
