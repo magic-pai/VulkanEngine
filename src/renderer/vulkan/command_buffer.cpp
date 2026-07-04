@@ -1480,6 +1480,7 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* forwardResidualVelocityGraphicsPipeline,
     const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline,
     std::span<const RenderCommand> forwardResidualVelocityRenderCommands,
+    std::span<const RenderCommand> weightedTranslucencyVelocityRenderCommands,
     const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass,
     const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer,
     const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline,
@@ -1946,7 +1947,8 @@ void VulkanCommandBuffer::Record(
     if (forwardResidualVelocityRenderPass != nullptr &&
         forwardResidualVelocityFramebuffer != nullptr &&
         forwardResidualVelocityGraphicsPipeline != nullptr &&
-        !forwardResidualVelocityRenderCommands.empty()) {
+        (!forwardResidualVelocityRenderCommands.empty() ||
+            !weightedTranslucencyVelocityRenderCommands.empty())) {
         VkRenderPassBeginInfo velocityPassInfo{};
         velocityPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         velocityPassInfo.renderPass = forwardResidualVelocityRenderPass->Handle();
@@ -1994,6 +1996,35 @@ void VulkanCommandBuffer::Record(
             bindStats->forwardResidualVelocityMeshBinds += velocityMeshBinds;
             bindStats->pushConstantUpdates += velocityPushConstantUpdates;
             bindStats->pushConstantBytes += velocityPushConstantBytes;
+        }
+
+        if (!weightedTranslucencyVelocityRenderCommands.empty()) {
+            u32 velocityMaterialBinds = 0;
+            u32 velocityMeshBinds = 0;
+            u32 velocityPushConstantUpdates = 0;
+            u64 velocityPushConstantBytes = 0;
+            const u32 velocityDraws = DrawForwardResidualCommands(
+                commandBuffer,
+                forwardResidualVelocityGraphicsPipeline,
+                doubleSidedForwardResidualVelocityGraphicsPipeline,
+                descriptorSets,
+                materialDescriptorSets,
+                frameMaterials,
+                weightedTranslucencyVelocityRenderCommands,
+                forwardResidualVelocityFramebuffer->Extent(),
+                imageIndex,
+                velocityMaterialBinds,
+                velocityMeshBinds,
+                velocityPushConstantUpdates,
+                velocityPushConstantBytes
+            );
+            if (bindStats != nullptr) {
+                bindStats->weightedTranslucencyVelocityDraws += velocityDraws;
+                bindStats->weightedTranslucencyVelocityMaterialBinds += velocityMaterialBinds;
+                bindStats->weightedTranslucencyVelocityMeshBinds += velocityMeshBinds;
+                bindStats->pushConstantUpdates += velocityPushConstantUpdates;
+                bindStats->pushConstantBytes += velocityPushConstantBytes;
+            }
         }
 
         vkCmdEndRenderPass(commandBuffer);

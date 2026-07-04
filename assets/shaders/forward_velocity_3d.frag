@@ -114,6 +114,9 @@ void main() {
     if (alphaMode > 0.5 && alphaMode < 1.5 && materialAlpha < alphaCutoff) {
         discard;
     }
+    if (materialAlpha <= 0.001) {
+        discard;
+    }
 
     vec2 currentNdc = fragCurrentClip.xy / max(abs(fragCurrentClip.w), 0.000001);
     vec2 previousNdc = fragPreviousClip.xy / max(abs(fragPreviousClip.w), 0.000001);

@@ -473,6 +473,9 @@ struct RendererBindStats {
     u32 weightedTranslucencyDebugFrameBinds = 0;
     u32 weightedTranslucencyDebugTextureBinds = 0;
     u32 weightedTranslucencyAlphaReferenceMismatchDraws = 0;
+    u32 weightedTranslucencyVelocityDraws = 0;
+    u32 weightedTranslucencyVelocityMaterialBinds = 0;
+    u32 weightedTranslucencyVelocityMeshBinds = 0;
     u32 forwardResidualAlphaReferenceEnabled = 0;
     u32 forwardResidualDraws = 0;
     u32 forwardResidualFrameBinds = 0;

@@ -45,11 +45,11 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T19:40:07+08:00",
-    "nativeColumns": "769/769",
-    "dlssColumns": "769/769",
-    "comparisonChangedPixels": 3501,
-    "comparisonMeanDelta": 22.748,
-    "comparisonMaxDelta": 580
+    "capturedAt": "2026-07-04T22:59:20+08:00",
+    "nativeColumns": "775/775",
+    "dlssColumns": "775/775",
+    "comparisonChangedPixels": 4339,
+    "comparisonMeanDelta": 35.4445,
+    "comparisonMaxDelta": 577
   }
 }

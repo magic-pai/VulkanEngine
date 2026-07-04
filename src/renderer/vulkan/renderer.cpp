@@ -225,6 +225,7 @@ bool DlssObjectMotionVectorsReady(
     std::span<const RenderCommand> gBufferCommands,
     std::span<const RenderCommand> weightedTranslucencyCommands,
     std::span<const RenderCommand> forwardResidualCommands,
+    bool weightedTranslucencyVelocityCoverageReady,
     bool forwardResidualVelocityCoverageReady
 ) {
     return has3DMainPass &&
@@ -232,7 +233,8 @@ bool DlssObjectMotionVectorsReady(
         velocityTargetAllocated &&
         temporalState.velocityCameraMotionReady &&
         !gBufferCommands.empty() &&
-        weightedTranslucencyCommands.empty() &&
+        (weightedTranslucencyCommands.empty() ||
+            weightedTranslucencyVelocityCoverageReady) &&
         (forwardResidualCommands.empty() || forwardResidualVelocityCoverageReady);
 }
 
@@ -3354,6 +3356,7 @@ void VulkanRenderer::DrawFrame() {
             : nullptr;
     std::vector<RenderCommand> gBufferCommands;
     std::vector<RenderCommand> weightedTranslucencyCommands;
+    std::vector<RenderCommand> weightedTranslucencyVelocityCommands;
     std::vector<RenderCommand> forwardResidualCommands;
     std::vector<RenderCommand> forwardResidualVelocityCommands;
     const bool has3DMainPass =
@@ -3928,6 +3931,13 @@ void VulkanRenderer::DrawFrame() {
             frameStats.draw
         );
     }
+    weightedTranslucencyVelocityCommands.clear();
+    weightedTranslucencyVelocityCommands.reserve(weightedTranslucencyCommands.size());
+    for (const RenderCommand& command : weightedTranslucencyCommands) {
+        if (RenderClassForCommand(command) == MaterialRenderClass::Transparent) {
+            weightedTranslucencyVelocityCommands.push_back(command);
+        }
+    }
     forwardResidualVelocityCommands.clear();
     forwardResidualVelocityCommands.reserve(forwardResidualCommands.size());
     for (const RenderCommand& command : forwardResidualCommands) {
@@ -3938,6 +3948,12 @@ void VulkanRenderer::DrawFrame() {
     const bool forwardResidualVelocityCoverageReady =
         !forwardResidualCommands.empty() &&
         forwardResidualVelocityCommands.size() == forwardResidualCommands.size() &&
+        m_ForwardResidualVelocityRenderPass != nullptr &&
+        m_ForwardResidualVelocityFramebuffer != nullptr &&
+        m_ForwardResidualVelocityGraphicsPipeline != nullptr;
+    const bool weightedTranslucencyVelocityCoverageReady =
+        !weightedTranslucencyCommands.empty() &&
+        weightedTranslucencyVelocityCommands.size() == weightedTranslucencyCommands.size() &&
         m_ForwardResidualVelocityRenderPass != nullptr &&
         m_ForwardResidualVelocityFramebuffer != nullptr &&
         m_ForwardResidualVelocityGraphicsPipeline != nullptr;
@@ -3957,6 +3973,7 @@ void VulkanRenderer::DrawFrame() {
             forwardResidualCommands.data(),
             forwardResidualCommands.size()
         ),
+        weightedTranslucencyVelocityCoverageReady,
         forwardResidualVelocityCoverageReady
     );
     frameStats.temporal.velocityObjectMotionReady =
@@ -4262,6 +4279,11 @@ void VulkanRenderer::DrawFrame() {
                 m_ForwardResidualVelocityRenderPass != nullptr &&
                 m_ForwardResidualVelocityFramebuffer != nullptr &&
                 m_ForwardResidualVelocityGraphicsPipeline != nullptr,
+            has3DMainPass &&
+                !weightedTranslucencyVelocityCommands.empty() &&
+                m_ForwardResidualVelocityRenderPass != nullptr &&
+                m_ForwardResidualVelocityFramebuffer != nullptr &&
+                m_ForwardResidualVelocityGraphicsPipeline != nullptr,
             frameStats.temporal.velocityTargetAllocated > 0,
             frameStats.temporal.historyValid > 0,
             frameStats.temporal.historyReset > 0,
@@ -4463,6 +4485,12 @@ void VulkanRenderer::DrawFrame() {
             ? std::span<const RenderCommand>(
                 forwardResidualVelocityCommands.data(),
                 forwardResidualVelocityCommands.size()
+            )
+            : std::span<const RenderCommand>{},
+        has3DMainPass
+            ? std::span<const RenderCommand>(
+                weightedTranslucencyVelocityCommands.data(),
+                weightedTranslucencyVelocityCommands.size()
             )
             : std::span<const RenderCommand>{},
         m_WeightedTranslucencyRenderPass.get(),

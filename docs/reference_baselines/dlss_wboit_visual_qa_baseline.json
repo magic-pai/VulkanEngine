@@ -3,7 +3,7 @@
   "name": "dlss_visual_qa_grid_wboit_transparent_render_scale_075",
   "target": "SelfEngineForward3D",
   "scene": "grid",
-  "description": "Reference contract for transparent/WBOIT coverage in the experimental DLSS-present path. This baseline intentionally expects the production DLSS quality gate to remain blocked on object-motion coverage while verifying DLSS output, WBOIT write/resolve execution, and reference-baseline readiness.",
+  "description": "Reference contract for transparent/WBOIT coverage in the experimental DLSS-present path. This baseline expects DLSS output, WBOIT write/resolve execution, transparent velocity coverage, and production-quality gate readiness for the controlled transparent grid route.",
   "environment": {
     "native": {
       "SE_BENCHMARK_SCENE": "grid",
@@ -36,11 +36,12 @@
     "dlssPresent": {
       "evaluateOutput": "1/1",
       "postSource": "1/1/0",
-      "qualityGate": "1/0/4",
-      "qualityMasks": "255/251/4",
-      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
       "weightedTranslucencyDraws": "79",
       "weightedTranslucencyResolveDraws": "1",
+      "weightedTranslucencyVelocityDraws": "79",
       "forwardResidualDraws": "0"
     }
   },
@@ -53,14 +54,15 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T20:00:00+08:00",
-    "dlssColumns": "769/769",
+    "capturedAt": "2026-07-04T22:59:20+08:00",
+    "dlssColumns": "775/775",
     "weightedTranslucencyDraws": 79,
     "weightedTranslucencyResolveDraws": 1,
+    "weightedTranslucencyVelocityDraws": 79,
     "forwardResidualDraws": 0,
-    "qualityMasks": "255/251/4",
-    "comparisonChangedPixels": 257,
-    "comparisonMeanDelta": 0.9693,
+    "qualityMasks": "255/255/0",
+    "comparisonChangedPixels": 228,
+    "comparisonMeanDelta": 0.9675,
     "comparisonMaxDelta": 564
   }
 }

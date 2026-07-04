@@ -713,17 +713,18 @@ if ($wboitDlssRow.temporal_upscaler_dlss_output_ready -ne "1" -or
     throw "WBOIT DLSS-present run did not produce visible DLSS output"
 }
 if ($wboitDlssRow.weighted_translucency_draws -ne $wboitBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws -or
-    $wboitDlssRow.weighted_translucency_resolve_draws -ne $wboitBaselineManifest.expected.dlssPresent.weightedTranslucencyResolveDraws) {
+    $wboitDlssRow.weighted_translucency_resolve_draws -ne $wboitBaselineManifest.expected.dlssPresent.weightedTranslucencyResolveDraws -or
+    $wboitDlssRow.weighted_translucency_velocity_draws -ne $wboitBaselineManifest.expected.dlssPresent.weightedTranslucencyVelocityDraws) {
     throw "WBOIT DLSS draw/resolve count mismatch"
 }
 if ($wboitDlssRow.forward_residual_draws -ne $wboitBaselineManifest.expected.dlssPresent.forwardResidualDraws) {
     throw "WBOIT DLSS unexpectedly used forward residual draws"
 }
-if ($wboitDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "0" -or
-    $wboitDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "4") {
-    throw "WBOIT DLSS quality gate did not preserve object-motion blocker"
+if ($wboitDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $wboitDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "WBOIT DLSS quality gate did not pass"
 }
-if ($wboitDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "0" -or
+if ($wboitDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
     $wboitDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "WBOIT DLSS quality gate did not report the expected object/baseline readiness"
 }
@@ -1092,7 +1093,7 @@ $summary = [pscustomobject]@{
         qualityGate = $wboitDlssQualityGate
         qualityMasks = $wboitDlssQualityMasks
         qualityInputs = $wboitDlssQualityInputs
-        weightedTranslucency = "$($wboitDlssRow.weighted_translucency_draws)/$($wboitDlssRow.weighted_translucency_resolve_draws)/$($wboitDlssRow.forward_residual_draws)"
+        weightedTranslucency = "$($wboitDlssRow.weighted_translucency_draws)/$($wboitDlssRow.weighted_translucency_resolve_draws)/$($wboitDlssRow.weighted_translucency_velocity_draws)/$($wboitDlssRow.forward_residual_draws)"
         imageStats = $wboitDlssImageStats
     }
     forwardSpecialNative = [pscustomobject]@{

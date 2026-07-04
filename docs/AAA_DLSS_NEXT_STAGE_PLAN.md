@@ -999,3 +999,42 @@ after the evaluate contract is stable.
   quality gate `1/1/0`, masks `255/255/0`, per-input readiness
   `1/1/1/1/1/1/1/1`, and 79 residual velocity draws. WBOIT remains correctly
   blocked at `1/0/4`.
+
+## Slice 4.12 Execution Evidence
+
+- Extended the pre-upscale velocity coverage to transparent/WBOIT content by
+  reusing `VulkanForwardResidualVelocityRenderPass`, its framebuffer, and the
+  forward residual velocity pipeline for weighted-translucency commands. The
+  velocity fragment shader now discards fully transparent material alpha so the
+  velocity route better matches visible WBOIT coverage.
+- Command recording now opens the shared velocity-only pass when either
+  forward-special residual velocity commands or WBOIT velocity commands are
+  present. WBOIT velocity draws are tracked separately through
+  `weighted_translucency_velocity_draws`,
+  `weighted_translucency_velocity_material_binds`, and
+  `weighted_translucency_velocity_mesh_binds`.
+- Added a FrameGraph-visible `WeightedTranslucencyVelocityPreUpscale` pass. The
+  DLSS object-motion gate now accepts transparent/WBOIT content only when the
+  WBOIT command list is nonempty, every WBOIT command has matching velocity
+  coverage, and the velocity render pass, framebuffer, and pipeline are
+  allocated. This keeps the gate tied to real draw coverage rather than a
+  relaxed readiness flag.
+- Verification: `_quick_build.bat` passes for `SelfEngineForward3D`. The
+  focused probe
+  `out/benchmarks/aaa_dlss_wboit_velocity_probe_dlss.csv` reports
+  `framegraph_validation_issues=0`, DLSS output/post source `1/1` and
+  `1/1/0`, production quality gate `1/1/0`, masks `255/255/0`, object motion
+  ready `1`, 79 WBOIT draws, 79 WBOIT velocity draws, one WBOIT resolve, zero
+  forward-residual draws, and `depth_copy_ops=0`.
+- Full visual QA passes with matching `775/775` CSV columns and 0 frame-graph
+  validation issues across opaque, WBOIT, forward-special, and material-stress
+  native/DLSS pairs. The WBOIT DLSS capture reports quality gate `1/1/0`,
+  masks `255/255/0`, per-input readiness `1/1/1/1/1/1/1/1`, and
+  weighted-translucency counters `79/1/79/0` for draw/resolve/velocity/forward
+  residual. Latest WBOIT native-vs-DLSS comparison samples 14352 pixels with
+  228 changed pixels, mean RGB delta `0.9675`, and max delta `564`.
+- This clears the controlled transparent WBOIT route from the DLSS production
+  gate. It still is not a broad production-quality claim for arbitrary content:
+  imported-model and skinned velocity, non-neutral reactive/transparency mask
+  authoring, larger scene references, temporal stability captures, and default
+  presentation policy remain open.

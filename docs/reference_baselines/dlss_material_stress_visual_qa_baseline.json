@@ -74,8 +74,8 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T20:49:00+08:00",
-    "dlssColumns": "769/769",
+    "capturedAt": "2026-07-04T22:59:20+08:00",
+    "dlssColumns": "775/775",
     "gbufferDraws": 242,
     "forwardResidualDraws": 0,
     "weightedTranslucencyDraws": 0,
@@ -90,8 +90,8 @@
       "volumeMaterials": 1,
       "texturedMaterials": 3
     },
-    "comparisonChangedPixels": 284,
-    "comparisonMeanDelta": 1.0845,
+    "comparisonChangedPixels": 236,
+    "comparisonMeanDelta": 0.9979,
     "comparisonMaxDelta": 564
   }
 }

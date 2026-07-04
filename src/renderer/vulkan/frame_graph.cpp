@@ -2025,6 +2025,20 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Writes forward-special residual object motion vectors into the shared velocity target before TAA/DLSS consume it."
         );
     }
+    if (inputs.weightedTranslucencyVelocityPreUpscaleEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Forward,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "WeightedTranslucencyVelocityPreUpscale",
+            inputs.temporalStateAllocated
+                ? "SceneDepth, TemporalFrameState"
+                : "SceneDepth",
+            "Velocity",
+            "Writes transparent/WBOIT object motion vectors into the shared velocity target before TAA/DLSS consume it."
+        );
+    }
     if (inputs.shadowPassEnabled) {
         AppendPass(
             plan,

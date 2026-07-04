@@ -147,6 +147,7 @@ public:
         const VulkanGraphicsPipeline* forwardResidualVelocityGraphicsPipeline = nullptr,
         const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline = nullptr,
         std::span<const RenderCommand> forwardResidualVelocityRenderCommands = {},
+        std::span<const RenderCommand> weightedTranslucencyVelocityRenderCommands = {},
         const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass = nullptr,
         const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer = nullptr,
         const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline = nullptr,

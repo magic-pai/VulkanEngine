@@ -58,8 +58,8 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T22:26:58+08:00",
-    "dlssColumns": "772/772",
+    "capturedAt": "2026-07-04T22:59:20+08:00",
+    "dlssColumns": "775/775",
     "hybridForwardSpecialDraws": 79,
     "forwardResidualDraws": 79,
     "forwardResidualSharedLightListDraws": 79,
@@ -67,8 +67,8 @@
     "forwardSpecialMaterialCount": 1,
     "weightedTranslucencyDraws": 0,
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 204,
-    "comparisonMeanDelta": 1.0113,
+    "comparisonChangedPixels": 195,
+    "comparisonMeanDelta": 0.9197,
     "comparisonMaxDelta": 564
   }
 }

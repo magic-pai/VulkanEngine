@@ -356,6 +356,7 @@ struct CurrentVulkanFrameGraphInputs {
     bool gBufferRenderPassAllocated = false;
     bool gBufferGeometryEnabled = false;
     bool forwardResidualVelocityPreUpscaleEnabled = false;
+    bool weightedTranslucencyVelocityPreUpscaleEnabled = false;
     bool temporalStateAllocated = false;
     bool temporalHistoryValid = false;
     bool temporalHistoryReset = false;
