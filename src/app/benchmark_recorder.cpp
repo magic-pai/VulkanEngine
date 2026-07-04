@@ -624,6 +624,10 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscaleRequestedHeight << ','
         << temporal.temporalUpscaleActiveWidth << ','
         << temporal.temporalUpscaleActiveHeight << ','
+        << temporal.temporalUpscaleOutputAllocated << ','
+        << temporal.temporalUpscaleOutputFormat << ','
+        << temporal.temporalUpscaleOutputWidth << ','
+        << temporal.temporalUpscaleOutputHeight << ','
         << temporal.dynamicResolutionRequested << ','
         << temporal.dynamicResolutionEnabled << ','
         << temporal.taauRequested << ','
@@ -699,6 +703,30 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerMaxRenderWidth << ','
         << temporal.temporalUpscalerMaxRenderHeight << ','
         << temporal.temporalUpscalerSharpness << ','
+        << temporal.temporalUpscalerEvaluateRequested << ','
+        << temporal.temporalUpscalerEvaluateAttempted << ','
+        << temporal.temporalUpscalerEvaluateFallbackReason << ','
+        << temporal.temporalUpscalerEvaluateParametersAllocated << ','
+        << temporal.temporalUpscalerEvaluateParameterAllocationResult << ','
+        << temporal.temporalUpscalerFeatureCreateAttempted << ','
+        << temporal.temporalUpscalerFeatureCreated << ','
+        << temporal.temporalUpscalerFeatureCreateResult << ','
+        << temporal.temporalUpscalerFeatureRecreated << ','
+        << temporal.temporalUpscalerFeatureRecreationReason << ','
+        << temporal.temporalUpscalerDlssEvaluateAttempted << ','
+        << temporal.temporalUpscalerDlssEvaluateResult << ','
+        << temporal.temporalUpscalerDlssOutputReady << ','
+        << temporal.temporalUpscalerDlssRenderWidth << ','
+        << temporal.temporalUpscalerDlssRenderHeight << ','
+        << temporal.temporalUpscalerDlssOutputWidth << ','
+        << temporal.temporalUpscalerDlssOutputHeight << ','
+        << temporal.temporalUpscalerDlssCreateFlags << ','
+        << temporal.temporalUpscalerDlssReset << ','
+        << temporal.temporalUpscalerDlssJitterOffsetX << ','
+        << temporal.temporalUpscalerDlssJitterOffsetY << ','
+        << temporal.temporalUpscalerDlssMotionVectorScaleX << ','
+        << temporal.temporalUpscalerDlssMotionVectorScaleY << ','
+        << temporal.temporalUpscalerDlssEvaluateSharpness << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1209,6 +1237,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscale_requested_height,"
         << "temporal_upscale_active_width,"
         << "temporal_upscale_active_height,"
+        << "temporal_upscale_output_allocated,"
+        << "temporal_upscale_output_format,"
+        << "temporal_upscale_output_width,"
+        << "temporal_upscale_output_height,"
         << "temporal_dynamic_resolution_requested,"
         << "temporal_dynamic_resolution_enabled,"
         << "temporal_taau_requested,"
@@ -1284,6 +1316,30 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_max_render_width,"
         << "temporal_upscaler_max_render_height,"
         << "temporal_upscaler_sharpness,"
+        << "temporal_upscaler_evaluate_requested,"
+        << "temporal_upscaler_evaluate_attempted,"
+        << "temporal_upscaler_evaluate_fallback_reason,"
+        << "temporal_upscaler_evaluate_parameters_allocated,"
+        << "temporal_upscaler_evaluate_parameter_allocation_result,"
+        << "temporal_upscaler_feature_create_attempted,"
+        << "temporal_upscaler_feature_created,"
+        << "temporal_upscaler_feature_create_result,"
+        << "temporal_upscaler_feature_recreated,"
+        << "temporal_upscaler_feature_recreation_reason,"
+        << "temporal_upscaler_dlss_evaluate_attempted,"
+        << "temporal_upscaler_dlss_evaluate_result,"
+        << "temporal_upscaler_dlss_output_ready,"
+        << "temporal_upscaler_dlss_render_width,"
+        << "temporal_upscaler_dlss_render_height,"
+        << "temporal_upscaler_dlss_output_width,"
+        << "temporal_upscaler_dlss_output_height,"
+        << "temporal_upscaler_dlss_create_flags,"
+        << "temporal_upscaler_dlss_reset,"
+        << "temporal_upscaler_dlss_jitter_offset_x,"
+        << "temporal_upscaler_dlss_jitter_offset_y,"
+        << "temporal_upscaler_dlss_motion_vector_scale_x,"
+        << "temporal_upscaler_dlss_motion_vector_scale_y,"
+        << "temporal_upscaler_dlss_evaluate_sharpness,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

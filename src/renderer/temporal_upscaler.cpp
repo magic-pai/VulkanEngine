@@ -11,6 +11,7 @@
 
 #if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
 #include <nvsdk_ngx_helpers.h>
+#include <nvsdk_ngx_helpers_vk.h>
 #include <nvsdk_ngx_vk.h>
 #endif
 
@@ -283,6 +284,83 @@ NVSDK_NGX_PerfQuality_Value NgxQualityMode(
     }
 }
 
+int NgxPresetHint(TemporalUpscalerDlssPreset preset) {
+    switch (preset) {
+    case TemporalUpscalerDlssPreset::K:
+        return NVSDK_NGX_DLSS_Hint_Render_Preset_K;
+    case TemporalUpscalerDlssPreset::L:
+        return NVSDK_NGX_DLSS_Hint_Render_Preset_L;
+    case TemporalUpscalerDlssPreset::M:
+        return NVSDK_NGX_DLSS_Hint_Render_Preset_M;
+    case TemporalUpscalerDlssPreset::Default:
+    default:
+        return NVSDK_NGX_DLSS_Hint_Render_Preset_Default;
+    }
+}
+
+void SetNgxPresetHint(
+    NVSDK_NGX_Parameter* parameters,
+    TemporalUpscalerDlssQualityMode qualityMode
+) {
+    if (parameters == nullptr) {
+        return;
+    }
+
+    const int preset =
+        NgxPresetHint(RecommendedDlssPresetForQuality(qualityMode));
+    switch (qualityMode) {
+    case TemporalUpscalerDlssQualityMode::Dlaa:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA,
+            preset
+        );
+        break;
+    case TemporalUpscalerDlssQualityMode::Balanced:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced,
+            preset
+        );
+        break;
+    case TemporalUpscalerDlssQualityMode::Performance:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
+            preset
+        );
+        break;
+    case TemporalUpscalerDlssQualityMode::UltraPerformance:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance,
+            preset
+        );
+        break;
+    case TemporalUpscalerDlssQualityMode::UltraQuality:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraQuality,
+            preset
+        );
+        break;
+    case TemporalUpscalerDlssQualityMode::Quality:
+    case TemporalUpscalerDlssQualityMode::Default:
+    default:
+        NVSDK_NGX_Parameter_SetI(
+            parameters,
+            NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
+            preset
+        );
+        break;
+    }
+}
+
+u32 NgxDlssCreateFlags() {
+    return NVSDK_NGX_DLSS_Feature_Flags_IsHDR |
+        NVSDK_NGX_DLSS_Feature_Flags_MVLowRes;
+}
+
 bool NgxGetU32(NVSDK_NGX_Parameter* parameters, const char* name, u32& value) {
     unsigned int uiValue = 0;
     NVSDK_NGX_Result result =
@@ -536,9 +614,65 @@ struct DlssRuntimeCache {
     TemporalUpscalerDlssQualityMode cachedQualityMode =
         TemporalUpscalerDlssQualityMode::Quality;
     TemporalUpscalerRuntimeStatus cachedStatus{};
+    NVSDK_NGX_Handle* dlssFeatureHandle = nullptr;
+    NVSDK_NGX_Parameter* dlssParameters = nullptr;
+    VkExtent2D dlssFeatureRenderExtent{};
+    VkExtent2D dlssFeatureOutputExtent{};
+    TemporalUpscalerDlssQualityMode dlssFeatureQualityMode =
+        TemporalUpscalerDlssQualityMode::Quality;
+    u32 dlssFeatureCreateFlags = 0;
 };
 
 DlssRuntimeCache g_DlssRuntimeCache{};
+
+void ReleaseDlssFeatureCache() {
+    if (g_DlssRuntimeCache.dlssFeatureHandle != nullptr) {
+        NVSDK_NGX_VULKAN_ReleaseFeature(g_DlssRuntimeCache.dlssFeatureHandle);
+        g_DlssRuntimeCache.dlssFeatureHandle = nullptr;
+    }
+    if (g_DlssRuntimeCache.dlssParameters != nullptr) {
+        NVSDK_NGX_VULKAN_DestroyParameters(g_DlssRuntimeCache.dlssParameters);
+        g_DlssRuntimeCache.dlssParameters = nullptr;
+    }
+    g_DlssRuntimeCache.dlssFeatureRenderExtent = {};
+    g_DlssRuntimeCache.dlssFeatureOutputExtent = {};
+    g_DlssRuntimeCache.dlssFeatureQualityMode =
+        TemporalUpscalerDlssQualityMode::Quality;
+    g_DlssRuntimeCache.dlssFeatureCreateFlags = 0u;
+}
+
+bool ExtentsEqual(VkExtent2D lhs, VkExtent2D rhs) {
+    return lhs.width == rhs.width && lhs.height == rhs.height;
+}
+
+TemporalUpscalerFeatureRecreationReason DlssFeatureRecreationReason(
+    const TemporalUpscalerEvaluateRequest& request,
+    u32 createFlags
+) {
+    if (g_DlssRuntimeCache.dlssFeatureHandle == nullptr) {
+        return TemporalUpscalerFeatureRecreationReason::FirstCreate;
+    }
+    if (!ExtentsEqual(
+        g_DlssRuntimeCache.dlssFeatureRenderExtent,
+        request.renderExtent
+    )) {
+        return TemporalUpscalerFeatureRecreationReason::InputExtentChanged;
+    }
+    if (!ExtentsEqual(
+        g_DlssRuntimeCache.dlssFeatureOutputExtent,
+        request.outputExtent
+    )) {
+        return TemporalUpscalerFeatureRecreationReason::OutputExtentChanged;
+    }
+    if (g_DlssRuntimeCache.dlssFeatureQualityMode !=
+        request.dlssQualityMode) {
+        return TemporalUpscalerFeatureRecreationReason::QualityModeChanged;
+    }
+    if (g_DlssRuntimeCache.dlssFeatureCreateFlags != createFlags) {
+        return TemporalUpscalerFeatureRecreationReason::CreateFlagsChanged;
+    }
+    return TemporalUpscalerFeatureRecreationReason::None;
+}
 
 void PopulateNgxCapabilityStatus(
     const TemporalUpscalerRuntimeRequest& request,
@@ -733,6 +867,193 @@ TemporalUpscalerRuntimeStatus QueryCompiledDlssRuntime(
     g_DlssRuntimeCache.cachedStatus = status;
     return status;
 }
+
+bool IsValidEvaluateImage(const TemporalUpscalerVulkanImageResource& image) {
+    return image.image != VK_NULL_HANDLE &&
+        image.imageView != VK_NULL_HANDLE &&
+        image.format != VK_FORMAT_UNDEFINED &&
+        image.extent.width > 0u &&
+        image.extent.height > 0u;
+}
+
+NVSDK_NGX_Resource_VK NgxImageResource(
+    const TemporalUpscalerVulkanImageResource& image
+) {
+    VkImageSubresourceRange range{};
+    range.aspectMask = image.aspectMask;
+    range.baseMipLevel = 0u;
+    range.levelCount = 1u;
+    range.baseArrayLayer = 0u;
+    range.layerCount = 1u;
+    return NVSDK_NGX_Create_ImageView_Resource_VK(
+        image.imageView,
+        image.image,
+        range,
+        image.format,
+        image.extent.width,
+        image.extent.height,
+        image.readWrite
+    );
+}
+
+TemporalUpscalerEvaluateStatus EvaluateCompiledDlssRuntime(
+    const TemporalUpscalerEvaluateRequest& request
+) {
+    TemporalUpscalerEvaluateStatus status{};
+    status.requested = request.runtimeStatus.requested;
+    status.renderWidth = request.renderExtent.width;
+    status.renderHeight = request.renderExtent.height;
+    status.outputWidth = request.outputExtent.width;
+    status.outputHeight = request.outputExtent.height;
+    status.createFlags = NgxDlssCreateFlags();
+    status.reset = request.reset;
+    status.jitterOffsetX = request.jitterOffsetX;
+    status.jitterOffsetY = request.jitterOffsetY;
+    status.motionVectorScaleX = request.motionVectorScaleX;
+    status.motionVectorScaleY = request.motionVectorScaleY;
+    status.sharpness = request.sharpness;
+
+    if (request.runtimeStatus.evaluateAdapterAvailable == 0u ||
+        !g_DlssRuntimeCache.initialized) {
+        status.fallbackReason =
+            TemporalUpscalerEvaluateFallbackReason::RuntimeUnavailable;
+        return status;
+    }
+    if (request.device == VK_NULL_HANDLE ||
+        request.commandBuffer == VK_NULL_HANDLE ||
+        request.renderExtent.width == 0u ||
+        request.renderExtent.height == 0u ||
+        request.outputExtent.width == 0u ||
+        request.outputExtent.height == 0u ||
+        !IsValidEvaluateImage(request.inputColor) ||
+        !IsValidEvaluateImage(request.inputDepth) ||
+        !IsValidEvaluateImage(request.inputMotionVectors) ||
+        !IsValidEvaluateImage(request.outputColor)) {
+        status.fallbackReason =
+            TemporalUpscalerEvaluateFallbackReason::VulkanResourcesUnavailable;
+        return status;
+    }
+
+    status.attempted = 1u;
+    if (g_DlssRuntimeCache.dlssParameters == nullptr) {
+        NVSDK_NGX_Parameter* parameters = nullptr;
+        const NVSDK_NGX_Result allocateResult =
+            NVSDK_NGX_VULKAN_AllocateParameters(&parameters);
+        status.parameterAllocationResult = static_cast<u32>(allocateResult);
+        if (NVSDK_NGX_FAILED(allocateResult) || parameters == nullptr) {
+            status.fallbackReason =
+                TemporalUpscalerEvaluateFallbackReason::ParametersUnavailable;
+            return status;
+        }
+        g_DlssRuntimeCache.dlssParameters = parameters;
+    } else {
+        status.parameterAllocationResult =
+            static_cast<u32>(NVSDK_NGX_Result_Success);
+    }
+    status.parametersAllocated = 1u;
+
+    const TemporalUpscalerFeatureRecreationReason recreationReason =
+        DlssFeatureRecreationReason(request, status.createFlags);
+    status.featureRecreationReason = recreationReason;
+    if (recreationReason != TemporalUpscalerFeatureRecreationReason::None) {
+        if (g_DlssRuntimeCache.dlssFeatureHandle != nullptr) {
+            NVSDK_NGX_VULKAN_ReleaseFeature(
+                g_DlssRuntimeCache.dlssFeatureHandle
+            );
+            g_DlssRuntimeCache.dlssFeatureHandle = nullptr;
+        }
+
+        g_DlssRuntimeCache.dlssParameters->Reset();
+        SetNgxPresetHint(
+            g_DlssRuntimeCache.dlssParameters,
+            request.dlssQualityMode
+        );
+
+        NVSDK_NGX_DLSS_Create_Params createParams{};
+        createParams.Feature.InWidth = request.renderExtent.width;
+        createParams.Feature.InHeight = request.renderExtent.height;
+        createParams.Feature.InTargetWidth = request.outputExtent.width;
+        createParams.Feature.InTargetHeight = request.outputExtent.height;
+        createParams.Feature.InPerfQualityValue =
+            NgxQualityMode(request.dlssQualityMode);
+        createParams.InFeatureCreateFlags =
+            static_cast<int>(status.createFlags);
+        createParams.InEnableOutputSubrects = false;
+
+        status.featureCreateAttempted = 1u;
+        const NVSDK_NGX_Result createResult =
+            NGX_VULKAN_CREATE_DLSS_EXT1(
+                request.device,
+                request.commandBuffer,
+                1u,
+                1u,
+                &g_DlssRuntimeCache.dlssFeatureHandle,
+                g_DlssRuntimeCache.dlssParameters,
+                &createParams
+            );
+        status.featureCreateResult = static_cast<u32>(createResult);
+        if (NVSDK_NGX_FAILED(createResult) ||
+            g_DlssRuntimeCache.dlssFeatureHandle == nullptr) {
+            g_DlssRuntimeCache.dlssFeatureHandle = nullptr;
+            status.fallbackReason =
+                TemporalUpscalerEvaluateFallbackReason::FeatureCreateFailed;
+            return status;
+        }
+
+        g_DlssRuntimeCache.dlssFeatureRenderExtent = request.renderExtent;
+        g_DlssRuntimeCache.dlssFeatureOutputExtent = request.outputExtent;
+        g_DlssRuntimeCache.dlssFeatureQualityMode = request.dlssQualityMode;
+        g_DlssRuntimeCache.dlssFeatureCreateFlags = status.createFlags;
+        status.featureRecreated = 1u;
+    } else {
+        status.featureCreateResult =
+            static_cast<u32>(NVSDK_NGX_Result_Success);
+    }
+    status.featureCreated =
+        g_DlssRuntimeCache.dlssFeatureHandle != nullptr ? 1u : 0u;
+
+    g_DlssRuntimeCache.dlssParameters->Reset();
+    NVSDK_NGX_Resource_VK colorResource = NgxImageResource(request.inputColor);
+    NVSDK_NGX_Resource_VK depthResource = NgxImageResource(request.inputDepth);
+    NVSDK_NGX_Resource_VK motionResource =
+        NgxImageResource(request.inputMotionVectors);
+    NVSDK_NGX_Resource_VK outputResource = NgxImageResource(request.outputColor);
+
+    NVSDK_NGX_VK_DLSS_Eval_Params evalParams{};
+    evalParams.Feature.pInColor = &colorResource;
+    evalParams.Feature.pInOutput = &outputResource;
+    evalParams.Feature.InSharpness = request.sharpness;
+    evalParams.pInDepth = &depthResource;
+    evalParams.pInMotionVectors = &motionResource;
+    evalParams.InJitterOffsetX = request.jitterOffsetX;
+    evalParams.InJitterOffsetY = request.jitterOffsetY;
+    evalParams.InRenderSubrectDimensions.Width = request.renderExtent.width;
+    evalParams.InRenderSubrectDimensions.Height = request.renderExtent.height;
+    evalParams.InReset = request.reset != 0u ? 1 : 0;
+    evalParams.InMVScaleX = request.motionVectorScaleX;
+    evalParams.InMVScaleY = request.motionVectorScaleY;
+    evalParams.InPreExposure = 1.0f;
+    evalParams.InExposureScale = 1.0f;
+
+    status.evaluateAttempted = 1u;
+    const NVSDK_NGX_Result evaluateResult =
+        NGX_VULKAN_EVALUATE_DLSS_EXT(
+            request.commandBuffer,
+            g_DlssRuntimeCache.dlssFeatureHandle,
+            g_DlssRuntimeCache.dlssParameters,
+            &evalParams
+        );
+    status.evaluateResult = static_cast<u32>(evaluateResult);
+    if (NVSDK_NGX_FAILED(evaluateResult)) {
+        status.fallbackReason =
+            TemporalUpscalerEvaluateFallbackReason::EvaluateFailed;
+        return status;
+    }
+
+    status.outputReady = 1u;
+    status.fallbackReason = TemporalUpscalerEvaluateFallbackReason::None;
+    return status;
+}
 #endif
 
 }
@@ -852,8 +1173,39 @@ TemporalUpscalerRuntimeStatus QueryTemporalUpscalerRuntime(
 #endif
 }
 
+TemporalUpscalerEvaluateStatus EvaluateTemporalUpscaler(
+    const TemporalUpscalerEvaluateRequest& request
+) {
+    TemporalUpscalerEvaluateStatus status{};
+    status.requested = request.runtimeStatus.requested;
+    status.renderWidth = request.renderExtent.width;
+    status.renderHeight = request.renderExtent.height;
+    status.outputWidth = request.outputExtent.width;
+    status.outputHeight = request.outputExtent.height;
+    status.reset = request.reset;
+    status.jitterOffsetX = request.jitterOffsetX;
+    status.jitterOffsetY = request.jitterOffsetY;
+    status.motionVectorScaleX = request.motionVectorScaleX;
+    status.motionVectorScaleY = request.motionVectorScaleY;
+    status.sharpness = request.sharpness;
+
+    if (request.runtimeStatus.requested == 0u) {
+        status.fallbackReason =
+            TemporalUpscalerEvaluateFallbackReason::NotRequested;
+        return status;
+    }
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+    return EvaluateCompiledDlssRuntime(request);
+#else
+    status.fallbackReason =
+        TemporalUpscalerEvaluateFallbackReason::RuntimeUnavailable;
+    return status;
+#endif
+}
+
 void ShutdownTemporalUpscalerRuntime(VkDevice device) {
 #if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+    ReleaseDlssFeatureCache();
     if (g_DlssRuntimeCache.initialized) {
         NVSDK_NGX_VULKAN_Shutdown1(
             device != VK_NULL_HANDLE ? device : g_DlssRuntimeCache.device

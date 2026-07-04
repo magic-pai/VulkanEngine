@@ -3702,6 +3702,13 @@ void VulkanRenderer::DrawFrame() {
         m_SceneRenderTargets != nullptr
             ? m_SceneRenderTargets->TemporalHistoryColorFormat()
             : VK_FORMAT_UNDEFINED,
+        m_SceneRenderTargets != nullptr,
+        m_SceneRenderTargets != nullptr
+            ? m_SceneRenderTargets->TemporalUpscaleOutputFormat()
+            : VK_FORMAT_UNDEFINED,
+        m_SceneRenderTargets != nullptr
+            ? m_SceneRenderTargets->DisplayExtent()
+            : VkExtent2D{},
         recordTemporalHistoryColorCopy
             ? static_cast<u32>(m_SceneRenderTargets->Count())
             : 0u,
@@ -4080,6 +4087,10 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalUpscaleRequestedHeight,
             frameStats.temporal.temporalUpscaleActiveWidth,
             frameStats.temporal.temporalUpscaleActiveHeight,
+            frameStats.temporal.temporalUpscaleOutputAllocated > 0,
+            frameStats.temporal.temporalUpscaleOutputFormat,
+            frameStats.temporal.temporalUpscaleOutputWidth,
+            frameStats.temporal.temporalUpscaleOutputHeight,
             frameStats.temporal.dynamicResolutionRequested > 0,
             frameStats.temporal.dynamicResolutionEnabled > 0,
             frameStats.temporal.taauRequested > 0,
@@ -4146,6 +4157,11 @@ void VulkanRenderer::DrawFrame() {
             kLightTileCullComputeLocalSizeY
         : 0;
 
+    TemporalUpscalerEvaluateStatus temporalUpscalerEvaluateStatus{};
+    const bool temporalUpscaleOutputInitialized =
+        imageIndex < m_TemporalUpscaleOutputInitialized.size()
+            ? m_TemporalUpscaleOutputInitialized[imageIndex]
+            : false;
     m_CommandBuffer->Record(
         imageIndex,
         *m_RenderPass,
@@ -4195,6 +4211,10 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::Sharpening,
         m_TemporalHistoryColorValid,
         recordTemporalHistoryColorCopy,
+        &temporalState,
+        &temporalUpscaleState,
+        temporalUpscaleOutputInitialized,
+        &temporalUpscalerEvaluateStatus,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -4246,6 +4266,74 @@ void VulkanRenderer::DrawFrame() {
         &frameStats.binds,
         &frameStats.frameGraph
     );
+    if (imageIndex < m_TemporalUpscaleOutputInitialized.size() &&
+        temporalUpscalerEvaluateStatus.attempted > 0u) {
+        m_TemporalUpscaleOutputInitialized[imageIndex] = true;
+    }
+    frameStats.temporal.temporalUpscalerEvaluateRequested =
+        temporalUpscalerEvaluateStatus.requested;
+    frameStats.temporal.temporalUpscalerEvaluateAttempted =
+        temporalUpscalerEvaluateStatus.attempted;
+    frameStats.temporal.temporalUpscalerEvaluateFallbackReason =
+        static_cast<u32>(temporalUpscalerEvaluateStatus.fallbackReason);
+    frameStats.temporal.temporalUpscalerEvaluateParametersAllocated =
+        temporalUpscalerEvaluateStatus.parametersAllocated;
+    frameStats.temporal.temporalUpscalerEvaluateParameterAllocationResult =
+        temporalUpscalerEvaluateStatus.parameterAllocationResult;
+    frameStats.temporal.temporalUpscalerFeatureCreateAttempted =
+        temporalUpscalerEvaluateStatus.featureCreateAttempted;
+    frameStats.temporal.temporalUpscalerFeatureCreated =
+        temporalUpscalerEvaluateStatus.featureCreated;
+    frameStats.temporal.temporalUpscalerFeatureCreateResult =
+        temporalUpscalerEvaluateStatus.featureCreateResult;
+    frameStats.temporal.temporalUpscalerFeatureRecreated =
+        temporalUpscalerEvaluateStatus.featureRecreated;
+    frameStats.temporal.temporalUpscalerFeatureRecreationReason =
+        static_cast<u32>(temporalUpscalerEvaluateStatus.featureRecreationReason);
+    frameStats.temporal.temporalUpscalerDlssEvaluateAttempted =
+        temporalUpscalerEvaluateStatus.evaluateAttempted;
+    frameStats.temporal.temporalUpscalerDlssEvaluateResult =
+        temporalUpscalerEvaluateStatus.evaluateResult;
+    frameStats.temporal.temporalUpscalerDlssOutputReady =
+        temporalUpscalerEvaluateStatus.outputReady;
+    frameStats.temporal.temporalUpscalerDlssRenderWidth =
+        temporalUpscalerEvaluateStatus.renderWidth;
+    frameStats.temporal.temporalUpscalerDlssRenderHeight =
+        temporalUpscalerEvaluateStatus.renderHeight;
+    frameStats.temporal.temporalUpscalerDlssOutputWidth =
+        temporalUpscalerEvaluateStatus.outputWidth;
+    frameStats.temporal.temporalUpscalerDlssOutputHeight =
+        temporalUpscalerEvaluateStatus.outputHeight;
+    frameStats.temporal.temporalUpscalerDlssCreateFlags =
+        temporalUpscalerEvaluateStatus.createFlags;
+    frameStats.temporal.temporalUpscalerDlssReset =
+        temporalUpscalerEvaluateStatus.reset;
+    frameStats.temporal.temporalUpscalerDlssJitterOffsetX =
+        temporalUpscalerEvaluateStatus.jitterOffsetX;
+    frameStats.temporal.temporalUpscalerDlssJitterOffsetY =
+        temporalUpscalerEvaluateStatus.jitterOffsetY;
+    frameStats.temporal.temporalUpscalerDlssMotionVectorScaleX =
+        temporalUpscalerEvaluateStatus.motionVectorScaleX;
+    frameStats.temporal.temporalUpscalerDlssMotionVectorScaleY =
+        temporalUpscalerEvaluateStatus.motionVectorScaleY;
+    frameStats.temporal.temporalUpscalerDlssEvaluateSharpness =
+        temporalUpscalerEvaluateStatus.sharpness;
+    frameStats.temporal.temporalUpscaleEnabled =
+        temporalUpscalerEvaluateStatus.outputReady;
+    if (temporalUpscalerEvaluateStatus.outputReady > 0u) {
+        frameStats.temporal.temporalUpscaleFallbackReason =
+            static_cast<u32>(RendererTemporalUpscaleFallbackReason::None);
+        frameStats.temporal.temporalConsumerActiveMask |=
+            kTemporalConsumerUpscalerBit;
+        frameStats.temporal.temporalConsumerUnsupportedMask &=
+            ~kTemporalConsumerUpscalerBit;
+    } else if (temporalUpscalerEvaluateStatus.attempted > 0u) {
+        frameStats.temporal.temporalUpscaleFallbackReason =
+            static_cast<u32>(
+                RendererTemporalUpscaleFallbackReason::UpscalerEvaluateFailed
+            );
+        frameStats.temporal.temporalUpscaleEnabled = 0u;
+    }
     frameStats.localShadowAtlas.recordedTilePasses =
         frameStats.binds.localShadowAtlasPasses;
     frameStats.localShadowAtlas.recordedDraws =
@@ -4543,6 +4631,10 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         *m_Swapchain,
         sceneExtent
+    );
+    m_TemporalUpscaleOutputInitialized.assign(
+        m_Swapchain->Images().size(),
+        false
     );
     m_BloomPyramid = std::make_unique<VulkanBloomPyramid>(
         m_Device,
@@ -5279,6 +5371,10 @@ void VulkanRenderer::RecreateSwapchain() {
             sceneExtent
         );
         m_TemporalHistoryColorValid = false;
+        m_TemporalUpscaleOutputInitialized.assign(
+            m_Swapchain->Images().size(),
+            false
+        );
     }
     if (m_BloomPyramid != nullptr) {
         m_BloomPyramid->Recreate(
@@ -6305,6 +6401,7 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.requestedInternalExtent.height < displayExtent.height;
     state.dynamicResolutionRequested = DynamicResolutionRequestedFromEnvironment();
     state.taauRequested = TemporalUpscaleRequestedFromEnvironment();
+    state.dlssQualityMode = TemporalUpscalerDlssQualityModeFromEnvironment();
     state.upscalerPackage = ProbeTemporalUpscalerPackage(
         TemporalUpscalerProbeRequest{
             TemporalUpscalerProviderFromEnvironment(),
@@ -6323,7 +6420,7 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
             vkGetInstanceProcAddr,
             vkGetDeviceProcAddr,
             displayExtent,
-            TemporalUpscalerDlssQualityModeFromEnvironment(),
+            state.dlssQualityMode,
             {}
         }
     );
@@ -6375,8 +6472,9 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.fallbackReason =
             RendererTemporalUpscaleFallbackReason::InputsUnavailable;
     } else if (state.upscalerPluginAvailable) {
+        state.temporalUpscaleEnabled = true;
         state.fallbackReason =
-            RendererTemporalUpscaleFallbackReason::UpscalerEvaluatePathMissing;
+            RendererTemporalUpscaleFallbackReason::None;
     } else {
         state.fallbackReason =
             RendererTemporalUpscaleFallbackReason::UpscalerUnavailable;
@@ -6453,6 +6551,9 @@ void VulkanRenderer::WriteTemporalStats(
     VkFormat materialAuxFormat,
     bool historyColorTargetAllocated,
     VkFormat historyColorFormat,
+    bool temporalUpscaleOutputAllocated,
+    VkFormat temporalUpscaleOutputFormat,
+    VkExtent2D temporalUpscaleOutputExtent,
     u32 historyColorCopyCount,
     RendererTemporalStats& stats
 ) const {
@@ -6520,6 +6621,20 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleState.activeInternalExtent.width;
     stats.temporalUpscaleActiveHeight =
         temporalUpscaleState.activeInternalExtent.height;
+    stats.temporalUpscaleOutputAllocated =
+        temporalUpscaleOutputAllocated ? 1u : 0u;
+    stats.temporalUpscaleOutputFormat =
+        temporalUpscaleOutputAllocated
+            ? temporalUpscaleOutputFormat
+            : VK_FORMAT_UNDEFINED;
+    stats.temporalUpscaleOutputWidth =
+        temporalUpscaleOutputAllocated
+            ? temporalUpscaleOutputExtent.width
+            : 0u;
+    stats.temporalUpscaleOutputHeight =
+        temporalUpscaleOutputAllocated
+            ? temporalUpscaleOutputExtent.height
+            : 0u;
     stats.dynamicResolutionRequested =
         temporalUpscaleState.dynamicResolutionRequested ? 1u : 0u;
     stats.dynamicResolutionEnabled =

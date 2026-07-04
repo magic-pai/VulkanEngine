@@ -140,12 +140,15 @@ public:
 
     VkImageView HdrSceneColorView(std::size_t index) const;
     VkImage HdrSceneColorImage(std::size_t index) const;
+    VkImageView TemporalUpscaleOutputView(std::size_t index) const;
+    VkImage TemporalUpscaleOutputImage(std::size_t index) const;
     VkImageView TemporalHistoryColorView(std::size_t index) const;
     VkImage TemporalHistoryColorImage(std::size_t index) const;
     VkImageView WeightedTranslucencyAccumView(std::size_t index) const;
     VkImageView WeightedTranslucencyRevealageView(std::size_t index) const;
     VkImage SceneDepthImage(std::size_t index) const;
     VkImageView SceneDepthView(std::size_t index) const;
+    VkImage VelocityImage(std::size_t index) const;
     VkImageView VelocityView(std::size_t index) const;
     VkImageView GBufferAlbedoView(std::size_t index) const;
     VkImageView GBufferNormalRoughnessView(std::size_t index) const;
@@ -153,6 +156,7 @@ public:
     VkImageView GBufferEmissiveView(std::size_t index) const;
     VkImageView GBufferMaterialAuxView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
+    VkFormat TemporalUpscaleOutputFormat() const;
     VkFormat TemporalHistoryColorFormat() const;
     VkFormat WeightedTranslucencyAccumFormat() const;
     VkFormat WeightedTranslucencyRevealageFormat() const;
@@ -163,6 +167,7 @@ public:
     VkFormat GBufferMaterialFormat() const;
     VkFormat GBufferEmissiveFormat() const;
     VkFormat GBufferMaterialAuxFormat() const;
+    VkExtent2D DisplayExtent() const;
     VkExtent2D Extent() const;
     std::size_t Count() const;
 
@@ -201,9 +206,20 @@ private:
         VkImageAspectFlags aspectFlags,
         std::vector<std::unique_ptr<VulkanImage>>& images
     ) const;
+    void CreateImageArrayForExtent(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        std::size_t count,
+        VkExtent2D extent,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        VkImageAspectFlags aspectFlags,
+        std::vector<std::unique_ptr<VulkanImage>>& images
+    ) const;
 
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_TemporalUpscaleOutputImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalHistoryColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyAccumImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyRevealageImages;
@@ -214,6 +230,7 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialAuxImages;
+    VkExtent2D m_DisplayExtent{};
     VkExtent2D m_Extent{};
 };
 

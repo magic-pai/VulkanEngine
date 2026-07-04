@@ -102,15 +102,66 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4: DLSS SR/DLAA evaluate path. Slice 3.5 now proves the current
-RTX 5070 / driver stack can satisfy the DLSS Super Resolution feature
-requirements once NGX-required Vulkan extensions are enabled. The engine still
-reports `temporal_upscale_fallback_reason=6`
-(`UpscalerEvaluatePathMissing`) because the renderer does not yet create a DLSS
-feature handle or call evaluate. The next slice should keep that work behind the
-existing `TemporalUpscaler` boundary and should not expand into Frame
-Generation, Ray Reconstruction, Streamline interposition, or production IQ
-claims yet.
+Implement Slice 4.1: DLSS output presentation/post-ordering hardening. Slice 4
+now creates a DLSS SR/DLAA feature handle and records per-frame
+`NGX_VULKAN_EVALUATE_DLSS_EXT` behind the existing `TemporalUpscaler` boundary.
+The next slice should route `TemporalUpscaleOutput` into the visible
+post/present path under an explicit gate, then add screenshots/visual QA before
+any production image-quality claim. Do not expand into Frame Generation, Ray
+Reconstruction, Streamline interposition, or default presentation changes yet.
+
+## Slice 4 Execution Plan
+
+Slice 4 should turn the current readiness proof into a real, per-frame DLSS
+Super Resolution / DLAA evaluate call while preserving deterministic fallback.
+The first implementation is intentionally scoped to SR/DLAA evaluation evidence;
+post-process ordering and default presentation can deepen in follow-up slices
+after the evaluate contract is stable.
+
+1. Output resource carrier.
+   - Add a display-sized temporal-upscale output image per swapchain image.
+   - Use HDR color format and storage/sampled/transfer usage so NGX can write
+     the output and later renderer passes can sample or inspect it.
+   - Expose output allocation, format, display extent, and active input extent
+     in CSV, ImGui, and FrameGraph.
+
+2. NGX feature lifecycle.
+   - Add an engine-owned `TemporalUpscalerEvaluateRequest` and
+     `TemporalUpscalerEvaluateStatus` so Vulkan renderer code passes opaque
+     image handles/views/formats/extents without learning NGX helper details.
+   - Create the DLSS feature handle lazily on the first valid evaluate request.
+   - Recreate the feature handle when input extent, output extent, quality mode,
+     or create flags change.
+   - Release the feature handle from the existing NGX shutdown path.
+
+3. Evaluate call.
+   - Wrap HDR scene color, scene depth, velocity, and temporal-upscale output as
+     `NVSDK_NGX_Resource_VK` image-view resources.
+   - Call `NGX_VULKAN_EVALUATE_DLSS_EXT` after HDR scene color/WBOIT/auto
+     exposure inputs are produced and before the swapchain main pass.
+   - Pass render-subrect dimensions, jitter offsets in input pixels, reset
+     state, MV scale, HDR/depth/motion-vector flags, sharpness, and quality
+     preset policy.
+   - Keep exposure texture/reactive mask/transparency mask optional and null in
+     the first evaluate carrier.
+
+4. Fallback and diagnostics.
+   - If package/runtime/resource/create/evaluate readiness fails, keep the
+     current native/HDR composite fallback and report the exact reason.
+   - Replace `UpscalerEvaluatePathMissing` with either `None` when evaluate
+     succeeds or a more specific fallback when it does not.
+   - Add create/evaluate attempt counts, results, output ready state, input and
+     output dimensions, reset flag, jitter, and feature recreation reason to
+     CSV, ImGui, and FrameGraph.
+
+5. Verification.
+   - Run `_quick_build.bat`.
+   - Run DLSS requested, invalid-SDK, and not-requested smokes.
+   - Require 0 frame-graph validation issues and clean logs for `VUID`,
+     validation, error, failed, exception, and shader diagnostics.
+   - Do not claim production image quality until object motion vectors,
+     reactive/transparency masks, pre/post-upscale post ordering, and visual QA
+     are proven.
 
 ## Slice 1 Execution Evidence
 
@@ -299,3 +350,61 @@ claims yet.
   not create a DLSS feature handle, evaluate DLSS, enable Frame Generation,
   enable Ray Reconstruction, change presentation, or claim production image
   quality.
+
+## Slice 4 Execution Evidence
+
+- Added a display-sized `TemporalUpscaleOutput` image per swapchain image. It
+  uses the HDR scene color format with storage/sampled/transfer usage and is
+  exposed in CSV, ImGui, and FrameGraph when the evaluate pass is active.
+- Added `TemporalUpscalerEvaluateRequest` and
+  `TemporalUpscalerEvaluateStatus` behind the engine-owned TemporalUpscaler
+  boundary. Renderer code passes Vulkan image handles/views/formats/extents,
+  jitter/reset, quality mode, and sharpness; NGX helper types remain contained
+  in `temporal_upscaler.cpp`.
+- Added DLSS feature-handle lifecycle management. The feature is lazily created
+  on the first valid evaluate request, reused across matching frames, recreated
+  when render extent, output extent, quality mode, or create flags change, and
+  released from the existing NGX shutdown path.
+- Added a pre-main-pass DLSS evaluate command-buffer step. It transitions
+  HDRSceneColor, SceneDepth, Velocity, and TemporalUpscaleOutput to
+  `GENERAL`, wraps them as `NVSDK_NGX_Resource_VK`, calls
+  `NGX_VULKAN_EVALUATE_DLSS_EXT`, then restores renderer-readable layouts.
+- The first evaluate carrier uses `IsHDR | MVLowRes` create flags, input-pixel
+  jitter offsets, reset state, render-subrect dimensions, MV scale `1/1`,
+  NGX-recommended sharpness, and the existing transformer preset policy. It
+  intentionally leaves exposure texture, reactive/transparency masks, and
+  optional research GBuffer inputs null.
+- CSV and ImGui now report evaluate requested/attempted/fallback,
+  parameter-allocation result, feature create attempt/result/recreate reason,
+  evaluate result, output ready state, render/output dimensions, create flags,
+  reset, jitter, MV scale, and evaluate sharpness.
+- FrameGraph now records `TemporalUpscalerEvaluate` as a compute pass and
+  `TemporalUpscaleOutput` as its output only when the pass is active, preserving
+  0 validation issues in fallback paths.
+- `_quick_build.bat` passes for `SelfEngineForward3D`; the existing MSVC
+  runtime-library warning remains.
+- Smoke evidence:
+  `out/benchmarks/aaa_dlss_evaluate_smoke.csv`,
+  `out/benchmarks/aaa_dlss_evaluate_invalid_sdk_smoke.csv`, and
+  `out/benchmarks/aaa_dlss_evaluate_not_requested_smoke.csv` all report
+  matching 752-column rows and 0 frame-graph validation issues.
+- The DLSS-requested smoke reports temporal upscale requested/enabled `1/1`,
+  fallback `0`, output allocated `1` at `1280x720`, plugin/evaluate adapter
+  `1/1`, runtime fallback `0`, evaluate requested/attempted `1/1`, evaluate
+  fallback `0`, feature create result `1`, feature created `1`, DLSS evaluate
+  result `1`, output ready `1`, and render/output extents `960x540 -> 1280x720`.
+  The first recorded row proves feature creation itself: create attempted `1`,
+  result `1`, recreated `1`, recreation reason `1` (`FirstCreate`), evaluate
+  result `1`, and output ready `1`; later rows reuse the handle.
+- The invalid-SDK smoke reports deterministic fallback: plugin requested `1`,
+  package ready `0`, plugin/evaluate adapter `0/0`, runtime fallback `3`,
+  temporal-upscale fallback `4`, evaluate attempted `0`, and output ready `0`.
+- The not-requested smoke reports no DLSS side effects: temporal upscale
+  requested/enabled `0/0`, package/runtime fallback `1/1`, evaluate
+  requested/attempted `0/0`, and output ready `0`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is real DLSS SR/DLAA feature creation and evaluate command recording. It
+  still does not route the DLSS output into final presentation, enable Frame
+  Generation, enable Ray Reconstruction, introduce Streamline interposition,
+  change default presentation, or claim production image quality.

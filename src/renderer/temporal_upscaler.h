@@ -58,6 +58,25 @@ enum class TemporalUpscalerRuntimeFallbackReason : u32 {
     RequiredVulkanExtensionMissing = 12
 };
 
+enum class TemporalUpscalerEvaluateFallbackReason : u32 {
+    None = 0,
+    NotRequested = 1,
+    RuntimeUnavailable = 2,
+    VulkanResourcesUnavailable = 3,
+    ParametersUnavailable = 4,
+    FeatureCreateFailed = 5,
+    EvaluateFailed = 6
+};
+
+enum class TemporalUpscalerFeatureRecreationReason : u32 {
+    None = 0,
+    FirstCreate = 1,
+    InputExtentChanged = 2,
+    OutputExtentChanged = 3,
+    QualityModeChanged = 4,
+    CreateFlagsChanged = 5
+};
+
 struct TemporalUpscalerProbeRequest {
     std::string providerName;
     std::filesystem::path sdkRootOverride;
@@ -153,6 +172,64 @@ struct TemporalUpscalerRuntimeStatus {
     u32 evaluateAdapterAvailable = 0;
 };
 
+struct TemporalUpscalerVulkanImageResource {
+    VkImage image = VK_NULL_HANDLE;
+    VkImageView imageView = VK_NULL_HANDLE;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkExtent2D extent{};
+    VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    bool readWrite = false;
+};
+
+struct TemporalUpscalerEvaluateRequest {
+    TemporalUpscalerRuntimeStatus runtimeStatus{};
+    VkDevice device = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    TemporalUpscalerVulkanImageResource inputColor{};
+    TemporalUpscalerVulkanImageResource inputDepth{};
+    TemporalUpscalerVulkanImageResource inputMotionVectors{};
+    TemporalUpscalerVulkanImageResource outputColor{};
+    VkExtent2D renderExtent{};
+    VkExtent2D outputExtent{};
+    TemporalUpscalerDlssQualityMode dlssQualityMode =
+        TemporalUpscalerDlssQualityMode::Quality;
+    u32 reset = 0;
+    f32 jitterOffsetX = 0.0f;
+    f32 jitterOffsetY = 0.0f;
+    f32 motionVectorScaleX = 1.0f;
+    f32 motionVectorScaleY = 1.0f;
+    f32 sharpness = 0.0f;
+};
+
+struct TemporalUpscalerEvaluateStatus {
+    TemporalUpscalerEvaluateFallbackReason fallbackReason =
+        TemporalUpscalerEvaluateFallbackReason::NotRequested;
+    TemporalUpscalerFeatureRecreationReason featureRecreationReason =
+        TemporalUpscalerFeatureRecreationReason::None;
+    u32 requested = 0;
+    u32 attempted = 0;
+    u32 parametersAllocated = 0;
+    u32 parameterAllocationResult = 0;
+    u32 featureCreateAttempted = 0;
+    u32 featureCreated = 0;
+    u32 featureCreateResult = 0;
+    u32 featureRecreated = 0;
+    u32 evaluateAttempted = 0;
+    u32 evaluateResult = 0;
+    u32 outputReady = 0;
+    u32 renderWidth = 0;
+    u32 renderHeight = 0;
+    u32 outputWidth = 0;
+    u32 outputHeight = 0;
+    u32 createFlags = 0;
+    u32 reset = 0;
+    f32 jitterOffsetX = 0.0f;
+    f32 jitterOffsetY = 0.0f;
+    f32 motionVectorScaleX = 1.0f;
+    f32 motionVectorScaleY = 1.0f;
+    f32 sharpness = 0.0f;
+};
+
 TemporalUpscalerProviderKind TemporalUpscalerProviderKindFromName(
     const std::string& name
 );
@@ -167,6 +244,10 @@ TemporalUpscalerPackageStatus ProbeTemporalUpscalerPackage(
 
 TemporalUpscalerRuntimeStatus QueryTemporalUpscalerRuntime(
     const TemporalUpscalerRuntimeRequest& request
+);
+
+TemporalUpscalerEvaluateStatus EvaluateTemporalUpscaler(
+    const TemporalUpscalerEvaluateRequest& request
 );
 
 void ShutdownTemporalUpscalerRuntime(VkDevice device);

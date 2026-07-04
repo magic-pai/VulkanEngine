@@ -799,6 +799,165 @@ void CopyHdrSceneColorToTemporalHistory(
     );
 }
 
+void RecordTemporalUpscalerEvaluate(
+    VkCommandBuffer commandBuffer,
+    VkDevice device,
+    const VulkanSceneRenderTargets& renderTargets,
+    std::size_t imageIndex,
+    const FrameTemporalState& temporalState,
+    const FrameTemporalUpscaleState& temporalUpscaleState,
+    bool temporalUpscaleOutputInitialized,
+    TemporalUpscalerEvaluateStatus& evaluateStatus
+) {
+    evaluateStatus = TemporalUpscalerEvaluateStatus{};
+    evaluateStatus.requested =
+        temporalUpscaleState.temporalUpscaleRequested ? 1u : 0u;
+    if (!temporalUpscaleState.temporalUpscaleEnabled ||
+        !temporalUpscaleState.temporalUpscaleContractReady ||
+        !temporalUpscaleState.upscalerPluginAvailable ||
+        imageIndex >= renderTargets.Count()) {
+        return;
+    }
+
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.HdrSceneColorImage(imageIndex),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+    TransitionDepthImage(
+        commandBuffer,
+        renderTargets.SceneDepthImage(imageIndex),
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_SHADER_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.VelocityImage(imageIndex),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.TemporalUpscaleOutputImage(imageIndex),
+        temporalUpscaleOutputInitialized
+            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            : VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL,
+        temporalUpscaleOutputInitialized ? VK_ACCESS_SHADER_READ_BIT : 0,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        temporalUpscaleOutputInitialized
+            ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+
+    const VkExtent2D renderExtent = renderTargets.Extent();
+    const VkExtent2D outputExtent = renderTargets.DisplayExtent();
+    evaluateStatus = EvaluateTemporalUpscaler(
+        TemporalUpscalerEvaluateRequest{
+            temporalUpscaleState.upscalerRuntime,
+            device,
+            commandBuffer,
+            TemporalUpscalerVulkanImageResource{
+                renderTargets.HdrSceneColorImage(imageIndex),
+                renderTargets.HdrSceneColorView(imageIndex),
+                renderTargets.HdrSceneColorFormat(),
+                renderExtent,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                false
+            },
+            TemporalUpscalerVulkanImageResource{
+                renderTargets.SceneDepthImage(imageIndex),
+                renderTargets.SceneDepthView(imageIndex),
+                renderTargets.SceneDepthFormat(),
+                renderExtent,
+                VK_IMAGE_ASPECT_DEPTH_BIT,
+                false
+            },
+            TemporalUpscalerVulkanImageResource{
+                renderTargets.VelocityImage(imageIndex),
+                renderTargets.VelocityView(imageIndex),
+                renderTargets.VelocityFormat(),
+                renderExtent,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                false
+            },
+            TemporalUpscalerVulkanImageResource{
+                renderTargets.TemporalUpscaleOutputImage(imageIndex),
+                renderTargets.TemporalUpscaleOutputView(imageIndex),
+                renderTargets.TemporalUpscaleOutputFormat(),
+                outputExtent,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                true
+            },
+            renderExtent,
+            outputExtent,
+            temporalUpscaleState.dlssQualityMode,
+            temporalState.historyReset ? 1u : 0u,
+            temporalState.jitterPixels.x,
+            temporalState.jitterPixels.y,
+            1.0f,
+            1.0f,
+            temporalUpscaleState.upscalerRuntime.sharpness
+        }
+    );
+
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.TemporalUpscaleOutputImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.VelocityImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+    TransitionDepthImage(
+        commandBuffer,
+        renderTargets.SceneDepthImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.HdrSceneColorImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+}
+
 void RecordBloomFullscreenPass(
     VkCommandBuffer commandBuffer,
     const VulkanBloomRenderPass& renderPass,
@@ -1189,6 +1348,10 @@ void VulkanCommandBuffer::Record(
     bool sharpeningDebugView,
     bool temporalHistoryColorInitialized,
     bool recordTemporalHistoryColorCopy,
+    const FrameTemporalState* temporalState,
+    const FrameTemporalUpscaleState* temporalUpscaleState,
+    bool temporalUpscaleOutputInitialized,
+    TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -2103,6 +2266,24 @@ void VulkanCommandBuffer::Record(
         sceneRenderTargets != nullptr &&
         !temporalHistoryColorInitialized) {
         PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
+    }
+
+    if (sceneRenderTargets != nullptr &&
+        temporalState != nullptr &&
+        temporalUpscaleState != nullptr &&
+        temporalUpscalerEvaluateStatus != nullptr) {
+        RecordTemporalUpscalerEvaluate(
+            commandBuffer,
+            m_Device,
+            *sceneRenderTargets,
+            imageIndex,
+            *temporalState,
+            *temporalUpscaleState,
+            temporalUpscaleOutputInitialized,
+            *temporalUpscalerEvaluateStatus
+        );
+    } else if (temporalUpscalerEvaluateStatus != nullptr) {
+        *temporalUpscalerEvaluateStatus = TemporalUpscalerEvaluateStatus{};
     }
 
     std::array<VkClearValue, 2> clearValues{};

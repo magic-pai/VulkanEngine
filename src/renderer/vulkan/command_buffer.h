@@ -40,6 +40,9 @@ struct RenderFrameGraphPlan;
 struct FrameMaterialSet;
 struct DirectionalShadowCascadeSet;
 struct LocalShadowTileSet;
+struct FrameTemporalState;
+struct FrameTemporalUpscaleState;
+struct TemporalUpscalerEvaluateStatus;
 
 class VulkanCommandBuffer {
 public:
@@ -104,6 +107,10 @@ public:
         bool sharpeningDebugView = false,
         bool temporalHistoryColorInitialized = false,
         bool recordTemporalHistoryColorCopy = false,
+        const FrameTemporalState* temporalState = nullptr,
+        const FrameTemporalUpscaleState* temporalUpscaleState = nullptr,
+        bool temporalUpscaleOutputInitialized = false,
+        TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus = nullptr,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
         int gBufferDebugView = -1,

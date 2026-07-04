@@ -451,6 +451,26 @@ VkImage VulkanSceneRenderTargets::HdrSceneColorImage(std::size_t index) const {
     return m_HdrSceneColorImages[index]->Handle();
 }
 
+VkImageView VulkanSceneRenderTargets::TemporalUpscaleOutputView(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_TemporalUpscaleOutputImages.size(),
+        "Temporal upscale output index is out of range"
+    );
+    return m_TemporalUpscaleOutputImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::TemporalUpscaleOutputImage(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_TemporalUpscaleOutputImages.size(),
+        "Temporal upscale output index is out of range"
+    );
+    return m_TemporalUpscaleOutputImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::TemporalHistoryColorView(std::size_t index) const {
     SE_ASSERT(
         index < m_TemporalHistoryColorImages.size(),
@@ -493,6 +513,11 @@ VkImageView VulkanSceneRenderTargets::SceneDepthView(std::size_t index) const {
     return m_SceneDepthImages[index]->View();
 }
 
+VkImage VulkanSceneRenderTargets::VelocityImage(std::size_t index) const {
+    SE_ASSERT(index < m_VelocityImages.size(), "Velocity index is out of range");
+    return m_VelocityImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::VelocityView(std::size_t index) const {
     SE_ASSERT(index < m_VelocityImages.size(), "Velocity index is out of range");
     return m_VelocityImages[index]->View();
@@ -530,6 +555,10 @@ VkImageView VulkanSceneRenderTargets::GBufferMaterialAuxView(std::size_t index) 
 }
 
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
+    return kHdrSceneColorFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::TemporalUpscaleOutputFormat() const {
     return kHdrSceneColorFormat;
 }
 
@@ -573,6 +602,10 @@ VkFormat VulkanSceneRenderTargets::GBufferMaterialAuxFormat() const {
     return kGBufferMaterialAuxFormat;
 }
 
+VkExtent2D VulkanSceneRenderTargets::DisplayExtent() const {
+    return m_DisplayExtent;
+}
+
 VkExtent2D VulkanSceneRenderTargets::Extent() const {
     return m_Extent;
 }
@@ -588,6 +621,7 @@ void VulkanSceneRenderTargets::Recreate(
     VkExtent2D extent
 ) {
     Release();
+    m_DisplayExtent = swapchain.Extent();
     m_Extent =
         extent.width > 0u && extent.height > 0u ? extent : swapchain.Extent();
     const std::size_t count = swapchain.Images().size();
@@ -604,6 +638,19 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_HdrSceneColorImages
+    );
+    CreateImageArrayForExtent(
+        device,
+        physicalDevice,
+        count,
+        m_DisplayExtent,
+        kHdrSceneColorFormat,
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_STORAGE_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_TemporalUpscaleOutputImages
     );
     CreateImageArray(
         device,
@@ -716,6 +763,7 @@ void VulkanSceneRenderTargets::Recreate(
 
 void VulkanSceneRenderTargets::Release() {
     m_HdrSceneColorImages.clear();
+    m_TemporalUpscaleOutputImages.clear();
     m_TemporalHistoryColorImages.clear();
     m_WeightedTranslucencyAccumImages.clear();
     m_WeightedTranslucencyRevealageImages.clear();
@@ -726,6 +774,7 @@ void VulkanSceneRenderTargets::Release() {
     m_GBufferMaterialImages.clear();
     m_GBufferEmissiveImages.clear();
     m_GBufferMaterialAuxImages.clear();
+    m_DisplayExtent = {};
     m_Extent = {};
 }
 
@@ -744,6 +793,31 @@ void VulkanSceneRenderTargets::CreateImageArray(
             device,
             physicalDevice,
             m_Extent,
+            format,
+            VK_IMAGE_TILING_OPTIMAL,
+            usage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            aspectFlags
+        ));
+    }
+}
+
+void VulkanSceneRenderTargets::CreateImageArrayForExtent(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    std::size_t count,
+    VkExtent2D extent,
+    VkFormat format,
+    VkImageUsageFlags usage,
+    VkImageAspectFlags aspectFlags,
+    std::vector<std::unique_ptr<VulkanImage>>& images
+) const {
+    images.reserve(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        images.push_back(std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
             format,
             VK_IMAGE_TILING_OPTIMAL,
             usage,

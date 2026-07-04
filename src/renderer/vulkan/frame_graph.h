@@ -383,6 +383,10 @@ struct CurrentVulkanFrameGraphInputs {
     u32 temporalUpscaleRequestedHeight = 0;
     u32 temporalUpscaleActiveWidth = 0;
     u32 temporalUpscaleActiveHeight = 0;
+    bool temporalUpscaleOutputAllocated = false;
+    VkFormat temporalUpscaleOutputFormat = VK_FORMAT_UNDEFINED;
+    u32 temporalUpscaleOutputWidth = 0;
+    u32 temporalUpscaleOutputHeight = 0;
     bool dynamicResolutionRequested = false;
     bool dynamicResolutionEnabled = false;
     bool taauRequested = false;

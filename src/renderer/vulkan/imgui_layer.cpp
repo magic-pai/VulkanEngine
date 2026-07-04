@@ -1246,6 +1246,35 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalerSharpness
     );
     ImGui::Text(
+        "Temporal upscaler evaluate: output %u %ux%u fmt %u requested/attempted %u/%u fallback %u params %u result 0x%X create %u/%u result 0x%X recreate %u reason %u eval %u result 0x%X ready %u render %ux%u flags 0x%X reset %u jitter %.3f %.3f mv %.2f %.2f sharp %.3f",
+        stats.temporal.temporalUpscaleOutputAllocated,
+        stats.temporal.temporalUpscaleOutputWidth,
+        stats.temporal.temporalUpscaleOutputHeight,
+        stats.temporal.temporalUpscaleOutputFormat,
+        stats.temporal.temporalUpscalerEvaluateRequested,
+        stats.temporal.temporalUpscalerEvaluateAttempted,
+        stats.temporal.temporalUpscalerEvaluateFallbackReason,
+        stats.temporal.temporalUpscalerEvaluateParametersAllocated,
+        stats.temporal.temporalUpscalerEvaluateParameterAllocationResult,
+        stats.temporal.temporalUpscalerFeatureCreateAttempted,
+        stats.temporal.temporalUpscalerFeatureCreated,
+        stats.temporal.temporalUpscalerFeatureCreateResult,
+        stats.temporal.temporalUpscalerFeatureRecreated,
+        stats.temporal.temporalUpscalerFeatureRecreationReason,
+        stats.temporal.temporalUpscalerDlssEvaluateAttempted,
+        stats.temporal.temporalUpscalerDlssEvaluateResult,
+        stats.temporal.temporalUpscalerDlssOutputReady,
+        stats.temporal.temporalUpscalerDlssRenderWidth,
+        stats.temporal.temporalUpscalerDlssRenderHeight,
+        stats.temporal.temporalUpscalerDlssCreateFlags,
+        stats.temporal.temporalUpscalerDlssReset,
+        stats.temporal.temporalUpscalerDlssJitterOffsetX,
+        stats.temporal.temporalUpscalerDlssJitterOffsetY,
+        stats.temporal.temporalUpscalerDlssMotionVectorScaleX,
+        stats.temporal.temporalUpscalerDlssMotionVectorScaleY,
+        stats.temporal.temporalUpscalerDlssEvaluateSharpness
+    );
+    ImGui::Text(
         "Temporal upscaler requirements: queried %u result 0x%X supported %u mask 0x%X minHW %u minOS %s inst %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s] dev %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s]",
         stats.temporal.temporalUpscalerFeatureRequirementsQueried,
         stats.temporal.temporalUpscalerFeatureRequirementsResult,

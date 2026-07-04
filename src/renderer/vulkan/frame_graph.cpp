@@ -1474,6 +1474,12 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     const std::string sceneExtentScale = inputs.temporalRenderScaleApplied
         ? "internal scene extent"
         : "display extent";
+    const std::string temporalUpscaleOutputScale =
+        inputs.temporalUpscaleOutputWidth > 0u &&
+            inputs.temporalUpscaleOutputHeight > 0u
+            ? std::to_string(inputs.temporalUpscaleOutputWidth) + "x" +
+                std::to_string(inputs.temporalUpscaleOutputHeight)
+            : "display extent";
 
     AppendResource(
         plan,
@@ -1909,6 +1915,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "history color cold"
         );
     }
+    if (inputs.temporalUpscaleOutputAllocated &&
+        inputs.temporalUpscaleEnabled) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "TemporalUpscaleOutput",
+            VulkanFormatName(inputs.temporalUpscaleOutputFormat),
+            "storage, sampled, transfer",
+            temporalUpscaleOutputScale
+        );
+    }
     if (inputs.lightTileCullComputeEnabled) {
         AppendResource(
             plan,
@@ -2190,6 +2208,25 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "",
             inputs.temporalUpscaleEnabled ? "HDRSceneColor" : "",
             "Reports render-scale, dynamic-resolution, TAAU, and plugin handoff contract before native TSR/upscaler implementation."
+        );
+    }
+    if (inputs.temporalUpscalerPluginRequested ||
+        inputs.temporalUpscaleEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.temporalUpscaleEnabled
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "TemporalUpscalerEvaluate",
+            inputs.temporalUpscaleEnabled
+                ? "HDRSceneColor, SceneDepth, Velocity, TemporalFrameState"
+                : "",
+            inputs.temporalUpscaleEnabled ? "TemporalUpscaleOutput" : "",
+            inputs.temporalUpscaleEnabled
+                ? "DLSS SR/DLAA evaluate is recorded behind the TemporalUpscaler boundary."
+                : "DLSS SR/DLAA evaluate waits for runtime, contract, and output-resource readiness."
         );
     }
     if (inputs.temporalUpscalerPluginRequested ||

@@ -579,7 +579,8 @@ enum class RendererTemporalUpscaleFallbackReason : u32 {
     InputsUnavailable = 3,
     UpscalerUnavailable = 4,
     DynamicResolutionUnsupported = 5,
-    UpscalerEvaluatePathMissing = 6
+    UpscalerEvaluatePathMissing = 6,
+    UpscalerEvaluateFailed = 7
 };
 
 struct RendererTemporalStats {
@@ -636,6 +637,10 @@ struct RendererTemporalStats {
     u32 temporalUpscaleRequestedHeight = 0;
     u32 temporalUpscaleActiveWidth = 0;
     u32 temporalUpscaleActiveHeight = 0;
+    u32 temporalUpscaleOutputAllocated = 0;
+    VkFormat temporalUpscaleOutputFormat = VK_FORMAT_UNDEFINED;
+    u32 temporalUpscaleOutputWidth = 0;
+    u32 temporalUpscaleOutputHeight = 0;
     u32 dynamicResolutionRequested = 0;
     u32 dynamicResolutionEnabled = 0;
     u32 taauRequested = 0;
@@ -711,6 +716,30 @@ struct RendererTemporalStats {
     u32 temporalUpscalerMaxRenderWidth = 0;
     u32 temporalUpscalerMaxRenderHeight = 0;
     f32 temporalUpscalerSharpness = 0.0f;
+    u32 temporalUpscalerEvaluateRequested = 0;
+    u32 temporalUpscalerEvaluateAttempted = 0;
+    u32 temporalUpscalerEvaluateFallbackReason = 0;
+    u32 temporalUpscalerEvaluateParametersAllocated = 0;
+    u32 temporalUpscalerEvaluateParameterAllocationResult = 0;
+    u32 temporalUpscalerFeatureCreateAttempted = 0;
+    u32 temporalUpscalerFeatureCreated = 0;
+    u32 temporalUpscalerFeatureCreateResult = 0;
+    u32 temporalUpscalerFeatureRecreated = 0;
+    u32 temporalUpscalerFeatureRecreationReason = 0;
+    u32 temporalUpscalerDlssEvaluateAttempted = 0;
+    u32 temporalUpscalerDlssEvaluateResult = 0;
+    u32 temporalUpscalerDlssOutputReady = 0;
+    u32 temporalUpscalerDlssRenderWidth = 0;
+    u32 temporalUpscalerDlssRenderHeight = 0;
+    u32 temporalUpscalerDlssOutputWidth = 0;
+    u32 temporalUpscalerDlssOutputHeight = 0;
+    u32 temporalUpscalerDlssCreateFlags = 0;
+    u32 temporalUpscalerDlssReset = 0;
+    f32 temporalUpscalerDlssJitterOffsetX = 0.0f;
+    f32 temporalUpscalerDlssJitterOffsetY = 0.0f;
+    f32 temporalUpscalerDlssMotionVectorScaleX = 1.0f;
+    f32 temporalUpscalerDlssMotionVectorScaleY = 1.0f;
+    f32 temporalUpscalerDlssEvaluateSharpness = 0.0f;
 };
 
 struct RendererStats {

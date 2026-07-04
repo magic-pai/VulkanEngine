@@ -129,6 +129,8 @@ struct FrameTemporalUpscaleState {
     bool temporalUpscaleContractReady = false;
     bool upscalerPluginRequested = false;
     bool upscalerPluginAvailable = false;
+    TemporalUpscalerDlssQualityMode dlssQualityMode =
+        TemporalUpscalerDlssQualityMode::Quality;
     TemporalUpscalerPackageStatus upscalerPackage{};
     TemporalUpscalerRuntimeStatus upscalerRuntime{};
     RendererTemporalUpscaleFallbackReason fallbackReason =
@@ -457,6 +459,9 @@ private:
         VkFormat materialAuxFormat,
         bool historyColorTargetAllocated,
         VkFormat historyColorFormat,
+        bool temporalUpscaleOutputAllocated,
+        VkFormat temporalUpscaleOutputFormat,
+        VkExtent2D temporalUpscaleOutputExtent,
         u32 historyColorCopyCount,
         RendererTemporalStats& stats
     ) const;
@@ -588,6 +593,7 @@ private:
     u32 m_TemporalFrameCounter = 0;
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
+    std::vector<bool> m_TemporalUpscaleOutputInitialized;
 
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;
