@@ -17,7 +17,6 @@ param(
     [string]$DefaultSceneDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json",
     [string]$ImportedDynamicDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
-    [ValidateSet("full", "default", "default-motion", "default-object-motion", "imported-dynamic")]
     [string[]]$Suite = @("full"),
     [switch]$SkipBuild
 )
@@ -907,11 +906,15 @@ function Compare-ImageSequence {
     $maxDelta = 0
     $minEdgePixels = [int]::MaxValue
     $maxChangedEdgePixels = 0
+    $maxChangedEdgeRatio = 0.0
     $maxMeanEdgeDelta = 0.0
     $maxEdgeDelta = 0.0
     for ($index = 1; $index -lt $Paths.Count; ++$index) {
         $comparison = Compare-Images -A $Paths[$index - 1] -B $Paths[$index]
         $edgeComparison = Compare-ImageEdges -A $Paths[$index - 1] -B $Paths[$index]
+        $changedEdgeRatio =
+            [double]$edgeComparison.ChangedEdgePixels /
+            [double][Math]::Max([int]$edgeComparison.EdgePixels, 1)
         $pairs += [pscustomobject]@{
             from = $Paths[$index - 1]
             to = $Paths[$index]
@@ -921,6 +924,7 @@ function Compare-ImageSequence {
             maxDelta = $comparison.MaxDelta
             edgePixels = $edgeComparison.EdgePixels
             changedEdgePixels = $edgeComparison.ChangedEdgePixels
+            changedEdgeRatio = [Math]::Round($changedEdgeRatio, 4)
             meanEdgeDelta = $edgeComparison.MeanEdgeDelta
             maxEdgeDelta = $edgeComparison.MaxEdgeDelta
         }
@@ -941,6 +945,10 @@ function Compare-ImageSequence {
             $maxChangedEdgePixels,
             [int]$edgeComparison.ChangedEdgePixels
         )
+        $maxChangedEdgeRatio = [Math]::Max(
+            $maxChangedEdgeRatio,
+            $changedEdgeRatio
+        )
         $maxMeanEdgeDelta = [Math]::Max(
             $maxMeanEdgeDelta,
             [double]$edgeComparison.MeanEdgeDelta
@@ -959,6 +967,7 @@ function Compare-ImageSequence {
         maxDelta = $maxDelta
         minEdgePixels = $minEdgePixels
         maxChangedEdgePixels = $maxChangedEdgePixels
+        maxChangedEdgeRatio = [Math]::Round($maxChangedEdgeRatio, 4)
         maxMeanEdgeDelta = [Math]::Round($maxMeanEdgeDelta, 4)
         maxEdgeDelta = [Math]::Round($maxEdgeDelta, 4)
     }
@@ -1193,10 +1202,30 @@ $materialStressDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
 $materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
     $materialStressBaselineManifestPath
 
-$selectedSuites =
-    @($Suite | ForEach-Object { $_.ToString().ToLowerInvariant() } | Select-Object -Unique)
+$validSuites =
+    @("full", "default", "default-motion", "default-object-motion", "imported-dynamic")
+$selectedSuites = @(
+    @(
+        foreach ($suiteValue in $Suite) {
+            foreach ($suitePart in $suiteValue.ToString().Split(
+                    [char[]]@(','),
+                    [System.StringSplitOptions]::RemoveEmptyEntries
+                )) {
+                $normalizedSuite = $suitePart.Trim().ToLowerInvariant()
+                if ($normalizedSuite.Length -gt 0) {
+                    $normalizedSuite
+                }
+            }
+        }
+    ) | Select-Object -Unique
+)
 if ($selectedSuites.Count -eq 0) {
     $selectedSuites = @("full")
+}
+foreach ($selectedSuite in $selectedSuites) {
+    if ($validSuites -notcontains $selectedSuite) {
+        throw "Unknown -Suite '$selectedSuite'. Valid suites: $($validSuites -join ', ')"
+    }
 }
 if (($selectedSuites -contains "full") -and $selectedSuites.Count -gt 1) {
     throw "-Suite full cannot be combined with focused suites"
@@ -1382,6 +1411,16 @@ function Assert-QuickSequenceComparison {
         -Min $Manifest.thresholds.sequencePairEdgePixelsMin `
         -Max $Comparison.pairs[0].SampledPixels
     Assert-BaselineRange `
+        -Name "$Name.sequence.maxChangedEdgePixels" `
+        -Actual $Comparison.maxChangedEdgePixels `
+        -Min 0 `
+        -Max $Manifest.thresholds.sequencePairChangedEdgePixelsMax
+    Assert-BaselineRange `
+        -Name "$Name.sequence.maxChangedEdgeRatio" `
+        -Actual $Comparison.maxChangedEdgeRatio `
+        -Min 0 `
+        -Max $Manifest.thresholds.sequencePairChangedEdgeRatioMax
+    Assert-BaselineRange `
         -Name "$Name.sequence.maxMeanEdgeDelta" `
         -Actual $Comparison.maxMeanEdgeDelta `
         -Min 0 `
@@ -1391,6 +1430,21 @@ function Assert-QuickSequenceComparison {
         -Actual $Comparison.maxEdgeDelta `
         -Min 0 `
         -Max $Manifest.thresholds.sequencePairMaxEdgeDeltaMax
+}
+
+function New-QuickSequenceThresholdSummary {
+    param([Parameter(Mandatory = $true)]$Manifest)
+
+    return [ordered]@{
+        centralDifferentPixelsMin = [int]$Manifest.thresholds.centralDifferentPixelsMin
+        sequencePairChangedPixelsMin = [int]$Manifest.thresholds.sequencePairChangedPixelsMin
+        sequencePairMeanDeltaMax = [double]$Manifest.thresholds.sequencePairMeanDeltaMax
+        sequencePairEdgePixelsMin = [int]$Manifest.thresholds.sequencePairEdgePixelsMin
+        sequencePairChangedEdgePixelsMax = [int]$Manifest.thresholds.sequencePairChangedEdgePixelsMax
+        sequencePairChangedEdgeRatioMax = [double]$Manifest.thresholds.sequencePairChangedEdgeRatioMax
+        sequencePairMeanEdgeDeltaMax = [double]$Manifest.thresholds.sequencePairMeanEdgeDeltaMax
+        sequencePairMaxEdgeDeltaMax = [double]$Manifest.thresholds.sequencePairMaxEdgeDeltaMax
+    }
 }
 
 function New-QuickLaneSummary {
@@ -1485,6 +1539,7 @@ if (-not ($selectedSuites -contains "full")) {
         selectedSuites = $selectedSuites
         captureMonitor = $script:captureMonitorWorkArea
         baselines = [ordered]@{}
+        thresholds = [ordered]@{}
         lanes = [ordered]@{}
     }
 
@@ -1555,6 +1610,9 @@ if (-not ($selectedSuites -contains "full")) {
             manifest = $defaultSceneDlaaMotionBaselineManifestPath
             name = $defaultSceneDlaaMotionBaselineManifest.name
         }
+        $quickSummary["thresholds"]["defaultMotion"] =
+            New-QuickSequenceThresholdSummary `
+                -Manifest $defaultSceneDlaaMotionBaselineManifest
         $quickSummary["lanes"]["defaultSceneDlaaMotionPresent"] =
             Invoke-QuickDlaaSequenceSuite `
                 -Name "default_scene_dlaa_motion_present" `
@@ -1568,6 +1626,9 @@ if (-not ($selectedSuites -contains "full")) {
             manifest = $defaultSceneDlaaObjectMotionBaselineManifestPath
             name = $defaultSceneDlaaObjectMotionBaselineManifest.name
         }
+        $quickSummary["thresholds"]["defaultObjectMotion"] =
+            New-QuickSequenceThresholdSummary `
+                -Manifest $defaultSceneDlaaObjectMotionBaselineManifest
         $quickSummary["lanes"]["defaultSceneDlaaObjectMotionPresent"] =
             Invoke-QuickDlaaSequenceSuite `
                 -Name "default_scene_dlaa_object_motion_present" `
@@ -1582,6 +1643,9 @@ if (-not ($selectedSuites -contains "full")) {
             name = $importedDynamicDlaaObjectMotionBaselineManifest.name
             model = $importedDynamicModelPath
         }
+        $quickSummary["thresholds"]["importedDynamic"] =
+            New-QuickSequenceThresholdSummary `
+                -Manifest $importedDynamicDlaaObjectMotionBaselineManifest
         $quickSummary["lanes"]["importedDynamicDlaaObjectMotionPresent"] =
             Invoke-QuickDlaaSequenceSuite `
                 -Name "imported_dynamic_dlaa_object_motion_present" `
@@ -1608,7 +1672,7 @@ if (-not ($selectedSuites -contains "full")) {
         }
         if ($lane.Value.Contains("sequenceComparison")) {
             $sequenceComparison = $lane.Value["sequenceComparison"]
-            Write-Host "  $($lane.Key) sequence: pairs=$($sequenceComparison.pairCount) minChanged=$($sequenceComparison.minChangedPixels) maxMean=$($sequenceComparison.maxMeanDelta) edgeMin=$($sequenceComparison.minEdgePixels) edgeMeanMax=$($sequenceComparison.maxMeanEdgeDelta)"
+            Write-Host "  $($lane.Key) sequence: pairs=$($sequenceComparison.pairCount) minChanged=$($sequenceComparison.minChangedPixels) maxMean=$($sequenceComparison.maxMeanDelta) edgeMin=$($sequenceComparison.minEdgePixels) edgeChangedMax=$($sequenceComparison.maxChangedEdgePixels) edgeChangedRatioMax=$($sequenceComparison.maxChangedEdgeRatio) edgeMeanMax=$($sequenceComparison.maxMeanEdgeDelta)"
         }
     }
     return
@@ -2481,6 +2545,16 @@ Assert-BaselineRange `
     -Min $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin `
     -Max $defaultSceneDlaaMotionSequenceComparison.pairs[0].SampledPixels
 Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.maxChangedEdgePixels" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.maxChangedEdgePixels `
+    -Min 0 `
+    -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.maxChangedEdgeRatio" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.maxChangedEdgeRatio `
+    -Min 0 `
+    -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
+Assert-BaselineRange `
     -Name "defaultSceneDlaaMotion.sequence.maxMeanEdgeDelta" `
     -Actual $defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta `
     -Min 0 `
@@ -2513,6 +2587,16 @@ Assert-BaselineRange `
     -Min $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin `
     -Max $defaultSceneDlaaObjectMotionSequenceComparison.pairs[0].SampledPixels
 Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.maxChangedEdgePixels" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgePixels `
+    -Min 0 `
+    -Max $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.maxChangedEdgeRatio" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgeRatio `
+    -Min 0 `
+    -Max $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
+Assert-BaselineRange `
     -Name "defaultSceneDlaaObjectMotion.sequence.maxMeanEdgeDelta" `
     -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta `
     -Min 0 `
@@ -2544,6 +2628,16 @@ Assert-BaselineRange `
     -Actual $importedDynamicDlaaObjectMotionSequenceComparison.minEdgePixels `
     -Min $importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin `
     -Max $importedDynamicDlaaObjectMotionSequenceComparison.pairs[0].SampledPixels
+Assert-BaselineRange `
+    -Name "importedDynamicDlaaObjectMotion.sequence.maxChangedEdgePixels" `
+    -Actual $importedDynamicDlaaObjectMotionSequenceComparison.maxChangedEdgePixels `
+    -Min 0 `
+    -Max $importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+Assert-BaselineRange `
+    -Name "importedDynamicDlaaObjectMotion.sequence.maxChangedEdgeRatio" `
+    -Actual $importedDynamicDlaaObjectMotionSequenceComparison.maxChangedEdgeRatio `
+    -Min 0 `
+    -Max $importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
 Assert-BaselineRange `
     -Name "importedDynamicDlaaObjectMotion.sequence.maxMeanEdgeDelta" `
     -Actual $importedDynamicDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta `
@@ -2692,16 +2786,22 @@ $summary = [pscustomobject]@{
         defaultSceneDlaaMotionSequencePairChangedPixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
         defaultSceneDlaaMotionSequencePairMeanDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
         defaultSceneDlaaMotionSequencePairEdgePixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
+        defaultSceneDlaaMotionSequencePairChangedEdgePixelsMax = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+        defaultSceneDlaaMotionSequencePairChangedEdgeRatioMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
         defaultSceneDlaaMotionSequencePairMeanEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
         defaultSceneDlaaMotionSequencePairMaxEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
         defaultSceneDlaaObjectMotionSequencePairChangedPixelsMin = [int]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
         defaultSceneDlaaObjectMotionSequencePairMeanDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
         defaultSceneDlaaObjectMotionSequencePairEdgePixelsMin = [int]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
+        defaultSceneDlaaObjectMotionSequencePairChangedEdgePixelsMax = [int]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+        defaultSceneDlaaObjectMotionSequencePairChangedEdgeRatioMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
         defaultSceneDlaaObjectMotionSequencePairMeanEdgeDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
         defaultSceneDlaaObjectMotionSequencePairMaxEdgeDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
         importedDynamicDlaaObjectMotionSequencePairChangedPixelsMin = [int]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
         importedDynamicDlaaObjectMotionSequencePairMeanDeltaMax = [double]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
         importedDynamicDlaaObjectMotionSequencePairEdgePixelsMin = [int]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
+        importedDynamicDlaaObjectMotionSequencePairChangedEdgePixelsMax = [int]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgePixelsMax
+        importedDynamicDlaaObjectMotionSequencePairChangedEdgeRatioMax = [double]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedEdgeRatioMax
         importedDynamicDlaaObjectMotionSequencePairMeanEdgeDeltaMax = [double]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
         importedDynamicDlaaObjectMotionSequencePairMaxEdgeDeltaMax = [double]$importedDynamicDlaaObjectMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
     }
@@ -2944,11 +3044,11 @@ Write-Host "  adiff: sampled=$($dlaaComparison.SampledPixels) changed=$($dlaaCom
 Write-Host "  app dlaa: $defaultSceneDlaaImage"
 Write-Host "  appdiff: sampled=$($defaultSceneDlaaComparison.SampledPixels) changed=$($defaultSceneDlaaComparison.ChangedPixels) mean=$($defaultSceneDlaaComparison.MeanDelta) max=$($defaultSceneDlaaComparison.MaxDelta)"
 Write-Host "  app motion: $($defaultSceneDlaaMotionImages -join ', ')"
-Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta)"
+Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaMotionSequenceComparison.maxChangedEdgePixels) edgeChangedRatioMax=$($defaultSceneDlaaMotionSequenceComparison.maxChangedEdgeRatio) edgeMeanMax=$($defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta)"
 Write-Host "  app object motion: $($defaultSceneDlaaObjectMotionImages -join ', ')"
-Write-Host "  appobjectmotiondiff: pairs=$($defaultSceneDlaaObjectMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaObjectMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaObjectMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaObjectMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxEdgeDelta)"
+Write-Host "  appobjectmotiondiff: pairs=$($defaultSceneDlaaObjectMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaObjectMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaObjectMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaObjectMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgePixels) edgeChangedRatioMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgeRatio) edgeMeanMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxEdgeDelta)"
 Write-Host "  imported motion: $($importedDynamicDlaaObjectMotionImages -join ', ')"
-Write-Host "  importeddiff: pairs=$($importedDynamicDlaaObjectMotionSequenceComparison.pairCount) minChanged=$($importedDynamicDlaaObjectMotionSequenceComparison.minChangedPixels) maxMean=$($importedDynamicDlaaObjectMotionSequenceComparison.maxMeanDelta) max=$($importedDynamicDlaaObjectMotionSequenceComparison.maxDelta) edgeMin=$($importedDynamicDlaaObjectMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxEdgeDelta)"
+Write-Host "  importeddiff: pairs=$($importedDynamicDlaaObjectMotionSequenceComparison.pairCount) minChanged=$($importedDynamicDlaaObjectMotionSequenceComparison.minChangedPixels) maxMean=$($importedDynamicDlaaObjectMotionSequenceComparison.maxMeanDelta) max=$($importedDynamicDlaaObjectMotionSequenceComparison.maxDelta) edgeMin=$($importedDynamicDlaaObjectMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxChangedEdgePixels) edgeChangedRatioMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxChangedEdgeRatio) edgeMeanMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($importedDynamicDlaaObjectMotionSequenceComparison.maxEdgeDelta)"
 Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
 Write-Host "  forward: $forwardSpecialDlssImage"

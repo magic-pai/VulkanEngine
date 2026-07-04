@@ -55,6 +55,8 @@
     "sequencePairChangedPixelsMin": 512,
     "sequencePairMeanDeltaMax": 180.0,
     "sequencePairEdgePixelsMin": 256,
+    "sequencePairChangedEdgePixelsMax": 512,
+    "sequencePairChangedEdgeRatioMax": 0.95,
     "sequencePairMeanEdgeDeltaMax": 128.0,
     "sequencePairMaxEdgeDeltaMax": 255.0,
     "centralDifferentPixelsMin": 512
