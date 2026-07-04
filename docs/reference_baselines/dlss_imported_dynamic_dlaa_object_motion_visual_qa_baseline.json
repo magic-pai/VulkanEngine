@@ -1,11 +1,15 @@
 {
   "schemaVersion": 1,
-  "name": "dlss_visual_qa_default_scene_dlaa_object_motion",
+  "name": "dlss_visual_qa_imported_dynamic_dlaa_object_motion",
   "target": "SelfEngineForward3D",
-  "scene": "default-application-scene-moving-camera-moving-object",
-  "description": "Reference contract for the real default Forward 3D application scene under deterministic benchmark camera and object motion. This validates that DLAA is exercised with camera-motion vectors, object-motion vectors, applied jitter, and a changing frame sequence instead of only static screenshots.",
+  "scene": "imported-demo-crystal-static-camera-object-motion",
+  "description": "Reference contract for the repo-owned imported OBJ asset under deterministic benchmark object motion with a static camera. This validates that DLAA is exercised through RuntimeModelLoader/Assimp geometry, imported mesh identity, previous-model object velocity coverage, applied jitter, and a changing frame sequence that cannot be explained by camera-only motion.",
+  "model": "assets/models/demo_crystal.obj",
   "environment": {
     "dlssPresent": {
+      "SELFENGINE_MODEL_PATH": "assets/models/demo_crystal.obj",
+      "SE_DEBUG_LOCAL_LIGHTS": "1",
+      "SE_VISUAL_QA_HIDE_IMGUI": "1",
       "SE_RENDER_SCALE": "1.0",
       "SE_RENDER_SCALE_APPLY": "1",
       "SE_TAA": "1",
@@ -14,8 +18,9 @@
       "SE_UPSCALER_PLUGIN": "dlss",
       "SE_DLSS_QUALITY": "dlaa",
       "SE_DLSS_PRESENT": "1",
-      "SE_BENCHMARK_CAMERA_MOTION": "orbit",
       "SE_BENCHMARK_OBJECT_MOTION": "orbit",
+      "SE_BENCHMARK_OBJECT_MOTION_SPEED": "0.9",
+      "SE_BENCHMARK_OBJECT_MOTION_RADIUS": "0.42",
       "SE_RENDER_VIEW": "deferred-hdr"
     }
   },
@@ -36,24 +41,29 @@
       "recommendedPreset": "11",
       "cameraMotionReady": "1",
       "objectMotionReady": "1",
-      "mainDraws": "5",
-      "gbufferDraws": "5",
+      "mainDraws": "1",
+      "gbufferDraws": "1",
       "forwardResidualDraws": "0",
-      "weightedTranslucencyDraws": "0"
+      "weightedTranslucencyDraws": "0",
+      "frameMaterialCount": "1",
+      "frameMaterialTexturedCount": "0",
+      "frameLightTotalCount": "4",
+      "frameLocalLightCount": "3"
     }
   },
   "thresholds": {
-    "sequencePairChangedPixelsMin": 16,
+    "sequencePairChangedPixelsMin": 512,
     "sequencePairMeanDeltaMax": 180.0,
     "sequencePairEdgePixelsMin": 256,
-    "sequencePairMeanEdgeDeltaMax": 64.0,
+    "sequencePairMeanEdgeDeltaMax": 128.0,
     "sequencePairMaxEdgeDeltaMax": 255.0,
-    "centralDifferentPixelsMin": 1024
+    "centralDifferentPixelsMin": 512
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T03:27:50.7278582+08:00",
+    "capturedAt": "2026-07-05T03:56:16.1810489+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
     "dlssColumns": "782/782",
+    "model": "assets/models/demo_crystal.obj",
     "qualityMode": 6,
     "recommendedPreset": 11,
     "renderScale": "1/1/0",
@@ -65,13 +75,15 @@
     "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
     "cameraMotion": "1/1",
     "objectMotion": "1/1",
+    "drawRoute": "1/1/0/0",
+    "materialCounters": "materials=1,textured=0,lights=4,local=3,rect=0",
     "sequencePairCount": 2,
-    "sequencePairMinChangedPixels": 5518,
-    "sequencePairMaxMeanDelta": 46.5107,
-    "sequencePairMaxDelta": 569,
-    "sequencePairMinEdgePixels": 1776,
-    "sequencePairMaxChangedEdgePixels": 595,
-    "sequencePairMaxMeanEdgeDelta": 22.3617,
-    "sequencePairMaxEdgeDelta": 204.967
+    "sequencePairMinChangedPixels": 1120,
+    "sequencePairMaxMeanDelta": 39.7803,
+    "sequencePairMaxDelta": 546,
+    "sequencePairMinEdgePixels": 389,
+    "sequencePairMaxChangedEdgePixels": 289,
+    "sequencePairMaxMeanEdgeDelta": 80.1224,
+    "sequencePairMaxEdgeDelta": 182.0732
   }
 }

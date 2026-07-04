@@ -697,6 +697,57 @@ void ApplyBenchmarkObjectMotion(
     });
 }
 
+struct BenchmarkMovingObject {
+    se::Renderable3D* renderable = nullptr;
+    glm::vec3 basePosition{ 0.0f };
+    glm::vec3 baseRotationDegrees{ 0.0f };
+};
+
+void AddBenchmarkMovingObject(
+    std::vector<BenchmarkMovingObject>& movingObjects,
+    se::Renderable3D& renderable
+) {
+    movingObjects.push_back(BenchmarkMovingObject{
+        &renderable,
+        renderable.Transform().Position(),
+        renderable.Transform().RotationDegrees()
+    });
+}
+
+void AddBenchmarkMovingObjectsFromSceneRange(
+    std::vector<BenchmarkMovingObject>& movingObjects,
+    se::Scene3D& scene,
+    std::size_t firstRenderableIndex
+) {
+    const std::span<se::Renderable3D* const> renderables = scene.Renderables();
+    if (firstRenderableIndex >= renderables.size()) {
+        return;
+    }
+
+    for (std::size_t index = firstRenderableIndex; index < renderables.size(); ++index) {
+        if (renderables[index] != nullptr) {
+            AddBenchmarkMovingObject(movingObjects, *renderables[index]);
+        }
+    }
+}
+
+void DisableBenchmarkAutoRotation(
+    const std::vector<BenchmarkMovingObject>& movingObjects
+) {
+    for (const BenchmarkMovingObject& movingObject : movingObjects) {
+        if (movingObject.renderable == nullptr) {
+            continue;
+        }
+
+        movingObject.renderable->Transform().SetAnimateRotation(false);
+        movingObject.renderable->Transform().SetRotationSpeedDegreesPerSecond({
+            0.0f,
+            0.0f,
+            0.0f
+        });
+    }
+}
+
 std::filesystem::path UnrealProjectRootPath() {
     const std::string overridePath = ReadEnvironmentString("SE_UE_PROJECT_ROOT");
     return overridePath.empty() ?
@@ -2066,9 +2117,7 @@ int main() {
     app.RenderResources().RegisterMaterial("GridMaterial", gridMaterial);
 
     se::Scene3D scene;
-    se::Renderable3D* benchmarkMovingObject = nullptr;
-    glm::vec3 benchmarkMovingObjectBasePosition{ 0.0f };
-    glm::vec3 benchmarkMovingObjectBaseRotationDegrees{ 0.0f };
+    std::vector<BenchmarkMovingObject> benchmarkMovingObjects;
     se::RuntimeModelLoader runtimeModelLoader(
         app.Device(),
         app.PhysicalDevice(),
@@ -2119,10 +2168,7 @@ int main() {
         rightCube.Transform().SetScale({ 1.1f, 1.1f, 1.1f });
         rightCube.Transform().SetRotationDegrees({ 0.0f, -18.0f, 0.0f });
         rightCube.Transform().SetRotationSpeedDegreesPerSecond({ 12.0f, 14.0f, 0.0f });
-        benchmarkMovingObject = &rightCube;
-        benchmarkMovingObjectBasePosition = rightCube.Transform().Position();
-        benchmarkMovingObjectBaseRotationDegrees =
-            rightCube.Transform().RotationDegrees();
+        AddBenchmarkMovingObject(benchmarkMovingObjects, rightCube);
 
         scene.CreatePointLight(
             "Warm Key Point Light",
@@ -2181,6 +2227,7 @@ int main() {
         std::cout << "Loading startup model: "
             << se::UnrealPathToUtf8(startupModelPath)
             << std::endl;
+        const std::size_t startupModelFirstRenderableIndex = scene.Count();
         const se::RuntimeModelLoadResult defaultModelLoad =
             runtimeModelLoader.LoadIntoScene(
             startupModelPath,
@@ -2191,15 +2238,28 @@ int main() {
             std::cout << "Startup model loaded: "
                 << defaultModelLoad.message
                 << std::endl;
+            AddBenchmarkMovingObjectsFromSceneRange(
+                benchmarkMovingObjects,
+                scene,
+                startupModelFirstRenderableIndex
+            );
         } else {
             std::cout << "[warning] Startup model load failed: "
                 << defaultModelLoad.message
                 << std::endl;
         }
     }
+    const std::size_t bridgeFirstRenderableIndex = scene.Count();
     const se::u32 loadedBridgeMeshInstances =
         LoadBridgeMeshInstances(startupBridgeScene, runtimeModelLoader);
     (void)loadedBridgeMeshInstances;
+    if (loadedBridgeMeshInstances > 0) {
+        AddBenchmarkMovingObjectsFromSceneRange(
+            benchmarkMovingObjects,
+            scene,
+            bridgeFirstRenderableIndex
+        );
+    }
 
     if (!hasStartupModel && !useBenchmarkScene) {
         se::Renderable3D& grid = scene.CreateRenderable(
@@ -2240,15 +2300,10 @@ int main() {
         !useBenchmarkScene && BenchmarkCameraMotionRequested();
     const bool benchmarkObjectMotionRequested =
         !useBenchmarkScene &&
-        benchmarkMovingObject != nullptr &&
+        !benchmarkMovingObjects.empty() &&
         BenchmarkObjectMotionRequested();
-    if (benchmarkObjectMotionRequested && benchmarkMovingObject != nullptr) {
-        benchmarkMovingObject->Transform().SetAnimateRotation(false);
-        benchmarkMovingObject->Transform().SetRotationSpeedDegreesPerSecond({
-            0.0f,
-            0.0f,
-            0.0f
-        });
+    if (benchmarkObjectMotionRequested) {
+        DisableBenchmarkAutoRotation(benchmarkMovingObjects);
     }
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
@@ -2331,17 +2386,23 @@ int main() {
             if (!bridgeLights.anyApplied) {
                 ApplySceneDirectionalLight(scene, camera);
             }
-            if (benchmarkObjectMotionRequested && benchmarkMovingObject != nullptr) {
+            if (benchmarkObjectMotionRequested) {
                 benchmarkObjectMotionTime += std::max(
                     clampedDeltaSeconds,
                     1.0f / 60.0f
                 );
-                ApplyBenchmarkObjectMotion(
-                    *benchmarkMovingObject,
-                    benchmarkMovingObjectBasePosition,
-                    benchmarkMovingObjectBaseRotationDegrees,
-                    benchmarkObjectMotionTime
-                );
+                for (const BenchmarkMovingObject& movingObject : benchmarkMovingObjects) {
+                    if (movingObject.renderable == nullptr) {
+                        continue;
+                    }
+
+                    ApplyBenchmarkObjectMotion(
+                        *movingObject.renderable,
+                        movingObject.basePosition,
+                        movingObject.baseRotationDegrees,
+                        benchmarkObjectMotionTime
+                    );
+                }
             }
         } else if (animateBenchmarkPartialLocalShadowCache) {
             benchmarkPartialLocalShadowTime += std::max(

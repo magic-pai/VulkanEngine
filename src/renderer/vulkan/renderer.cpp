@@ -3231,19 +3231,27 @@ void VulkanRenderer::DrawFrame() {
     frameStats.cpu.waitAcquireMs = ElapsedMilliseconds(sectionStart, sectionEnd);
     sectionStart = sectionEnd;
 
-    m_ImGuiLayer->BeginFrame(
-        m_Scene,
-        m_Camera,
-        m_ImGuiScene3D,
-        m_ImGuiCamera3D,
-        &m_RenderResources,
-        &m_LastStats,
-        &m_RenderDebugSettings,
-        &m_ShadowSettings
-    );
+    const bool hideImGuiForVisualQa =
+        EnvironmentFlagEnabled("SE_VISUAL_QA_HIDE_IMGUI") ||
+        EnvironmentFlagEnabled("SE_HIDE_IMGUI");
+    if (!hideImGuiForVisualQa) {
+        m_ImGuiLayer->BeginFrame(
+            m_Scene,
+            m_Camera,
+            m_ImGuiScene3D,
+            m_ImGuiCamera3D,
+            &m_RenderResources,
+            &m_LastStats,
+            &m_RenderDebugSettings,
+            &m_ShadowSettings
+        );
 
-    sectionEnd = FrameClock::now();
-    frameStats.cpu.imguiMs = ElapsedMilliseconds(sectionStart, sectionEnd);
+        sectionEnd = FrameClock::now();
+        frameStats.cpu.imguiMs = ElapsedMilliseconds(sectionStart, sectionEnd);
+    } else {
+        sectionEnd = FrameClock::now();
+        frameStats.cpu.imguiMs = 0.0f;
+    }
     sectionStart = sectionEnd;
 
     ApplyShadowMapSettings();
@@ -4437,7 +4445,7 @@ void VulkanRenderer::DrawFrame() {
         m_DepthLoadRenderPass.get(),
         m_DepthLoadFramebuffer.get(),
         *m_Swapchain,
-        m_ImGuiLayer.get(),
+        hideImGuiForVisualQa ? nullptr : m_ImGuiLayer.get(),
         m_ShadowRenderPass.get(),
         m_ShadowGraphicsPipeline.get(),
         m_DoubleSidedShadowGraphicsPipeline.get(),

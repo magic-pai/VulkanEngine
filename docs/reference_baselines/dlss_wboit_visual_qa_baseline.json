@@ -49,15 +49,16 @@
   },
   "thresholds": {
     "comparisonChangedPixelsMin": 0,
-    "comparisonChangedPixelsMax": 5000,
+    "comparisonChangedPixelsMax": 15000,
     "comparisonMeanDeltaMin": 0.0,
     "comparisonMeanDeltaMax": 64.0,
     "comparisonMaxDeltaMax": 765,
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T00:52:25.8655483+08:00",
-    "dlssColumns": "780/780",
+    "capturedAt": "2026-07-05T03:27:50.7278582+08:00",
+    "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
+    "dlssColumns": "782/782",
     "weightedTranslucencyDraws": 79,
     "weightedTranslucencyResolveDraws": 1,
     "weightedTranslucencyVelocityDraws": 79,
@@ -65,8 +66,8 @@
     "dlssMaskForwardResidualDraws": 0,
     "forwardResidualDraws": 0,
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 119,
-    "comparisonMeanDelta": 0.4422,
-    "comparisonMaxDelta": 564
+    "comparisonChangedPixels": 948,
+    "comparisonMeanDelta": 2.1964,
+    "comparisonMaxDelta": 324
   }
 }

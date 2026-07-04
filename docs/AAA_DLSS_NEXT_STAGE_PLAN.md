@@ -117,11 +117,11 @@ before model upgrades can be judged honestly.
      as Slice 4.15 so startup-scene jagged edges are covered by CSV and
      screenshot evidence, not only by benchmark-grid captures.
 
-2. Imported/static model DLSS baseline.
+2. Imported dynamic model DLSS baseline.
    - Add an imported-model capture path that exercises real asset geometry,
      UVs, materials, mesh identity, previous transforms, and velocity output.
-   - Require the DLSS object-motion gate to pass on imported static content
-     without special-casing the benchmark grid.
+   - Require the DLSS object-motion gate to pass while imported renderables
+     move under a static camera, without special-casing the benchmark grid.
 
 3. Animated/skinned velocity readiness.
    - Add previous-pose/previous-bone or explicit skinned velocity carriers.
@@ -228,8 +228,8 @@ independently of the camera.
 4. Scope guard.
    - Do not call this skinned or imported production coverage. This slice only
      proves deterministic opaque object motion in the real default scene.
-   - Follow with imported static model and then skinned/animated velocity lanes
-     after this path is stable.
+   - Follow with imported dynamic model and then skinned/animated velocity
+     lanes after this path is stable.
 
 ## Slice 4.19 Execution Evidence
 
@@ -247,7 +247,9 @@ presentation, and native TAA final-resolve suppression. The lane uses its own
 baseline manifest:
 `docs/reference_baselines/dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json`.
 
-Verification from `scripts\Test-DlssVisualQa.ps1 -SkipBuild` on 2026-07-05:
+Verification from
+`powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -CaptureDelaySeconds 4`
+on 2026-07-05:
 
 - Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, area
   `2048,0 2048x1104`.
@@ -266,8 +268,86 @@ Verification from `scripts\Test-DlssVisualQa.ps1 -SkipBuild` on 2026-07-05:
 Scope remains intentionally limited: this is not imported-model, skinned,
 transparent, forward-residual, water/particle, or final production image-quality
 coverage. It closes the static-scene/dynamic-scene testing error for the real
-default opaque scene and makes the next imported/static and animated lanes
+default opaque scene and makes the next imported/dynamic and animated lanes
 meaningful.
+
+## Slice 4.20 Execution Plan
+
+Slice 4.20 adds the first imported dynamic-object DLAA temporal lane. The point
+is to stop using only engine-authored primitives or camera-only movement as
+proof of the DLSS/DLAA input contract: imported geometry must prove
+previous-model object velocity coverage, applied jitter, post-source ordering,
+and reference baseline readiness before imported scenes can be part of any
+production image-quality claim.
+
+1. Imported dynamic model lane.
+   - Use the repo-owned `assets/models/demo_crystal.obj` smoke asset through
+     `SELFENGINE_MODEL_PATH` so the route exercises `RuntimeModelLoader` and
+     Assimp-imported mesh identity instead of built-in cube/plane primitives.
+   - Keep the camera static and drive the imported renderable with
+     `SE_BENCHMARK_OBJECT_MOTION=orbit`, full-resolution DLAA, and applied
+     projection jitter so the sequence cannot pass via camera-only motion.
+   - Use `SE_DEBUG_LOCAL_LIGHTS=1` in this QA lane so the imported model still
+     exercises local-light/shadow resources without depending on a parked UE
+     bridge scene.
+
+2. Clean visual capture.
+   - Add `SE_VISUAL_QA_HIDE_IMGUI=1` as a narrow renderer/test switch so visual
+     QA can capture the imported model instead of dynamic ImGui text.
+   - Make the screenshot process DPI-aware before monitor placement/capture so
+     high-DPI monitor coordinates do not grab another window beside SelfEngine.
+
+3. Assertions and baseline.
+   - Add `imported_dynamic_dlaa_object_motion_present` to the DLSS visual QA
+     script.
+   - Require DLSS output/post activation, production quality gate readiness,
+     mask readiness, camera/object motion readiness, applied jitter, native TAA
+     final-resolve suppression, full-resolution DLAA extents, and the imported
+     draw/material/light counters.
+   - Capture a three-frame same-window sequence and gate central variation,
+     sequence motion, and high-contrast edge metrics with a separate baseline
+     manifest.
+
+4. Scope guard.
+   - This is deterministic opaque imported OBJ object-motion coverage only. It
+     is not skinned animation, morph targets, imported transparency/refraction,
+     particle/water masking, or final subjective production tuning.
+
+## Slice 4.20 Execution Evidence
+
+Slice 4.20 is implemented and verified. The new visual-QA lane is
+`imported_dynamic_dlaa_object_motion_present`, backed by
+`docs/reference_baselines/dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json`.
+
+Verification from `scripts\Test-DlssVisualQa.ps1 -SkipBuild` on 2026-07-05:
+
+- Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, physical area
+  `2560,0 2560x1380`.
+- DPI/capture fix: the QA PowerShell process is DPI-aware before monitor
+  placement/capture, preventing high-DPI coordinate mismatch from capturing an
+  adjacent window. The imported lane hides ImGui with
+  `SE_VISUAL_QA_HIDE_IMGUI=1` so edge metrics target the model.
+- Model: `assets/models/demo_crystal.obj` through `SELFENGINE_MODEL_PATH`.
+- Motion setup: static camera plus `SE_BENCHMARK_OBJECT_MOTION=orbit` on the
+  imported OBJ renderable.
+- CSV shape: `782/782` columns.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Motion readiness: camera `1/1`, object `1/1`.
+- Jitter and resolve policy: jitter `1/1/-0.125/-0.277778`, TAA resolve
+  `input/enabled/suppressed=1/0/1`.
+- Imported route counters:
+  `main/gbuffer/forwardResidual/weightedTranslucency=1/1/0/0`,
+  `materials=1,textured=0,lights=4,local=3,rect=0`.
+- Dynamic sequence metric:
+  `pairs=2 minChanged=1120 maxMean=39.7803 max=546 edgeMin=389 edgeChangedMax=289 edgeMeanMax=80.1224 edgeMax=182.0732`.
+- The same full run completed all DLSS visual-QA lanes and wrote
+  `out/reference_captures/dlss_visual_qa/summary.json`.
+
+Scope remains intentionally limited: imported dynamic opaque OBJ coverage is now
+in the DLAA queue, but skinned/animated imported assets and imported transparent
+or material-specific mask cases are still open.
 
 ## Slice 4.4 Execution Plan
 
