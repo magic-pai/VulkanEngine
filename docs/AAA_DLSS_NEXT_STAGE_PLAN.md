@@ -1225,3 +1225,41 @@ after the evaluate contract is stable.
   status still needs applied jitter policy, jitter-aware history storage,
   motion-vector validation under camera motion, larger moving-scene captures,
   imported/skinned content, and material-specific mask tuning.
+
+## Slice 4.17 Execution Evidence
+
+- Corrected the validation gap raised by the user: the previous pressure and
+  default-scene DLAA screenshots were still effectively static, so they could
+  not represent the dynamic camera case where temporal shimmer is visible.
+  `SelfEngineForward3D` now supports deterministic benchmark camera motion
+  through `SE_BENCHMARK_CAMERA_MOTION=orbit`, with optional speed/yaw/pitch/
+  distance controls. The path drives the real default application scene camera
+  in the update loop and keeps normal mouse interaction unchanged when the
+  benchmark flag is absent.
+- Added
+  `docs/reference_baselines/dlss_default_scene_dlaa_motion_visual_qa_baseline.json`
+  and a new `default_scene_dlaa_motion_present` visual-QA lane. The lane keeps
+  `SE_BENCHMARK_SCENE` unset, uses the real startup scene, selects full-
+  resolution DLAA, enables the visible DLSS post source, and requires camera-
+  motion readiness rather than only static-frame readiness.
+- `scripts\Test-DlssVisualQa.ps1` now captures a moving-camera sequence from a
+  single running window (`default_scene_dlaa_motion_present_00/01/02.png`) and
+  compares adjacent frames. The sequence gate requires nonblank frames,
+  frame-to-frame pixel changes above a minimum, and a bounded mean delta so the
+  test can catch both accidental static captures and obvious full-frame
+  instability.
+- Verification:
+  `_quick_build.bat` passes for `SelfEngineForward3D`.
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  passes. The new motion row reports matching `780/780` columns, 0 frame-graph
+  validation issues, evaluate/output `1/1`, post source `1/1/0`, quality gate
+  `1/1/0`, quality masks `255/255/0`, render scale `1/1/0`, quality mode/
+  preset `6/11`, draw route `5/5/0/0`, camera-motion readiness `1/1`, and
+  DLSS jitter `0/0` while projection jitter is not applied.
+- The dynamic screenshot sequence reports two adjacent-frame comparisons with
+  minimum changed sampled pixels `125`, maximum mean RGB delta `3.9588`, and
+  maximum delta `564`. This proves the new QA route is genuinely dynamic; it is
+  still a first stability sentinel, not final production IQ. The next depth
+  should add applied-jitter policy, frame-indexed motion-vector debug captures,
+  larger camera paths, moving objects, imported/skinned content, and stricter
+  shimmer metrics around high-contrast edges.

@@ -13,6 +13,7 @@ param(
     [string]$MaterialStressBaselinePath = "docs\reference_baselines\dlss_material_stress_visual_qa_baseline.json",
     [string]$DlaaBaselinePath = "docs\reference_baselines\dlss_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_visual_qa_baseline.json",
+    [string]$DefaultSceneDlaaMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
     [switch]$SkipBuild
 )
@@ -116,6 +117,19 @@ $defaultSceneDlaaBaselineManifest =
 if ($defaultSceneDlaaBaselineManifest.target -ne $Target) {
     throw "Default-scene DLAA visual QA baseline target mismatch: expected $Target, manifest has $($defaultSceneDlaaBaselineManifest.target)"
 }
+$defaultSceneDlaaMotionBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($DefaultSceneDlaaMotionBaselinePath)) {
+    [System.IO.Path]::GetFullPath($DefaultSceneDlaaMotionBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $DefaultSceneDlaaMotionBaselinePath))
+}
+if (!(Test-Path -LiteralPath $defaultSceneDlaaMotionBaselineManifestPath)) {
+    throw "Default-scene DLAA motion visual QA baseline manifest not found: $defaultSceneDlaaMotionBaselineManifestPath"
+}
+$defaultSceneDlaaMotionBaselineManifest =
+    Get-Content -Raw -LiteralPath $defaultSceneDlaaMotionBaselineManifestPath | ConvertFrom-Json
+if ($defaultSceneDlaaMotionBaselineManifest.target -ne $Target) {
+    throw "Default-scene DLAA motion visual QA baseline target mismatch: expected $Target, manifest has $($defaultSceneDlaaMotionBaselineManifest.target)"
+}
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
@@ -183,6 +197,11 @@ $managedEnvironmentKeys = @(
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_BENCHMARK_CSV",
+    "SE_BENCHMARK_CAMERA_MOTION",
+    "SE_BENCHMARK_CAMERA_MOTION_SPEED",
+    "SE_BENCHMARK_CAMERA_MOTION_YAW",
+    "SE_BENCHMARK_CAMERA_MOTION_PITCH",
+    "SE_BENCHMARK_CAMERA_MOTION_DISTANCE",
     "SE_RENDER_SCALE",
     "SE_RENDER_SCALE_APPLY",
     "SE_INTERNAL_RENDER_SCALE_APPLY",
@@ -431,6 +450,35 @@ Write-Host (
     $script:captureMonitorWorkArea.Height
 )
 
+function Set-CaptureWindowPlacement {
+    param([Parameter(Mandatory = $true)][IntPtr]$WindowHandle)
+
+    $topMost = [IntPtr](-1)
+    $showWindow = 0x0040
+    $monitorMargin = 40
+    $captureLeft =
+        [int]($script:captureMonitorWorkArea.Left + $monitorMargin)
+    $captureTop =
+        [int]($script:captureMonitorWorkArea.Top + $monitorMargin)
+    $captureWidth = [Math]::Min(
+        1038,
+        [Math]::Max(320, $script:captureMonitorWorkArea.Width - $monitorMargin * 2)
+    )
+    $captureHeight = [Math]::Min(
+        614,
+        [Math]::Max(240, $script:captureMonitorWorkArea.Height - $monitorMargin * 2)
+    )
+    [void][SelfEngineVisualQaWin32]::SetWindowPos(
+        $WindowHandle,
+        $topMost,
+        $captureLeft,
+        $captureTop,
+        $captureWidth,
+        $captureHeight,
+        $showWindow
+    )
+}
+
 function Capture-WindowImage {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -475,30 +523,7 @@ function Capture-WindowImage {
                 throw "Could not find render window '$WindowTitle' for $Name"
             }
 
-            $topMost = [IntPtr](-1)
-            $showWindow = 0x0040
-            $monitorMargin = 40
-            $captureLeft =
-                [int]($script:captureMonitorWorkArea.Left + $monitorMargin)
-            $captureTop =
-                [int]($script:captureMonitorWorkArea.Top + $monitorMargin)
-            $captureWidth = [Math]::Min(
-                1038,
-                [Math]::Max(320, $script:captureMonitorWorkArea.Width - $monitorMargin * 2)
-            )
-            $captureHeight = [Math]::Min(
-                614,
-                [Math]::Max(240, $script:captureMonitorWorkArea.Height - $monitorMargin * 2)
-            )
-            [void][SelfEngineVisualQaWin32]::SetWindowPos(
-                $windowHandle,
-                $topMost,
-                $captureLeft,
-                $captureTop,
-                $captureWidth,
-                $captureHeight,
-                $showWindow
-            )
+            Set-CaptureWindowPlacement -WindowHandle $windowHandle
             [void][SelfEngineVisualQaWin32]::SetForegroundWindow($windowHandle)
             Start-Sleep -Seconds $CaptureDelaySeconds
 
@@ -531,6 +556,103 @@ function Capture-WindowImage {
     Assert-CleanLog -Path $stdoutPath
     Assert-CleanLog -Path $stderrPath
     return $imagePath
+}
+
+function Capture-WindowImageSequence {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][hashtable]$Environment,
+        [int]$FrameCount = 3,
+        [int]$InitialDelaySeconds = 4,
+        [int]$IntervalSeconds = 2
+    )
+
+    if ($FrameCount -lt 2) {
+        throw "Image sequence needs at least 2 frames"
+    }
+
+    $stdoutPath = Join-Path $outputRoot "$Name.sequence.out.log"
+    $stderrPath = Join-Path $outputRoot "$Name.sequence.err.log"
+    Remove-Item -LiteralPath $stdoutPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stderrPath -ErrorAction SilentlyContinue
+    $imagePaths = @()
+    for ($index = 0; $index -lt $FrameCount; ++$index) {
+        $imagePath = Join-Path $outputRoot ("{0}_{1:D2}.png" -f $Name, $index)
+        Remove-Item -LiteralPath $imagePath -ErrorAction SilentlyContinue
+        $imagePaths += $imagePath
+    }
+
+    $runEnvironment = $Environment.Clone()
+    $runEnvironment["SE_AUTO_EXIT_FRAMES"] = "1200"
+
+    Write-Host "Capture sequence [$Name]"
+    Invoke-WithEnvironment -Environment $runEnvironment -Script {
+        $process = Start-Process `
+            -FilePath $exePath `
+            -WorkingDirectory $repoRoot `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+        try {
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            $windowHandle = [IntPtr]::Zero
+            do {
+                Start-Sleep -Milliseconds 250
+                $process.Refresh()
+                $windowHandle = Get-RenderWindowHandle -ProcessId $process.Id -Title $WindowTitle
+            } while (
+                $windowHandle -eq [IntPtr]::Zero -and
+                (Get-Date) -lt $deadline -and
+                -not $process.HasExited
+            )
+
+            if ($process.HasExited) {
+                throw "$Name exited before sequence capture with code $($process.ExitCode)"
+            }
+            if ($windowHandle -eq [IntPtr]::Zero) {
+                throw "Could not find render window '$WindowTitle' for $Name"
+            }
+
+            Set-CaptureWindowPlacement -WindowHandle $windowHandle
+            [void][SelfEngineVisualQaWin32]::SetForegroundWindow($windowHandle)
+            Start-Sleep -Seconds $InitialDelaySeconds
+
+            for ($index = 0; $index -lt $FrameCount; ++$index) {
+                $rect = New-Object SelfEngineVisualQaWin32+RECT
+                [void][SelfEngineVisualQaWin32]::GetWindowRect($windowHandle, [ref]$rect)
+                $width = $rect.Right - $rect.Left
+                $height = $rect.Bottom - $rect.Top
+                if ($width -le 0 -or $height -le 0) {
+                    throw "Invalid capture bounds for $Name sequence: ${width}x${height}"
+                }
+
+                $bitmap = New-Object System.Drawing.Bitmap $width, $height
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+                $bitmap.Save($imagePaths[$index], [System.Drawing.Imaging.ImageFormat]::Png)
+                $graphics.Dispose()
+                $bitmap.Dispose()
+
+                if ($index -lt ($FrameCount - 1)) {
+                    Start-Sleep -Seconds $IntervalSeconds
+                }
+            }
+        } finally {
+            if ($process -and -not $process.HasExited) {
+                [void]$process.CloseMainWindow()
+                Start-Sleep -Milliseconds 500
+                $process.Refresh()
+                if (-not $process.HasExited) {
+                    $process.Kill()
+                }
+            }
+        }
+    }
+
+    Assert-CleanLog -Path $stdoutPath
+    Assert-CleanLog -Path $stderrPath
+    return $imagePaths
 }
 
 function Get-ImageVariationStats {
@@ -630,6 +752,47 @@ function Compare-Images {
     } finally {
         $bitmapA.Dispose()
         $bitmapB.Dispose()
+    }
+}
+
+function Compare-ImageSequence {
+    param([Parameter(Mandatory = $true)][string[]]$Paths)
+
+    if ($Paths.Count -lt 2) {
+        throw "Image sequence comparison needs at least 2 images"
+    }
+
+    $pairs = @()
+    $minChangedPixels = [int]::MaxValue
+    $maxMeanDelta = 0.0
+    $maxDelta = 0
+    for ($index = 1; $index -lt $Paths.Count; ++$index) {
+        $comparison = Compare-Images -A $Paths[$index - 1] -B $Paths[$index]
+        $pairs += [pscustomobject]@{
+            from = $Paths[$index - 1]
+            to = $Paths[$index]
+            sampledPixels = $comparison.SampledPixels
+            changedPixels = $comparison.ChangedPixels
+            meanDelta = $comparison.MeanDelta
+            maxDelta = $comparison.MaxDelta
+        }
+        $minChangedPixels = [Math]::Min(
+            $minChangedPixels,
+            [int]$comparison.ChangedPixels
+        )
+        $maxMeanDelta = [Math]::Max(
+            $maxMeanDelta,
+            [double]$comparison.MeanDelta
+        )
+        $maxDelta = [Math]::Max($maxDelta, [int]$comparison.MaxDelta)
+    }
+
+    return [pscustomobject]@{
+        pairCount = $pairs.Count
+        pairs = $pairs
+        minChangedPixels = $minChangedPixels
+        maxMeanDelta = [Math]::Round($maxMeanDelta, 4)
+        maxDelta = $maxDelta
     }
 }
 
@@ -752,6 +915,19 @@ $defaultSceneDlaaPresentEnvironment = @{
     "SE_DLSS_REFERENCE_BASELINE_PATH" = $defaultSceneDlaaBaselineManifestPath
     "SE_RENDER_VIEW" = "deferred-hdr"
 }
+$defaultSceneDlaaMotionPresentEnvironment = @{
+    "SE_RENDER_SCALE" = "1.0"
+    "SE_RENDER_SCALE_APPLY" = "1"
+    "SE_TAA" = "1"
+    "SE_TEMPORAL_JITTER" = "1"
+    "SE_UPSCALER_PLUGIN" = "dlss"
+    "SE_DLSS_QUALITY" = "dlaa"
+    "SE_DLSS_PRESENT" = "1"
+    "SE_DLSS_REFERENCE_BASELINE_PATH" = $defaultSceneDlaaMotionBaselineManifestPath
+    "SE_BENCHMARK_CAMERA_MOTION" = "orbit"
+    "SE_BENCHMARK_CAMERA_MOTION_SPEED" = "0.65"
+    "SE_RENDER_VIEW" = "deferred-hdr"
+}
 $wboitNativeEnvironment = @{
     "SE_BENCHMARK_SCENE" = "grid"
     "SE_BENCHMARK_TRANSPARENT_MATERIAL" = "1"
@@ -828,6 +1004,10 @@ $defaultSceneDlaaBenchmark = Invoke-BenchmarkRun `
     -Name "default_scene_dlaa_present" `
     -Environment $defaultSceneDlaaPresentEnvironment `
     -UseApplicationScene
+$defaultSceneDlaaMotionBenchmark = Invoke-BenchmarkRun `
+    -Name "default_scene_dlaa_motion_present" `
+    -Environment $defaultSceneDlaaMotionPresentEnvironment `
+    -UseApplicationScene
 $wboitNativeBenchmark = Invoke-BenchmarkRun -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssBenchmark = Invoke-BenchmarkRun -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeBenchmark = Invoke-BenchmarkRun -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
@@ -841,6 +1021,7 @@ $dlaaNativeRow = $dlaaNativeBenchmark.LastRow
 $dlaaRow = $dlaaBenchmark.LastRow
 $defaultSceneDlaaNativeRow = $defaultSceneDlaaNativeBenchmark.LastRow
 $defaultSceneDlaaRow = $defaultSceneDlaaBenchmark.LastRow
+$defaultSceneDlaaMotionRow = $defaultSceneDlaaMotionBenchmark.LastRow
 $wboitNativeRow = $wboitNativeBenchmark.LastRow
 $wboitDlssRow = $wboitDlssBenchmark.LastRow
 $forwardSpecialNativeRow = $forwardSpecialNativeBenchmark.LastRow
@@ -1005,6 +1186,49 @@ if ($defaultSceneDlaaRow.frame_light_total_count -ne $defaultSceneDlaaBaselineMa
     throw "Default-scene DLAA scene-light/probe counters mismatch"
 }
 
+if ($defaultSceneDlaaMotionRow.framegraph_validation_issues -ne "0") {
+    throw "Default-scene moving DLAA frame graph validation issues: $($defaultSceneDlaaMotionRow.framegraph_validation_issues)"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityMode -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.recommendedPreset) {
+    throw "Default-scene moving DLAA did not select the expected DLSS quality mode/preset"
+}
+if ($defaultSceneDlaaMotionRow.temporal_render_scale_active -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleActive -or
+    $defaultSceneDlaaMotionRow.temporal_render_scale_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleApplied) {
+    throw "Default-scene moving DLAA did not stay on the full-resolution render path"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_render_width -ne $defaultSceneDlaaMotionRow.temporal_upscale_display_width -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_render_height -ne $defaultSceneDlaaMotionRow.temporal_upscale_display_height -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_width -ne $defaultSceneDlaaMotionRow.temporal_upscale_display_width -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_height -ne $defaultSceneDlaaMotionRow.temporal_upscale_display_height) {
+    throw "Default-scene moving DLAA did not evaluate at full display resolution"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_ready -ne "1" -or
+    $defaultSceneDlaaMotionRow.temporal_upscale_post_source_requested -ne "1" -or
+    $defaultSceneDlaaMotionRow.temporal_upscale_post_source_active -ne "1" -or
+    $defaultSceneDlaaMotionRow.temporal_upscale_post_source_fallback_reason -ne "0") {
+    throw "Default-scene moving DLAA-present run did not produce visible DLSS output"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "Default-scene moving DLAA quality gate did not pass"
+}
+if ($defaultSceneDlaaMotionRow.temporal_velocity_camera_motion_ready -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady) {
+    throw "Default-scene moving DLAA did not report camera-motion readiness"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
+    $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
+    throw "Default-scene moving DLAA quality gate did not report object/baseline readiness"
+}
+Assert-DlssJitterConsistency -Name "Default-scene moving DLAA-present" -Row $defaultSceneDlaaMotionRow
+if ($defaultSceneDlaaMotionRow.main_draws -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.mainDraws -or
+    $defaultSceneDlaaMotionRow.gbuffer_draws -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.gbufferDraws -or
+    $defaultSceneDlaaMotionRow.forward_residual_draws -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
+    $defaultSceneDlaaMotionRow.weighted_translucency_draws -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
+    throw "Default-scene moving DLAA draw route mismatch"
+}
+
 if ($wboitNativeRow.framegraph_validation_issues -ne "0") {
     throw "WBOIT native frame graph validation issues: $($wboitNativeRow.framegraph_validation_issues)"
 }
@@ -1131,6 +1355,12 @@ $defaultSceneDlaaNativeImage = Capture-WindowImage `
 $defaultSceneDlaaImage = Capture-WindowImage `
     -Name "default_scene_dlaa_present" `
     -Environment $defaultSceneDlaaPresentEnvironment
+$defaultSceneDlaaMotionImages = Capture-WindowImageSequence `
+    -Name "default_scene_dlaa_motion_present" `
+    -Environment $defaultSceneDlaaMotionPresentEnvironment `
+    -FrameCount 3 `
+    -InitialDelaySeconds 4 `
+    -IntervalSeconds 2
 $wboitNativeImage = Capture-WindowImage -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssImage = Capture-WindowImage -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeImage = Capture-WindowImage -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
@@ -1143,6 +1373,10 @@ $dlaaNativeImageStats = Get-ImageVariationStats -Path $dlaaNativeImage
 $dlaaImageStats = Get-ImageVariationStats -Path $dlaaImage
 $defaultSceneDlaaNativeImageStats = Get-ImageVariationStats -Path $defaultSceneDlaaNativeImage
 $defaultSceneDlaaImageStats = Get-ImageVariationStats -Path $defaultSceneDlaaImage
+$defaultSceneDlaaMotionImageStats = @()
+foreach ($motionImage in $defaultSceneDlaaMotionImages) {
+    $defaultSceneDlaaMotionImageStats += Get-ImageVariationStats -Path $motionImage
+}
 $wboitNativeImageStats = Get-ImageVariationStats -Path $wboitNativeImage
 $wboitDlssImageStats = Get-ImageVariationStats -Path $wboitDlssImage
 $forwardSpecialNativeImageStats = Get-ImageVariationStats -Path $forwardSpecialNativeImage
@@ -1153,6 +1387,8 @@ $comparison = Compare-Images -A $nativeImage -B $dlssImage
 $dlaaComparison = Compare-Images -A $dlaaNativeImage -B $dlaaImage
 $defaultSceneDlaaComparison =
     Compare-Images -A $defaultSceneDlaaNativeImage -B $defaultSceneDlaaImage
+$defaultSceneDlaaMotionSequenceComparison =
+    Compare-ImageSequence -Paths $defaultSceneDlaaMotionImages
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
 $forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
 $materialStressComparison = Compare-Images -A $materialStressNativeImage -B $materialStressDlssImage
@@ -1207,6 +1443,22 @@ $defaultSceneDlaaDrawRoute =
     "$($defaultSceneDlaaRow.main_draws)/$($defaultSceneDlaaRow.gbuffer_draws)/$($defaultSceneDlaaRow.forward_residual_draws)/$($defaultSceneDlaaRow.weighted_translucency_draws)"
 $defaultSceneDlaaSceneCounters =
     "materials=$($defaultSceneDlaaRow.frame_material_count),lights=$($defaultSceneDlaaRow.frame_light_total_count),local=$($defaultSceneDlaaRow.frame_local_light_count),rect=$($defaultSceneDlaaRow.frame_rect_light_count),probes=$($defaultSceneDlaaRow.reflection_probe_scene_probe_count)"
+$defaultSceneDlaaMotionPostSource =
+    "$($defaultSceneDlaaMotionRow.temporal_upscale_post_source_requested)/$($defaultSceneDlaaMotionRow.temporal_upscale_post_source_active)/$($defaultSceneDlaaMotionRow.temporal_upscale_post_source_fallback_reason)"
+$defaultSceneDlaaMotionQualityGate =
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_gate_requested)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_gate_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$defaultSceneDlaaMotionQualityMasks =
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_required_mask)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_ready_mask)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_blocker_mask)"
+$defaultSceneDlaaMotionQualityInputs =
+    "output/camera/object/reactive/transparency/exposure/post/baseline=$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+$defaultSceneDlaaMotionRenderScale =
+    "$($defaultSceneDlaaMotionRow.temporal_render_scale_requested)/$($defaultSceneDlaaMotionRow.temporal_render_scale_active)/$($defaultSceneDlaaMotionRow.temporal_render_scale_applied)"
+$defaultSceneDlaaMotionDlssExtents =
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_render_width)x$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_render_height)->$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_width)x$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_height)"
+$defaultSceneDlaaMotionDrawRoute =
+    "$($defaultSceneDlaaMotionRow.main_draws)/$($defaultSceneDlaaMotionRow.gbuffer_draws)/$($defaultSceneDlaaMotionRow.forward_residual_draws)/$($defaultSceneDlaaMotionRow.weighted_translucency_draws)"
+$defaultSceneDlaaMotionCameraMotion =
+    "$($defaultSceneDlaaMotionRow.temporal_velocity_camera_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)"
 $wboitNativePostSource =
     "$($wboitNativeRow.temporal_upscale_post_source_requested)/$($wboitNativeRow.temporal_upscale_post_source_active)/$($wboitNativeRow.temporal_upscale_post_source_fallback_reason)"
 $wboitNativeQualityGate =
@@ -1275,6 +1527,14 @@ Assert-BaselineText -Name "defaultSceneDlaa.dlssPresent.qualityInputs" -Actual $
 Assert-BaselineText -Name "defaultSceneDlaa.dlssPresent.renderScale" -Actual $defaultSceneDlaaRenderScale -Expected $defaultSceneDlaaBaselineManifest.expected.dlssPresent.renderScale
 Assert-BaselineText -Name "defaultSceneDlaa.dlssPresent.qualityMode" -Actual $defaultSceneDlaaRow.temporal_upscaler_dlss_quality_mode -Expected $defaultSceneDlaaBaselineManifest.expected.dlssPresent.qualityMode
 Assert-BaselineText -Name "defaultSceneDlaa.dlssPresent.recommendedPreset" -Actual $defaultSceneDlaaRow.temporal_upscaler_dlss_recommended_preset -Expected $defaultSceneDlaaBaselineManifest.expected.dlssPresent.recommendedPreset
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.postSource" -Actual $defaultSceneDlaaMotionPostSource -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.postSource
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityGate" -Actual $defaultSceneDlaaMotionQualityGate -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityGate
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityMasks" -Actual $defaultSceneDlaaMotionQualityMasks -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityMasks
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityInputs" -Actual $defaultSceneDlaaMotionQualityInputs -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityInputs
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.renderScale" -Actual $defaultSceneDlaaMotionRenderScale -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScale
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityMode" -Actual $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityMode
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.recommendedPreset" -Actual $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.recommendedPreset
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.cameraMotion" -Actual $defaultSceneDlaaMotionCameraMotion -Expected "$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)"
 Assert-BaselineText -Name "wboit.native.postSource" -Actual $wboitNativePostSource -Expected $wboitBaselineManifest.expected.native.postSource
 Assert-BaselineText -Name "wboit.native.qualityGate" -Actual $wboitNativeQualityGate -Expected $wboitBaselineManifest.expected.native.qualityGate
 Assert-BaselineText -Name "wboit.dlssPresent.evaluateOutput" -Actual $wboitDlssEvaluateOutput -Expected $wboitBaselineManifest.expected.dlssPresent.evaluateOutput
@@ -1371,6 +1631,23 @@ Assert-BaselineRange `
     -Actual $defaultSceneDlaaComparison.MaxDelta `
     -Min 0 `
     -Max $defaultSceneDlaaBaselineManifest.thresholds.comparisonMaxDeltaMax
+for ($index = 0; $index -lt $defaultSceneDlaaMotionImageStats.Count; ++$index) {
+    Assert-BaselineRange `
+        -Name "defaultSceneDlaaMotion.imageStats[$index].differentPixels" `
+        -Actual $defaultSceneDlaaMotionImageStats[$index].DifferentPixels `
+        -Min $defaultSceneDlaaMotionBaselineManifest.thresholds.centralDifferentPixelsMin `
+        -Max $defaultSceneDlaaMotionImageStats[$index].SampledPixels
+}
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.minChangedPixels" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.minChangedPixels `
+    -Min $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin `
+    -Max $defaultSceneDlaaMotionSequenceComparison.pairs[0].SampledPixels
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.maxMeanDelta" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.maxMeanDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
 Assert-BaselineRange `
     -Name "wboit.native.imageStats.differentPixels" `
     -Actual $wboitNativeImageStats.DifferentPixels `
@@ -1465,6 +1742,8 @@ $summary = [pscustomobject]@{
         dlaaName = $dlaaBaselineManifest.name
         defaultSceneDlaaManifest = $defaultSceneDlaaBaselineManifestPath
         defaultSceneDlaaName = $defaultSceneDlaaBaselineManifest.name
+        defaultSceneDlaaMotionManifest = $defaultSceneDlaaMotionBaselineManifestPath
+        defaultSceneDlaaMotionName = $defaultSceneDlaaMotionBaselineManifest.name
     }
     thresholds = [pscustomobject]@{
         minChangedPixels = $MinChangedPixels
@@ -1499,6 +1778,8 @@ $summary = [pscustomobject]@{
         defaultSceneDlaaComparisonMeanDeltaMin = [double]$defaultSceneDlaaBaselineManifest.thresholds.comparisonMeanDeltaMin
         defaultSceneDlaaComparisonMeanDeltaMax = [double]$defaultSceneDlaaBaselineManifest.thresholds.comparisonMeanDeltaMax
         defaultSceneDlaaComparisonMaxDeltaMax = [int]$defaultSceneDlaaBaselineManifest.thresholds.comparisonMaxDeltaMax
+        defaultSceneDlaaMotionSequencePairChangedPixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
+        defaultSceneDlaaMotionSequencePairMeanDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
@@ -1576,6 +1857,25 @@ $summary = [pscustomobject]@{
         drawRoute = $defaultSceneDlaaDrawRoute
         sceneCounters = $defaultSceneDlaaSceneCounters
         imageStats = $defaultSceneDlaaImageStats
+    }
+    defaultSceneDlaaMotionPresent = [pscustomobject]@{
+        csv = $defaultSceneDlaaMotionBenchmark.CsvPath
+        images = $defaultSceneDlaaMotionImages
+        columns = "$($defaultSceneDlaaMotionBenchmark.HeaderColumns)/$($defaultSceneDlaaMotionBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$defaultSceneDlaaMotionRow.framegraph_validation_issues
+        evaluateOutput = "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_evaluate_result)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_output_ready)"
+        postSource = $defaultSceneDlaaMotionPostSource
+        qualityGate = $defaultSceneDlaaMotionQualityGate
+        qualityMasks = $defaultSceneDlaaMotionQualityMasks
+        qualityInputs = $defaultSceneDlaaMotionQualityInputs
+        renderScale = $defaultSceneDlaaMotionRenderScale
+        qualityMode = [int]$defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode
+        recommendedPreset = [int]$defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset
+        dlssExtents = $defaultSceneDlaaMotionDlssExtents
+        drawRoute = $defaultSceneDlaaMotionDrawRoute
+        cameraMotion = $defaultSceneDlaaMotionCameraMotion
+        imageStats = $defaultSceneDlaaMotionImageStats
+        sequenceComparison = $defaultSceneDlaaMotionSequenceComparison
     }
     wboitNative = [pscustomobject]@{
         csv = $wboitNativeBenchmark.CsvPath
@@ -1671,6 +1971,8 @@ Write-Host "  dlaa:    $dlaaImage"
 Write-Host "  adiff: sampled=$($dlaaComparison.SampledPixels) changed=$($dlaaComparison.ChangedPixels) mean=$($dlaaComparison.MeanDelta) max=$($dlaaComparison.MaxDelta)"
 Write-Host "  app dlaa: $defaultSceneDlaaImage"
 Write-Host "  appdiff: sampled=$($defaultSceneDlaaComparison.SampledPixels) changed=$($defaultSceneDlaaComparison.ChangedPixels) mean=$($defaultSceneDlaaComparison.MeanDelta) max=$($defaultSceneDlaaComparison.MaxDelta)"
+Write-Host "  app motion: $($defaultSceneDlaaMotionImages -join ', ')"
+Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta)"
 Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
 Write-Host "  forward: $forwardSpecialDlssImage"

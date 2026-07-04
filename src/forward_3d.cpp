@@ -615,6 +615,51 @@ bool EnvironmentFlagDisabled(const char* name) {
         value == "NO";
 }
 
+se::f32 ReadEnvironmentF32(const char* name, se::f32 fallback) {
+    const std::string value = ReadEnvironmentString(name);
+    if (value.empty()) {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    const float parsed = std::strtof(value.c_str(), &end);
+    return end != value.c_str() ? parsed : fallback;
+}
+
+bool BenchmarkCameraMotionRequested() {
+    const std::string value = ReadEnvironmentString("SE_BENCHMARK_CAMERA_MOTION");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES" ||
+        value == "orbit" ||
+        value == "Orbit" ||
+        value == "ORBIT";
+}
+
+void ApplyBenchmarkCameraMotion(se::Camera3D& camera, se::f32 elapsedSeconds) {
+    const se::f32 speed =
+        std::max(ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_SPEED", 0.65f), 0.0f);
+    const se::f32 yawAmplitude =
+        std::max(ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_YAW", 0.18f), 0.0f);
+    const se::f32 pitchAmplitude =
+        std::max(ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_PITCH", 0.035f), 0.0f);
+    const se::f32 distance = std::clamp(
+        ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_DISTANCE", 5.0f),
+        3.0f,
+        35.0f
+    );
+    const se::f32 motionPhase = elapsedSeconds * speed;
+    camera.SetOrbit(
+        3.75f + std::sin(motionPhase) * yawAmplitude,
+        0.34f + std::sin(motionPhase * 0.73f) * pitchAmplitude,
+        distance
+    );
+}
+
 std::filesystem::path UnrealProjectRootPath() {
     const std::string overridePath = ReadEnvironmentString("SE_UE_PROJECT_ROOT");
     return overridePath.empty() ?
@@ -2147,12 +2192,15 @@ int main() {
     if (!bridgeLights.anyApplied) {
         ApplySceneDirectionalLight(scene, camera);
     }
+    const bool benchmarkCameraMotionRequested =
+        !useBenchmarkScene && BenchmarkCameraMotionRequested();
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
         1.1f,
         -1.8f
     };
     se::f32 benchmarkPartialLocalShadowTime = 0.0f;
+    se::f32 benchmarkCameraMotionTime = 0.0f;
     PickClickState pickClickState{};
 
     app.CreateRenderer();
@@ -2207,14 +2255,22 @@ int main() {
     app.Run([&](float deltaSeconds, float) {
         const float clampedDeltaSeconds = std::clamp(deltaSeconds, 0.0f, 0.05f);
         if (!useBenchmarkScene) {
-            camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
-            HandleScenePicking(
-                app.WindowHandle(),
-                camera,
-                scene,
-                clampedDeltaSeconds,
-                pickClickState
-            );
+            if (benchmarkCameraMotionRequested) {
+                benchmarkCameraMotionTime += std::max(
+                    clampedDeltaSeconds,
+                    1.0f / 60.0f
+                );
+                ApplyBenchmarkCameraMotion(camera, benchmarkCameraMotionTime);
+            } else {
+                camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
+                HandleScenePicking(
+                    app.WindowHandle(),
+                    camera,
+                    scene,
+                    clampedDeltaSeconds,
+                    pickClickState
+                );
+            }
             if (!bridgeLights.anyApplied) {
                 ApplySceneDirectionalLight(scene, camera);
             }

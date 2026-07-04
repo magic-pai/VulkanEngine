@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_default_scene_dlaa_motion",
+  "target": "SelfEngineForward3D",
+  "scene": "default-application-scene-moving-camera",
+  "description": "Reference contract for the real default Forward 3D application scene under deterministic benchmark camera motion. This validates that DLAA is exercised with camera-motion vectors and a changing frame sequence instead of only static screenshots.",
+  "environment": {
+    "dlssPresent": {
+      "SE_RENDER_SCALE": "1.0",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_QUALITY": "dlaa",
+      "SE_DLSS_PRESENT": "1",
+      "SE_BENCHMARK_CAMERA_MOTION": "orbit",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "dlssPresent": {
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "renderScale": "1/1/0",
+      "renderScaleActive": "1",
+      "renderScaleApplied": "0",
+      "qualityMode": "6",
+      "recommendedPreset": "11",
+      "cameraMotionReady": "1",
+      "mainDraws": "5",
+      "gbufferDraws": "5",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0"
+    }
+  },
+  "thresholds": {
+    "sequencePairChangedPixelsMin": 16,
+    "sequencePairMeanDeltaMax": 180.0,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-05T01:13:30.5132582+08:00",
+    "dlssColumns": "780/780",
+    "qualityMode": 6,
+    "recommendedPreset": 11,
+    "renderScale": "1/1/0",
+    "dlssExtents": "1280x720->1280x720",
+    "qualityGate": "1/1/0",
+    "qualityMasks": "255/255/0",
+    "sequencePairMinChangedPixels": 125,
+    "sequencePairMaxMeanDelta": 3.9588,
+    "sequencePairMaxDelta": 564
+  }
+}
