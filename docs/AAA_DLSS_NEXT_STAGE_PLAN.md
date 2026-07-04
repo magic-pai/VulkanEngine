@@ -79,6 +79,7 @@ machines or incomplete packages.
      quality modes.
 
 3.5. Vulkan DLSS feature-requirements readiness.
+   Implemented.
    - Query and expose NGX Vulkan feature requirements, required instance/device
      extensions, and device-creation prerequisites before attempting SR
      evaluation.
@@ -101,12 +102,15 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 3.5: Vulkan DLSS feature-requirements readiness. Slice 3 now
-initializes NGX and queries capability parameters, but the current Vulkan device
-reports `SuperSampling.Available=0` with feature-init result `0xBAD00002`.
-Before Slice 4 can safely evaluate DLSS SR/DLAA, expose NGX feature
-requirements and required Vulkan extension/device prerequisites, then either
-enable the missing prerequisites or keep a deterministic unsupported fallback.
+Implement Slice 4: DLSS SR/DLAA evaluate path. Slice 3.5 now proves the current
+RTX 5070 / driver stack can satisfy the DLSS Super Resolution feature
+requirements once NGX-required Vulkan extensions are enabled. The engine still
+reports `temporal_upscale_fallback_reason=6`
+(`UpscalerEvaluatePathMissing`) because the renderer does not yet create a DLSS
+feature handle or call evaluate. The next slice should keep that work behind the
+existing `TemporalUpscaler` boundary and should not expand into Frame
+Generation, Ray Reconstruction, Streamline interposition, or production IQ
+claims yet.
 
 ## Slice 1 Execution Evidence
 
@@ -250,3 +254,48 @@ enable the missing prerequisites or keep a deterministic unsupported fallback.
 - This is runtime initialization and capability diagnostics only. It does not
   create a DLSS feature handle, evaluate DLSS, enable Frame Generation, enable
   Ray Reconstruction, change presentation, or claim production image quality.
+
+## Slice 3.5 Execution Evidence
+
+- Added NGX Vulkan feature-requirement diagnostics before the runtime capability
+  query. CSV, ImGui, and FrameGraph now expose feature requirement query/result,
+  supported mask, minimum hardware/OS, required instance/device extensions,
+  missing-available extension counts, and missing-enabled extension counts.
+- When DLSS is requested through `SE_UPSCALER_PLUGIN=dlss` or the explicit
+  extension gate is set, SelfEngine now enables the NGX-required Vulkan
+  instance/device extensions if the selected physical device exposes them:
+  `VK_KHR_get_physical_device_properties2`, `VK_KHR_buffer_device_address`,
+  `VK_KHR_push_descriptor`, `VK_NVX_binary_import`, and
+  `VK_NVX_image_view_handle`.
+- Device creation now enables `VkPhysicalDeviceBufferDeviceAddressFeatures`
+  when `VK_KHR_buffer_device_address` is enabled and supported.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_dlss_feature_requirements_smoke.csv`,
+  `out/benchmarks/aaa_dlss_feature_requirements_invalid_sdk_smoke.csv`, and
+  `out/benchmarks/aaa_dlss_feature_requirements_not_requested_smoke.csv` all
+  report 0 frame-graph validation issues.
+- The package-present feature-requirements smoke reports provider/package
+  `1/1`, package fallback `0`, adapter compiled `1`, initialization attempted
+  and initialized `1/1`, feature requirements supported `1`, instance/device
+  missing-enabled extension counts `0/0`, `SuperSampling.Available=1`,
+  feature-init result `1`, optimal-settings result `1`, evaluate adapter `1`,
+  and runtime fallback `0`.
+- The same smoke reports display extent `1280x720`, requested/active internal
+  extent `960x540`, quality mode `3`, preset `11`, recommended render extent
+  `853x480`, min render extent `640x360`, max render extent `1280x720`, and
+  sharpness `0.35`.
+- The renderer still reports `temporal_upscale_enabled=0` with fallback reason
+  `6` (`UpscalerEvaluatePathMissing`) because Slice 4 has not yet created or
+  evaluated a DLSS feature.
+- The invalid-SDK smoke reports package/runtime fallback `3/3`, no
+  initialization attempt, provider available `0`, evaluate adapter `0`, and a
+  deterministic temporal-upscale fallback. The not-requested smoke reports
+  package/runtime fallback `1/1`, no initialization attempt, temporal upscale
+  requested `0`, and no DLSS side effects.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is Vulkan prerequisite readiness and runtime support proof only. It does
+  not create a DLSS feature handle, evaluate DLSS, enable Frame Generation,
+  enable Ray Reconstruction, change presentation, or claim production image
+  quality.

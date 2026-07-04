@@ -4101,6 +4101,13 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalUpscalerInitializationAttempted > 0,
             frameStats.temporal.temporalUpscalerInitialized > 0,
             frameStats.temporal.temporalUpscalerCapabilityParametersReady > 0,
+            frameStats.temporal.temporalUpscalerFeatureRequirementsQueried > 0,
+            frameStats.temporal.temporalUpscalerFeatureRequirementsSupported > 0,
+            frameStats.temporal.temporalUpscalerFeatureSupportedMask,
+            frameStats.temporal.temporalUpscalerInstanceExtensionMissingAvailableCount,
+            frameStats.temporal.temporalUpscalerInstanceExtensionMissingEnabledCount,
+            frameStats.temporal.temporalUpscalerDeviceExtensionMissingAvailableCount,
+            frameStats.temporal.temporalUpscalerDeviceExtensionMissingEnabledCount,
             frameStats.temporal.temporalUpscalerDlssSuperResolutionSupported > 0,
             frameStats.temporal.temporalUpscalerOptimalSettingsQueried > 0,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
@@ -6579,6 +6586,58 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleState.upscalerRuntime.capabilityParametersReady;
     stats.temporalUpscalerCapabilityQueryResult =
         temporalUpscaleState.upscalerRuntime.capabilityQueryResult;
+    stats.temporalUpscalerFeatureRequirementsQueried =
+        temporalUpscaleState.upscalerRuntime.featureRequirementsQueried;
+    stats.temporalUpscalerFeatureRequirementsResult =
+        temporalUpscaleState.upscalerRuntime.featureRequirementsResult;
+    stats.temporalUpscalerFeatureSupportedMask =
+        temporalUpscaleState.upscalerRuntime.featureSupportedMask;
+    stats.temporalUpscalerFeatureRequirementsSupported =
+        temporalUpscaleState.upscalerRuntime.featureRequirementsSupported;
+    stats.temporalUpscalerMinHardwareArchitecture =
+        temporalUpscaleState.upscalerRuntime.minHardwareArchitecture;
+    stats.temporalUpscalerMinOsVersion =
+        temporalUpscaleState.upscalerRuntime.minOsVersion;
+    stats.temporalUpscalerInstanceExtensionRequirementsQueried =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionRequirementsQueried;
+    stats.temporalUpscalerInstanceExtensionRequirementsResult =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionRequirementsResult;
+    stats.temporalUpscalerInstanceExtensionRequirementCount =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionRequirementCount;
+    stats.temporalUpscalerInstanceExtensionAvailableCount =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionAvailableCount;
+    stats.temporalUpscalerInstanceExtensionMissingAvailableCount =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionMissingAvailableCount;
+    stats.temporalUpscalerInstanceExtensionEnabledCount =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionEnabledCount;
+    stats.temporalUpscalerInstanceExtensionMissingEnabledCount =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionMissingEnabledCount;
+    stats.temporalUpscalerInstanceExtensionRequirements =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionRequirements;
+    stats.temporalUpscalerInstanceExtensionMissingAvailable =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionMissingAvailable;
+    stats.temporalUpscalerInstanceExtensionMissingEnabled =
+        temporalUpscaleState.upscalerRuntime.instanceExtensionMissingEnabled;
+    stats.temporalUpscalerDeviceExtensionRequirementsQueried =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionRequirementsQueried;
+    stats.temporalUpscalerDeviceExtensionRequirementsResult =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionRequirementsResult;
+    stats.temporalUpscalerDeviceExtensionRequirementCount =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionRequirementCount;
+    stats.temporalUpscalerDeviceExtensionAvailableCount =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionAvailableCount;
+    stats.temporalUpscalerDeviceExtensionMissingAvailableCount =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionMissingAvailableCount;
+    stats.temporalUpscalerDeviceExtensionEnabledCount =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionEnabledCount;
+    stats.temporalUpscalerDeviceExtensionMissingEnabledCount =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionMissingEnabledCount;
+    stats.temporalUpscalerDeviceExtensionRequirements =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionRequirements;
+    stats.temporalUpscalerDeviceExtensionMissingAvailable =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionMissingAvailable;
+    stats.temporalUpscalerDeviceExtensionMissingEnabled =
+        temporalUpscaleState.upscalerRuntime.deviceExtensionMissingEnabled;
     stats.temporalUpscalerDlssSuperResolutionSupported =
         temporalUpscaleState.upscalerRuntime.superResolutionSupported;
     stats.temporalUpscalerNeedsUpdatedDriver =

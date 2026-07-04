@@ -5,6 +5,8 @@
 #include <cctype>
 #include <charconv>
 #include <fstream>
+#include <set>
+#include <sstream>
 #include <string_view>
 
 #if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
@@ -300,6 +302,230 @@ bool NgxGetU32(NVSDK_NGX_Parameter* parameters, const char* name, u32& value) {
     return false;
 }
 
+std::string JoinNames(const std::vector<std::string>& names) {
+    std::ostringstream stream;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (index != 0u) {
+            stream << ';';
+        }
+        stream << names[index];
+    }
+    return stream.str();
+}
+
+std::vector<std::string> ExtensionPropertyNames(
+    const VkExtensionProperties* extensionProperties,
+    u32 extensionCount
+) {
+    std::vector<std::string> names;
+    names.reserve(extensionCount);
+    for (u32 index = 0; index < extensionCount; ++index) {
+        names.emplace_back(extensionProperties[index].extensionName);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+std::set<std::string> ExtensionNameSet(
+    const std::vector<const char*>& extensionNames
+) {
+    std::set<std::string> names;
+    for (const char* extensionName : extensionNames) {
+        names.insert(extensionName);
+    }
+    return names;
+}
+
+u32 CountContained(
+    const std::vector<std::string>& requiredNames,
+    const std::set<std::string>& availableNames,
+    std::vector<std::string>& missingNames
+) {
+    u32 contained = 0;
+    for (const std::string& requiredName : requiredNames) {
+        if (availableNames.find(requiredName) != availableNames.end()) {
+            ++contained;
+        } else {
+            missingNames.push_back(requiredName);
+        }
+    }
+    return contained;
+}
+
+void PopulateNgxFeatureRequirementStatus(
+    const TemporalUpscalerRuntimeRequest& request,
+    TemporalUpscalerRuntimeStatus& status
+) {
+    const std::filesystem::path appDataPath =
+        request.applicationDataPath.empty()
+            ? DefaultNgxApplicationDataPath()
+            : request.applicationDataPath;
+    std::error_code error;
+    std::filesystem::create_directories(appDataPath, error);
+
+    const std::filesystem::path runtimePath =
+        request.packageStatus.sdkRoot /
+        "lib" / "Windows_x86_64" / "rel";
+    const std::wstring runtimePathWide = runtimePath.wstring();
+    const wchar_t* featurePaths[] = { runtimePathWide.c_str() };
+    NVSDK_NGX_FeatureCommonInfo featureInfo{};
+    featureInfo.PathListInfo.Path = featurePaths;
+    featureInfo.PathListInfo.Length = 1u;
+
+    NVSDK_NGX_Application_Identifier identifier{};
+    identifier.IdentifierType =
+        NVSDK_NGX_Application_Identifier_Type_Project_Id;
+    identifier.v.ProjectDesc.ProjectId = kSelfEngineDlssProjectId;
+    identifier.v.ProjectDesc.EngineType = NVSDK_NGX_ENGINE_TYPE_CUSTOM;
+    identifier.v.ProjectDesc.EngineVersion = kSelfEngineDlssEngineVersion;
+
+    const std::wstring appDataPathWide = appDataPath.wstring();
+    NVSDK_NGX_FeatureDiscoveryInfo discoveryInfo{};
+    discoveryInfo.SDKVersion = NVSDK_NGX_Version_API;
+    discoveryInfo.FeatureID = NVSDK_NGX_Feature_SuperSampling;
+    discoveryInfo.Identifier = identifier;
+    discoveryInfo.ApplicationDataPath = appDataPathWide.c_str();
+    discoveryInfo.FeatureInfo = &featureInfo;
+
+    VkExtensionProperties* instanceExtensionProperties = nullptr;
+    uint32_t instanceExtensionCount = 0;
+    status.instanceExtensionRequirementsQueried = 1u;
+    const NVSDK_NGX_Result instanceExtensionResult =
+        NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements(
+            &discoveryInfo,
+            &instanceExtensionCount,
+            &instanceExtensionProperties
+        );
+    status.instanceExtensionRequirementsResult =
+        static_cast<u32>(instanceExtensionResult);
+    if (NVSDK_NGX_SUCCEED(instanceExtensionResult)) {
+        status.instanceExtensionRequirementCount = instanceExtensionCount;
+        const std::vector<std::string> requiredNames =
+            ExtensionPropertyNames(
+                instanceExtensionProperties,
+                instanceExtensionCount
+            );
+        std::vector<std::string> missingNames;
+        status.instanceExtensionAvailableCount = CountContained(
+            requiredNames,
+            AvailableVulkanInstanceExtensionNames(),
+            missingNames
+        );
+        std::vector<std::string> missingEnabledNames;
+        status.instanceExtensionEnabledCount = CountContained(
+            requiredNames,
+            ExtensionNameSet(EnabledOptionalDlssVulkanInstanceExtensions()),
+            missingEnabledNames
+        );
+        status.instanceExtensionMissingAvailableCount =
+            static_cast<u32>(missingNames.size());
+        status.instanceExtensionMissingEnabledCount =
+            static_cast<u32>(missingEnabledNames.size());
+        status.instanceExtensionRequirements = JoinNames(requiredNames);
+        status.instanceExtensionMissingAvailable = JoinNames(missingNames);
+        status.instanceExtensionMissingEnabled =
+            JoinNames(missingEnabledNames);
+    }
+
+    VkExtensionProperties* deviceExtensionProperties = nullptr;
+    uint32_t deviceExtensionCount = 0;
+    status.deviceExtensionRequirementsQueried = 1u;
+    const NVSDK_NGX_Result deviceExtensionResult =
+        NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements(
+            request.instance,
+            request.physicalDevice,
+            &discoveryInfo,
+            &deviceExtensionCount,
+            &deviceExtensionProperties
+        );
+    status.deviceExtensionRequirementsResult =
+        static_cast<u32>(deviceExtensionResult);
+    if (NVSDK_NGX_SUCCEED(deviceExtensionResult)) {
+        status.deviceExtensionRequirementCount = deviceExtensionCount;
+        const std::vector<std::string> requiredNames =
+            ExtensionPropertyNames(
+                deviceExtensionProperties,
+                deviceExtensionCount
+            );
+        std::vector<std::string> missingAvailableNames;
+        status.deviceExtensionAvailableCount = CountContained(
+            requiredNames,
+            AvailableVulkanDeviceExtensionNames(request.physicalDevice),
+            missingAvailableNames
+        );
+        std::vector<std::string> missingEnabledNames;
+        status.deviceExtensionEnabledCount = CountContained(
+            requiredNames,
+            ExtensionNameSet(EnabledVulkanDeviceExtensionsForPhysicalDevice(
+                request.physicalDevice
+            )),
+            missingEnabledNames
+        );
+        status.deviceExtensionMissingAvailableCount =
+            static_cast<u32>(missingAvailableNames.size());
+        status.deviceExtensionMissingEnabledCount =
+            static_cast<u32>(missingEnabledNames.size());
+        status.deviceExtensionRequirements = JoinNames(requiredNames);
+        status.deviceExtensionMissingAvailable =
+            JoinNames(missingAvailableNames);
+        status.deviceExtensionMissingEnabled =
+            JoinNames(missingEnabledNames);
+    }
+
+    NVSDK_NGX_FeatureRequirement featureRequirement{};
+    status.featureRequirementsQueried = 1u;
+    const NVSDK_NGX_Result featureRequirementResult =
+        NVSDK_NGX_VULKAN_GetFeatureRequirements(
+            request.instance,
+            request.physicalDevice,
+            &discoveryInfo,
+            &featureRequirement
+        );
+    status.featureRequirementsResult =
+        static_cast<u32>(featureRequirementResult);
+    if (NVSDK_NGX_SUCCEED(featureRequirementResult)) {
+        status.featureSupportedMask =
+            static_cast<u32>(featureRequirement.FeatureSupported);
+        status.featureRequirementsSupported =
+            featureRequirement.FeatureSupported == 0 ? 1u : 0u;
+        status.minHardwareArchitecture =
+            featureRequirement.MinHWArchitecture;
+        status.minOsVersion = featureRequirement.MinOSVersion;
+    }
+
+    if (NVSDK_NGX_FAILED(instanceExtensionResult) ||
+        NVSDK_NGX_FAILED(deviceExtensionResult) ||
+        NVSDK_NGX_FAILED(featureRequirementResult)) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::FeatureRequirementsFailed;
+    } else if (status.instanceExtensionMissingAvailableCount != 0u ||
+        status.instanceExtensionMissingEnabledCount != 0u ||
+        status.deviceExtensionMissingAvailableCount != 0u ||
+        status.deviceExtensionMissingEnabledCount != 0u) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::RequiredVulkanExtensionMissing;
+    }
+}
+
+bool NgxRequirementsPermitEvaluation(
+    const TemporalUpscalerRuntimeStatus& status
+) {
+    return status.featureRequirementsQueried != 0u &&
+        status.featureRequirementsResult ==
+            static_cast<u32>(NVSDK_NGX_Result_Success) &&
+        status.featureRequirementsSupported != 0u &&
+        status.instanceExtensionRequirementsQueried != 0u &&
+        status.instanceExtensionRequirementsResult ==
+            static_cast<u32>(NVSDK_NGX_Result_Success) &&
+        status.instanceExtensionMissingAvailableCount == 0u &&
+        status.instanceExtensionMissingEnabledCount == 0u &&
+        status.deviceExtensionRequirementsQueried != 0u &&
+        status.deviceExtensionRequirementsResult ==
+            static_cast<u32>(NVSDK_NGX_Result_Success) &&
+        status.deviceExtensionMissingAvailableCount == 0u &&
+        status.deviceExtensionMissingEnabledCount == 0u;
+}
+
 struct DlssRuntimeCache {
     bool initializationAttempted = false;
     bool initialized = false;
@@ -393,8 +619,20 @@ void PopulateNgxCapabilityStatus(
             status.minRenderWidth = minWidth;
             status.minRenderHeight = minHeight;
             status.sharpness = sharpness;
-            status.evaluateAdapterAvailable = 1u;
-            status.fallbackReason = TemporalUpscalerRuntimeFallbackReason::None;
+            if (NgxRequirementsPermitEvaluation(status)) {
+                status.evaluateAdapterAvailable = 1u;
+                status.fallbackReason =
+                    TemporalUpscalerRuntimeFallbackReason::None;
+            } else if (status.deviceExtensionMissingAvailableCount != 0u ||
+                status.deviceExtensionMissingEnabledCount != 0u ||
+                status.instanceExtensionMissingAvailableCount != 0u ||
+                status.instanceExtensionMissingEnabledCount != 0u) {
+                status.fallbackReason =
+                    TemporalUpscalerRuntimeFallbackReason::RequiredVulkanExtensionMissing;
+            } else {
+                status.fallbackReason =
+                    TemporalUpscalerRuntimeFallbackReason::FeatureRequirementsFailed;
+            }
         } else {
             status.fallbackReason =
                 TemporalUpscalerRuntimeFallbackReason::OptimalSettingsFailed;
@@ -425,6 +663,8 @@ TemporalUpscalerRuntimeStatus QueryCompiledDlssRuntime(
             TemporalUpscalerRuntimeFallbackReason::VulkanHandlesUnavailable;
         return status;
     }
+
+    PopulateNgxFeatureRequirementStatus(request, status);
 
     if (!g_DlssRuntimeCache.initializationAttempted) {
         g_DlssRuntimeCache.initializationAttempted = true;

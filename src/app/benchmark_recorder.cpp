@@ -657,6 +657,32 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerInitializationResult << ','
         << temporal.temporalUpscalerCapabilityParametersReady << ','
         << temporal.temporalUpscalerCapabilityQueryResult << ','
+        << temporal.temporalUpscalerFeatureRequirementsQueried << ','
+        << temporal.temporalUpscalerFeatureRequirementsResult << ','
+        << temporal.temporalUpscalerFeatureSupportedMask << ','
+        << temporal.temporalUpscalerFeatureRequirementsSupported << ','
+        << temporal.temporalUpscalerMinHardwareArchitecture << ','
+        << temporal.temporalUpscalerMinOsVersion << ','
+        << temporal.temporalUpscalerInstanceExtensionRequirementsQueried << ','
+        << temporal.temporalUpscalerInstanceExtensionRequirementsResult << ','
+        << temporal.temporalUpscalerInstanceExtensionRequirementCount << ','
+        << temporal.temporalUpscalerInstanceExtensionAvailableCount << ','
+        << temporal.temporalUpscalerInstanceExtensionMissingAvailableCount << ','
+        << temporal.temporalUpscalerInstanceExtensionEnabledCount << ','
+        << temporal.temporalUpscalerInstanceExtensionMissingEnabledCount << ','
+        << temporal.temporalUpscalerInstanceExtensionRequirements << ','
+        << temporal.temporalUpscalerInstanceExtensionMissingAvailable << ','
+        << temporal.temporalUpscalerInstanceExtensionMissingEnabled << ','
+        << temporal.temporalUpscalerDeviceExtensionRequirementsQueried << ','
+        << temporal.temporalUpscalerDeviceExtensionRequirementsResult << ','
+        << temporal.temporalUpscalerDeviceExtensionRequirementCount << ','
+        << temporal.temporalUpscalerDeviceExtensionAvailableCount << ','
+        << temporal.temporalUpscalerDeviceExtensionMissingAvailableCount << ','
+        << temporal.temporalUpscalerDeviceExtensionEnabledCount << ','
+        << temporal.temporalUpscalerDeviceExtensionMissingEnabledCount << ','
+        << temporal.temporalUpscalerDeviceExtensionRequirements << ','
+        << temporal.temporalUpscalerDeviceExtensionMissingAvailable << ','
+        << temporal.temporalUpscalerDeviceExtensionMissingEnabled << ','
         << temporal.temporalUpscalerDlssSuperResolutionSupported << ','
         << temporal.temporalUpscalerNeedsUpdatedDriver << ','
         << temporal.temporalUpscalerMinDriverVersionMajor << ','
@@ -1216,6 +1242,32 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_initialization_result,"
         << "temporal_upscaler_capability_parameters_ready,"
         << "temporal_upscaler_capability_query_result,"
+        << "temporal_upscaler_feature_requirements_queried,"
+        << "temporal_upscaler_feature_requirements_result,"
+        << "temporal_upscaler_feature_supported_mask,"
+        << "temporal_upscaler_feature_requirements_supported,"
+        << "temporal_upscaler_min_hardware_architecture,"
+        << "temporal_upscaler_min_os_version,"
+        << "temporal_upscaler_instance_extension_requirements_queried,"
+        << "temporal_upscaler_instance_extension_requirements_result,"
+        << "temporal_upscaler_instance_extension_requirement_count,"
+        << "temporal_upscaler_instance_extension_available_count,"
+        << "temporal_upscaler_instance_extension_missing_available_count,"
+        << "temporal_upscaler_instance_extension_enabled_count,"
+        << "temporal_upscaler_instance_extension_missing_enabled_count,"
+        << "temporal_upscaler_instance_extension_requirements,"
+        << "temporal_upscaler_instance_extension_missing_available,"
+        << "temporal_upscaler_instance_extension_missing_enabled,"
+        << "temporal_upscaler_device_extension_requirements_queried,"
+        << "temporal_upscaler_device_extension_requirements_result,"
+        << "temporal_upscaler_device_extension_requirement_count,"
+        << "temporal_upscaler_device_extension_available_count,"
+        << "temporal_upscaler_device_extension_missing_available_count,"
+        << "temporal_upscaler_device_extension_enabled_count,"
+        << "temporal_upscaler_device_extension_missing_enabled_count,"
+        << "temporal_upscaler_device_extension_requirements,"
+        << "temporal_upscaler_device_extension_missing_available,"
+        << "temporal_upscaler_device_extension_missing_enabled,"
         << "temporal_upscaler_dlss_super_resolution_supported,"
         << "temporal_upscaler_needs_updated_driver,"
         << "temporal_upscaler_min_driver_version_major,"

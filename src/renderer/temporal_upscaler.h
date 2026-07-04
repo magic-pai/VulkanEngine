@@ -53,7 +53,9 @@ enum class TemporalUpscalerRuntimeFallbackReason : u32 {
     CapabilityParametersFailed = 7,
     SuperResolutionUnavailable = 8,
     DriverUpdateRequired = 9,
-    OptimalSettingsFailed = 10
+    OptimalSettingsFailed = 10,
+    FeatureRequirementsFailed = 11,
+    RequiredVulkanExtensionMissing = 12
 };
 
 struct TemporalUpscalerProbeRequest {
@@ -106,6 +108,32 @@ struct TemporalUpscalerRuntimeStatus {
     u32 initializationResult = 0;
     u32 capabilityParametersReady = 0;
     u32 capabilityQueryResult = 0;
+    u32 featureRequirementsQueried = 0;
+    u32 featureRequirementsResult = 0;
+    u32 featureSupportedMask = 0;
+    u32 featureRequirementsSupported = 0;
+    u32 minHardwareArchitecture = 0;
+    std::string minOsVersion;
+    u32 instanceExtensionRequirementsQueried = 0;
+    u32 instanceExtensionRequirementsResult = 0;
+    u32 instanceExtensionRequirementCount = 0;
+    u32 instanceExtensionAvailableCount = 0;
+    u32 instanceExtensionMissingAvailableCount = 0;
+    u32 instanceExtensionEnabledCount = 0;
+    u32 instanceExtensionMissingEnabledCount = 0;
+    std::string instanceExtensionRequirements;
+    std::string instanceExtensionMissingAvailable;
+    std::string instanceExtensionMissingEnabled;
+    u32 deviceExtensionRequirementsQueried = 0;
+    u32 deviceExtensionRequirementsResult = 0;
+    u32 deviceExtensionRequirementCount = 0;
+    u32 deviceExtensionAvailableCount = 0;
+    u32 deviceExtensionMissingAvailableCount = 0;
+    u32 deviceExtensionEnabledCount = 0;
+    u32 deviceExtensionMissingEnabledCount = 0;
+    std::string deviceExtensionRequirements;
+    std::string deviceExtensionMissingAvailable;
+    std::string deviceExtensionMissingEnabled;
     u32 superResolutionSupported = 0;
     u32 needsUpdatedDriver = 0;
     u32 minDriverVersionMajor = 0;

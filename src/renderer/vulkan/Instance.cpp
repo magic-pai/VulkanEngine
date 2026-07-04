@@ -108,7 +108,12 @@ namespace {
         );
 
         if (kEnableValidationLayers) {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            AppendUniqueExtension(extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
+
+        for (const char* extensionName :
+            EnabledOptionalDlssVulkanInstanceExtensions()) {
+            AppendUniqueExtension(extensions, extensionName);
         }
 
         return extensions;

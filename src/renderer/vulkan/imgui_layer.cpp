@@ -1246,6 +1246,29 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalerSharpness
     );
     ImGui::Text(
+        "Temporal upscaler requirements: queried %u result 0x%X supported %u mask 0x%X minHW %u minOS %s inst %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s] dev %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s]",
+        stats.temporal.temporalUpscalerFeatureRequirementsQueried,
+        stats.temporal.temporalUpscalerFeatureRequirementsResult,
+        stats.temporal.temporalUpscalerFeatureRequirementsSupported,
+        stats.temporal.temporalUpscalerFeatureSupportedMask,
+        stats.temporal.temporalUpscalerMinHardwareArchitecture,
+        stats.temporal.temporalUpscalerMinOsVersion.c_str(),
+        stats.temporal.temporalUpscalerInstanceExtensionAvailableCount,
+        stats.temporal.temporalUpscalerInstanceExtensionRequirementCount,
+        stats.temporal.temporalUpscalerInstanceExtensionEnabledCount,
+        stats.temporal.temporalUpscalerInstanceExtensionMissingAvailableCount,
+        stats.temporal.temporalUpscalerInstanceExtensionMissingEnabledCount,
+        stats.temporal.temporalUpscalerInstanceExtensionMissingAvailable.c_str(),
+        stats.temporal.temporalUpscalerInstanceExtensionMissingEnabled.c_str(),
+        stats.temporal.temporalUpscalerDeviceExtensionAvailableCount,
+        stats.temporal.temporalUpscalerDeviceExtensionRequirementCount,
+        stats.temporal.temporalUpscalerDeviceExtensionEnabledCount,
+        stats.temporal.temporalUpscalerDeviceExtensionMissingAvailableCount,
+        stats.temporal.temporalUpscalerDeviceExtensionMissingEnabledCount,
+        stats.temporal.temporalUpscalerDeviceExtensionMissingAvailable.c_str(),
+        stats.temporal.temporalUpscalerDeviceExtensionMissingEnabled.c_str()
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,

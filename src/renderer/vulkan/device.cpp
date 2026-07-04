@@ -32,13 +32,40 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     deviceFeatures.samplerAnisotropy = physicalDevice.Features().samplerAnisotropy;
     deviceFeatures.independentBlend = physicalDevice.Features().independentBlend;
 
+    const std::vector<const char*> enabledExtensions =
+        EnabledVulkanDeviceExtensionsForPhysicalDevice(physicalDevice.Handle());
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
+    if (IsExtensionEnabled(
+        enabledExtensions,
+        VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+    )) {
+        VkPhysicalDeviceBufferDeviceAddressFeatures supportedBufferDeviceAddress{};
+        supportedBufferDeviceAddress.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        VkPhysicalDeviceFeatures2 supportedFeatures{};
+        supportedFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        supportedFeatures.pNext = &supportedBufferDeviceAddress;
+        vkGetPhysicalDeviceFeatures2(physicalDevice.Handle(), &supportedFeatures);
+
+        bufferDeviceAddressFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        bufferDeviceAddressFeatures.bufferDeviceAddress =
+            supportedBufferDeviceAddress.bufferDeviceAddress;
+    }
+
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext =
+        bufferDeviceAddressFeatures.sType != 0
+            ? &bufferDeviceAddressFeatures
+            : nullptr;
     createInfo.queueCreateInfoCount = static_cast<u32>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
     createInfo.pEnabledFeatures = &deviceFeatures;
-    createInfo.enabledExtensionCount = static_cast<u32>(kDeviceExtensions.size());
-    createInfo.ppEnabledExtensionNames = kDeviceExtensions.data();
+    createInfo.enabledExtensionCount =
+        static_cast<u32>(enabledExtensions.size());
+    createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
     const VkResult result = vkCreateDevice(
         physicalDevice.Handle(),

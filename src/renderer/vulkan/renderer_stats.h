@@ -6,6 +6,7 @@
 #include "renderer/vulkan/vulkan_common.h"
 
 #include <array>
+#include <string>
 
 namespace se {
 
@@ -668,6 +669,32 @@ struct RendererTemporalStats {
     u32 temporalUpscalerInitializationResult = 0;
     u32 temporalUpscalerCapabilityParametersReady = 0;
     u32 temporalUpscalerCapabilityQueryResult = 0;
+    u32 temporalUpscalerFeatureRequirementsQueried = 0;
+    u32 temporalUpscalerFeatureRequirementsResult = 0;
+    u32 temporalUpscalerFeatureSupportedMask = 0;
+    u32 temporalUpscalerFeatureRequirementsSupported = 0;
+    u32 temporalUpscalerMinHardwareArchitecture = 0;
+    std::string temporalUpscalerMinOsVersion;
+    u32 temporalUpscalerInstanceExtensionRequirementsQueried = 0;
+    u32 temporalUpscalerInstanceExtensionRequirementsResult = 0;
+    u32 temporalUpscalerInstanceExtensionRequirementCount = 0;
+    u32 temporalUpscalerInstanceExtensionAvailableCount = 0;
+    u32 temporalUpscalerInstanceExtensionMissingAvailableCount = 0;
+    u32 temporalUpscalerInstanceExtensionEnabledCount = 0;
+    u32 temporalUpscalerInstanceExtensionMissingEnabledCount = 0;
+    std::string temporalUpscalerInstanceExtensionRequirements;
+    std::string temporalUpscalerInstanceExtensionMissingAvailable;
+    std::string temporalUpscalerInstanceExtensionMissingEnabled;
+    u32 temporalUpscalerDeviceExtensionRequirementsQueried = 0;
+    u32 temporalUpscalerDeviceExtensionRequirementsResult = 0;
+    u32 temporalUpscalerDeviceExtensionRequirementCount = 0;
+    u32 temporalUpscalerDeviceExtensionAvailableCount = 0;
+    u32 temporalUpscalerDeviceExtensionMissingAvailableCount = 0;
+    u32 temporalUpscalerDeviceExtensionEnabledCount = 0;
+    u32 temporalUpscalerDeviceExtensionMissingEnabledCount = 0;
+    std::string temporalUpscalerDeviceExtensionRequirements;
+    std::string temporalUpscalerDeviceExtensionMissingAvailable;
+    std::string temporalUpscalerDeviceExtensionMissingEnabled;
     u32 temporalUpscalerDlssSuperResolutionSupported = 0;
     u32 temporalUpscalerNeedsUpdatedDriver = 0;
     u32 temporalUpscalerMinDriverVersionMajor = 0;

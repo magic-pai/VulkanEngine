@@ -2213,6 +2213,14 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     if (inputs.temporalUpscalerPluginRequested ||
         inputs.temporalUpscalerInitializationAttempted ||
         inputs.temporalUpscalerRuntimeFallbackReason != 0u) {
+        const bool requirementsClean =
+            inputs.temporalUpscalerFeatureRequirementsQueried &&
+            inputs.temporalUpscalerFeatureRequirementsSupported &&
+            inputs.temporalUpscalerFeatureSupportedMask == 0u &&
+            inputs.temporalUpscalerInstanceExtensionMissingAvailableCount == 0u &&
+            inputs.temporalUpscalerInstanceExtensionMissingEnabledCount == 0u &&
+            inputs.temporalUpscalerDeviceExtensionMissingAvailableCount == 0u &&
+            inputs.temporalUpscalerDeviceExtensionMissingEnabledCount == 0u;
         AppendPass(
             plan,
             RenderFramePassKind::TemporalUpscale,
@@ -2225,7 +2233,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "",
             inputs.temporalUpscalerEvaluateAdapterAvailable
                 ? "NGX Vulkan initialized and DLSS Super Resolution capability plus recommended render extent were queried; DLSS evaluation is still a later pass."
-                : "Reports optional NGX adapter compile/init/capability fallback before DLSS Super Resolution evaluation is wired."
+                : requirementsClean
+                    ? "Reports optional NGX adapter compile/init/capability fallback before DLSS Super Resolution evaluation is wired."
+                    : "Reports NGX feature requirements and required Vulkan extension gaps that block DLSS Super Resolution evaluation."
         );
     }
 
