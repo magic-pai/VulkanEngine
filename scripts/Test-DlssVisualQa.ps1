@@ -18,6 +18,7 @@ param(
     [string]$ImportedDynamicDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
     [string[]]$Suite = @("full"),
+    [switch]$ListSuites,
     [switch]$SkipBuild
 )
 
@@ -26,6 +27,81 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+
+$baseSuites =
+    @(
+        "full",
+        "default",
+        "default-motion",
+        "default-object-motion",
+        "imported-dynamic",
+        "wboit",
+        "forward-special",
+        "material-stress"
+    )
+$suiteGroups =
+    [ordered]@{
+        "dynamic" = @(
+            "default-motion",
+            "default-object-motion",
+            "imported-dynamic"
+        )
+        "mask-material" = @(
+            "wboit",
+            "forward-special",
+            "material-stress"
+        )
+    }
+$validSuites = @($baseSuites + @($suiteGroups.Keys))
+$requestedSuites = @(
+    @(
+        foreach ($suiteValue in $Suite) {
+            foreach ($suitePart in $suiteValue.ToString().Split(
+                    [char[]]@(','),
+                    [System.StringSplitOptions]::RemoveEmptyEntries
+                )) {
+                $normalizedSuite = $suitePart.Trim().ToLowerInvariant()
+                if ($normalizedSuite.Length -gt 0) {
+                    $normalizedSuite
+                }
+            }
+        }
+    ) | Select-Object -Unique
+)
+if ($requestedSuites.Count -eq 0) {
+    $requestedSuites = @("full")
+}
+foreach ($requestedSuite in $requestedSuites) {
+    if ($validSuites -notcontains $requestedSuite) {
+        throw "Unknown -Suite '$requestedSuite'. Valid suites: $($validSuites -join ', ')"
+    }
+}
+if (($requestedSuites -contains "full") -and $requestedSuites.Count -gt 1) {
+    throw "-Suite full cannot be combined with focused suites"
+}
+$selectedSuites = @(
+    @(
+        foreach ($requestedSuite in $requestedSuites) {
+            if ($suiteGroups.Contains($requestedSuite)) {
+                foreach ($suiteMember in $suiteGroups[$requestedSuite]) {
+                    $suiteMember
+                }
+            } else {
+                $requestedSuite
+            }
+        }
+    ) | Select-Object -Unique
+)
+
+if ($ListSuites) {
+    [pscustomobject]@{
+        validSuites = $validSuites
+        suiteGroups = $suiteGroups
+        requestedSuites = $requestedSuites
+        expandedSuites = $selectedSuites
+    } | ConvertTo-Json -Depth 5
+    return
+}
 
 if (-not $SkipBuild) {
     & .\_quick_build.bat | Out-Host
@@ -1202,44 +1278,6 @@ $materialStressDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
 $materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
     $materialStressBaselineManifestPath
 
-$validSuites =
-    @(
-        "full",
-        "default",
-        "default-motion",
-        "default-object-motion",
-        "imported-dynamic",
-        "wboit",
-        "forward-special",
-        "material-stress"
-    )
-$selectedSuites = @(
-    @(
-        foreach ($suiteValue in $Suite) {
-            foreach ($suitePart in $suiteValue.ToString().Split(
-                    [char[]]@(','),
-                    [System.StringSplitOptions]::RemoveEmptyEntries
-                )) {
-                $normalizedSuite = $suitePart.Trim().ToLowerInvariant()
-                if ($normalizedSuite.Length -gt 0) {
-                    $normalizedSuite
-                }
-            }
-        }
-    ) | Select-Object -Unique
-)
-if ($selectedSuites.Count -eq 0) {
-    $selectedSuites = @("full")
-}
-foreach ($selectedSuite in $selectedSuites) {
-    if ($validSuites -notcontains $selectedSuite) {
-        throw "Unknown -Suite '$selectedSuite'. Valid suites: $($validSuites -join ', ')"
-    }
-}
-if (($selectedSuites -contains "full") -and $selectedSuites.Count -gt 1) {
-    throw "-Suite full cannot be combined with focused suites"
-}
-
 function New-QuickNativeMetrics {
     param([Parameter(Mandatory = $true)]$Row)
 
@@ -1643,11 +1681,18 @@ function Invoke-QuickDlaaSequenceSuite {
 }
 
 if (-not ($selectedSuites -contains "full")) {
-    Write-Host "Focused DLSS visual QA suites: $($selectedSuites -join ', ')"
+    $requestedSuiteText = $requestedSuites -join ', '
+    $selectedSuiteText = $selectedSuites -join ', '
+    Write-Host "Focused DLSS visual QA suites: $selectedSuiteText"
+    if ($requestedSuiteText -ne $selectedSuiteText) {
+        Write-Host "Requested suite groups: $requestedSuiteText"
+    }
     $quickSummary = [ordered]@{
         target = $Target
         generatedAt = (Get-Date).ToString("o")
+        requestedSuites = $requestedSuites
         selectedSuites = $selectedSuites
+        suiteGroups = $suiteGroups
         captureMonitor = $script:captureMonitorWorkArea
         baselines = [ordered]@{}
         thresholds = [ordered]@{}
