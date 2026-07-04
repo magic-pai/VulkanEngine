@@ -115,11 +115,106 @@ constexpr u32 kTemporalUpscaleRequiredInputMask =
     kTemporalUpscaleInputVelocityBit |
     kTemporalUpscaleInputHistoryColorBit |
     kTemporalUpscaleInputFrameStateBit;
+constexpr u32 kDlssQualityEvaluateOutputBit = 1u << 0u;
+constexpr u32 kDlssQualityCameraMotionBit = 1u << 1u;
+constexpr u32 kDlssQualityObjectMotionBit = 1u << 2u;
+constexpr u32 kDlssQualityReactiveMaskBit = 1u << 3u;
+constexpr u32 kDlssQualityTransparencyMaskBit = 1u << 4u;
+constexpr u32 kDlssQualityExposurePolicyBit = 1u << 5u;
+constexpr u32 kDlssQualityPostOrderingBit = 1u << 6u;
+constexpr u32 kDlssQualityReferenceBaselineBit = 1u << 7u;
+constexpr u32 kDlssQualityRequiredMask =
+    kDlssQualityEvaluateOutputBit |
+    kDlssQualityCameraMotionBit |
+    kDlssQualityObjectMotionBit |
+    kDlssQualityReactiveMaskBit |
+    kDlssQualityTransparencyMaskBit |
+    kDlssQualityExposurePolicyBit |
+    kDlssQualityPostOrderingBit |
+    kDlssQualityReferenceBaselineBit;
 
 using FrameClock = std::chrono::steady_clock;
 
 f32 ElapsedMilliseconds(FrameClock::time_point start, FrameClock::time_point end) {
     return std::chrono::duration<f32, std::milli>(end - start).count();
+}
+
+RendererDlssQualityGateFallbackReason DlssQualityGateFallbackFromBlockers(
+    u32 blockerMask
+) {
+    if ((blockerMask & kDlssQualityEvaluateOutputBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::EvaluateOutputUnavailable;
+    }
+    if ((blockerMask & kDlssQualityCameraMotionBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::CameraMotionVectorsUnavailable;
+    }
+    if ((blockerMask & kDlssQualityObjectMotionBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::ObjectMotionVectorsUnavailable;
+    }
+    if ((blockerMask & kDlssQualityReactiveMaskBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::ReactiveMaskUnavailable;
+    }
+    if ((blockerMask & kDlssQualityTransparencyMaskBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::TransparencyMaskUnavailable;
+    }
+    if ((blockerMask & kDlssQualityExposurePolicyBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::ExposurePolicyUnverified;
+    }
+    if ((blockerMask & kDlssQualityPostOrderingBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::PostOrderingUnverified;
+    }
+    if ((blockerMask & kDlssQualityReferenceBaselineBit) != 0u) {
+        return RendererDlssQualityGateFallbackReason::ReferenceBaselineMissing;
+    }
+    return RendererDlssQualityGateFallbackReason::None;
+}
+
+void FinalizeDlssQualityGateStats(RendererTemporalStats& stats) {
+    stats.temporalUpscalerDlssQualityRequiredMask = kDlssQualityRequiredMask;
+    if (stats.temporalUpscalerDlssQualityGateRequested == 0u) {
+        stats.temporalUpscalerDlssQualityGateReady = 0u;
+        stats.temporalUpscalerDlssQualityReadyMask = 0u;
+        stats.temporalUpscalerDlssQualityBlockerMask = 0u;
+        stats.temporalUpscalerDlssQualityGateFallbackReason =
+            static_cast<u32>(RendererDlssQualityGateFallbackReason::NotRequested);
+        return;
+    }
+
+    u32 readyMask = 0u;
+    if (stats.temporalUpscalerDlssQualityEvaluateOutputReady != 0u) {
+        readyMask |= kDlssQualityEvaluateOutputBit;
+    }
+    if (stats.temporalUpscalerDlssQualityCameraMotionReady != 0u) {
+        readyMask |= kDlssQualityCameraMotionBit;
+    }
+    if (stats.temporalUpscalerDlssQualityObjectMotionReady != 0u) {
+        readyMask |= kDlssQualityObjectMotionBit;
+    }
+    if (stats.temporalUpscalerDlssQualityReactiveMaskReady != 0u) {
+        readyMask |= kDlssQualityReactiveMaskBit;
+    }
+    if (stats.temporalUpscalerDlssQualityTransparencyMaskReady != 0u) {
+        readyMask |= kDlssQualityTransparencyMaskBit;
+    }
+    if (stats.temporalUpscalerDlssQualityExposurePolicyReady != 0u) {
+        readyMask |= kDlssQualityExposurePolicyBit;
+    }
+    if (stats.temporalUpscalerDlssQualityPostOrderingReady != 0u) {
+        readyMask |= kDlssQualityPostOrderingBit;
+    }
+    if (stats.temporalUpscalerDlssQualityReferenceBaselineReady != 0u) {
+        readyMask |= kDlssQualityReferenceBaselineBit;
+    }
+
+    stats.temporalUpscalerDlssQualityReadyMask = readyMask;
+    stats.temporalUpscalerDlssQualityBlockerMask =
+        kDlssQualityRequiredMask & ~readyMask;
+    stats.temporalUpscalerDlssQualityGateReady =
+        stats.temporalUpscalerDlssQualityBlockerMask == 0u ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityGateFallbackReason =
+        static_cast<u32>(DlssQualityGateFallbackFromBlockers(
+            stats.temporalUpscalerDlssQualityBlockerMask
+        ));
 }
 
 std::size_t ProbeGridLinearIndex(
@@ -4133,6 +4228,11 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalUpscalerDeviceExtensionMissingEnabledCount,
             frameStats.temporal.temporalUpscalerDlssSuperResolutionSupported > 0,
             frameStats.temporal.temporalUpscalerOptimalSettingsQueried > 0,
+            frameStats.temporal.temporalUpscalerDlssQualityGateRequested > 0,
+            frameStats.temporal.temporalUpscalerDlssQualityGateReady > 0,
+            frameStats.temporal.temporalUpscalerDlssQualityRequiredMask,
+            frameStats.temporal.temporalUpscalerDlssQualityReadyMask,
+            frameStats.temporal.temporalUpscalerDlssQualityBlockerMask,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
@@ -4345,6 +4445,11 @@ void VulkanRenderer::DrawFrame() {
         temporalUpscalerEvaluateStatus.motionVectorScaleY;
     frameStats.temporal.temporalUpscalerDlssEvaluateSharpness =
         temporalUpscalerEvaluateStatus.sharpness;
+    frameStats.temporal.temporalUpscalerDlssQualityEvaluateOutputReady =
+        temporalUpscalerEvaluateStatus.outputReady;
+    frameStats.temporal.temporalUpscalerDlssQualityPostOrderingReady =
+        temporalUpscalePostSourceStatus.active;
+    FinalizeDlssQualityGateStats(frameStats.temporal);
     frameStats.temporal.temporalUpscaleEnabled =
         temporalUpscalerEvaluateStatus.outputReady;
     if (temporalUpscalerEvaluateStatus.outputReady > 0u) {
@@ -6540,6 +6645,37 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
     state.temporalUpscaleEnabled = false;
     state.upscalerPluginAvailable =
         state.upscalerRuntime.evaluateAdapterAvailable > 0u;
+    state.dlssQualityGateRequested =
+        state.upscalerPluginRequested &&
+        state.upscalerPackage.providerKind == TemporalUpscalerProviderKind::Dlss;
+    state.dlssQualityEvaluateOutputReady = false;
+    state.dlssQualityCameraMotionReady = temporalState.velocityCameraMotionReady;
+    state.dlssQualityObjectMotionReady = temporalState.velocityObjectMotionReady;
+    state.dlssQualityReactiveMaskReady = false;
+    state.dlssQualityTransparencyMaskReady = false;
+    state.dlssQualityExposurePolicyReady = true;
+    state.dlssQualityPostOrderingReady = false;
+    state.dlssQualityReferenceBaselineReady = false;
+    state.dlssQualityRequiredMask = kDlssQualityRequiredMask;
+    state.dlssQualityReadyMask =
+        (state.dlssQualityEvaluateOutputReady ? kDlssQualityEvaluateOutputBit : 0u) |
+        (state.dlssQualityCameraMotionReady ? kDlssQualityCameraMotionBit : 0u) |
+        (state.dlssQualityObjectMotionReady ? kDlssQualityObjectMotionBit : 0u) |
+        (state.dlssQualityReactiveMaskReady ? kDlssQualityReactiveMaskBit : 0u) |
+        (state.dlssQualityTransparencyMaskReady ? kDlssQualityTransparencyMaskBit : 0u) |
+        (state.dlssQualityExposurePolicyReady ? kDlssQualityExposurePolicyBit : 0u) |
+        (state.dlssQualityPostOrderingReady ? kDlssQualityPostOrderingBit : 0u) |
+        (state.dlssQualityReferenceBaselineReady ? kDlssQualityReferenceBaselineBit : 0u);
+    state.dlssQualityBlockerMask =
+        state.dlssQualityGateRequested
+            ? kDlssQualityRequiredMask & ~state.dlssQualityReadyMask
+            : 0u;
+    state.dlssQualityGateReady =
+        state.dlssQualityGateRequested && state.dlssQualityBlockerMask == 0u;
+    state.dlssQualityGateFallbackReason =
+        state.dlssQualityGateRequested
+            ? DlssQualityGateFallbackFromBlockers(state.dlssQualityBlockerMask)
+            : RendererDlssQualityGateFallbackReason::NotRequested;
     if (!state.temporalUpscaleRequested) {
         state.fallbackReason =
             RendererTemporalUpscaleFallbackReason::Disabled;
@@ -6877,6 +7013,35 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleState.upscalerRuntime.maxRenderHeight;
     stats.temporalUpscalerSharpness =
         temporalUpscaleState.upscalerRuntime.sharpness;
+    stats.temporalUpscalerDlssQualityGateRequested =
+        temporalUpscaleState.dlssQualityGateRequested ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityGateReady =
+        temporalUpscaleState.dlssQualityGateReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityGateFallbackReason =
+        static_cast<u32>(temporalUpscaleState.dlssQualityGateFallbackReason);
+    stats.temporalUpscalerDlssQualityRequiredMask =
+        temporalUpscaleState.dlssQualityRequiredMask;
+    stats.temporalUpscalerDlssQualityReadyMask =
+        temporalUpscaleState.dlssQualityReadyMask;
+    stats.temporalUpscalerDlssQualityBlockerMask =
+        temporalUpscaleState.dlssQualityBlockerMask;
+    stats.temporalUpscalerDlssQualityEvaluateOutputReady =
+        temporalUpscaleState.dlssQualityEvaluateOutputReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityCameraMotionReady =
+        temporalUpscaleState.dlssQualityCameraMotionReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityObjectMotionReady =
+        temporalUpscaleState.dlssQualityObjectMotionReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityReactiveMaskReady =
+        temporalUpscaleState.dlssQualityReactiveMaskReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityTransparencyMaskReady =
+        temporalUpscaleState.dlssQualityTransparencyMaskReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityExposurePolicyReady =
+        temporalUpscaleState.dlssQualityExposurePolicyReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityPostOrderingReady =
+        temporalUpscaleState.dlssQualityPostOrderingReady ? 1u : 0u;
+    stats.temporalUpscalerDlssQualityReferenceBaselineReady =
+        temporalUpscaleState.dlssQualityReferenceBaselineReady ? 1u : 0u;
+    FinalizeDlssQualityGateStats(stats);
 }
 
 void VulkanRenderer::UpdateUniformBuffer(

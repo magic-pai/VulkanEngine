@@ -583,6 +583,19 @@ enum class RendererTemporalUpscaleFallbackReason : u32 {
     UpscalerEvaluateFailed = 7
 };
 
+enum class RendererDlssQualityGateFallbackReason : u32 {
+    None = 0,
+    NotRequested = 1,
+    EvaluateOutputUnavailable = 2,
+    CameraMotionVectorsUnavailable = 3,
+    ObjectMotionVectorsUnavailable = 4,
+    ReactiveMaskUnavailable = 5,
+    TransparencyMaskUnavailable = 6,
+    ExposurePolicyUnverified = 7,
+    PostOrderingUnverified = 8,
+    ReferenceBaselineMissing = 9
+};
+
 struct RendererTemporalStats {
     u32 velocityTargetAllocated = 0;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;
@@ -743,6 +756,20 @@ struct RendererTemporalStats {
     f32 temporalUpscalerDlssMotionVectorScaleX = 1.0f;
     f32 temporalUpscalerDlssMotionVectorScaleY = 1.0f;
     f32 temporalUpscalerDlssEvaluateSharpness = 0.0f;
+    u32 temporalUpscalerDlssQualityGateRequested = 0;
+    u32 temporalUpscalerDlssQualityGateReady = 0;
+    u32 temporalUpscalerDlssQualityGateFallbackReason = 0;
+    u32 temporalUpscalerDlssQualityRequiredMask = 0;
+    u32 temporalUpscalerDlssQualityReadyMask = 0;
+    u32 temporalUpscalerDlssQualityBlockerMask = 0;
+    u32 temporalUpscalerDlssQualityEvaluateOutputReady = 0;
+    u32 temporalUpscalerDlssQualityCameraMotionReady = 0;
+    u32 temporalUpscalerDlssQualityObjectMotionReady = 0;
+    u32 temporalUpscalerDlssQualityReactiveMaskReady = 0;
+    u32 temporalUpscalerDlssQualityTransparencyMaskReady = 0;
+    u32 temporalUpscalerDlssQualityExposurePolicyReady = 0;
+    u32 temporalUpscalerDlssQualityPostOrderingReady = 0;
+    u32 temporalUpscalerDlssQualityReferenceBaselineReady = 0;
 };
 
 struct RendererStats {

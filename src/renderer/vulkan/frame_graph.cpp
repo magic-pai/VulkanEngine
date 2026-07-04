@@ -2229,6 +2229,24 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "DLSS SR/DLAA evaluate waits for runtime, contract, and output-resource readiness."
         );
     }
+    if (inputs.temporalUpscalerDlssQualityGateRequested) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.temporalUpscalerDlssQualityGateReady
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TemporalUpscalerQualityInputs",
+            inputs.temporalUpscalerDlssQualityGateReady
+                ? "TemporalUpscaleOutput, Velocity, TemporalFrameState"
+                : "",
+            "",
+            inputs.temporalUpscalerDlssQualityGateReady
+                ? "DLSS SR/DLAA production-quality input gate is satisfied for the current frame."
+                : "Reports DLSS SR/DLAA quality blockers for output, object motion vectors, reactive/transparency masks, exposure/post ordering, and visual baselines."
+        );
+    }
     if (inputs.temporalUpscalePostSourceRequested ||
         inputs.temporalUpscalePostSourceExpected) {
         AppendPass(

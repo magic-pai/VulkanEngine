@@ -130,6 +130,21 @@ struct FrameTemporalUpscaleState {
     bool temporalUpscalePostSourceRequested = false;
     bool upscalerPluginRequested = false;
     bool upscalerPluginAvailable = false;
+    bool dlssQualityGateRequested = false;
+    bool dlssQualityGateReady = false;
+    bool dlssQualityEvaluateOutputReady = false;
+    bool dlssQualityCameraMotionReady = false;
+    bool dlssQualityObjectMotionReady = false;
+    bool dlssQualityReactiveMaskReady = false;
+    bool dlssQualityTransparencyMaskReady = false;
+    bool dlssQualityExposurePolicyReady = false;
+    bool dlssQualityPostOrderingReady = false;
+    bool dlssQualityReferenceBaselineReady = false;
+    u32 dlssQualityRequiredMask = 0;
+    u32 dlssQualityReadyMask = 0;
+    u32 dlssQualityBlockerMask = 0;
+    RendererDlssQualityGateFallbackReason dlssQualityGateFallbackReason =
+        RendererDlssQualityGateFallbackReason::NotRequested;
     TemporalUpscalerDlssQualityMode dlssQualityMode =
         TemporalUpscalerDlssQualityMode::Quality;
     TemporalUpscalerPackageStatus upscalerPackage{};

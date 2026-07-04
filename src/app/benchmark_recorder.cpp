@@ -730,6 +730,20 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerDlssMotionVectorScaleX << ','
         << temporal.temporalUpscalerDlssMotionVectorScaleY << ','
         << temporal.temporalUpscalerDlssEvaluateSharpness << ','
+        << temporal.temporalUpscalerDlssQualityGateRequested << ','
+        << temporal.temporalUpscalerDlssQualityGateReady << ','
+        << temporal.temporalUpscalerDlssQualityGateFallbackReason << ','
+        << temporal.temporalUpscalerDlssQualityRequiredMask << ','
+        << temporal.temporalUpscalerDlssQualityReadyMask << ','
+        << temporal.temporalUpscalerDlssQualityBlockerMask << ','
+        << temporal.temporalUpscalerDlssQualityEvaluateOutputReady << ','
+        << temporal.temporalUpscalerDlssQualityCameraMotionReady << ','
+        << temporal.temporalUpscalerDlssQualityObjectMotionReady << ','
+        << temporal.temporalUpscalerDlssQualityReactiveMaskReady << ','
+        << temporal.temporalUpscalerDlssQualityTransparencyMaskReady << ','
+        << temporal.temporalUpscalerDlssQualityExposurePolicyReady << ','
+        << temporal.temporalUpscalerDlssQualityPostOrderingReady << ','
+        << temporal.temporalUpscalerDlssQualityReferenceBaselineReady << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1346,6 +1360,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_dlss_motion_vector_scale_x,"
         << "temporal_upscaler_dlss_motion_vector_scale_y,"
         << "temporal_upscaler_dlss_evaluate_sharpness,"
+        << "temporal_upscaler_dlss_quality_gate_requested,"
+        << "temporal_upscaler_dlss_quality_gate_ready,"
+        << "temporal_upscaler_dlss_quality_gate_fallback_reason,"
+        << "temporal_upscaler_dlss_quality_required_mask,"
+        << "temporal_upscaler_dlss_quality_ready_mask,"
+        << "temporal_upscaler_dlss_quality_blocker_mask,"
+        << "temporal_upscaler_dlss_quality_evaluate_output_ready,"
+        << "temporal_upscaler_dlss_quality_camera_motion_ready,"
+        << "temporal_upscaler_dlss_quality_object_motion_ready,"
+        << "temporal_upscaler_dlss_quality_reactive_mask_ready,"
+        << "temporal_upscaler_dlss_quality_transparency_mask_ready,"
+        << "temporal_upscaler_dlss_quality_exposure_policy_ready,"
+        << "temporal_upscaler_dlss_quality_post_ordering_ready,"
+        << "temporal_upscaler_dlss_quality_reference_baseline_ready,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

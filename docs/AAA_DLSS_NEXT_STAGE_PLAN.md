@@ -102,14 +102,49 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.3: DLSS quality-input hardening. Slice 4.2 now provides a
-repeatable visual QA runner that captures native deferred HDR and DLSS-present
-screenshots, verifies their CSV diagnostics, and records image-difference
-metrics. The next slice should gate production-quality DLSS usage on stronger
-temporal inputs: object motion-vector readiness, reactive/transparency mask
-placeholders, exposure/post-ordering policy, and reference baseline thresholds.
-Do not expand into Frame Generation, Ray Reconstruction, Streamline
-interposition, or default presentation changes yet.
+Implement Slice 4.4: DLSS motion-vector and mask carrier hardening. Slice 4.3
+now makes production-quality DLSS readiness explicit through CSV, ImGui,
+FrameGraph, and visual-QA assertions. The current DLSS-present path can render
+and present experimental SR/DLAA output, but the production quality gate still
+blocks on object motion vectors, reactive masks, transparency masks, and stable
+reference baselines. The next slice should remove those blockers one at a time,
+starting with real object motion-vector coverage and placeholder mask resources
+that can be bound to NGX when ready. Do not expand into Frame Generation, Ray
+Reconstruction, Streamline interposition, or default presentation changes yet.
+
+## Slice 4.3 Execution Plan
+
+Slice 4.3 should keep the experimental DLSS-present route working while adding
+a separate production-quality gate. The gate must make it impossible for
+diagnostics, scripts, or docs to mistake "DLSS output is visible" for
+"production DLSS image quality is ready".
+
+1. Quality gate diagnostics.
+   - Add CSV and ImGui fields for quality gate requested/ready state,
+     fallback reason, required/ready/blocker masks, and per-input readiness.
+   - Required inputs are DLSS evaluate output, camera motion vectors, object
+     motion vectors, reactive mask, transparency mask, exposure policy,
+     post-upscale ordering, and stable reference baseline.
+   - Preserve the existing experimental DLSS evaluate/present route; this gate
+     must not disable the opt-in visible output.
+
+2. FrameGraph visibility.
+   - Add a `TemporalUpscalerQualityInputs` pass when DLSS is requested.
+   - Keep it roadmap until all quality inputs are ready.
+   - Avoid inventing physical FrameGraph resources for reactive/transparency
+     masks before the renderer allocates them.
+
+3. Visual QA hardening.
+   - Extend `scripts/Test-DlssVisualQa.ps1` to assert the DLSS-present run
+     produces visible output while the production quality gate remains blocked.
+   - Add coarse sanity thresholds for native-vs-DLSS screenshot difference so
+     identical or wildly divergent captures fail deterministically.
+
+4. Documentation and guardrails.
+   - Record the blocker mask and ready input mask in the DLSS plan and main AAA
+     rendering plan.
+   - Advance the next slice toward removing blockers instead of adding Frame
+     Generation, Ray Reconstruction, Streamline, or default presentation work.
 
 ## Slice 4.2 Execution Plan
 
@@ -582,3 +617,52 @@ after the evaluate contract is stable.
   image-quality baseline. Object motion vectors, reactive/transparency masks,
   exposure policy refinement, stable camera/reference baselines, and stricter
   visual-diff thresholds remain follow-up work.
+
+## Slice 4.3 Execution Evidence
+
+- Added a DLSS production-quality gate separate from experimental DLSS
+  evaluate/presentation. CSV and ImGui now expose
+  `temporal_upscaler_dlss_quality_gate_requested`,
+  `temporal_upscaler_dlss_quality_gate_ready`,
+  `temporal_upscaler_dlss_quality_gate_fallback_reason`, required/ready/blocker
+  masks, and per-input readiness for evaluate output, camera motion vectors,
+  object motion vectors, reactive mask, transparency mask, exposure policy,
+  post-upscale ordering, and reference baseline.
+- Added `TemporalUpscalerQualityInputs` to the FrameGraph when DLSS is
+  requested. It remains roadmap while the quality gate is blocked and does not
+  invent reactive/transparency mask resources before the renderer physically
+  allocates them.
+- Extended `scripts/Test-DlssVisualQa.ps1` so the paired visual QA now asserts
+  both sides of the current truth: DLSS-present must produce output and activate
+  post source, while production-quality DLSS must still report blocked. The
+  script also records sanity thresholds `minChangedPixels=512` and
+  `maxMeanDelta=160` in `summary.json`.
+- Verification commands:
+  - `_quick_build.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  - Invalid-SDK benchmark:
+    `out/benchmarks/aaa_dlss_quality_gate_invalid_sdk_smoke.csv`
+- `_quick_build.bat` passes for `SelfEngineForward3D`; the existing MSVC
+  runtime-library warning remains.
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/native_deferred_hdr.csv`,
+  `out/reference_captures/dlss_visual_qa/dlss_present.csv`, and
+  `out/reference_captures/dlss_visual_qa/summary.json` all reflect the expanded
+  769-column rows with 0 frame-graph validation issues.
+- Native reports post source `0/0/1` and quality gate `0/0/1`. DLSS-present
+  reports evaluate/output `1/1`, post source `1/1/0`, quality gate `1/0/4`,
+  quality masks `255/99/156`, and per-input readiness
+  `output/camera/object/reactive/transparency/exposure/post/baseline =
+  1/1/0/0/0/1/1/0`.
+- Screenshot evidence remains nonblank: both captures are `1038x614` with
+  8060/8060 sampled central pixels differing from the sampled background. The
+  paired comparison samples 14352 pixels with 3581 changed pixels, mean RGB
+  delta `31.1256`, and max delta `579`.
+- The invalid-SDK smoke preserves deterministic fallback: package ready `0`,
+  runtime fallback `3`, DLSS output ready `0`, post source requested/active
+  `1/0`, quality gate requested/ready `1/0`, blocker mask `221`, and 0
+  frame-graph validation issues.
+- This proves the renderer can now distinguish experimental visible DLSS SR/DLAA
+  output from production DLSS image-quality readiness. Production readiness is
+  still intentionally blocked on object motion vectors, reactive/transparency
+  masks, and stable reference baselines.

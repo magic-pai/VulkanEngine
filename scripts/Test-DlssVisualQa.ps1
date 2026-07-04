@@ -5,6 +5,8 @@ param(
     [string]$OutputDirectory = "out\reference_captures\dlss_visual_qa",
     [int]$TimeoutSeconds = 15,
     [int]$CaptureDelaySeconds = 8,
+    [int]$MinChangedPixels = 512,
+    [double]$MaxMeanDelta = 160.0,
     [switch]$SkipBuild
 )
 
@@ -463,22 +465,57 @@ if ($dlssRow.temporal_upscale_post_source_requested -ne "1" -or
     $dlssRow.temporal_upscale_post_source_fallback_reason -ne "0") {
     throw "DLSS-present post source did not activate cleanly"
 }
+if ($nativeRow.temporal_upscaler_dlss_quality_gate_requested -ne "0" -or
+    $nativeRow.temporal_upscaler_dlss_quality_gate_ready -ne "0") {
+    throw "Native run unexpectedly requested or passed the DLSS quality gate"
+}
+if ($dlssRow.temporal_upscaler_dlss_quality_gate_requested -ne "1") {
+    throw "DLSS-present run did not request the DLSS quality gate"
+}
+if ($dlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "0") {
+    throw "DLSS-present run unexpectedly passed production DLSS quality gate"
+}
+if ($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready -ne "1" -or
+    $dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready -ne "1") {
+    throw "DLSS-present quality gate did not observe output/post-ordering readiness"
+}
+$dlssQualityBlockerMask = [int]$dlssRow.temporal_upscaler_dlss_quality_blocker_mask
+if ($dlssQualityBlockerMask -le 0) {
+    throw "DLSS-present quality gate did not report remaining blockers"
+}
+if (($dlssQualityBlockerMask -band 4) -eq 0 -or
+    ($dlssQualityBlockerMask -band 8) -eq 0 -or
+    ($dlssQualityBlockerMask -band 16) -eq 0 -or
+    ($dlssQualityBlockerMask -band 128) -eq 0) {
+    throw "DLSS-present quality gate did not preserve object/mask/baseline blockers"
+}
 
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssImage = Capture-WindowImage -Name "dlss_present" -Environment $dlssPresentEnvironment
 $nativeImageStats = Get-ImageVariationStats -Path $nativeImage
 $dlssImageStats = Get-ImageVariationStats -Path $dlssImage
 $comparison = Compare-Images -A $nativeImage -B $dlssImage
+if ($comparison.ChangedPixels -lt $MinChangedPixels) {
+    throw "Native/DLSS comparison changed only $($comparison.ChangedPixels) sampled pixels; expected at least $MinChangedPixels"
+}
+if ($comparison.MeanDelta -gt $MaxMeanDelta) {
+    throw "Native/DLSS comparison mean delta $($comparison.MeanDelta) exceeded $MaxMeanDelta"
+}
 
 $summary = [pscustomobject]@{
     target = $Target
     generatedAt = (Get-Date).ToString("o")
+    thresholds = [pscustomobject]@{
+        minChangedPixels = $MinChangedPixels
+        maxMeanDelta = $MaxMeanDelta
+    }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
         image = $nativeImage
         columns = "$($nativeBenchmark.HeaderColumns)/$($nativeBenchmark.LastColumns)"
         framegraphValidationIssues = [int]$nativeRow.framegraph_validation_issues
         postSource = "$($nativeRow.temporal_upscale_post_source_requested)/$($nativeRow.temporal_upscale_post_source_active)/$($nativeRow.temporal_upscale_post_source_fallback_reason)"
+        qualityGate = "$($nativeRow.temporal_upscaler_dlss_quality_gate_requested)/$($nativeRow.temporal_upscaler_dlss_quality_gate_ready)/$($nativeRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
         imageStats = $nativeImageStats
     }
     dlssPresent = [pscustomobject]@{
@@ -488,6 +525,9 @@ $summary = [pscustomobject]@{
         framegraphValidationIssues = [int]$dlssRow.framegraph_validation_issues
         evaluateOutput = "$($dlssRow.temporal_upscaler_dlss_evaluate_result)/$($dlssRow.temporal_upscaler_dlss_output_ready)"
         postSource = "$($dlssRow.temporal_upscale_post_source_requested)/$($dlssRow.temporal_upscale_post_source_active)/$($dlssRow.temporal_upscale_post_source_fallback_reason)"
+        qualityGate = "$($dlssRow.temporal_upscaler_dlss_quality_gate_requested)/$($dlssRow.temporal_upscaler_dlss_quality_gate_ready)/$($dlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+        qualityMasks = "$($dlssRow.temporal_upscaler_dlss_quality_required_mask)/$($dlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($dlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
+        qualityInputs = "output/camera/object/reactive/transparency/exposure/post/baseline=$($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($dlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
         imageStats = $dlssImageStats
     }
     comparison = $comparison

@@ -1281,6 +1281,23 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalePostSourceFallbackReason
     );
     ImGui::Text(
+        "DLSS quality gate: requested %u ready %u fallback %u masks required/ready/blocker 0x%X/0x%X/0x%X output/camera/object/reactive/transparency/exposure/post/baseline %u/%u/%u/%u/%u/%u/%u/%u",
+        stats.temporal.temporalUpscalerDlssQualityGateRequested,
+        stats.temporal.temporalUpscalerDlssQualityGateReady,
+        stats.temporal.temporalUpscalerDlssQualityGateFallbackReason,
+        stats.temporal.temporalUpscalerDlssQualityRequiredMask,
+        stats.temporal.temporalUpscalerDlssQualityReadyMask,
+        stats.temporal.temporalUpscalerDlssQualityBlockerMask,
+        stats.temporal.temporalUpscalerDlssQualityEvaluateOutputReady,
+        stats.temporal.temporalUpscalerDlssQualityCameraMotionReady,
+        stats.temporal.temporalUpscalerDlssQualityObjectMotionReady,
+        stats.temporal.temporalUpscalerDlssQualityReactiveMaskReady,
+        stats.temporal.temporalUpscalerDlssQualityTransparencyMaskReady,
+        stats.temporal.temporalUpscalerDlssQualityExposurePolicyReady,
+        stats.temporal.temporalUpscalerDlssQualityPostOrderingReady,
+        stats.temporal.temporalUpscalerDlssQualityReferenceBaselineReady
+    );
+    ImGui::Text(
         "Temporal upscaler requirements: queried %u result 0x%X supported %u mask 0x%X minHW %u minOS %s inst %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s] dev %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s]",
         stats.temporal.temporalUpscalerFeatureRequirementsQueried,
         stats.temporal.temporalUpscalerFeatureRequirementsResult,
