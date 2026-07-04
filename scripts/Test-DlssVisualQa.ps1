@@ -1264,9 +1264,14 @@ function New-QuickDlssPresentMetrics {
         renderScaleActive = "$($Row.temporal_render_scale_active)"
         renderScaleApplied = "$($Row.temporal_render_scale_applied)"
         jitterApplied = "$($Row.temporal_jitter_applied)"
+        historyValid = "$($Row.temporal_history_valid)"
+        historyReset = "$($Row.temporal_history_reset)"
+        historyResetReason = "$($Row.temporal_history_reset_reason)"
         temporalUpscaleInputReady = "$($Row.temporal_upscale_input_ready)"
         nativeTaaResolveEnabled = "$($Row.temporal_taa_resolve_enabled)"
         nativeTaaResolveSuppressedForUpscaler = "$($Row.temporal_taa_resolve_suppressed_for_upscaler)"
+        dlssReset = "$($Row.temporal_upscaler_dlss_reset)"
+        dlssMotionVectorScale = "$($Row.temporal_upscaler_dlss_motion_vector_scale_x)/$($Row.temporal_upscaler_dlss_motion_vector_scale_y)"
         qualityMode = "$($Row.temporal_upscaler_dlss_quality_mode)"
         recommendedPreset = "$($Row.temporal_upscaler_dlss_recommended_preset)"
         cameraMotionReady = "$($Row.temporal_upscaler_dlss_quality_camera_motion_ready)"
@@ -1892,10 +1897,19 @@ if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -ne $defaultS
 if ($defaultSceneDlaaMotionRow.temporal_jitter_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
     throw "Default-scene moving DLAA did not apply the expected projection jitter policy"
 }
+if ($defaultSceneDlaaMotionRow.temporal_history_valid -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.historyValid -or
+    $defaultSceneDlaaMotionRow.temporal_history_reset -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.historyReset -or
+    $defaultSceneDlaaMotionRow.temporal_history_reset_reason -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.historyResetReason) {
+    throw "Default-scene moving DLAA did not preserve the expected temporal history state"
+}
 if ($defaultSceneDlaaMotionRow.temporal_upscale_input_ready -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady -or
     $defaultSceneDlaaMotionRow.temporal_taa_resolve_enabled -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled -or
     $defaultSceneDlaaMotionRow.temporal_taa_resolve_suppressed_for_upscaler -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler) {
     throw "Default-scene moving DLAA did not keep DLSS input readiness separate from native TAA resolve"
+}
+if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_reset -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.dlssReset -or
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)" -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.dlssMotionVectorScale) {
+    throw "Default-scene moving DLAA did not preserve the expected DLSS reset/motion-vector scale"
 }
 if ($defaultSceneDlaaMotionRow.temporal_render_scale_active -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleActive -or
     $defaultSceneDlaaMotionRow.temporal_render_scale_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleApplied) {
@@ -1943,10 +1957,19 @@ if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_mode -ne $de
 if ($defaultSceneDlaaObjectMotionRow.temporal_jitter_applied -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
     throw "Default-scene object-motion DLAA did not apply the expected projection jitter policy"
 }
+if ($defaultSceneDlaaObjectMotionRow.temporal_history_valid -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyValid -or
+    $defaultSceneDlaaObjectMotionRow.temporal_history_reset -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyReset -or
+    $defaultSceneDlaaObjectMotionRow.temporal_history_reset_reason -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyResetReason) {
+    throw "Default-scene object-motion DLAA did not preserve the expected temporal history state"
+}
 if ($defaultSceneDlaaObjectMotionRow.temporal_upscale_input_ready -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady -or
     $defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_enabled -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled -or
     $defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler) {
     throw "Default-scene object-motion DLAA did not keep DLSS input readiness separate from native TAA resolve"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_reset -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.dlssReset -or
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)" -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.dlssMotionVectorScale) {
+    throw "Default-scene object-motion DLAA did not preserve the expected DLSS reset/motion-vector scale"
 }
 if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_output_ready -ne "1" -or
     $defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_active -ne "1" -or
@@ -1983,10 +2006,19 @@ if ($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_quality_mode -ne 
 if ($importedDynamicDlaaObjectMotionRow.temporal_jitter_applied -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
     throw "Imported-dynamic object-motion DLAA did not apply the expected projection jitter policy"
 }
+if ($importedDynamicDlaaObjectMotionRow.temporal_history_valid -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyValid -or
+    $importedDynamicDlaaObjectMotionRow.temporal_history_reset -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyReset -or
+    $importedDynamicDlaaObjectMotionRow.temporal_history_reset_reason -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.historyResetReason) {
+    throw "Imported-dynamic object-motion DLAA did not preserve the expected temporal history state"
+}
 if ($importedDynamicDlaaObjectMotionRow.temporal_upscale_input_ready -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady -or
     $importedDynamicDlaaObjectMotionRow.temporal_taa_resolve_enabled -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled -or
     $importedDynamicDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler) {
     throw "Imported-dynamic object-motion DLAA did not keep DLSS input readiness separate from native TAA resolve"
+}
+if ($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_reset -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.dlssReset -or
+    "$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)" -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.dlssMotionVectorScale) {
+    throw "Imported-dynamic object-motion DLAA did not preserve the expected DLSS reset/motion-vector scale"
 }
 if ($importedDynamicDlaaObjectMotionRow.temporal_render_scale_active -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.renderScaleActive -or
     $importedDynamicDlaaObjectMotionRow.temporal_render_scale_applied -ne $importedDynamicDlaaObjectMotionBaselineManifest.expected.dlssPresent.renderScaleApplied) {
@@ -2287,6 +2319,12 @@ $defaultSceneDlaaMotionCameraMotion =
     "$($defaultSceneDlaaMotionRow.temporal_velocity_camera_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)"
 $defaultSceneDlaaMotionTaaResolve =
     "input/enabled/suppressed=$($defaultSceneDlaaMotionRow.temporal_upscale_input_ready)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_enabled)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
+$defaultSceneDlaaMotionHistory =
+    "valid/reset/reason=$($defaultSceneDlaaMotionRow.temporal_history_valid)/$($defaultSceneDlaaMotionRow.temporal_history_reset)/$($defaultSceneDlaaMotionRow.temporal_history_reset_reason)"
+$defaultSceneDlaaMotionDlssReset =
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_reset)"
+$defaultSceneDlaaMotionDlssMotionVectorScale =
+    "$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)"
 $defaultSceneDlaaObjectMotionPostSource =
     "$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_requested)/$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_active)/$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_fallback_reason)"
 $defaultSceneDlaaObjectMotionQualityGate =
@@ -2307,6 +2345,12 @@ $defaultSceneDlaaObjectMotionObjectMotion =
     "$($defaultSceneDlaaObjectMotionRow.temporal_velocity_object_motion_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_object_motion_ready)"
 $defaultSceneDlaaObjectMotionTaaResolve =
     "input/enabled/suppressed=$($defaultSceneDlaaObjectMotionRow.temporal_upscale_input_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_enabled)/$($defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
+$defaultSceneDlaaObjectMotionHistory =
+    "valid/reset/reason=$($defaultSceneDlaaObjectMotionRow.temporal_history_valid)/$($defaultSceneDlaaObjectMotionRow.temporal_history_reset)/$($defaultSceneDlaaObjectMotionRow.temporal_history_reset_reason)"
+$defaultSceneDlaaObjectMotionDlssReset =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_reset)"
+$defaultSceneDlaaObjectMotionDlssMotionVectorScale =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)"
 $importedDynamicDlaaObjectMotionPostSource =
     "$($importedDynamicDlaaObjectMotionRow.temporal_upscale_post_source_requested)/$($importedDynamicDlaaObjectMotionRow.temporal_upscale_post_source_active)/$($importedDynamicDlaaObjectMotionRow.temporal_upscale_post_source_fallback_reason)"
 $importedDynamicDlaaObjectMotionQualityGate =
@@ -2327,6 +2371,12 @@ $importedDynamicDlaaObjectMotionObjectMotion =
     "$($importedDynamicDlaaObjectMotionRow.temporal_velocity_object_motion_ready)/$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_quality_object_motion_ready)"
 $importedDynamicDlaaObjectMotionTaaResolve =
     "input/enabled/suppressed=$($importedDynamicDlaaObjectMotionRow.temporal_upscale_input_ready)/$($importedDynamicDlaaObjectMotionRow.temporal_taa_resolve_enabled)/$($importedDynamicDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
+$importedDynamicDlaaObjectMotionHistory =
+    "valid/reset/reason=$($importedDynamicDlaaObjectMotionRow.temporal_history_valid)/$($importedDynamicDlaaObjectMotionRow.temporal_history_reset)/$($importedDynamicDlaaObjectMotionRow.temporal_history_reset_reason)"
+$importedDynamicDlaaObjectMotionDlssReset =
+    "$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_reset)"
+$importedDynamicDlaaObjectMotionDlssMotionVectorScale =
+    "$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_x)/$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_motion_vector_scale_y)"
 $importedDynamicDlaaObjectMotionMaterialCounters =
     "materials=$($importedDynamicDlaaObjectMotionRow.frame_material_count),textured=$($importedDynamicDlaaObjectMotionRow.frame_material_textured_count),lights=$($importedDynamicDlaaObjectMotionRow.frame_light_total_count),local=$($importedDynamicDlaaObjectMotionRow.frame_local_light_count),rect=$($importedDynamicDlaaObjectMotionRow.frame_rect_light_count)"
 $wboitNativePostSource =
@@ -2899,6 +2949,9 @@ $summary = [pscustomobject]@{
         drawRoute = $defaultSceneDlaaMotionDrawRoute
         cameraMotion = $defaultSceneDlaaMotionCameraMotion
         taaResolve = $defaultSceneDlaaMotionTaaResolve
+        temporalHistory = $defaultSceneDlaaMotionHistory
+        dlssReset = $defaultSceneDlaaMotionDlssReset
+        dlssMotionVectorScale = $defaultSceneDlaaMotionDlssMotionVectorScale
         jitter = "$($defaultSceneDlaaMotionRow.temporal_jitter_enabled)/$($defaultSceneDlaaMotionRow.temporal_jitter_applied)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
         imageStats = $defaultSceneDlaaMotionImageStats
         sequenceComparison = $defaultSceneDlaaMotionSequenceComparison
@@ -2921,6 +2974,9 @@ $summary = [pscustomobject]@{
         cameraMotion = $defaultSceneDlaaObjectMotionCameraMotion
         objectMotion = $defaultSceneDlaaObjectMotionObjectMotion
         taaResolve = $defaultSceneDlaaObjectMotionTaaResolve
+        temporalHistory = $defaultSceneDlaaObjectMotionHistory
+        dlssReset = $defaultSceneDlaaObjectMotionDlssReset
+        dlssMotionVectorScale = $defaultSceneDlaaObjectMotionDlssMotionVectorScale
         jitter = "$($defaultSceneDlaaObjectMotionRow.temporal_jitter_enabled)/$($defaultSceneDlaaObjectMotionRow.temporal_jitter_applied)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
         imageStats = $defaultSceneDlaaObjectMotionImageStats
         sequenceComparison = $defaultSceneDlaaObjectMotionSequenceComparison
@@ -2944,6 +3000,9 @@ $summary = [pscustomobject]@{
         cameraMotion = $importedDynamicDlaaObjectMotionCameraMotion
         objectMotion = $importedDynamicDlaaObjectMotionObjectMotion
         taaResolve = $importedDynamicDlaaObjectMotionTaaResolve
+        temporalHistory = $importedDynamicDlaaObjectMotionHistory
+        dlssReset = $importedDynamicDlaaObjectMotionDlssReset
+        dlssMotionVectorScale = $importedDynamicDlaaObjectMotionDlssMotionVectorScale
         materialCounters = $importedDynamicDlaaObjectMotionMaterialCounters
         jitter = "$($importedDynamicDlaaObjectMotionRow.temporal_jitter_enabled)/$($importedDynamicDlaaObjectMotionRow.temporal_jitter_applied)/$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($importedDynamicDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
         imageStats = $importedDynamicDlaaObjectMotionImageStats
