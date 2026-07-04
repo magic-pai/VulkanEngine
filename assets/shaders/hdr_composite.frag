@@ -65,6 +65,8 @@ const int DEBUG_VIEW_AUTO_EXPOSURE = 40;
 const int DEBUG_VIEW_SHARPENING = 41;
 const int DEBUG_VIEW_TAA = 44;
 const int DEBUG_VIEW_TAA_REJECTION = 45;
+const int DEBUG_VIEW_TAA_HISTORY = 46;
+const int DEBUG_VIEW_TAA_REPROJECTION = 47;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -248,6 +250,15 @@ void main() {
     vec3 hdrColor = resolvedHdrColor * exposure;
     vec3 bloom = BloomContribution();
     int debugView = int(frame.shadowFiltering.z + 0.5);
+    if (debugView == DEBUG_VIEW_TAA_HISTORY) {
+        outColor = vec4(ToneMapHdr(historyHdrColor * exposure), 1.0);
+        return;
+    }
+    if (debugView == DEBUG_VIEW_TAA_REPROJECTION) {
+        float velocityMagnitude = clamp(length(velocity) * 24.0, 0.0, 1.0);
+        outColor = vec4(historyUv, velocityMagnitude, 1.0);
+        return;
+    }
     if (debugView == DEBUG_VIEW_TAA_REJECTION) {
         if (taaEnabled <= 0.5 || historyReady <= 0.5) {
             outColor = vec4(0.0, 0.0, 0.25, 1.0);

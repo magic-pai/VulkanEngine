@@ -605,6 +605,8 @@ struct RendererTemporalStats {
     f32 taaVelocityRejectionThreshold = 0.0f;
     f32 taaDepthRejectionThreshold = 0.0f;
     u32 taaRejectionDebugViewEnabled = 0;
+    u32 taaHistoryDebugViewEnabled = 0;
+    u32 taaReprojectionDebugViewEnabled = 0;
 };
 
 struct RendererStats {

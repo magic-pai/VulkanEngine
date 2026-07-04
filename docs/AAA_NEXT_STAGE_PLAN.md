@@ -64,7 +64,7 @@ feature explicitly off/fallback-safe by default.
    - Keep default presentation unjittered.
    - Add jittered projection diagnostics and pixel/UV sequence evidence.
 
-4. Temporal debug views and visual QA hooks.
+4. Temporal debug views and visual QA hooks. Implemented.
    - Add `SE_RENDER_VIEW=taa` and follow-up views for history, rejection, and
      velocity-reprojected UVs.
    - Add screenshot/reference-capture hooks if the existing renderer tooling is
@@ -209,6 +209,36 @@ change unless explicitly enabled by environment.
   final jittered-history storage, per-pass jitter policy, jitter-aware UI
   stabilization, dynamic-resolution jitter scaling, or upscaler plugin
   handoff.
+
+## Slice 4 Execution Evidence
+
+- Temporal debug coverage now includes `SE_RENDER_VIEW=taa`,
+  `SE_RENDER_VIEW=taa-rejection`, `SE_RENDER_VIEW=taa-history`, and
+  `SE_RENDER_VIEW=taa-reprojection`.
+- `taa-history` visualizes the velocity-reprojected HDR history color through
+  the HDR composite debug path.
+- `taa-reprojection` visualizes reprojected history UVs in RG and velocity
+  magnitude in B.
+- CSV exposes `temporal_taa_history_debug_view_enabled` and
+  `temporal_taa_reprojection_debug_view_enabled` alongside the existing TAA and
+  rejection debug-view state.
+- `_quick_build.bat` passes for `SelfEngineForward3D`; the only build warning
+  is the pre-existing MSVC runtime-library conflict warning.
+- Smoke evidence:
+  `out/benchmarks/aaa_taa_debug_history_smoke.csv` and
+  `out/benchmarks/aaa_taa_debug_reprojection_smoke.csv` both have matching
+  631-column rows and 0 frame-graph validation issues.
+- The history debug smoke reports TAA enabled `1`, history ready `1`, history
+  debug view `1`, reprojection debug view `0`, jitter prepared `1`, and jitter
+  applied `0`.
+- The reprojection debug smoke reports TAA enabled `1`, history ready `1`,
+  history debug view `0`, reprojection debug view `1`, jitter prepared `1`, and
+  jitter applied `0`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is debug-view coverage for the first temporal path. It does not yet add
+  screenshot/reference-capture automation, visual-diff baselines, temporal
+  history inspection tools outside HDR composite, or editor camera bookmarks.
 
 ## Previous Stage Summary
 

@@ -2393,6 +2393,8 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::Sharpening ||
         view == ForwardDebugView::Taa ||
         view == ForwardDebugView::TaaRejection ||
+        view == ForwardDebugView::TaaHistory ||
+        view == ForwardDebugView::TaaReprojection ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -2592,6 +2594,22 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "history-rejection" ||
         value == "history_rejection") {
         return ForwardDebugView::TaaRejection;
+    }
+    if (value == "taa-history" ||
+        value == "taa_history" ||
+        value == "temporal-history" ||
+        value == "temporal_history" ||
+        value == "history-color" ||
+        value == "history_color") {
+        return ForwardDebugView::TaaHistory;
+    }
+    if (value == "taa-reprojection" ||
+        value == "taa_reprojection" ||
+        value == "temporal-reprojection" ||
+        value == "temporal_reprojection" ||
+        value == "history-uv" ||
+        value == "history_uv") {
+        return ForwardDebugView::TaaReprojection;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -3538,6 +3556,10 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::Taa ? 1u : 0u;
     frameStats.temporal.taaRejectionDebugViewEnabled =
         m_RenderDebugSettings.forwardView == ForwardDebugView::TaaRejection ? 1u : 0u;
+    frameStats.temporal.taaHistoryDebugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::TaaHistory ? 1u : 0u;
+    frameStats.temporal.taaReprojectionDebugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::TaaReprojection ? 1u : 0u;
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,

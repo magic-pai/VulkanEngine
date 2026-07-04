@@ -612,6 +612,10 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "TAA";
     case ForwardDebugView::TaaRejection:
         return "TAA Rejection";
+    case ForwardDebugView::TaaHistory:
+        return "TAA History";
+    case ForwardDebugView::TaaReprojection:
+        return "TAA Reprojection";
     }
 
     return "Lit";
@@ -683,7 +687,9 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::ProbeGrid,
         ForwardDebugView::ProbeGridCell,
         ForwardDebugView::Taa,
-        ForwardDebugView::TaaRejection
+        ForwardDebugView::TaaRejection,
+        ForwardDebugView::TaaHistory,
+        ForwardDebugView::TaaReprojection
     };
 
     ImGui::SeparatorText("Render Debug");
