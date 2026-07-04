@@ -1,0 +1,33 @@
+# SelfEngine imported articulated-object QA asset.
+# Three separate OBJ objects are intentional: RuntimeModelLoader creates one
+# renderable per mesh, allowing object-velocity QA to exercise multi-part motion.
+
+o RootLink
+v -0.90 -0.22 -0.18
+v -0.28 -0.22 -0.18
+v -0.58  0.38 -0.18
+v -0.58 -0.04  0.42
+f 1 2 3
+f 1 4 2
+f 2 4 3
+f 3 4 1
+
+o MidLink
+v -0.25 -0.18 -0.14
+v  0.35 -0.18 -0.14
+v  0.05  0.34 -0.14
+v  0.05 -0.02  0.38
+f 5 6 7
+f 5 8 6
+f 6 8 7
+f 7 8 5
+
+o TipLink
+v  0.38 -0.16 -0.12
+v  0.90 -0.16 -0.12
+v  0.64  0.28 -0.12
+v  0.64 -0.01  0.32
+f 9 10 11
+f 9 12 10
+f 10 12 11
+f 11 12 9

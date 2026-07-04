@@ -405,6 +405,70 @@ This extends mask-policy evidence from generic WBOIT/forward-special routes
 into material-authored alpha/opacity coverage. Particles, water/refraction,
 animated/skinned content, and final DLSS/DLAA tuning remain open.
 
+## Slice 4.22 Execution Plan
+
+Slice 4.22 adds an imported articulated-object DLAA lane. The goal is to bridge
+from single imported rigid-object motion toward animated content without
+claiming skinned velocity: multiple imported meshes must move with independent
+deterministic phases while the DLSS object-motion gate, jitter handoff, history
+state, and dynamic edge metrics remain ready.
+
+1. Repo-owned articulated imported asset.
+   - Add a tiny multi-mesh OBJ asset under `assets/models/` so Assimp and
+     `RuntimeModelLoader` create multiple imported renderables in one load.
+   - Keep it renderer-owned and independent of UE bridge/export work.
+
+2. Articulated benchmark motion.
+   - Extend `SE_BENCHMARK_OBJECT_MOTION` with an `articulated` mode.
+   - Preserve the existing `orbit` mode for default-scene and rigid imported
+     lanes.
+   - Drive each imported part with an index-dependent phase so the lane proves
+     multiple previous-model histories, not one rigid transform.
+
+3. Focused QA lane.
+   - Add `imported-articulated` as a focused DLAA sequence suite and include it
+     in the `dynamic` suite group.
+   - Require full-resolution DLAA, applied jitter, native TAA final-resolve
+     suppression, camera/object-motion readiness, reference-baseline readiness,
+     imported draw/material/light counters, and edge-sequence metrics.
+
+4. Scope guard.
+   - This is articulated object-motion coverage only. It is not previous-bone,
+     previous-pose, morph-target, or skinned velocity coverage.
+
+## Slice 4.22 Execution Evidence
+
+Slice 4.22 is implemented and verified. The new focused visual-QA lane is
+`imported_articulated_dlaa_object_motion_present`, backed by
+`docs/reference_baselines/dlss_imported_articulated_dlaa_object_motion_visual_qa_baseline.json`
+and the repo-owned asset `assets/models/articulated_links.obj`.
+
+Verification from
+`powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -CaptureDelaySeconds 4 -Suite imported-articulated`
+on 2026-07-05:
+
+- Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, physical area
+  `2560,0 2560x1380`.
+- CSV shape: `782/782` columns.
+- FrameGraph validation issues: `0`.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Jitter/history/resolve: applied jitter `1`, temporal history
+  `valid/reset/reason=1/0/0`, native TAA resolve
+  `input/enabled/suppressed=1/0/1`, DLSS reset `0`, motion-vector scale `1/1`.
+- Draw and scene counters:
+  `main/gbuffer/forwardResidual/weightedTranslucency=3/3/0/0`,
+  `materials=1`, `textured=0`, `lights=4`, `local=3`, `rect=0`.
+- Dynamic sequence metric:
+  `pairs=2`, `minChanged=647`, `maxMean=21.695`, `max=582`,
+  `edgeMin=223`, `edgeChangedMax=162`, `edgeChangedRatioMax=0.6559`,
+  `edgeMeanMax=88.0401`, `edgeMax=194.8964`.
+
+This closes the next imported multi-part object-motion gap after the rigid OBJ
+lane. True skinned/animated velocity still requires previous-pose/bone or
+explicit skinned-velocity carriers and remains open.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

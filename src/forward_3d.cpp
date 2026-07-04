@@ -654,6 +654,25 @@ bool BenchmarkObjectMotionRequested() {
         value == "ORBIT";
 }
 
+enum class BenchmarkObjectMotionMode {
+    None,
+    Orbit,
+    Articulated
+};
+
+BenchmarkObjectMotionMode BenchmarkObjectMotionModeFromEnvironment() {
+    const std::string value = ReadEnvironmentString("SE_BENCHMARK_OBJECT_MOTION");
+    if (value == "articulated" ||
+        value == "Articulated" ||
+        value == "ARTICULATED") {
+        return BenchmarkObjectMotionMode::Articulated;
+    }
+
+    return BenchmarkObjectMotionRequested()
+        ? BenchmarkObjectMotionMode::Orbit
+        : BenchmarkObjectMotionMode::None;
+}
+
 void ApplyBenchmarkCameraMotion(se::Camera3D& camera, se::f32 elapsedSeconds) {
     const se::f32 speed =
         std::max(ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_SPEED", 0.65f), 0.0f);
@@ -694,6 +713,34 @@ void ApplyBenchmarkObjectMotion(
         std::sin(phase * 0.67f) * 10.0f,
         phase * 57.29578f,
         std::cos(phase * 0.51f) * 8.0f
+    });
+}
+
+void ApplyBenchmarkArticulatedObjectMotion(
+    se::Renderable3D& renderable,
+    const glm::vec3& basePosition,
+    const glm::vec3& baseRotationDegrees,
+    se::f32 elapsedSeconds,
+    std::size_t objectIndex,
+    std::size_t objectCount
+) {
+    const se::f32 speed =
+        std::max(ReadEnvironmentF32("SE_BENCHMARK_OBJECT_MOTION_SPEED", 1.1f), 0.0f);
+    const se::f32 radius =
+        std::clamp(ReadEnvironmentF32("SE_BENCHMARK_OBJECT_MOTION_RADIUS", 0.32f), 0.0f, 2.0f);
+    const se::f32 index = static_cast<se::f32>(objectIndex);
+    const se::f32 count = static_cast<se::f32>(std::max<std::size_t>(objectCount, 1));
+    const se::f32 centeredIndex = index - (count - 1.0f) * 0.5f;
+    const se::f32 phase = elapsedSeconds * speed + index * 1.37f;
+    renderable.Transform().SetPosition(basePosition + glm::vec3{
+        std::sin(phase) * radius * (0.38f + index * 0.08f),
+        std::sin(phase * 1.43f) * radius * 0.26f,
+        std::cos(phase * 0.91f) * radius * (0.28f + std::abs(centeredIndex) * 0.10f)
+    });
+    renderable.Transform().SetRotationDegrees(baseRotationDegrees + glm::vec3{
+        std::sin(phase * 0.77f) * 18.0f,
+        phase * 42.0f + centeredIndex * 18.0f,
+        std::cos(phase * 1.09f) * 14.0f
     });
 }
 
@@ -2286,10 +2333,12 @@ int main() {
     }
     const bool benchmarkCameraMotionRequested =
         !useBenchmarkScene && BenchmarkCameraMotionRequested();
+    const BenchmarkObjectMotionMode benchmarkObjectMotionMode =
+        !useBenchmarkScene && !benchmarkMovingObjects.empty()
+            ? BenchmarkObjectMotionModeFromEnvironment()
+            : BenchmarkObjectMotionMode::None;
     const bool benchmarkObjectMotionRequested =
-        !useBenchmarkScene &&
-        !benchmarkMovingObjects.empty() &&
-        BenchmarkObjectMotionRequested();
+        benchmarkObjectMotionMode != BenchmarkObjectMotionMode::None;
     if (benchmarkObjectMotionRequested) {
         DisableBenchmarkAutoRotation(benchmarkMovingObjects);
     }
@@ -2379,17 +2428,32 @@ int main() {
                     clampedDeltaSeconds,
                     1.0f / 60.0f
                 );
-                for (const BenchmarkMovingObject& movingObject : benchmarkMovingObjects) {
+                for (std::size_t movingObjectIndex = 0;
+                     movingObjectIndex < benchmarkMovingObjects.size();
+                     ++movingObjectIndex) {
+                    const BenchmarkMovingObject& movingObject =
+                        benchmarkMovingObjects[movingObjectIndex];
                     if (movingObject.renderable == nullptr) {
                         continue;
                     }
 
-                    ApplyBenchmarkObjectMotion(
-                        *movingObject.renderable,
-                        movingObject.basePosition,
-                        movingObject.baseRotationDegrees,
-                        benchmarkObjectMotionTime
-                    );
+                    if (benchmarkObjectMotionMode == BenchmarkObjectMotionMode::Articulated) {
+                        ApplyBenchmarkArticulatedObjectMotion(
+                            *movingObject.renderable,
+                            movingObject.basePosition,
+                            movingObject.baseRotationDegrees,
+                            benchmarkObjectMotionTime,
+                            movingObjectIndex,
+                            benchmarkMovingObjects.size()
+                        );
+                    } else {
+                        ApplyBenchmarkObjectMotion(
+                            *movingObject.renderable,
+                            movingObject.basePosition,
+                            movingObject.baseRotationDegrees,
+                            benchmarkObjectMotionTime
+                        );
+                    }
                 }
             }
         } else if (animateBenchmarkPartialLocalShadowCache) {

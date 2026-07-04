@@ -17,6 +17,7 @@ param(
     [string]$DefaultSceneDlaaMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_motion_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json",
     [string]$ImportedDynamicDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json",
+    [string]$ImportedArticulatedDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_articulated_dlaa_object_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
     [string[]]$Suite = @("full"),
     [switch]$ListSuites,
@@ -36,6 +37,7 @@ $baseSuites =
         "default-motion",
         "default-object-motion",
         "imported-dynamic",
+        "imported-articulated",
         "wboit",
         "forward-special",
         "material-stress",
@@ -46,7 +48,8 @@ $suiteGroups =
         "dynamic" = @(
             "default-motion",
             "default-object-motion",
-            "imported-dynamic"
+            "imported-dynamic",
+            "imported-articulated"
         )
         "mask-material" = @(
             "wboit",
@@ -250,11 +253,29 @@ $importedDynamicDlaaObjectMotionBaselineManifest =
 if ($importedDynamicDlaaObjectMotionBaselineManifest.target -ne $Target) {
     throw "Imported-dynamic DLAA object-motion visual QA baseline target mismatch: expected $Target, manifest has $($importedDynamicDlaaObjectMotionBaselineManifest.target)"
 }
+$importedArticulatedDlaaObjectMotionBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($ImportedArticulatedDlaaObjectMotionBaselinePath)) {
+    [System.IO.Path]::GetFullPath($ImportedArticulatedDlaaObjectMotionBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ImportedArticulatedDlaaObjectMotionBaselinePath))
+}
+if (!(Test-Path -LiteralPath $importedArticulatedDlaaObjectMotionBaselineManifestPath)) {
+    throw "Imported-articulated DLAA object-motion visual QA baseline manifest not found: $importedArticulatedDlaaObjectMotionBaselineManifestPath"
+}
+$importedArticulatedDlaaObjectMotionBaselineManifest =
+    Get-Content -Raw -LiteralPath $importedArticulatedDlaaObjectMotionBaselineManifestPath | ConvertFrom-Json
+if ($importedArticulatedDlaaObjectMotionBaselineManifest.target -ne $Target) {
+    throw "Imported-articulated DLAA object-motion visual QA baseline target mismatch: expected $Target, manifest has $($importedArticulatedDlaaObjectMotionBaselineManifest.target)"
+}
 
 $importedDynamicModelPath =
     [System.IO.Path]::GetFullPath((Join-Path $repoRoot "assets\models\demo_crystal.obj"))
 if (!(Test-Path -LiteralPath $importedDynamicModelPath)) {
     throw "Imported-dynamic DLAA object-motion model not found: $importedDynamicModelPath"
+}
+$importedArticulatedModelPath =
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot "assets\models\articulated_links.obj"))
+if (!(Test-Path -LiteralPath $importedArticulatedModelPath)) {
+    throw "Imported-articulated DLAA object-motion model not found: $importedArticulatedModelPath"
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -1237,6 +1258,22 @@ if (-not $importedDynamicDlaaObjectMotionPresentEnvironment.ContainsKey("SE_BENC
     $importedDynamicDlaaObjectMotionPresentEnvironment.ContainsKey("SE_BENCHMARK_CAMERA_MOTION")) {
     throw "Imported dynamic DLAA lane must be object-motion driven with a static camera"
 }
+$importedArticulatedDlaaObjectMotionPresentEnvironment =
+    $importedDynamicDlaaObjectMotionPresentEnvironment.Clone()
+$importedArticulatedDlaaObjectMotionPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
+    $importedArticulatedDlaaObjectMotionBaselineManifestPath
+$importedArticulatedDlaaObjectMotionPresentEnvironment["SELFENGINE_MODEL_PATH"] =
+    $importedArticulatedModelPath
+$importedArticulatedDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION"] =
+    "articulated"
+$importedArticulatedDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION_SPEED"] =
+    "1.1"
+$importedArticulatedDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION_RADIUS"] =
+    "0.32"
+if (-not $importedArticulatedDlaaObjectMotionPresentEnvironment.ContainsKey("SE_BENCHMARK_OBJECT_MOTION") -or
+    $importedArticulatedDlaaObjectMotionPresentEnvironment.ContainsKey("SE_BENCHMARK_CAMERA_MOTION")) {
+    throw "Imported articulated DLAA lane must be object-motion driven with a static camera"
+}
 $wboitNativeEnvironment = @{
     "SE_BENCHMARK_SCENE" = "grid"
     "SE_BENCHMARK_TRANSPARENT_MATERIAL" = "1"
@@ -1859,6 +1896,24 @@ if (-not ($selectedSuites -contains "full")) {
                 -Environment $importedDynamicDlaaObjectMotionPresentEnvironment `
                 -Manifest $importedDynamicDlaaObjectMotionBaselineManifest `
                 -Model $importedDynamicModelPath
+    }
+
+    if ($selectedSuites -contains "imported-articulated") {
+        $quickSummary["baselines"]["importedArticulated"] = [ordered]@{
+            manifest = $importedArticulatedDlaaObjectMotionBaselineManifestPath
+            name = $importedArticulatedDlaaObjectMotionBaselineManifest.name
+            model = $importedArticulatedModelPath
+        }
+        $quickSummary["thresholds"]["importedArticulated"] =
+            New-QuickSequenceThresholdSummary `
+                -Manifest $importedArticulatedDlaaObjectMotionBaselineManifest
+        $quickSummary["lanes"]["importedArticulatedDlaaObjectMotionPresent"] =
+            Invoke-QuickDlaaSequenceSuite `
+                -Name "imported_articulated_dlaa_object_motion_present" `
+                -LaneKey "importedArticulatedDlaaObjectMotion" `
+                -Environment $importedArticulatedDlaaObjectMotionPresentEnvironment `
+                -Manifest $importedArticulatedDlaaObjectMotionBaselineManifest `
+                -Model $importedArticulatedModelPath
     }
 
     if ($selectedSuites -contains "wboit") {
