@@ -146,6 +146,53 @@ before model upgrades can be judged honestly.
      interposition, or default presentation changes until the Forward/DLSS
      input contract above is covered by automated evidence.
 
+## Slice 4.18 Execution Plan
+
+Slice 4.18 is the first production-quality follow-up after the moving-camera
+DLAA sentinel. The goal is to stop treating "the frame changes" as a sufficient
+dynamic-quality signal and start validating the exact inputs that affect visible
+camera-motion shimmer: applied projection jitter, DLSS jitter handoff, and
+high-contrast edge temporal stability.
+
+1. Applied-jitter DLAA motion lane.
+   - Move the real default-scene moving-camera DLAA QA route to
+     `SE_TAA_APPLY_JITTER=1` while keeping full-resolution DLAA and the visible
+     DLSS post source.
+   - Require `temporal_jitter_applied=1` and keep the existing DLSS jitter
+     consistency assertion so NGX receives exactly the jitter that was applied
+     to color/depth/velocity.
+   - Preserve the previous no-mismatch guard: prepared-only jitter must never be
+     forwarded to DLSS as if it were rendered jitter.
+
+2. High-contrast edge shimmer metric.
+   - Extend the moving-camera screenshot sequence comparison with an
+     edge-focused temporal metric over sampled high-gradient pixels.
+   - Record per-pair edge sample counts, changed-edge counts, mean edge delta,
+     and max edge delta in `summary.json`.
+   - Gate the metric with broad baseline thresholds first. This is intended to
+     catch accidental static captures and obvious edge instability, not to
+     declare final subjective DLSS quality.
+
+3. Native TAA / DLSS resolve separation.
+   - Audit whether the final HDR composite is applying native TAA after DLSS
+     output is selected as the post source.
+   - Follow up by splitting "temporal resources are ready for DLSS" from
+     "native TAA resolve should blend history in the final composite" so DLSS
+     can consume jittered raw inputs without being double-resolved by the engine
+     TAA path.
+   - Add CSV fields or a focused assertion before changing default behavior.
+
+4. Broader temporal content.
+   - Add moving-object and imported-model/skinned velocity lanes after the
+     applied-jitter moving-camera lane is stable.
+   - Keep production claims blocked until those lanes have object-motion
+     coverage, mask coverage, and reference baselines.
+
+5. Tuning evidence.
+   - Compare DLAA preset/sharpness/mip-bias policies only after the input
+     contract is correct. Do not use model/preset changes to hide invalid
+     velocity, jitter, or post-ordering state.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming
@@ -1263,3 +1310,35 @@ after the evaluate contract is stable.
   should add applied-jitter policy, frame-indexed motion-vector debug captures,
   larger camera paths, moving objects, imported/skinned content, and stricter
   shimmer metrics around high-contrast edges.
+
+## Slice 4.18 Execution Evidence
+
+- Upgraded the real default-scene moving-camera DLAA visual-QA lane from
+  prepared-only jitter to applied projection jitter. The lane now sets
+  `SE_TAA_APPLY_JITTER=1`, keeps `SE_BENCHMARK_SCENE` unset, uses the real
+  startup Forward 3D scene, and still captures the three-frame same-window
+  sequence under full-resolution DLAA.
+- `scripts\Test-DlssVisualQa.ps1` now isolates the jitter-application
+  environment variables, asserts `temporal_jitter_applied=1` for the moving
+  default-scene DLAA lane, and keeps the DLSS jitter consistency gate. The
+  latest row reports temporal jitter `-0.125/-0.277778` and DLSS jitter
+  `-0.125/-0.277778`, proving NGX receives the same jitter that was applied to
+  the rendered inputs.
+- Added a high-contrast edge temporal metric to the moving-camera screenshot
+  sequence. Adjacent-frame comparisons now record sampled edge pixels,
+  changed-edge pixels, mean edge delta, and max edge delta in `summary.json`,
+  with baseline thresholds in
+  `docs/reference_baselines/dlss_default_scene_dlaa_motion_visual_qa_baseline.json`.
+- Verification:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  passes. The moving DLAA row reports matching `780/780` columns, 0
+  frame-graph validation issues, output/post `1/1` and `1/1/0`, quality gate
+  `1/1/0`, camera-motion readiness `1/1`, jitter applied `1`, draw route
+  `5/5/0/0`, and DLSS quality mode/preset `6/11`.
+- The latest dynamic sequence reports `minChanged=128`, `maxMean=3.9953`,
+  `max=564`, edge sample floor `1041`, max changed-edge pixels `81`, max mean
+  edge delta `3.9913`, and max edge delta `116.8768`. This is stronger
+  evidence for the user's moving-camera shimmer case, but it is still not final
+  production IQ: the next fix should split DLSS input readiness from native TAA
+  final-composite resolve, then add moving-object/imported/skinned coverage and
+  stricter content-specific tuning.

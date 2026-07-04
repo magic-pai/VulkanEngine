@@ -10,6 +10,7 @@
       "SE_RENDER_SCALE_APPLY": "1",
       "SE_TAA": "1",
       "SE_TEMPORAL_JITTER": "1",
+      "SE_TAA_APPLY_JITTER": "1",
       "SE_UPSCALER_PLUGIN": "dlss",
       "SE_DLSS_QUALITY": "dlaa",
       "SE_DLSS_PRESENT": "1",
@@ -26,6 +27,7 @@
       "renderScale": "1/1/0",
       "renderScaleActive": "1",
       "renderScaleApplied": "0",
+      "jitterApplied": "1",
       "qualityMode": "6",
       "recommendedPreset": "11",
       "cameraMotionReady": "1",
@@ -38,19 +40,27 @@
   "thresholds": {
     "sequencePairChangedPixelsMin": 16,
     "sequencePairMeanDeltaMax": 180.0,
+    "sequencePairEdgePixelsMin": 256,
+    "sequencePairMeanEdgeDeltaMax": 64.0,
+    "sequencePairMaxEdgeDeltaMax": 192.0,
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T01:13:30.5132582+08:00",
+    "capturedAt": "2026-07-05T01:44:55.3515667+08:00",
     "dlssColumns": "780/780",
     "qualityMode": 6,
     "recommendedPreset": 11,
     "renderScale": "1/1/0",
+    "jitterApplied": 1,
     "dlssExtents": "1280x720->1280x720",
     "qualityGate": "1/1/0",
     "qualityMasks": "255/255/0",
-    "sequencePairMinChangedPixels": 125,
-    "sequencePairMaxMeanDelta": 3.9588,
-    "sequencePairMaxDelta": 564
+    "sequencePairMinChangedPixels": 128,
+    "sequencePairMaxMeanDelta": 3.9953,
+    "sequencePairMaxDelta": 564,
+    "sequencePairMinEdgePixels": 1041,
+    "sequencePairMaxChangedEdgePixels": 81,
+    "sequencePairMaxMeanEdgeDelta": 3.9913,
+    "sequencePairMaxEdgeDelta": 116.8768
   }
 }

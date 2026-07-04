@@ -202,6 +202,9 @@ $managedEnvironmentKeys = @(
     "SE_BENCHMARK_CAMERA_MOTION_YAW",
     "SE_BENCHMARK_CAMERA_MOTION_PITCH",
     "SE_BENCHMARK_CAMERA_MOTION_DISTANCE",
+    "SE_TAA_APPLY_JITTER",
+    "SE_TEMPORAL_APPLY_JITTER",
+    "SE_CAMERA_JITTER_APPLY",
     "SE_RENDER_SCALE",
     "SE_RENDER_SCALE_APPLY",
     "SE_INTERNAL_RENDER_SCALE_APPLY",
@@ -755,6 +758,87 @@ function Compare-Images {
     }
 }
 
+function Get-ColorLuma {
+    param([Parameter(Mandatory = $true)]$Color)
+
+    return 0.2126 * [double]$Color.R +
+        0.7152 * [double]$Color.G +
+        0.0722 * [double]$Color.B
+}
+
+function Get-ImageEdgeMagnitude {
+    param(
+        [Parameter(Mandatory = $true)][System.Drawing.Bitmap]$Bitmap,
+        [Parameter(Mandatory = $true)][int]$X,
+        [Parameter(Mandatory = $true)][int]$Y
+    )
+
+    $left = Get-ColorLuma -Color ($Bitmap.GetPixel($X - 2, $Y))
+    $right = Get-ColorLuma -Color ($Bitmap.GetPixel($X + 2, $Y))
+    $up = Get-ColorLuma -Color ($Bitmap.GetPixel($X, $Y - 2))
+    $down = Get-ColorLuma -Color ($Bitmap.GetPixel($X, $Y + 2))
+    return [Math]::Abs($right - $left) + [Math]::Abs($down - $up)
+}
+
+function Compare-ImageEdges {
+    param(
+        [Parameter(Mandatory = $true)][string]$A,
+        [Parameter(Mandatory = $true)][string]$B,
+        [double]$GradientThreshold = 36.0,
+        [double]$DeltaThreshold = 8.0
+    )
+
+    $bitmapA = [System.Drawing.Bitmap]::FromFile($A)
+    $bitmapB = [System.Drawing.Bitmap]::FromFile($B)
+    try {
+        $width = [Math]::Min($bitmapA.Width, $bitmapB.Width)
+        $height = [Math]::Min($bitmapA.Height, $bitmapB.Height)
+        $edgePixels = 0
+        $changedEdgePixels = 0
+        $maxEdgeDelta = 0.0
+        $sumEdgeDelta = 0.0
+
+        for ($y = [Math]::Max(2, [int]($height * 0.20)); $y -lt [Math]::Min($height - 2, [int]($height * 0.80)); $y += 4) {
+            for ($x = [Math]::Max(2, [int]($width * 0.20)); $x -lt [Math]::Min($width - 2, [int]($width * 0.80)); $x += 4) {
+                $edgeA = Get-ImageEdgeMagnitude -Bitmap $bitmapA -X $x -Y $y
+                $edgeB = Get-ImageEdgeMagnitude -Bitmap $bitmapB -X $x -Y $y
+                if ([Math]::Max($edgeA, $edgeB) -lt $GradientThreshold) {
+                    continue
+                }
+
+                $colorA = $bitmapA.GetPixel($x, $y)
+                $colorB = $bitmapB.GetPixel($x, $y)
+                $edgeDelta = [Math]::Abs(
+                    (Get-ColorLuma -Color $colorA) -
+                    (Get-ColorLuma -Color $colorB)
+                )
+                if ($edgeDelta -gt $DeltaThreshold) {
+                    ++$changedEdgePixels
+                }
+                if ($edgeDelta -gt $maxEdgeDelta) {
+                    $maxEdgeDelta = $edgeDelta
+                }
+                $sumEdgeDelta += $edgeDelta
+                ++$edgePixels
+            }
+        }
+
+        if ($edgePixels -le 0) {
+            throw "No high-contrast sampled edges found between captures: $A $B"
+        }
+
+        return [pscustomobject]@{
+            EdgePixels = $edgePixels
+            ChangedEdgePixels = $changedEdgePixels
+            MaxEdgeDelta = [Math]::Round($maxEdgeDelta, 4)
+            MeanEdgeDelta = [Math]::Round($sumEdgeDelta / [Math]::Max($edgePixels, 1), 4)
+        }
+    } finally {
+        $bitmapA.Dispose()
+        $bitmapB.Dispose()
+    }
+}
+
 function Compare-ImageSequence {
     param([Parameter(Mandatory = $true)][string[]]$Paths)
 
@@ -766,8 +850,13 @@ function Compare-ImageSequence {
     $minChangedPixels = [int]::MaxValue
     $maxMeanDelta = 0.0
     $maxDelta = 0
+    $minEdgePixels = [int]::MaxValue
+    $maxChangedEdgePixels = 0
+    $maxMeanEdgeDelta = 0.0
+    $maxEdgeDelta = 0.0
     for ($index = 1; $index -lt $Paths.Count; ++$index) {
         $comparison = Compare-Images -A $Paths[$index - 1] -B $Paths[$index]
+        $edgeComparison = Compare-ImageEdges -A $Paths[$index - 1] -B $Paths[$index]
         $pairs += [pscustomobject]@{
             from = $Paths[$index - 1]
             to = $Paths[$index]
@@ -775,6 +864,10 @@ function Compare-ImageSequence {
             changedPixels = $comparison.ChangedPixels
             meanDelta = $comparison.MeanDelta
             maxDelta = $comparison.MaxDelta
+            edgePixels = $edgeComparison.EdgePixels
+            changedEdgePixels = $edgeComparison.ChangedEdgePixels
+            meanEdgeDelta = $edgeComparison.MeanEdgeDelta
+            maxEdgeDelta = $edgeComparison.MaxEdgeDelta
         }
         $minChangedPixels = [Math]::Min(
             $minChangedPixels,
@@ -785,6 +878,22 @@ function Compare-ImageSequence {
             [double]$comparison.MeanDelta
         )
         $maxDelta = [Math]::Max($maxDelta, [int]$comparison.MaxDelta)
+        $minEdgePixels = [Math]::Min(
+            $minEdgePixels,
+            [int]$edgeComparison.EdgePixels
+        )
+        $maxChangedEdgePixels = [Math]::Max(
+            $maxChangedEdgePixels,
+            [int]$edgeComparison.ChangedEdgePixels
+        )
+        $maxMeanEdgeDelta = [Math]::Max(
+            $maxMeanEdgeDelta,
+            [double]$edgeComparison.MeanEdgeDelta
+        )
+        $maxEdgeDelta = [Math]::Max(
+            $maxEdgeDelta,
+            [double]$edgeComparison.MaxEdgeDelta
+        )
     }
 
     return [pscustomobject]@{
@@ -793,6 +902,10 @@ function Compare-ImageSequence {
         minChangedPixels = $minChangedPixels
         maxMeanDelta = [Math]::Round($maxMeanDelta, 4)
         maxDelta = $maxDelta
+        minEdgePixels = $minEdgePixels
+        maxChangedEdgePixels = $maxChangedEdgePixels
+        maxMeanEdgeDelta = [Math]::Round($maxMeanEdgeDelta, 4)
+        maxEdgeDelta = [Math]::Round($maxEdgeDelta, 4)
     }
 }
 
@@ -920,6 +1033,7 @@ $defaultSceneDlaaMotionPresentEnvironment = @{
     "SE_RENDER_SCALE_APPLY" = "1"
     "SE_TAA" = "1"
     "SE_TEMPORAL_JITTER" = "1"
+    "SE_TAA_APPLY_JITTER" = "1"
     "SE_UPSCALER_PLUGIN" = "dlss"
     "SE_DLSS_QUALITY" = "dlaa"
     "SE_DLSS_PRESENT" = "1"
@@ -1192,6 +1306,9 @@ if ($defaultSceneDlaaMotionRow.framegraph_validation_issues -ne "0") {
 if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityMode -or
     $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.recommendedPreset) {
     throw "Default-scene moving DLAA did not select the expected DLSS quality mode/preset"
+}
+if ($defaultSceneDlaaMotionRow.temporal_jitter_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
+    throw "Default-scene moving DLAA did not apply the expected projection jitter policy"
 }
 if ($defaultSceneDlaaMotionRow.temporal_render_scale_active -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleActive -or
     $defaultSceneDlaaMotionRow.temporal_render_scale_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleApplied) {
@@ -1649,6 +1766,21 @@ Assert-BaselineRange `
     -Min 0 `
     -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
 Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.minEdgePixels" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.minEdgePixels `
+    -Min $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin `
+    -Max $defaultSceneDlaaMotionSequenceComparison.pairs[0].SampledPixels
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.maxMeanEdgeDelta" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaMotion.sequence.maxEdgeDelta" `
+    -Actual $defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
+Assert-BaselineRange `
     -Name "wboit.native.imageStats.differentPixels" `
     -Actual $wboitNativeImageStats.DifferentPixels `
     -Min $wboitBaselineManifest.thresholds.centralDifferentPixelsMin `
@@ -1780,6 +1912,9 @@ $summary = [pscustomobject]@{
         defaultSceneDlaaComparisonMaxDeltaMax = [int]$defaultSceneDlaaBaselineManifest.thresholds.comparisonMaxDeltaMax
         defaultSceneDlaaMotionSequencePairChangedPixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
         defaultSceneDlaaMotionSequencePairMeanDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
+        defaultSceneDlaaMotionSequencePairEdgePixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
+        defaultSceneDlaaMotionSequencePairMeanEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
+        defaultSceneDlaaMotionSequencePairMaxEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
@@ -1874,6 +2009,7 @@ $summary = [pscustomobject]@{
         dlssExtents = $defaultSceneDlaaMotionDlssExtents
         drawRoute = $defaultSceneDlaaMotionDrawRoute
         cameraMotion = $defaultSceneDlaaMotionCameraMotion
+        jitter = "$($defaultSceneDlaaMotionRow.temporal_jitter_enabled)/$($defaultSceneDlaaMotionRow.temporal_jitter_applied)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
         imageStats = $defaultSceneDlaaMotionImageStats
         sequenceComparison = $defaultSceneDlaaMotionSequenceComparison
     }
@@ -1972,7 +2108,7 @@ Write-Host "  adiff: sampled=$($dlaaComparison.SampledPixels) changed=$($dlaaCom
 Write-Host "  app dlaa: $defaultSceneDlaaImage"
 Write-Host "  appdiff: sampled=$($defaultSceneDlaaComparison.SampledPixels) changed=$($defaultSceneDlaaComparison.ChangedPixels) mean=$($defaultSceneDlaaComparison.MeanDelta) max=$($defaultSceneDlaaComparison.MaxDelta)"
 Write-Host "  app motion: $($defaultSceneDlaaMotionImages -join ', ')"
-Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta)"
+Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta)"
 Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
 Write-Host "  forward: $forwardSpecialDlssImage"
