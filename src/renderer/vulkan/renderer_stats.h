@@ -571,6 +571,15 @@ enum class RendererTaaFallbackReason : u32 {
     VelocityUnavailable = 5
 };
 
+enum class RendererTemporalUpscaleFallbackReason : u32 {
+    None = 0,
+    Disabled = 1,
+    FullResolution = 2,
+    InputsUnavailable = 3,
+    UpscalerUnavailable = 4,
+    DynamicResolutionUnsupported = 5
+};
+
 struct RendererTemporalStats {
     u32 velocityTargetAllocated = 0;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;
@@ -616,6 +625,26 @@ struct RendererTemporalStats {
     u32 temporalConsumerMotionBlurReady = 0;
     u32 temporalConsumerDynamicResolutionReady = 0;
     u32 temporalConsumerUpscalerReady = 0;
+    f32 renderScaleRequested = 1.0f;
+    f32 renderScaleActive = 1.0f;
+    u32 renderScaleApplied = 0;
+    u32 temporalUpscaleDisplayWidth = 0;
+    u32 temporalUpscaleDisplayHeight = 0;
+    u32 temporalUpscaleRequestedWidth = 0;
+    u32 temporalUpscaleRequestedHeight = 0;
+    u32 temporalUpscaleActiveWidth = 0;
+    u32 temporalUpscaleActiveHeight = 0;
+    u32 dynamicResolutionRequested = 0;
+    u32 dynamicResolutionEnabled = 0;
+    u32 taauRequested = 0;
+    u32 temporalUpscaleRequested = 0;
+    u32 temporalUpscaleEnabled = 0;
+    u32 temporalUpscaleFallbackReason = 0;
+    u32 temporalUpscaleInputReadinessMask = 0;
+    u32 temporalUpscaleRequiredInputMask = 0;
+    u32 temporalUpscaleContractReady = 0;
+    u32 temporalUpscalerPluginRequested = 0;
+    u32 temporalUpscalerPluginAvailable = 0;
 };
 
 struct RendererStats {

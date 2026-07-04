@@ -104,6 +104,17 @@ constexpr u32 kTemporalConsumerGtaoBit = 1u << 1u;
 constexpr u32 kTemporalConsumerMotionBlurBit = 1u << 2u;
 constexpr u32 kTemporalConsumerDynamicResolutionBit = 1u << 3u;
 constexpr u32 kTemporalConsumerUpscalerBit = 1u << 4u;
+constexpr u32 kTemporalUpscaleInputHdrSceneColorBit = 1u << 0u;
+constexpr u32 kTemporalUpscaleInputSceneDepthBit = 1u << 1u;
+constexpr u32 kTemporalUpscaleInputVelocityBit = 1u << 2u;
+constexpr u32 kTemporalUpscaleInputHistoryColorBit = 1u << 3u;
+constexpr u32 kTemporalUpscaleInputFrameStateBit = 1u << 4u;
+constexpr u32 kTemporalUpscaleRequiredInputMask =
+    kTemporalUpscaleInputHdrSceneColorBit |
+    kTemporalUpscaleInputSceneDepthBit |
+    kTemporalUpscaleInputVelocityBit |
+    kTemporalUpscaleInputHistoryColorBit |
+    kTemporalUpscaleInputFrameStateBit;
 
 using FrameClock = std::chrono::steady_clock;
 
@@ -1113,6 +1124,44 @@ std::optional<f32> EnvironmentFloatOverride(const char* name) {
     }
 
     return parsed;
+}
+
+f32 TemporalRenderScaleFromEnvironment() {
+    std::optional<f32> overrideValue =
+        EnvironmentFloatOverride("SE_RENDER_SCALE");
+    if (!overrideValue) {
+        overrideValue = EnvironmentFloatOverride("SE_TEMPORAL_RENDER_SCALE");
+    }
+    if (!overrideValue) {
+        overrideValue = EnvironmentFloatOverride("SE_INTERNAL_RENDER_SCALE");
+    }
+    return glm::clamp(overrideValue.value_or(1.0f), 0.5f, 1.0f);
+}
+
+bool DynamicResolutionRequestedFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_DYNAMIC_RESOLUTION") ||
+        EnvironmentFlagEnabled("SE_DYNAMIC_RESOLUTION_ENABLED");
+}
+
+bool TemporalUpscaleRequestedFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TAAU") ||
+        EnvironmentFlagEnabled("SE_TAA_UPSCALE") ||
+        EnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE");
+}
+
+bool UpscalerProviderRequested(const std::string& value) {
+    return !value.empty() &&
+        value != "0" &&
+        value != "off" &&
+        value != "OFF" &&
+        value != "none" &&
+        value != "None" &&
+        value != "NONE";
+}
+
+bool TemporalUpscalerPluginRequestedFromEnvironment() {
+    return UpscalerProviderRequested(ReadEnvironmentString("SE_UPSCALER_PLUGIN")) ||
+        UpscalerProviderRequested(ReadEnvironmentString("SE_TEMPORAL_UPSCALER_PLUGIN"));
 }
 
 f32 TaaHistoryWeightFromEnvironment() {
@@ -3100,6 +3149,13 @@ void VulkanRenderer::DrawFrame() {
         taaDepthRejectionThreshold,
         temporalJitterApplyRequested
     );
+    const FrameTemporalUpscaleState temporalUpscaleState =
+        BuildFrameTemporalUpscaleState(
+            extent,
+            hdrCompositeAvailable,
+            m_SceneRenderTargets != nullptr,
+            temporalState
+        );
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     PrepareReflectionProbeCaptureResources();
     const FrameReflectionProbeSet frameReflectionProbes =
@@ -3540,6 +3596,7 @@ void VulkanRenderer::DrawFrame() {
     }
     WriteTemporalStats(
         temporalState,
+        temporalUpscaleState,
         velocityTargetAllocated,
         m_SceneRenderTargets != nullptr
             ? m_SceneRenderTargets->VelocityFormat()
@@ -3574,12 +3631,26 @@ void VulkanRenderer::DrawFrame() {
     frameStats.temporal.temporalConsumerSsrActive = 0u;
     frameStats.temporal.temporalConsumerGtaoReady = 0u;
     frameStats.temporal.temporalConsumerMotionBlurReady = 0u;
-    frameStats.temporal.temporalConsumerDynamicResolutionReady = 0u;
-    frameStats.temporal.temporalConsumerUpscalerReady = 0u;
-    frameStats.temporal.temporalConsumerReadinessMask =
-        frameStats.temporal.temporalConsumerSsrReady > 0
-            ? kTemporalConsumerSsrBit
+    frameStats.temporal.temporalConsumerDynamicResolutionReady =
+        temporalUpscaleState.dynamicResolutionRequested &&
+            temporalUpscaleState.temporalUpscaleContractReady
+            ? 1u
             : 0u;
+    frameStats.temporal.temporalConsumerUpscalerReady =
+        temporalUpscaleState.temporalUpscaleRequested &&
+            temporalUpscaleState.temporalUpscaleContractReady
+            ? 1u
+            : 0u;
+    frameStats.temporal.temporalConsumerReadinessMask =
+        (frameStats.temporal.temporalConsumerSsrReady > 0
+            ? kTemporalConsumerSsrBit
+            : 0u) |
+        (frameStats.temporal.temporalConsumerDynamicResolutionReady > 0
+            ? kTemporalConsumerDynamicResolutionBit
+            : 0u) |
+        (frameStats.temporal.temporalConsumerUpscalerReady > 0
+            ? kTemporalConsumerUpscalerBit
+            : 0u);
     frameStats.temporal.temporalConsumerActiveMask = 0u;
     frameStats.temporal.temporalConsumerUnsupportedMask =
         kTemporalConsumerGtaoBit |
@@ -3907,6 +3978,26 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalConsumerReadinessMask,
             frameStats.temporal.temporalConsumerActiveMask,
             frameStats.temporal.temporalConsumerUnsupportedMask,
+            frameStats.temporal.renderScaleRequested,
+            frameStats.temporal.renderScaleActive,
+            frameStats.temporal.renderScaleApplied > 0,
+            frameStats.temporal.temporalUpscaleDisplayWidth,
+            frameStats.temporal.temporalUpscaleDisplayHeight,
+            frameStats.temporal.temporalUpscaleRequestedWidth,
+            frameStats.temporal.temporalUpscaleRequestedHeight,
+            frameStats.temporal.temporalUpscaleActiveWidth,
+            frameStats.temporal.temporalUpscaleActiveHeight,
+            frameStats.temporal.dynamicResolutionRequested > 0,
+            frameStats.temporal.dynamicResolutionEnabled > 0,
+            frameStats.temporal.taauRequested > 0,
+            frameStats.temporal.temporalUpscaleRequested > 0,
+            frameStats.temporal.temporalUpscaleEnabled > 0,
+            frameStats.temporal.temporalUpscaleFallbackReason,
+            frameStats.temporal.temporalUpscaleInputReadinessMask,
+            frameStats.temporal.temporalUpscaleRequiredInputMask,
+            frameStats.temporal.temporalUpscaleContractReady > 0,
+            frameStats.temporal.temporalUpscalerPluginRequested > 0,
+            frameStats.temporal.temporalUpscalerPluginAvailable > 0,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
@@ -6071,6 +6162,94 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     return state;
 }
 
+FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
+    const VkExtent2D& displayExtent,
+    bool hdrSceneColorReady,
+    bool sceneDepthReady,
+    const FrameTemporalState& temporalState
+) const {
+    FrameTemporalUpscaleState state{};
+    state.displayExtent = displayExtent;
+    state.activeInternalExtent = displayExtent;
+    state.requestedRenderScale = TemporalRenderScaleFromEnvironment();
+    state.activeRenderScale = 1.0f;
+    state.requiredInputMask = kTemporalUpscaleRequiredInputMask;
+    if (displayExtent.width > 0u && displayExtent.height > 0u) {
+        state.requestedInternalExtent = VkExtent2D{
+            std::max(
+                1u,
+                static_cast<u32>(std::round(
+                    static_cast<f32>(displayExtent.width) *
+                    state.requestedRenderScale
+                ))
+            ),
+            std::max(
+                1u,
+                static_cast<u32>(std::round(
+                    static_cast<f32>(displayExtent.height) *
+                    state.requestedRenderScale
+                ))
+            )
+        };
+    }
+
+    const bool renderScaleReduced =
+        state.requestedInternalExtent.width < displayExtent.width ||
+        state.requestedInternalExtent.height < displayExtent.height;
+    state.dynamicResolutionRequested = DynamicResolutionRequestedFromEnvironment();
+    state.taauRequested = TemporalUpscaleRequestedFromEnvironment();
+    state.upscalerPluginRequested =
+        TemporalUpscalerPluginRequestedFromEnvironment();
+    state.temporalUpscaleRequested =
+        state.taauRequested ||
+        renderScaleReduced ||
+        state.dynamicResolutionRequested ||
+        state.upscalerPluginRequested;
+
+    if (hdrSceneColorReady) {
+        state.inputReadinessMask |= kTemporalUpscaleInputHdrSceneColorBit;
+    }
+    if (sceneDepthReady) {
+        state.inputReadinessMask |= kTemporalUpscaleInputSceneDepthBit;
+    }
+    if (temporalState.velocityCameraMotionReady) {
+        state.inputReadinessMask |= kTemporalUpscaleInputVelocityBit;
+    }
+    if (temporalState.taaHistoryColorReady) {
+        state.inputReadinessMask |= kTemporalUpscaleInputHistoryColorBit;
+    }
+    if (temporalState.historyValid) {
+        state.inputReadinessMask |= kTemporalUpscaleInputFrameStateBit;
+    }
+    state.temporalUpscaleContractReady =
+        temporalState.taaResolveEnabled &&
+        (state.inputReadinessMask & state.requiredInputMask) ==
+            state.requiredInputMask;
+
+    state.renderScaleApplied = false;
+    state.dynamicResolutionEnabled = false;
+    state.temporalUpscaleEnabled = false;
+    state.upscalerPluginAvailable = false;
+    if (!state.temporalUpscaleRequested) {
+        state.fallbackReason =
+            RendererTemporalUpscaleFallbackReason::Disabled;
+    } else if (state.dynamicResolutionRequested) {
+        state.fallbackReason =
+            RendererTemporalUpscaleFallbackReason::DynamicResolutionUnsupported;
+    } else if (!renderScaleReduced && !state.upscalerPluginRequested) {
+        state.fallbackReason =
+            RendererTemporalUpscaleFallbackReason::FullResolution;
+    } else if (!state.temporalUpscaleContractReady) {
+        state.fallbackReason =
+            RendererTemporalUpscaleFallbackReason::InputsUnavailable;
+    } else {
+        state.fallbackReason =
+            RendererTemporalUpscaleFallbackReason::UpscalerUnavailable;
+    }
+
+    return state;
+}
+
 void VulkanRenderer::StoreTemporalHistory(
     const FrameMatrices* matrices,
     const VkExtent2D& extent
@@ -6132,6 +6311,7 @@ void VulkanRenderer::PopulateTemporalUniforms(
 
 void VulkanRenderer::WriteTemporalStats(
     const FrameTemporalState& temporalState,
+    const FrameTemporalUpscaleState& temporalUpscaleState,
     bool velocityTargetAllocated,
     VkFormat velocityFormat,
     bool materialAuxTargetAllocated,
@@ -6189,6 +6369,44 @@ void VulkanRenderer::WriteTemporalStats(
         temporalState.taaVelocityRejectionThreshold;
     stats.taaDepthRejectionThreshold =
         temporalState.taaDepthRejectionThreshold;
+    stats.renderScaleRequested = temporalUpscaleState.requestedRenderScale;
+    stats.renderScaleActive = temporalUpscaleState.activeRenderScale;
+    stats.renderScaleApplied =
+        temporalUpscaleState.renderScaleApplied ? 1u : 0u;
+    stats.temporalUpscaleDisplayWidth =
+        temporalUpscaleState.displayExtent.width;
+    stats.temporalUpscaleDisplayHeight =
+        temporalUpscaleState.displayExtent.height;
+    stats.temporalUpscaleRequestedWidth =
+        temporalUpscaleState.requestedInternalExtent.width;
+    stats.temporalUpscaleRequestedHeight =
+        temporalUpscaleState.requestedInternalExtent.height;
+    stats.temporalUpscaleActiveWidth =
+        temporalUpscaleState.activeInternalExtent.width;
+    stats.temporalUpscaleActiveHeight =
+        temporalUpscaleState.activeInternalExtent.height;
+    stats.dynamicResolutionRequested =
+        temporalUpscaleState.dynamicResolutionRequested ? 1u : 0u;
+    stats.dynamicResolutionEnabled =
+        temporalUpscaleState.dynamicResolutionEnabled ? 1u : 0u;
+    stats.taauRequested =
+        temporalUpscaleState.taauRequested ? 1u : 0u;
+    stats.temporalUpscaleRequested =
+        temporalUpscaleState.temporalUpscaleRequested ? 1u : 0u;
+    stats.temporalUpscaleEnabled =
+        temporalUpscaleState.temporalUpscaleEnabled ? 1u : 0u;
+    stats.temporalUpscaleFallbackReason =
+        static_cast<u32>(temporalUpscaleState.fallbackReason);
+    stats.temporalUpscaleInputReadinessMask =
+        temporalUpscaleState.inputReadinessMask;
+    stats.temporalUpscaleRequiredInputMask =
+        temporalUpscaleState.requiredInputMask;
+    stats.temporalUpscaleContractReady =
+        temporalUpscaleState.temporalUpscaleContractReady ? 1u : 0u;
+    stats.temporalUpscalerPluginRequested =
+        temporalUpscaleState.upscalerPluginRequested ? 1u : 0u;
+    stats.temporalUpscalerPluginAvailable =
+        temporalUpscaleState.upscalerPluginAvailable ? 1u : 0u;
 }
 
 void VulkanRenderer::UpdateUniformBuffer(

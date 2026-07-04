@@ -111,6 +111,27 @@ struct FrameTemporalState {
         RendererTaaFallbackReason::Disabled;
 };
 
+struct FrameTemporalUpscaleState {
+    VkExtent2D displayExtent{};
+    VkExtent2D requestedInternalExtent{};
+    VkExtent2D activeInternalExtent{};
+    f32 requestedRenderScale = 1.0f;
+    f32 activeRenderScale = 1.0f;
+    u32 inputReadinessMask = 0;
+    u32 requiredInputMask = 0;
+    bool renderScaleApplied = false;
+    bool dynamicResolutionRequested = false;
+    bool dynamicResolutionEnabled = false;
+    bool taauRequested = false;
+    bool temporalUpscaleRequested = false;
+    bool temporalUpscaleEnabled = false;
+    bool temporalUpscaleContractReady = false;
+    bool upscalerPluginRequested = false;
+    bool upscalerPluginAvailable = false;
+    RendererTemporalUpscaleFallbackReason fallbackReason =
+        RendererTemporalUpscaleFallbackReason::Disabled;
+};
+
 struct FrameLightConstants {
     glm::vec4 directionalLight{ -0.45f, -0.82f, -0.35f, 0.78f };
     glm::vec4 ambientLight{ 0.22f, 0.24f, 0.0f, 0.0f };
@@ -409,6 +430,12 @@ private:
         f32 taaDepthRejectionThreshold,
         bool temporalJitterApplyRequested
     ) const;
+    FrameTemporalUpscaleState BuildFrameTemporalUpscaleState(
+        const VkExtent2D& displayExtent,
+        bool hdrSceneColorReady,
+        bool sceneDepthReady,
+        const FrameTemporalState& temporalState
+    ) const;
     void StoreTemporalHistory(
         const FrameMatrices* matrices,
         const VkExtent2D& extent
@@ -419,6 +446,7 @@ private:
     ) const;
     void WriteTemporalStats(
         const FrameTemporalState& temporalState,
+        const FrameTemporalUpscaleState& temporalUpscaleState,
         bool velocityTargetAllocated,
         VkFormat velocityFormat,
         bool materialAuxTargetAllocated,

@@ -615,6 +615,26 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalConsumerMotionBlurReady << ','
         << temporal.temporalConsumerDynamicResolutionReady << ','
         << temporal.temporalConsumerUpscalerReady << ','
+        << temporal.renderScaleRequested << ','
+        << temporal.renderScaleActive << ','
+        << temporal.renderScaleApplied << ','
+        << temporal.temporalUpscaleDisplayWidth << ','
+        << temporal.temporalUpscaleDisplayHeight << ','
+        << temporal.temporalUpscaleRequestedWidth << ','
+        << temporal.temporalUpscaleRequestedHeight << ','
+        << temporal.temporalUpscaleActiveWidth << ','
+        << temporal.temporalUpscaleActiveHeight << ','
+        << temporal.dynamicResolutionRequested << ','
+        << temporal.dynamicResolutionEnabled << ','
+        << temporal.taauRequested << ','
+        << temporal.temporalUpscaleRequested << ','
+        << temporal.temporalUpscaleEnabled << ','
+        << temporal.temporalUpscaleFallbackReason << ','
+        << temporal.temporalUpscaleInputReadinessMask << ','
+        << temporal.temporalUpscaleRequiredInputMask << ','
+        << temporal.temporalUpscaleContractReady << ','
+        << temporal.temporalUpscalerPluginRequested << ','
+        << temporal.temporalUpscalerPluginAvailable << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1116,6 +1136,26 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_consumer_motion_blur_ready,"
         << "temporal_consumer_dynamic_resolution_ready,"
         << "temporal_consumer_upscaler_ready,"
+        << "temporal_render_scale_requested,"
+        << "temporal_render_scale_active,"
+        << "temporal_render_scale_applied,"
+        << "temporal_upscale_display_width,"
+        << "temporal_upscale_display_height,"
+        << "temporal_upscale_requested_width,"
+        << "temporal_upscale_requested_height,"
+        << "temporal_upscale_active_width,"
+        << "temporal_upscale_active_height,"
+        << "temporal_dynamic_resolution_requested,"
+        << "temporal_dynamic_resolution_enabled,"
+        << "temporal_taau_requested,"
+        << "temporal_upscale_requested,"
+        << "temporal_upscale_enabled,"
+        << "temporal_upscale_fallback_reason,"
+        << "temporal_upscale_input_readiness_mask,"
+        << "temporal_upscale_required_input_mask,"
+        << "temporal_upscale_contract_ready,"
+        << "temporal_upscaler_plugin_requested,"
+        << "temporal_upscaler_plugin_available,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

@@ -1179,6 +1179,29 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalConsumerUnsupportedMask
     );
     ImGui::Text(
+        "Temporal upscale: scale req/active %.2f/%.2f applied %u, display %ux%u requested %ux%u active %ux%u, dynamic %u/%u TAAU %u upscale %u/%u fallback %u contract %u inputs 0x%X/0x%X plugin %u/%u",
+        stats.temporal.renderScaleRequested,
+        stats.temporal.renderScaleActive,
+        stats.temporal.renderScaleApplied,
+        stats.temporal.temporalUpscaleDisplayWidth,
+        stats.temporal.temporalUpscaleDisplayHeight,
+        stats.temporal.temporalUpscaleRequestedWidth,
+        stats.temporal.temporalUpscaleRequestedHeight,
+        stats.temporal.temporalUpscaleActiveWidth,
+        stats.temporal.temporalUpscaleActiveHeight,
+        stats.temporal.dynamicResolutionRequested,
+        stats.temporal.dynamicResolutionEnabled,
+        stats.temporal.taauRequested,
+        stats.temporal.temporalUpscaleRequested,
+        stats.temporal.temporalUpscaleEnabled,
+        stats.temporal.temporalUpscaleFallbackReason,
+        stats.temporal.temporalUpscaleContractReady,
+        stats.temporal.temporalUpscaleInputReadinessMask,
+        stats.temporal.temporalUpscaleRequiredInputMask,
+        stats.temporal.temporalUpscalerPluginRequested,
+        stats.temporal.temporalUpscalerPluginAvailable
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,

@@ -75,7 +75,7 @@ feature explicitly off/fallback-safe by default.
      motion blur, dynamic resolution, and future upscaler plugins.
    - Add explicit unsupported/fallback reporting instead of silent no-ops.
 
-6. TAAU/dynamic-resolution boundary.
+6. TAAU/dynamic-resolution boundary. Implemented.
    - Add render-scale/dynamic-resolution diagnostics and a narrow upscaler
      interface contract.
    - Do not implement a native TSR-class upscaler in this stage.
@@ -271,6 +271,59 @@ change unless explicitly enabled by environment.
 - This is an explicit temporal-consumer readiness contract. It does not yet make
   SSR consume history, implement GTAO, motion blur, dynamic resolution, TAAU, or
   any upscaler plugin integration.
+
+## Slice 6 Execution Evidence
+
+- Temporal stats now expose the first TAAU/dynamic-resolution boundary contract:
+  requested/active render scale, display/requested/active extents, render-scale
+  applied state, dynamic-resolution requested/enabled state, TAAU requested
+  state, temporal-upscale requested/enabled/fallback state, input readiness and
+  required masks, contract readiness, and plugin requested/available state.
+- The upscaler input mask uses bit `1` for `HDRSceneColor`, bit `2` for
+  `SceneDepth`, bit `4` for `Velocity`, bit `8` for `TemporalHistoryColor`, and
+  bit `16` for `TemporalFrameState`; the required mask is `31`.
+- `SE_RENDER_SCALE`, `SE_TEMPORAL_RENDER_SCALE`, and
+  `SE_INTERNAL_RENDER_SCALE` request an internal scale for diagnostics.
+  `SE_TAAU`, `SE_TAA_UPSCALE`, and `SE_TEMPORAL_UPSCALE` request the TAAU
+  boundary. `SE_DYNAMIC_RESOLUTION` / `SE_DYNAMIC_RESOLUTION_ENABLED` request
+  dynamic resolution, and `SE_UPSCALER_PLUGIN` /
+  `SE_TEMPORAL_UPSCALER_PLUGIN` request a future external upscaler provider.
+- Current rendering remains native-resolution. `renderScaleActive` stays `1`,
+  the active extent stays equal to the display extent, `renderScaleApplied` is
+  `0`, and temporal upscale/dynamic resolution enabled state stays `0`.
+- FrameGraph records `TemporalUpscaleBoundary` when TAAU, dynamic resolution,
+  render-scale reduction, or an upscaler plugin is requested. It reads temporal
+  inputs only when the input contract is ready.
+- Temporal consumer readiness now reports dynamic-resolution and upscaler
+  readiness only when requested and the input contract is ready; active masks
+  remain `0` because no system consumes the boundary yet.
+- `_quick_build.bat` passes for `SelfEngineForward3D` with only the pre-existing
+  MSVC runtime-library warning.
+- Smoke evidence:
+  `out/benchmarks/aaa_taa_upscale_boundary_smoke.csv`,
+  `out/benchmarks/aaa_taa_dynamic_resolution_boundary_smoke.csv`, and
+  `out/benchmarks/aaa_taa_upscale_forced_reset_smoke.csv` all have matching
+  660-column rows and 0 frame-graph validation issues.
+- The TAAU/render-scale smoke reports TAA enabled `1`, requested scale `0.75`,
+  active scale `1`, requested extent `960x540`, active extent `1280x720`,
+  TAAU requested `1`, temporal upscale enabled `0`, fallback reason `4`,
+  input/required masks `31/31`, contract ready `1`, consumer readiness mask
+  `17`, active mask `0`, and unsupported mask `31`.
+- The dynamic-resolution smoke reports requested scale `0.67`, requested extent
+  `858x482`, dynamic-resolution requested/enabled `1/0`, plugin
+  requested/available `1/0`, temporal upscale enabled `0`, fallback reason `5`,
+  input/required masks `31/31`, contract ready `1`, consumer readiness mask
+  `25`, active mask `0`, and unsupported mask `31`.
+- The forced-reset smoke reports TAA enabled `0`, TAA fallback reason `3`,
+  temporal reset `1`, reset reason `4`, requested scale `0.75`, temporal
+  upscale requested/enabled `1/0`, fallback reason `3`, input/required masks
+  `11/31`, contract ready `0`, consumer readiness mask `0`, active mask `0`,
+  and unsupported mask `30`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is a TAAU/dynamic-resolution/upscaler boundary and diagnostic contract.
+  It does not resize render targets, implement native TSR/TAAU, integrate FSR or
+  DLSS, run dynamic-resolution policy, or change default presentation.
 
 ## Previous Stage Summary
 

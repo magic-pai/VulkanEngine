@@ -2167,6 +2167,24 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "Reports ready, active, and unsupported temporal-history consumers before SSR/GTAO/motion-blur/upscaler integrations consume history."
         );
     }
+    if (inputs.temporalUpscaleRequested ||
+        inputs.dynamicResolutionRequested ||
+        inputs.temporalUpscalerPluginRequested) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.temporalUpscaleEnabled
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TemporalUpscaleBoundary",
+            inputs.temporalUpscaleContractReady
+                ? "HDRSceneColor, SceneDepth, Velocity, TemporalHistoryColor, TemporalFrameState"
+                : "",
+            inputs.temporalUpscaleEnabled ? "HDRSceneColor" : "",
+            "Reports render-scale, dynamic-resolution, TAAU, and plugin handoff contract before native TSR/upscaler implementation."
+        );
+    }
 
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(
