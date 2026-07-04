@@ -1479,6 +1479,9 @@ function New-QuickDlssPresentMetrics {
         runtimeImportAnimationCount = "$($Row.runtime_import_animation_count)"
         runtimeImportMeshWithBonesCount = "$($Row.runtime_import_mesh_with_bones_count)"
         runtimeImportBoneCount = "$($Row.runtime_import_bone_count)"
+        runtimeImportSkinnedVertexCount = "$($Row.runtime_import_skinned_vertex_count)"
+        runtimeImportBoneInfluenceCount = "$($Row.runtime_import_bone_influence_count)"
+        runtimeImportMaxBoneInfluencesPerVertex = "$($Row.runtime_import_max_bone_influences_per_vertex)"
         runtimeImportSkinnedAnimationUnsupported = "$($Row.runtime_import_skinned_animation_unsupported)"
         dlssExtents = "$($Row.temporal_upscaler_dlss_render_width)x$($Row.temporal_upscaler_dlss_render_height)->$($Row.temporal_upscaler_dlss_output_width)x$($Row.temporal_upscaler_dlss_output_height)"
     }

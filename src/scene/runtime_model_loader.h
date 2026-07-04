@@ -26,6 +26,9 @@ struct RuntimeModelLoadResult {
     u32 sourceAnimationCount = 0;
     u32 sourceMeshWithBonesCount = 0;
     u32 sourceBoneCount = 0;
+    u32 sourceSkinnedVertexCount = 0;
+    u32 sourceBoneInfluenceCount = 0;
+    u32 sourceMaxBoneInfluencesPerVertex = 0;
     u32 skinnedAnimationUnsupported = 0;
 };
 
@@ -61,6 +64,9 @@ private:
         u32 sourceAnimationCount = 0;
         u32 sourceMeshWithBonesCount = 0;
         u32 sourceBoneCount = 0;
+        u32 sourceSkinnedVertexCount = 0;
+        u32 sourceBoneInfluenceCount = 0;
+        u32 sourceMaxBoneInfluencesPerVertex = 0;
         u32 skinnedAnimationUnsupported = 0;
     };
 

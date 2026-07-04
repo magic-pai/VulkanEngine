@@ -581,6 +581,9 @@ void PopulateModelSourceDiagnostics(ImportedModel3D& model, const aiScene* scene
     model.sourceAnimationCount = scene->mNumAnimations;
     model.sourceMeshWithBonesCount = 0;
     model.sourceBoneCount = 0;
+    model.sourceSkinnedVertexCount = 0;
+    model.sourceBoneInfluenceCount = 0;
+    model.sourceMaxBoneInfluencesPerVertex = 0;
 
     for (u32 meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
         const aiMesh* mesh = scene->mMeshes[meshIndex];
@@ -590,12 +593,76 @@ void PopulateModelSourceDiagnostics(ImportedModel3D& model, const aiScene* scene
 
         ++model.sourceMeshWithBonesCount;
         model.sourceBoneCount += mesh->mNumBones;
+
+        std::vector<u32> influencesPerVertex(mesh->mNumVertices, 0u);
+        for (u32 boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex) {
+            const aiBone* bone = mesh->mBones[boneIndex];
+            if (bone == nullptr) {
+                continue;
+            }
+
+            for (u32 weightIndex = 0; weightIndex < bone->mNumWeights; ++weightIndex) {
+                const aiVertexWeight& weight = bone->mWeights[weightIndex];
+                if (weight.mVertexId >= influencesPerVertex.size() ||
+                    weight.mWeight <= 0.0f) {
+                    continue;
+                }
+
+                ++model.sourceBoneInfluenceCount;
+                ++influencesPerVertex[weight.mVertexId];
+            }
+        }
+
+        for (u32 influenceCount : influencesPerVertex) {
+            if (influenceCount == 0u) {
+                continue;
+            }
+
+            ++model.sourceSkinnedVertexCount;
+            model.sourceMaxBoneInfluencesPerVertex =
+                std::max(model.sourceMaxBoneInfluencesPerVertex, influenceCount);
+        }
     }
 
     model.skinnedAnimationUnsupported =
         model.sourceAnimationCount > 0 ||
         model.sourceMeshWithBonesCount > 0 ||
         model.sourceBoneCount > 0;
+}
+
+void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
+    SE_ASSERT(source != nullptr, "Assimp mesh must not be null");
+    if (source->mNumBones == 0 || source->mNumVertices == 0) {
+        return;
+    }
+
+    mesh.bones.reserve(source->mNumBones);
+    mesh.vertexBoneInfluences.resize(source->mNumVertices);
+    for (u32 boneIndex = 0; boneIndex < source->mNumBones; ++boneIndex) {
+        const aiBone* sourceBone = source->mBones[boneIndex];
+        if (sourceBone == nullptr) {
+            continue;
+        }
+
+        const u32 importedBoneIndex = static_cast<u32>(mesh.bones.size());
+        mesh.bones.push_back({
+            ToString(sourceBone->mName),
+            ToMat4(sourceBone->mOffsetMatrix)
+        });
+
+        for (u32 weightIndex = 0; weightIndex < sourceBone->mNumWeights; ++weightIndex) {
+            const aiVertexWeight& weight = sourceBone->mWeights[weightIndex];
+            if (weight.mVertexId >= mesh.vertexBoneInfluences.size() ||
+                weight.mWeight <= 0.0f) {
+                continue;
+            }
+
+            mesh.vertexBoneInfluences[weight.mVertexId].push_back({
+                importedBoneIndex,
+                weight.mWeight
+            });
+        }
+    }
 }
 
 ImportedMesh3D ConvertMeshInstance(
@@ -650,6 +717,8 @@ ImportedMesh3D ConvertMeshInstance(
         mesh.mesh.indices.push_back(face.mIndices[1]);
         mesh.mesh.indices.push_back(face.mIndices[2]);
     }
+
+    PopulateMeshSkinning(mesh, source);
 
     return mesh;
 }
@@ -868,7 +937,9 @@ ImportedModel3D ModelImporter::LoadModel3D(
                 std::to_string(model.sourceMeshWithBonesCount) +
                 " mesh(es) with bones, and " +
                 std::to_string(model.sourceBoneCount) +
-                " bone reference(s); runtime import currently treats it as rigid mesh data."
+                " bone reference(s) across " +
+                std::to_string(model.sourceBoneInfluenceCount) +
+                " vertex influence(s); runtime import currently treats it as rigid mesh data."
         });
     }
 

@@ -646,6 +646,55 @@ lane. True skinned/animated DLSS/DLAA quality still requires animation sampling,
 skinned vertex carriers, previous-bone or previous-pose data, and skinned
 velocity output.
 
+## Slice 4.26 Execution Plan
+
+Slice 4.26 starts the real skinned-support implementation path by preserving
+source skinning data at import time. The goal is not to skin vertices on the GPU
+yet; it is to make the importer and runtime diagnostics carry the bone/weight
+data that future animation sampling and velocity passes will need.
+
+1. Importer skinning carriers.
+   - Add per-mesh bone records with source bone names and offset matrices.
+   - Add per-vertex bone influence lists with imported bone indices and weights.
+   - Preserve this data alongside the existing rigid `MeshData3D` so current
+     rendering remains unchanged.
+
+2. Runtime diagnostics.
+   - Aggregate source skinned vertex count, total bone influence count, and max
+     influences per vertex.
+   - Carry those values through `RuntimeModelLoadResult`, runtime model cache
+     entries, benchmark scene diagnostics, and CSV output.
+
+3. QA contract.
+   - Extend the skinned diagnostic baseline to assert the carrier counts from
+     `assets/models/skinned_probe.dae`.
+   - Keep the DLSS quality gate expected-blocked because the renderer still does
+     not sample animation, skin vertices, or write skinned motion vectors.
+
+## Slice 4.26 Execution Evidence
+
+Slice 4.26 is implemented and verified. `ImportedMesh3D` now stores bone names,
+offset matrices, and per-vertex bone influences. Runtime import diagnostics now
+include skinned vertex count, bone influence count, and max influences per
+vertex.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- CSV shape: `794/794` columns.
+- Runtime import diagnostics:
+  `requested/loaded/cache/mesh/material/animation/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/1/1/2/3/5/2/1`.
+- DLSS quality gate remains expected-blocked:
+  `qualityGate=1/0/4`, masks `255/251/4`,
+  object readiness `temporal_velocity_object_motion_ready/temporal_upscaler_dlss_quality_object_motion_ready=1/0`.
+
+This creates the source-data carrier needed by the next skinned animation work.
+The remaining hard work is animation clip/node sampling, skinned vertex buffers
+or shader skinning, previous-bone/previous-pose storage, and skinned velocity
+output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

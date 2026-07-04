@@ -412,6 +412,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourceAnimationCount,
                 cached.sourceMeshWithBonesCount,
                 cached.sourceBoneCount,
+                cached.sourceSkinnedVertexCount,
+                cached.sourceBoneInfluenceCount,
+                cached.sourceMaxBoneInfluencesPerVertex,
                 cached.skinnedAnimationUnsupported};
         }
 
@@ -974,6 +977,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         loadedModel->sourceAnimationCount = importedModelData.sourceAnimationCount;
         loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
         loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
+        loadedModel->sourceSkinnedVertexCount = importedModelData.sourceSkinnedVertexCount;
+        loadedModel->sourceBoneInfluenceCount = importedModelData.sourceBoneInfluenceCount;
+        loadedModel->sourceMaxBoneInfluencesPerVertex =
+            importedModelData.sourceMaxBoneInfluencesPerVertex;
         loadedModel->skinnedAnimationUnsupported =
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u;
         m_ModelCache[lookupKey] = m_LoadedModels.size();
@@ -990,6 +997,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceAnimationCount,
             importedModelData.sourceMeshWithBonesCount,
             importedModelData.sourceBoneCount,
+            importedModelData.sourceSkinnedVertexCount,
+            importedModelData.sourceBoneInfluenceCount,
+            importedModelData.sourceMaxBoneInfluencesPerVertex,
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u
         };
     } catch (const std::exception& error) {

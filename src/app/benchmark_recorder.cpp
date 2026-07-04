@@ -217,6 +217,9 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportAnimationCount << ','
         << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
         << sceneDiagnostics.runtimeImportBoneCount << ','
+        << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
+        << sceneDiagnostics.runtimeImportBoneInfluenceCount << ','
+        << sceneDiagnostics.runtimeImportMaxBoneInfluencesPerVertex << ','
         << sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported << ','
         << cpu.totalFrameMs << ','
         << cpu.waitAcquireMs << ','
@@ -1006,6 +1009,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_cache_hit,runtime_import_mesh_count,"
         << "runtime_import_material_count,runtime_import_animation_count,"
         << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
+        << "runtime_import_skinned_vertex_count,"
+        << "runtime_import_bone_influence_count,"
+        << "runtime_import_max_bone_influences_per_vertex,"
         << "runtime_import_skinned_animation_unsupported,"
         << "cpu_total_ms,cpu_wait_acquire_ms,cpu_imgui_ms,cpu_picking_ms,"
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"

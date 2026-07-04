@@ -62,6 +62,9 @@
       "runtimeImportAnimationCount": "0",
       "runtimeImportMeshWithBonesCount": "0",
       "runtimeImportBoneCount": "0",
+      "runtimeImportSkinnedVertexCount": "0",
+      "runtimeImportBoneInfluenceCount": "0",
+      "runtimeImportMaxBoneInfluencesPerVertex": "0",
       "runtimeImportSkinnedAnimationUnsupported": "0"
     }
   },
@@ -78,7 +81,7 @@
   "baselineSource": {
     "capturedAt": "2026-07-05T04:15:24.0271604+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
-    "dlssColumns": "791/791",
+    "dlssColumns": "794/794",
     "model": "assets/models/demo_crystal.obj",
     "qualityMode": 6,
     "recommendedPreset": 11,

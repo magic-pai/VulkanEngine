@@ -2372,6 +2372,12 @@ int main() {
     sceneDiagnostics.runtimeImportMeshWithBonesCount =
         defaultModelLoad.sourceMeshWithBonesCount;
     sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;
+    sceneDiagnostics.runtimeImportSkinnedVertexCount =
+        defaultModelLoad.sourceSkinnedVertexCount;
+    sceneDiagnostics.runtimeImportBoneInfluenceCount =
+        defaultModelLoad.sourceBoneInfluenceCount;
+    sceneDiagnostics.runtimeImportMaxBoneInfluencesPerVertex =
+        defaultModelLoad.sourceMaxBoneInfluencesPerVertex;
     sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
         defaultModelLoad.skinnedAnimationUnsupported;
     se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);
