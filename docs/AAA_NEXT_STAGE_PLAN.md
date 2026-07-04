@@ -227,11 +227,34 @@ resource and proving the shader path can consume directional probe data.
 - The seam-off smoke reports default Medium quality `1`, seam-aware `0`, 64
   samples, mode `1`, resource ready `1`, cubemap sampling `1`, authored loaded
   `1`, and authored irradiance applied `1`.
+- Authored cubemap loading now also computes six signed directional diffuse
+  lobes from the base cubemap: +X, -X, +Y, -Y, +Z, and -Z. The existing
+  single-color irradiance remains the base term, while the lobe deltas provide
+  normal-weighted diffuse variation for selected authored probes.
+- The frame UBO appends `reflectionProbeDiffuseLobes[24]` after the existing
+  fields, preserving previous offsets while carrying six lobes for each top-4
+  selected probe. Deferred lighting, legacy forward, and WBOIT blend toward
+  the lobe diffuse carrier at rough diffuse roughness while keeping authored
+  cubemap sampling for specular.
+- CSV, ImGui, and FrameGraph now expose authored diffuse-lobe ready count,
+  applied count, lobe count, selected-ready mask, and average lobe energy.
+- `_quick_build.bat` passes for `SelfEngineForward3D` after regenerating all
+  frame-UBO shader variants.
+- Smoke evidence:
+  `out/benchmarks/aaa_reflection_probe_diffuse_lobes_authored_smoke.csv`,
+  `out/benchmarks/aaa_reflection_probe_diffuse_lobes_forward_smoke.csv`, and
+  `out/benchmarks/aaa_reflection_probe_diffuse_lobes_wboit_smoke.csv` all have
+  matching 582-column rows and 0 frame-graph validation issues.
+- The authored, forward, and WBOIT lobe smokes all report lobe ready/applied
+  `1/1`, lobe count `6`, selected lobe mask `1`, average lobe energy
+  `0.0681917`, authored irradiance applied `1`, cubemap sampling `1`, and
+  clean stdout/stderr logs. The WBOIT smoke also reports 79 weighted
+  translucency draws and one resolve.
 - Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
   exception, or shader diagnostic matches.
-- This is the first production-filtering policy slice. It does not implement
-  diffuse irradiance convolution, SH/light-probe coefficients, dynamic scene
-  capture filtering, or final artist quality presets.
+- This is still a first production-filtering policy and authored diffuse-lobe
+  carrier. It does not implement full irradiance cubemap convolution, baked
+  SH import, dynamic scene capture filtering, or final artist quality presets.
 
 ## Non-Goals
 

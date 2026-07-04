@@ -321,6 +321,9 @@ struct CurrentVulkanFrameGraphInputs {
     bool authoredReflectionCubemapSeamAwareFiltering = false;
     u32 authoredReflectionCubemapIrradianceReadyCount = 0;
     bool authoredReflectionCubemapIrradianceApplied = false;
+    u32 authoredReflectionCubemapDiffuseLobesReadyCount = 0;
+    bool authoredReflectionCubemapDiffuseLobesApplied = false;
+    u32 authoredReflectionCubemapDiffuseLobeCount = 0;
     u32 authoredReflectionCubemapCacheHitCount = 0;
     u32 authoredReflectionCubemapReloadCount = 0;
     u32 authoredReflectionCubemapRefreshCheckCount = 0;

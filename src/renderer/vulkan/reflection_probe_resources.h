@@ -10,6 +10,12 @@
 
 namespace se {
 
+inline constexpr std::size_t kAuthoredReflectionProbeDiffuseLobeCount = 6;
+using AuthoredReflectionProbeDiffuseLobes = std::array<
+    std::array<f32, 3>,
+    kAuthoredReflectionProbeDiffuseLobeCount
+>;
+
 class VulkanCommandPool;
 class VulkanDevice;
 class VulkanImage;
@@ -120,6 +126,11 @@ public:
         std::string_view assetId
     ) const;
     u32 AuthoredCubemapIrradianceReadyCount() const;
+    bool AuthoredCubemapDiffuseLobesReady(std::string_view assetId) const;
+    AuthoredReflectionProbeDiffuseLobes AuthoredCubemapDiffuseLobes(
+        std::string_view assetId
+    ) const;
+    u32 AuthoredCubemapDiffuseLobesReadyCount() const;
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
@@ -144,6 +155,8 @@ private:
         bool seamAwareFiltering = true;
         bool irradianceReady = false;
         std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
+        bool diffuseLobesReady = false;
+        AuthoredReflectionProbeDiffuseLobes diffuseLobes{};
     };
 
 private:

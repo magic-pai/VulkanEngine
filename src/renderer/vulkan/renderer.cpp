@@ -1354,6 +1354,7 @@ void ResetFrameReflectionProbeCaptureDiagnostics(FrameReflectionProbeSet& probes
     probes.selectedAuthoredAssetHashes.fill(0u);
     probes.selectedAuthoredAssetSpecified.fill(false);
     probes.selectedAuthoredAssetFound.fill(false);
+    probes.selectedDiffuseIrradianceLobesReady.fill(false);
 }
 
 void SetSelectedReflectionProbeCaptureDiagnostics(
@@ -1587,6 +1588,13 @@ void WriteFrameReflectionProbeStats(
         frameProbes.selectedAuthoredAssetFoundMask;
     stats.selectedAuthoredAssetMissingMask =
         frameProbes.selectedAuthoredAssetMissingMask;
+    stats.authoredCubemapDiffuseLobesApplied =
+        frameProbes.selectedDiffuseIrradianceLobesReadyCount;
+    stats.authoredCubemapDiffuseLobeCount =
+        frameProbes.selectedDiffuseIrradianceLobeCount;
+    stats.selectedDiffuseLobeReadyMask =
+        frameProbes.selectedDiffuseIrradianceLobesReadyMask;
+    stats.authoredCubemapDiffuseLobeEnergy = 0.0f;
     stats.capturedSceneRequestedCount =
         frameProbes.capturedSceneRequestedCount;
     stats.capturedScenePlaceholderAllocatedCount =
@@ -1638,6 +1646,21 @@ void WriteFrameReflectionProbeStats(
             frameProbes.selectedCapturedSceneInvalidated[index] ? 1u : 0u;
         stats.selectedAuthoredAssetHashes[index] =
             frameProbes.selectedAuthoredAssetHashes[index];
+        if (frameProbes.selectedDiffuseIrradianceLobesReady[index]) {
+            for (const glm::vec4& lobe :
+                frameProbes.selectedDiffuseIrradianceLobes[index]) {
+                stats.authoredCubemapDiffuseLobeEnergy +=
+                    std::abs(lobe.x) + std::abs(lobe.y) + std::abs(lobe.z);
+            }
+        }
+    }
+    const u32 lobeValueCount =
+        frameProbes.selectedDiffuseIrradianceLobesReadyCount *
+        static_cast<u32>(kReflectionProbeDiffuseLobeCount) *
+        3u;
+    if (lobeValueCount > 0u) {
+        stats.authoredCubemapDiffuseLobeEnergy /=
+            static_cast<f32>(lobeValueCount);
     }
     stats.maxBlendWeight = frameProbes.maxBlendWeight;
     stats.totalBlendWeight = frameProbes.totalBlendWeight;
@@ -1736,6 +1759,17 @@ void PopulateReflectionProbeUniforms(
             glm::max(probe.boxExtents, glm::vec3(0.01f)),
             ReflectionProbeBoxProjectionEnabled(probe) ? 1.0f : 0.0f
         );
+        if (reflectionProbes.selectedDiffuseIrradianceLobesReady[index]) {
+            for (std::size_t lobe = 0; lobe < kReflectionProbeDiffuseLobeCount;
+                 ++lobe) {
+                const std::size_t lobeIndex =
+                    static_cast<std::size_t>(index) *
+                        kReflectionProbeDiffuseLobeCount +
+                    lobe;
+                uniformData.reflectionProbeDiffuseLobes[lobeIndex] =
+                    reflectionProbes.selectedDiffuseIrradianceLobes[index][lobe];
+            }
+        }
     }
     uniformData.reflectionProbeBlendControls = glm::vec4(
         static_cast<f32>(selectedProbeCount),
@@ -3208,6 +3242,8 @@ void VulkanRenderer::DrawFrame() {
         m_ReflectionProbeResources.AuthoredCubemapRefreshCheckCount();
     frameStats.reflectionProbe.authoredCubemapIrradianceReadyCount =
         m_ReflectionProbeResources.AuthoredCubemapIrradianceReadyCount();
+    frameStats.reflectionProbe.authoredCubemapDiffuseLobesReadyCount =
+        m_ReflectionProbeResources.AuthoredCubemapDiffuseLobesReadyCount();
     if (frameReflectionProbes.selectedProbeCount > 0 &&
         frameReflectionProbes.selectedProbes[0].captureSource ==
             RendererReflectionProbeCaptureSource::AuthoredCubemap) {
@@ -3596,6 +3632,9 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapSeamAwareFiltering > 0,
             frameStats.reflectionProbe.authoredCubemapIrradianceReadyCount,
             frameStats.reflectionProbe.authoredCubemapIrradianceApplied > 0,
+            frameStats.reflectionProbe.authoredCubemapDiffuseLobesReadyCount,
+            frameStats.reflectionProbe.authoredCubemapDiffuseLobesApplied > 0,
+            frameStats.reflectionProbe.authoredCubemapDiffuseLobeCount,
             frameStats.reflectionProbe.authoredCubemapCacheHitCount,
             frameStats.reflectionProbe.authoredCubemapReloadCount,
             frameStats.reflectionProbe.authoredCubemapRefreshCheckCount,
@@ -6455,6 +6494,32 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                         irradiance[1],
                         irradiance[2]
                     };
+                }
+                if (authoredCubemapReady &&
+                    m_ReflectionProbeResources.AuthoredCubemapDiffuseLobesReady(
+                        selected.probe.captureAssetId
+                    )) {
+                    const AuthoredReflectionProbeDiffuseLobes diffuseLobes =
+                        m_ReflectionProbeResources.AuthoredCubemapDiffuseLobes(
+                            selected.probe.captureAssetId
+                        );
+                    probes.selectedDiffuseIrradianceLobesReady[index] = true;
+                    ++probes.selectedDiffuseIrradianceLobesReadyCount;
+                    probes.selectedDiffuseIrradianceLobesReadyMask |=
+                        1u << index;
+                    probes.selectedDiffuseIrradianceLobeCount =
+                        static_cast<u32>(kReflectionProbeDiffuseLobeCount);
+                    for (std::size_t lobe = 0;
+                         lobe < kReflectionProbeDiffuseLobeCount;
+                         ++lobe) {
+                        probes.selectedDiffuseIrradianceLobes[index][lobe] =
+                            glm::vec4(
+                                diffuseLobes[lobe][0],
+                                diffuseLobes[lobe][1],
+                                diffuseLobes[lobe][2],
+                                1.0f
+                            );
+                    }
                 }
                 SetSelectedReflectionProbeCaptureDiagnostics(
                     probes,

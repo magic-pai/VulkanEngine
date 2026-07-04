@@ -161,6 +161,11 @@ struct FrameReflectionProbeSet {
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetSpecified{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetFound{};
+    std::array<
+        std::array<glm::vec4, kReflectionProbeDiffuseLobeCount>,
+        kMaxFrameReflectionProbes
+    > selectedDiffuseIrradianceLobes{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedDiffuseIrradianceLobesReady{};
     u32 sceneProbeCount = 0;
     u32 activeLocalProbeCount = 0;
     u32 eligibleSceneProbeCount = 0;
@@ -179,6 +184,9 @@ struct FrameReflectionProbeSet {
     u32 selectedAuthoredAssetSpecifiedMask = 0;
     u32 selectedAuthoredAssetFoundMask = 0;
     u32 selectedAuthoredAssetMissingMask = 0;
+    u32 selectedDiffuseIrradianceLobesReadyCount = 0;
+    u32 selectedDiffuseIrradianceLobesReadyMask = 0;
+    u32 selectedDiffuseIrradianceLobeCount = 0;
     u32 capturedSceneRequestedCount = 0;
     u32 capturedScenePlaceholderAllocatedCount = 0;
     u32 capturedScenePlaceholderReadyCount = 0;

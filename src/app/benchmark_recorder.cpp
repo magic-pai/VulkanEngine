@@ -396,6 +396,11 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.authoredCubemapIrradianceR << ','
         << reflectionProbe.authoredCubemapIrradianceG << ','
         << reflectionProbe.authoredCubemapIrradianceB << ','
+        << reflectionProbe.authoredCubemapDiffuseLobesReadyCount << ','
+        << reflectionProbe.authoredCubemapDiffuseLobesApplied << ','
+        << reflectionProbe.authoredCubemapDiffuseLobeCount << ','
+        << reflectionProbe.selectedDiffuseLobeReadyMask << ','
+        << reflectionProbe.authoredCubemapDiffuseLobeEnergy << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
         << reflectionProbe.selectedCaptureSlots[2] << ','
@@ -896,6 +901,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_cubemap_irradiance_r,"
         << "reflection_probe_authored_cubemap_irradiance_g,"
         << "reflection_probe_authored_cubemap_irradiance_b,"
+        << "reflection_probe_authored_cubemap_diffuse_lobes_ready_count,"
+        << "reflection_probe_authored_cubemap_diffuse_lobes_applied,"
+        << "reflection_probe_authored_cubemap_diffuse_lobe_count,"
+        << "reflection_probe_selected_diffuse_lobe_ready_mask,"
+        << "reflection_probe_authored_cubemap_diffuse_lobe_energy,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"
         << "reflection_probe_selected_capture_slot_2,"

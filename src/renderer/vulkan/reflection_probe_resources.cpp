@@ -73,6 +73,8 @@ struct AuthoredCubemapLoadResult {
     bool seamAwareFiltering = true;
     bool irradianceReady = false;
     std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
+    bool diffuseLobesReady = false;
+    AuthoredReflectionProbeDiffuseLobes diffuseLobes{};
 };
 
 struct AuthoredCubemapPixelData {
@@ -1037,6 +1039,71 @@ std::array<f32, 3> ComputeCubemapDiffuseIrradianceColor(
     };
 }
 
+AuthoredReflectionProbeDiffuseLobes ComputeCubemapDiffuseIrradianceLobes(
+    const AuthoredCubemapPixelData& pixelData,
+    u32 faceSize,
+    const std::array<f32, 3>& baseColor
+) {
+    constexpr std::array<std::array<float, 3>, kAuthoredReflectionProbeDiffuseLobeCount>
+        kLobeAxes{ {
+            { 1.0f, 0.0f, 0.0f },
+            { -1.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f },
+            { 0.0f, -1.0f, 0.0f },
+            { 0.0f, 0.0f, 1.0f },
+            { 0.0f, 0.0f, -1.0f }
+        } };
+
+    std::array<std::array<double, 3>, kAuthoredReflectionProbeDiffuseLobeCount>
+        weightedColor{};
+    std::array<double, kAuthoredReflectionProbeDiffuseLobeCount> totalWeight{};
+    const float size = static_cast<float>(faceSize);
+    for (std::size_t face = 0; face < 6u; ++face) {
+        for (u32 y = 0; y < faceSize; ++y) {
+            for (u32 x = 0; x < faceSize; ++x) {
+                const float u =
+                    (2.0f * (static_cast<float>(x) + 0.5f) / size) - 1.0f;
+                const float v =
+                    (2.0f * (static_cast<float>(y) + 0.5f) / size) - 1.0f;
+                const std::array<float, 3> direction =
+                    CubemapDirection(face, u, v);
+                const float solidAngle = CubemapTexelSolidAngle(faceSize, x, y);
+                const std::array<float, 4> texel =
+                    LoadCubemapBaseTexel(pixelData, faceSize, face, x, y);
+
+                for (std::size_t lobe = 0; lobe < kLobeAxes.size(); ++lobe) {
+                    const float cosine =
+                        std::max(Dot3(direction, kLobeAxes[lobe]), 0.0f);
+                    if (cosine <= 0.000001f) {
+                        continue;
+                    }
+                    const double weight =
+                        static_cast<double>(solidAngle) *
+                        static_cast<double>(cosine);
+                    weightedColor[lobe][0] += static_cast<double>(texel[0]) * weight;
+                    weightedColor[lobe][1] += static_cast<double>(texel[1]) * weight;
+                    weightedColor[lobe][2] += static_cast<double>(texel[2]) * weight;
+                    totalWeight[lobe] += weight;
+                }
+            }
+        }
+    }
+
+    AuthoredReflectionProbeDiffuseLobes lobes{};
+    for (std::size_t lobe = 0; lobe < lobes.size(); ++lobe) {
+        if (totalWeight[lobe] <= 0.000001) {
+            continue;
+        }
+        const double invWeight = 1.0 / totalWeight[lobe];
+        for (std::size_t channel = 0; channel < 3u; ++channel) {
+            lobes[lobe][channel] =
+                static_cast<f32>(weightedColor[lobe][channel] * invWeight) -
+                baseColor[channel];
+        }
+    }
+    return lobes;
+}
+
 struct CubemapSampleLocation {
     std::size_t face = 0;
     float x = 0.0f;
@@ -1474,6 +1541,12 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             ConvertEquirectangularToCubemapPixels(equirectangular, faceSize);
         const std::array<f32, 3> irradianceColor =
             ComputeCubemapDiffuseIrradianceColor(pixelData, faceSize);
+        const AuthoredReflectionProbeDiffuseLobes diffuseLobes =
+            ComputeCubemapDiffuseIrradianceLobes(
+                pixelData,
+                faceSize,
+                irradianceColor
+            );
         AuthoredCubemapMipChain mipChain =
             BuildPrefilteredCubemapMipChain(
                 pixelData,
@@ -1495,7 +1568,9 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             mipChain.filterQuality,
             mipChain.seamAwareFiltering,
             true,
-            irradianceColor
+            irradianceColor,
+            true,
+            diffuseLobes
         };
     }
 
@@ -1517,6 +1592,12 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         ComputeCubemapDiffuseIrradianceColor(
             pixelData,
             static_cast<u32>(faces[0].width)
+        );
+    const AuthoredReflectionProbeDiffuseLobes diffuseLobes =
+        ComputeCubemapDiffuseIrradianceLobes(
+            pixelData,
+            static_cast<u32>(faces[0].width),
+            irradianceColor
         );
     AuthoredCubemapMipChain mipChain =
         BuildPrefilteredCubemapMipChain(
@@ -1540,7 +1621,9 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         mipChain.filterQuality,
         mipChain.seamAwareFiltering,
         true,
-        irradianceColor
+        irradianceColor,
+        true,
+        diffuseLobes
     };
 }
 
@@ -1600,6 +1683,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
+        resource.diffuseLobesReady = false;
+        resource.diffuseLobes = {};
         return;
     }
 
@@ -1637,6 +1722,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
+        resource.diffuseLobesReady = false;
+        resource.diffuseLobes = {};
         return;
     }
 
@@ -1669,6 +1756,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
     resource.irradianceReady = false;
     resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
+    resource.diffuseLobesReady = false;
+    resource.diffuseLobes = {};
 
     try {
         AuthoredCubemapLoadResult loadResult = CreateAuthoredCubemapImage(
@@ -1689,6 +1778,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.seamAwareFiltering = loadResult.seamAwareFiltering;
         resource.irradianceReady = loadResult.irradianceReady;
         resource.irradianceColor = loadResult.irradianceColor;
+        resource.diffuseLobesReady = loadResult.diffuseLobesReady;
+        resource.diffuseLobes = loadResult.diffuseLobes;
         ++m_AuthoredCubemapUploadCount;
         if (resource.prefiltered) {
             ++m_AuthoredCubemapPrefilteredUploadCount;
@@ -1710,6 +1801,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
+        resource.diffuseLobesReady = false;
+        resource.diffuseLobes = {};
     }
 }
 
@@ -2013,6 +2106,38 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapIrradianceReadyCount() const 
     for (const auto& [assetId, resource] : m_AuthoredCubemaps) {
         (void)assetId;
         if (resource.image != nullptr && resource.irradianceReady) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool VulkanReflectionProbeResources::AuthoredCubemapDiffuseLobesReady(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+        found->second.image != nullptr &&
+        found->second.diffuseLobesReady;
+}
+
+AuthoredReflectionProbeDiffuseLobes
+VulkanReflectionProbeResources::AuthoredCubemapDiffuseLobes(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+            found->second.image != nullptr &&
+            found->second.diffuseLobesReady
+        ? found->second.diffuseLobes
+        : AuthoredReflectionProbeDiffuseLobes{};
+}
+
+u32 VulkanReflectionProbeResources::AuthoredCubemapDiffuseLobesReadyCount() const {
+    u32 count = 0;
+    for (const auto& [assetId, resource] : m_AuthoredCubemaps) {
+        (void)assetId;
+        if (resource.image != nullptr && resource.diffuseLobesReady) {
             ++count;
         }
     }

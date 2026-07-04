@@ -37,6 +37,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 reflectionProbeDiffuseLobes[24];
 } frame;
 
 struct MaterialRecord {

@@ -1016,7 +1016,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedAuthoredAssetHashes[3]
     );
     ImGui::Text(
-        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u quality %s seam %s, irradiance %u/%u [%.2f %.2f %.2f], cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
+        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u quality %s seam %s, irradiance %u/%u [%.2f %.2f %.2f], lobes %u/%u count %u mask 0x%X energy %.3f, cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
         stats.reflectionProbe.authoredCubemapLoadedCount,
         stats.reflectionProbe.authoredCubemapMissingCount,
         stats.reflectionProbe.authoredCubemapLoadFailedCount,
@@ -1040,6 +1040,11 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.authoredCubemapIrradianceR,
         stats.reflectionProbe.authoredCubemapIrradianceG,
         stats.reflectionProbe.authoredCubemapIrradianceB,
+        stats.reflectionProbe.authoredCubemapDiffuseLobesReadyCount,
+        stats.reflectionProbe.authoredCubemapDiffuseLobesApplied,
+        stats.reflectionProbe.authoredCubemapDiffuseLobeCount,
+        stats.reflectionProbe.selectedDiffuseLobeReadyMask,
+        stats.reflectionProbe.authoredCubemapDiffuseLobeEnergy,
         stats.reflectionProbe.authoredCubemapCacheHitCount,
         stats.reflectionProbe.authoredCubemapReloadCount,
         stats.reflectionProbe.authoredCubemapRefreshCheckCount,

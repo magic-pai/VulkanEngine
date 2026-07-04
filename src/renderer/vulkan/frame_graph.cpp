@@ -1723,7 +1723,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PersistentCache,
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
-            inputs.authoredReflectionCubemapIrradianceApplied
+            inputs.authoredReflectionCubemapDiffuseLobesApplied
+                ? "loaded authored reflection-probe cubemaps with quality-controlled GGX specular mips and directional diffuse lobes"
+                : inputs.authoredReflectionCubemapIrradianceApplied
                 ? "loaded authored reflection-probe cubemaps with quality-controlled GGX specular mips and diffuse irradiance color"
                 : inputs.authoredReflectionCubemapSeamAwareFiltering
                 ? "loaded seam-aware GGX authored reflection-probe cubemaps with explicit mip payloads"
@@ -1736,7 +1738,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : inputs.authoredReflectionCubemapEquirectangularConversionCount > 0
                 ? "loaded authored reflection-probe cubemaps with equirectangular conversions available for selected capture slots"
                 : "loaded authored reflection-probe cubemaps available for selected capture slots",
-            inputs.authoredReflectionCubemapIrradianceApplied
+            inputs.authoredReflectionCubemapDiffuseLobesApplied
+                ? "authored diffuse lobe set applied to selected local probe"
+                : inputs.authoredReflectionCubemapIrradianceApplied
                 ? "authored diffuse irradiance applied to selected local probe"
                 : inputs.authoredReflectionCubemapSeamAwareFiltering
                 ? "seam-aware authored mip chain uploaded"

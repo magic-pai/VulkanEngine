@@ -277,6 +277,11 @@ struct RendererReflectionProbeStats {
     f32 authoredCubemapIrradianceR = 0.0f;
     f32 authoredCubemapIrradianceG = 0.0f;
     f32 authoredCubemapIrradianceB = 0.0f;
+    u32 authoredCubemapDiffuseLobesReadyCount = 0;
+    u32 authoredCubemapDiffuseLobesApplied = 0;
+    u32 authoredCubemapDiffuseLobeCount = 0;
+    u32 selectedDiffuseLobeReadyMask = 0;
+    f32 authoredCubemapDiffuseLobeEnergy = 0.0f;
     u32 droppedProbeCount = 0;
     i32 selectedProbeIndex = -1;
     std::array<i32, kMaxFrameReflectionProbes> selectedProbeIndices{};

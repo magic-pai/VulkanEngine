@@ -23,6 +23,9 @@ inline constexpr std::size_t kLightIndexGroupsPerTile =
     (kMaxFrameLightsPerTile + 3) / 4;
 inline constexpr std::size_t kMaxFrameLightTileOverflowIndices = 65536;
 inline constexpr std::size_t kMaxFrameReflectionProbes = 4;
+inline constexpr std::size_t kReflectionProbeDiffuseLobeCount = 6;
+inline constexpr std::size_t kReflectionProbeDiffuseLobeVec4Count =
+    kMaxFrameReflectionProbes * kReflectionProbeDiffuseLobeCount;
 inline constexpr std::size_t kMaxFrameMaterials = 256;
 inline constexpr std::size_t kMaxFrameLocalShadowTiles = 64;
 inline constexpr std::size_t kAutoExposureHistogramBinCount = 64;
@@ -71,6 +74,8 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 autoExposureControls{ 0.18f, 0.25f, 4.0f, 1.0f };
     alignas(16) glm::vec4 sharpeningControls{ 0.0f, 0.35f, 1.0f, 0.0f };
     alignas(16) glm::vec4 colorGradingLutControls{ 0.0f, 16.0f, 0.0f, 0.0f };
+    alignas(16) std::array<glm::vec4, kReflectionProbeDiffuseLobeVec4Count>
+        reflectionProbeDiffuseLobes{};
 };
 
 struct GpuLocalLightRecord {
@@ -186,7 +191,9 @@ struct ObjectPushConstants {
 static_assert(
     sizeof(UniformBufferObject) ==
         sizeof(glm::mat4) * 5 +
-        sizeof(glm::vec4) * (24 + kMaxFrameReflectionProbes * 4),
+        sizeof(glm::vec4) *
+            (24 + kMaxFrameReflectionProbes *
+                (4 + kReflectionProbeDiffuseLobeCount)),
     "UniformBufferObject layout must match the shader uniform block"
 );
 

@@ -55,6 +55,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 reflectionProbeDiffuseLobes[24];
 } frame;
 
 struct LocalLightRecord {
@@ -149,6 +150,7 @@ const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
 const int MAX_REFLECTION_PROBES = 4;
+const int REFLECTION_PROBE_DIFFUSE_LOBE_COUNT = 6;
 
 bool HasTextureFlag(float flags, float bit) {
     return mod(floor(flags / bit), 2.0) > 0.5;
@@ -464,6 +466,29 @@ vec3 SampleLocalReflectionProbeMap(int slotIndex, vec3 direction, float lod) {
     return textureLod(localReflectionProbeMaps[3], direction, lod).rgb;
 }
 
+vec3 LocalReflectionProbeDiffuseRadianceAt(
+    int probeIndex,
+    vec3 normal,
+    vec3 fallbackRadiance
+) {
+    int baseIndex = probeIndex * REFLECTION_PROBE_DIFFUSE_LOBE_COUNT;
+    if (frame.reflectionProbeDiffuseLobes[baseIndex].a <= 0.5) {
+        return fallbackRadiance;
+    }
+
+    vec3 n = dot(normal, normal) > 0.0001
+        ? normalize(normal)
+        : vec3(0.0, 1.0, 0.0);
+    vec3 irradiance = max(frame.reflectionProbeColorArray[probeIndex].rgb, vec3(0.0));
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 0].rgb * max(n.x, 0.0);
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 1].rgb * max(-n.x, 0.0);
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 2].rgb * max(n.y, 0.0);
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 3].rgb * max(-n.y, 0.0);
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 4].rgb * max(n.z, 0.0);
+    irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 5].rgb * max(-n.z, 0.0);
+    return max(irradiance, vec3(0.0));
+}
+
 vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
 }
@@ -511,20 +536,30 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
                 direction,
                 worldPosition
             );
-        vec3 localRadiance =
-            globalRadiance * localTint * localIntensity * glossBoost;
+        vec3 sampledRadiance = globalRadiance * localTint;
         if (color.a > 0.5) {
             int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
-            localRadiance =
+            sampledRadiance =
                 max(SampleLocalReflectionProbeMap(
                     slotIndex,
                     sampleDirection,
                     roughnessClamped * 4.0
                 ), vec3(0.0)) *
-                localTint *
-                localIntensity *
-                glossBoost;
+                localTint;
         }
+        vec3 diffuseRadiance = LocalReflectionProbeDiffuseRadianceAt(
+            probeIndex,
+            direction,
+            sampledRadiance
+        );
+        vec3 localRadiance =
+            mix(
+                sampledRadiance,
+                diffuseRadiance,
+                smoothstep(0.72, 1.0, roughnessClamped)
+            ) *
+            localIntensity *
+            glossBoost;
         localBlend += localRadiance * (rawWeight / totalWeight);
     }
 
