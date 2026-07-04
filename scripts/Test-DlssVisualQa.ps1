@@ -18,6 +18,7 @@ param(
     [string]$DefaultSceneDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json",
     [string]$ImportedDynamicDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_dynamic_dlaa_object_motion_visual_qa_baseline.json",
     [string]$ImportedArticulatedDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_imported_articulated_dlaa_object_motion_visual_qa_baseline.json",
+    [string]$ImportedSkinnedDiagnosticBaselinePath = "docs\reference_baselines\dlss_imported_skinned_diagnostic_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
     [string[]]$Suite = @("full"),
     [switch]$ListSuites,
@@ -38,6 +39,7 @@ $baseSuites =
         "default-object-motion",
         "imported-dynamic",
         "imported-articulated",
+        "imported-skinned-diagnostic",
         "wboit",
         "forward-special",
         "material-stress",
@@ -266,6 +268,19 @@ $importedArticulatedDlaaObjectMotionBaselineManifest =
 if ($importedArticulatedDlaaObjectMotionBaselineManifest.target -ne $Target) {
     throw "Imported-articulated DLAA object-motion visual QA baseline target mismatch: expected $Target, manifest has $($importedArticulatedDlaaObjectMotionBaselineManifest.target)"
 }
+$importedSkinnedDiagnosticBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($ImportedSkinnedDiagnosticBaselinePath)) {
+    [System.IO.Path]::GetFullPath($ImportedSkinnedDiagnosticBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ImportedSkinnedDiagnosticBaselinePath))
+}
+if (!(Test-Path -LiteralPath $importedSkinnedDiagnosticBaselineManifestPath)) {
+    throw "Imported-skinned diagnostic visual QA baseline manifest not found: $importedSkinnedDiagnosticBaselineManifestPath"
+}
+$importedSkinnedDiagnosticBaselineManifest =
+    Get-Content -Raw -LiteralPath $importedSkinnedDiagnosticBaselineManifestPath | ConvertFrom-Json
+if ($importedSkinnedDiagnosticBaselineManifest.target -ne $Target) {
+    throw "Imported-skinned diagnostic visual QA baseline target mismatch: expected $Target, manifest has $($importedSkinnedDiagnosticBaselineManifest.target)"
+}
 
 $importedDynamicModelPath =
     [System.IO.Path]::GetFullPath((Join-Path $repoRoot "assets\models\demo_crystal.obj"))
@@ -276,6 +291,11 @@ $importedArticulatedModelPath =
     [System.IO.Path]::GetFullPath((Join-Path $repoRoot "assets\models\articulated_links.obj"))
 if (!(Test-Path -LiteralPath $importedArticulatedModelPath)) {
     throw "Imported-articulated DLAA object-motion model not found: $importedArticulatedModelPath"
+}
+$importedSkinnedDiagnosticModelPath =
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot "assets\models\skinned_probe.dae"))
+if (!(Test-Path -LiteralPath $importedSkinnedDiagnosticModelPath)) {
+    throw "Imported-skinned diagnostic model not found: $importedSkinnedDiagnosticModelPath"
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -1274,6 +1294,16 @@ if (-not $importedArticulatedDlaaObjectMotionPresentEnvironment.ContainsKey("SE_
     $importedArticulatedDlaaObjectMotionPresentEnvironment.ContainsKey("SE_BENCHMARK_CAMERA_MOTION")) {
     throw "Imported articulated DLAA lane must be object-motion driven with a static camera"
 }
+$importedSkinnedDiagnosticPresentEnvironment =
+    $importedDynamicDlaaObjectMotionPresentEnvironment.Clone()
+$importedSkinnedDiagnosticPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
+    $importedSkinnedDiagnosticBaselineManifestPath
+$importedSkinnedDiagnosticPresentEnvironment["SELFENGINE_MODEL_PATH"] =
+    $importedSkinnedDiagnosticModelPath
+if (-not $importedSkinnedDiagnosticPresentEnvironment.ContainsKey("SE_BENCHMARK_OBJECT_MOTION") -or
+    $importedSkinnedDiagnosticPresentEnvironment.ContainsKey("SE_BENCHMARK_CAMERA_MOTION")) {
+    throw "Imported skinned diagnostic DLAA lane must be object-motion driven with a static camera"
+}
 $wboitNativeEnvironment = @{
     "SE_BENCHMARK_SCENE" = "grid"
     "SE_BENCHMARK_TRANSPARENT_MATERIAL" = "1"
@@ -1669,6 +1699,30 @@ function New-QuickLaneSummary {
     return $lane
 }
 
+function Invoke-QuickDlssBenchmarkSuite {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$LaneKey,
+        [Parameter(Mandatory = $true)][hashtable]$Environment,
+        [Parameter(Mandatory = $true)]$Manifest,
+        [string]$Model = ""
+    )
+
+    $benchmark = Invoke-BenchmarkRun `
+        -Name $Name `
+        -Environment $Environment `
+        -UseApplicationScene
+    $metrics = Assert-QuickDlssPresentRow `
+        -Name $LaneKey `
+        -Row $benchmark.LastRow `
+        -Expected $Manifest.expected.dlssPresent
+
+    return New-QuickLaneSummary `
+        -Benchmark $benchmark `
+        -Metrics $metrics `
+        -Model $Model
+}
+
 function Invoke-QuickDlssPairSuite {
     param(
         [Parameter(Mandatory = $true)][string]$NativeName,
@@ -1923,6 +1977,21 @@ if (-not ($selectedSuites -contains "full")) {
                 -Environment $importedArticulatedDlaaObjectMotionPresentEnvironment `
                 -Manifest $importedArticulatedDlaaObjectMotionBaselineManifest `
                 -Model $importedArticulatedModelPath
+    }
+
+    if ($selectedSuites -contains "imported-skinned-diagnostic") {
+        $quickSummary["baselines"]["importedSkinnedDiagnostic"] = [ordered]@{
+            manifest = $importedSkinnedDiagnosticBaselineManifestPath
+            name = $importedSkinnedDiagnosticBaselineManifest.name
+            model = $importedSkinnedDiagnosticModelPath
+        }
+        $quickSummary["lanes"]["importedSkinnedDiagnosticPresent"] =
+            Invoke-QuickDlssBenchmarkSuite `
+                -Name "imported_skinned_diagnostic_present" `
+                -LaneKey "importedSkinnedDiagnostic" `
+                -Environment $importedSkinnedDiagnosticPresentEnvironment `
+                -Manifest $importedSkinnedDiagnosticBaselineManifest `
+                -Model $importedSkinnedDiagnosticModelPath
     }
 
     if ($selectedSuites -contains "wboit") {

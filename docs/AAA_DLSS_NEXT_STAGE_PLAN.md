@@ -530,6 +530,66 @@ Verification on 2026-07-05:
 This prevents unsupported skinned/animated source content from being invisible
 to QA, but true skinned/animated velocity remains open.
 
+## Slice 4.24 Execution Plan
+
+Slice 4.24 adds the positive skinned/animation diagnostic lane that Slice 4.23
+made possible. The previous slice exposed runtime import diagnostics, but only
+proved the zero case on rigid OBJ content. This slice must prove that a real
+source asset with animation and skinning metadata trips the unsupported flag.
+
+1. Repo-owned skinned diagnostic probe.
+   - Add a small Collada asset with one renderable triangle, one animation
+     channel, and a two-bone skin controller.
+   - Keep the asset intentionally tiny so it is a diagnostic probe, not an
+     image-quality scene.
+
+2. Focused benchmark-only QA lane.
+   - Add `imported-skinned-diagnostic` as a focused suite.
+   - Run one DLSS-present benchmark/CSV pass and do not capture screenshots or
+     image sequences.
+   - Assert runtime import counters:
+     `requested/loaded/cache=1/1/0`,
+     `mesh/material=1/1`,
+     `animation/meshWithBones/bones/unsupported=1/1/2/1`.
+
+3. Scope guard.
+   - Keep this lane out of the dynamic screenshot group for now.
+   - Do not call it skinned animation support. It is an unsupported-feature
+     sentinel that protects the existing rigid imported lanes from false
+     production claims.
+
+## Slice 4.24 Execution Evidence
+
+Slice 4.24 is implemented and verified. The new focused suite is
+`imported-skinned-diagnostic`, backed by
+`docs/reference_baselines/dlss_imported_skinned_diagnostic_visual_qa_baseline.json`
+and the repo-owned asset `assets/models/skinned_probe.dae`.
+
+Verification on 2026-07-05:
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -ListSuites`
+  lists `imported-skinned-diagnostic` without building, launching the renderer,
+  or capturing windows.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- CSV shape: `791/791` columns.
+- FrameGraph validation issues: `0`.
+- Runtime import diagnostics:
+  `requested/loaded/cache=1/1/0`,
+  `mesh/material=1/1`,
+  `animation/meshWithBones/bones/unsupported=1/1/2/1`.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Draw and scene counters:
+  `main/gbuffer/forwardResidual/weightedTranslucency=1/1/0/0`,
+  `materials=1`, `textured=0`, `lights=4`, `local=3`.
+
+This closes the positive unsupported-diagnostic proof. True skinned/animated
+DLSS/DLAA quality still requires animation sampling, skinned vertex carriers,
+previous-bone or previous-pose data, skinned velocity output, and a visual
+dynamic skinned lane.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

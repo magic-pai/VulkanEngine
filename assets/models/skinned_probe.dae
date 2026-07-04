@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor>
+      <authoring_tool>SelfEngine skinned import diagnostic probe</authoring_tool>
+    </contributor>
+    <created>2026-07-05T00:00:00Z</created>
+    <modified>2026-07-05T00:00:00Z</modified>
+    <unit name="meter" meter="1"/>
+    <up_axis>Y_UP</up_axis>
+  </asset>
+  <library_effects>
+    <effect id="ProbeEffect">
+      <profile_COMMON>
+        <technique sid="common">
+          <phong>
+            <diffuse>
+              <color>0.8 0.35 0.2 1</color>
+            </diffuse>
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="ProbeMaterial" name="ProbeMaterial">
+      <instance_effect url="#ProbeEffect"/>
+    </material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="ProbeGeometry" name="ProbeGeometry">
+      <mesh>
+        <source id="ProbeGeometry-positions">
+          <float_array id="ProbeGeometry-positions-array" count="9">-0.45 0 0 0.45 0 0 0 0.7 0</float_array>
+          <technique_common>
+            <accessor source="#ProbeGeometry-positions-array" count="3" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="ProbeGeometry-normals">
+          <float_array id="ProbeGeometry-normals-array" count="9">0 0 1 0 0 1 0 0 1</float_array>
+          <technique_common>
+            <accessor source="#ProbeGeometry-normals-array" count="3" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <vertices id="ProbeGeometry-vertices">
+          <input semantic="POSITION" source="#ProbeGeometry-positions"/>
+        </vertices>
+        <triangles material="ProbeMaterial" count="1">
+          <input semantic="VERTEX" source="#ProbeGeometry-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#ProbeGeometry-normals" offset="1"/>
+          <p>0 0 1 1 2 2</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_controllers>
+    <controller id="ProbeSkin" name="ProbeSkin">
+      <skin source="#ProbeGeometry">
+        <bind_shape_matrix>1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</bind_shape_matrix>
+        <source id="ProbeSkin-joints">
+          <Name_array id="ProbeSkin-joints-array" count="2">Root Bone</Name_array>
+          <technique_common>
+            <accessor source="#ProbeSkin-joints-array" count="2" stride="1">
+              <param name="JOINT" type="Name"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="ProbeSkin-bind-poses">
+          <float_array id="ProbeSkin-bind-poses-array" count="32">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</float_array>
+          <technique_common>
+            <accessor source="#ProbeSkin-bind-poses-array" count="2" stride="16">
+              <param name="TRANSFORM" type="float4x4"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <source id="ProbeSkin-weights">
+          <float_array id="ProbeSkin-weights-array" count="5">1 0.8 0.2 0.5 0.5</float_array>
+          <technique_common>
+            <accessor source="#ProbeSkin-weights-array" count="5" stride="1">
+              <param name="WEIGHT" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+        <joints>
+          <input semantic="JOINT" source="#ProbeSkin-joints"/>
+          <input semantic="INV_BIND_MATRIX" source="#ProbeSkin-bind-poses"/>
+        </joints>
+        <vertex_weights count="3">
+          <input semantic="JOINT" source="#ProbeSkin-joints" offset="0"/>
+          <input semantic="WEIGHT" source="#ProbeSkin-weights" offset="1"/>
+          <vcount>1 2 2</vcount>
+          <v>0 0 0 1 1 2 0 3 1 4</v>
+        </vertex_weights>
+      </skin>
+    </controller>
+  </library_controllers>
+  <library_animations>
+    <animation id="ProbeBoneAction" name="ProbeBoneAction">
+      <source id="ProbeBoneAction-input">
+        <float_array id="ProbeBoneAction-input-array" count="2">0 1</float_array>
+        <technique_common>
+          <accessor source="#ProbeBoneAction-input-array" count="2" stride="1">
+            <param name="TIME" type="float"/>
+          </accessor>
+        </technique_common>
+      </source>
+      <source id="ProbeBoneAction-output">
+        <float_array id="ProbeBoneAction-output-array" count="32">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0.9848 0 0.1736 0 0 1 0 0 -0.1736 0 0.9848 0 0 0.08 0 1</float_array>
+        <technique_common>
+          <accessor source="#ProbeBoneAction-output-array" count="2" stride="16">
+            <param name="TRANSFORM" type="float4x4"/>
+          </accessor>
+        </technique_common>
+      </source>
+      <source id="ProbeBoneAction-interpolation">
+        <Name_array id="ProbeBoneAction-interpolation-array" count="2">LINEAR LINEAR</Name_array>
+        <technique_common>
+          <accessor source="#ProbeBoneAction-interpolation-array" count="2" stride="1">
+            <param name="INTERPOLATION" type="Name"/>
+          </accessor>
+        </technique_common>
+      </source>
+      <sampler id="ProbeBoneAction-sampler">
+        <input semantic="INPUT" source="#ProbeBoneAction-input"/>
+        <input semantic="OUTPUT" source="#ProbeBoneAction-output"/>
+        <input semantic="INTERPOLATION" source="#ProbeBoneAction-interpolation"/>
+      </sampler>
+      <channel source="#ProbeBoneAction-sampler" target="Bone/matrix"/>
+    </animation>
+  </library_animations>
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="Root" name="Root" sid="Root" type="JOINT">
+        <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1</matrix>
+        <node id="Bone" name="Bone" sid="Bone" type="JOINT">
+          <matrix sid="matrix">1 0 0 0 0 1 0 0 0 0 1 0 0 0.35 0 1</matrix>
+        </node>
+      </node>
+      <node id="ProbeNode" name="ProbeNode">
+        <instance_controller url="#ProbeSkin">
+          <skeleton>#Root</skeleton>
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="ProbeMaterial" target="#ProbeMaterial"/>
+            </technique_common>
+          </bind_material>
+        </instance_controller>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene>
+    <instance_visual_scene url="#Scene"/>
+  </scene>
+</COLLADA>
