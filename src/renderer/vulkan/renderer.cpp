@@ -3368,6 +3368,9 @@ void VulkanRenderer::DrawFrame() {
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
     const bool temporalUpscalePostSourceRequested =
         TemporalUpscalePostSourceRequestedFromEnvironment();
+    const bool suppressNativeTaaResolveForUpscaler =
+        temporalUpscalePostSourceRequested &&
+        TemporalUpscalerPluginRequestedFromEnvironment();
     const bool showDeferredHdr =
         UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView) ||
         temporalUpscalePostSourceRequested;
@@ -3403,7 +3406,8 @@ void VulkanRenderer::DrawFrame() {
         taaNeighborhoodClampEnabled,
         taaVelocityRejectionThreshold,
         taaDepthRejectionThreshold,
-        temporalJitterApplyRequested
+        temporalJitterApplyRequested,
+        suppressNativeTaaResolveForUpscaler
     );
     const FrameTemporalUpscaleState temporalUpscaleState =
         BuildFrameTemporalUpscaleState(
@@ -6917,7 +6921,8 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     bool taaNeighborhoodClampEnabled,
     f32 taaVelocityRejectionThreshold,
     f32 taaDepthRejectionThreshold,
-    bool temporalJitterApplyRequested
+    bool temporalJitterApplyRequested,
+    bool suppressNativeTaaResolveForUpscaler
 ) const {
     FrameTemporalState state{};
     state.previousMatrices = m_PreviousTemporalMatrices;
@@ -6963,6 +6968,8 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
         velocityTargetAllocated && matricesAvailable && state.historyValid;
     state.velocityObjectMotionReady = false;
     state.taaResolveConfigured = taaResolveConfigured;
+    state.taaResolveSuppressedForUpscaler =
+        suppressNativeTaaResolveForUpscaler;
     state.taaHistoryColorTargetAllocated = historyColorTargetAllocated;
     state.taaHistoryColorReady = historyColorReady;
     state.taaHistoryWeight = taaHistoryWeight;
@@ -6983,13 +6990,22 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     } else if (!state.velocityCameraMotionReady) {
         state.taaFallbackReason = RendererTaaFallbackReason::VelocityUnavailable;
     } else {
-        state.taaFallbackReason = RendererTaaFallbackReason::None;
-        state.taaResolveEnabled = true;
+        state.temporalUpscaleInputReady = true;
+        if (suppressNativeTaaResolveForUpscaler) {
+            state.taaFallbackReason =
+                RendererTaaFallbackReason::SuppressedForTemporalUpscaler;
+        } else {
+            state.taaFallbackReason = RendererTaaFallbackReason::None;
+            state.taaResolveEnabled = true;
+        }
+    }
+    if (state.taaResolveEnabled) {
+        state.temporalUpscaleInputReady = true;
     }
     state.jitterApplied =
         state.jitterEnabled &&
         temporalJitterApplyRequested &&
-        state.taaResolveEnabled;
+        (state.taaResolveEnabled || state.temporalUpscaleInputReady);
     if (!state.historyValid && matricesAvailable) {
         state.previousMatrices = *matrices;
     }
@@ -7071,7 +7087,7 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.inputReadinessMask |= kTemporalUpscaleInputFrameStateBit;
     }
     state.temporalUpscaleContractReady =
-        temporalState.taaResolveEnabled &&
+        temporalState.temporalUpscaleInputReady &&
         (state.inputReadinessMask & state.requiredInputMask) ==
             state.requiredInputMask;
 
@@ -7240,6 +7256,8 @@ void VulkanRenderer::WriteTemporalStats(
         temporalState.taaResolveConfigured ? 1u : 0u;
     stats.taaResolveEnabled =
         temporalState.taaResolveEnabled ? 1u : 0u;
+    stats.taaResolveSuppressedForUpscaler =
+        temporalState.taaResolveSuppressedForUpscaler ? 1u : 0u;
     stats.taaHistoryColorTargetAllocated =
         historyColorTargetAllocated ? 1u : 0u;
     stats.taaHistoryColorFormat =
@@ -7311,6 +7329,8 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleState.temporalUpscaleRequested ? 1u : 0u;
     stats.temporalUpscaleEnabled =
         temporalUpscaleState.temporalUpscaleEnabled ? 1u : 0u;
+    stats.temporalUpscaleInputReady =
+        temporalState.temporalUpscaleInputReady ? 1u : 0u;
     stats.temporalUpscaleFallbackReason =
         static_cast<u32>(temporalUpscaleState.fallbackReason);
     stats.temporalUpscaleInputReadinessMask =

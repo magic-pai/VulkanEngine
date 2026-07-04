@@ -1331,14 +1331,22 @@ after the evaluate contract is stable.
   `docs/reference_baselines/dlss_default_scene_dlaa_motion_visual_qa_baseline.json`.
 - Verification:
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
-  passes. The moving DLAA row reports matching `780/780` columns, 0
+  passes. The moving DLAA row reports matching `782/782` columns, 0
   frame-graph validation issues, output/post `1/1` and `1/1/0`, quality gate
-  `1/1/0`, camera-motion readiness `1/1`, jitter applied `1`, draw route
+  `1/1/0`, camera-motion readiness `1/1`, jitter applied `1`, DLSS input ready
+  `1`, native TAA resolve `0`, native TAA suppress-for-upscaler `1`, draw route
   `5/5/0/0`, and DLSS quality mode/preset `6/11`.
-- The latest dynamic sequence reports `minChanged=128`, `maxMean=3.9953`,
-  `max=564`, edge sample floor `1041`, max changed-edge pixels `81`, max mean
-  edge delta `3.9913`, and max edge delta `116.8768`. This is stronger
-  evidence for the user's moving-camera shimmer case, but it is still not final
-  production IQ: the next fix should split DLSS input readiness from native TAA
-  final-composite resolve, then add moving-object/imported/skinned coverage and
-  stricter content-specific tuning.
+- The same slice also splits DLSS input readiness from native TAA final-
+  composite resolve. In the moving DLAA row, `SE_TAA=1` still prepares the
+  history/velocity inputs required by the upscaler contract, but the final HDR
+  composite no longer blends native TAA over the DLSS output; CSV reports
+  `temporal_taa_resolve_enabled=0`,
+  `temporal_taa_resolve_suppressed_for_upscaler=1`,
+  `temporal_taa_fallback_reason=6`, and
+  `temporal_upscale_contract_ready=1`.
+- The latest dynamic sequence reports `minChanged=133`, `maxMean=4.1015`,
+  `max=564`, edge sample floor `1045`, max changed-edge pixels `87`, max mean
+  edge delta `4.1589`, and max edge delta `188.0`. This is stronger evidence
+  for the user's moving-camera shimmer case, but it is still not final
+  production IQ: the next depth should add moving-object/imported/skinned
+  coverage and stricter content-specific tuning.

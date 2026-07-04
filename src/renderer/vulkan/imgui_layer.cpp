@@ -1156,7 +1156,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureFallbacks
     );
     ImGui::Text(
-        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s/%s history %s copies %u weight %.2f fallback %u reject %s clamp %s consumers ready 0x%X active 0x%X unsupported 0x%X",
+        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s/%s suppress %u history %s copies %u weight %.2f fallback %u reject %s clamp %s consumers ready 0x%X active 0x%X unsupported 0x%X",
         stats.temporal.velocityCameraMotionReady ? "camera-ready" : "cold",
         stats.temporal.historyValid ? "valid" : "cold",
         stats.temporal.historyReset,
@@ -1168,6 +1168,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.velocityMaterialAuxMigrated ? "split" : "missing",
         stats.temporal.taaResolveConfigured ? "configured" : "off",
         stats.temporal.taaResolveEnabled ? "enabled" : "fallback",
+        stats.temporal.taaResolveSuppressedForUpscaler,
         stats.temporal.taaHistoryColorReady ? "ready" : "cold",
         stats.temporal.taaHistoryColorCopies,
         stats.temporal.taaHistoryWeight,
@@ -1179,7 +1180,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalConsumerUnsupportedMask
     );
     ImGui::Text(
-        "Temporal upscale: scale req/active %.2f/%.2f applied %u, display %ux%u requested %ux%u active %ux%u, dynamic %u/%u TAAU %u upscale %u/%u fallback %u contract %u inputs 0x%X/0x%X plugin %u/%u",
+        "Temporal upscale: scale req/active %.2f/%.2f applied %u, display %ux%u requested %ux%u active %ux%u, dynamic %u/%u TAAU %u upscale %u/%u input %u fallback %u contract %u inputs 0x%X/0x%X plugin %u/%u",
         stats.temporal.renderScaleRequested,
         stats.temporal.renderScaleActive,
         stats.temporal.renderScaleApplied,
@@ -1194,6 +1195,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.taauRequested,
         stats.temporal.temporalUpscaleRequested,
         stats.temporal.temporalUpscaleEnabled,
+        stats.temporal.temporalUpscaleInputReady,
         stats.temporal.temporalUpscaleFallbackReason,
         stats.temporal.temporalUpscaleContractReady,
         stats.temporal.temporalUpscaleInputReadinessMask,

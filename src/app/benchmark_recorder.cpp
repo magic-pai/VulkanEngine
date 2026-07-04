@@ -591,6 +591,7 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.jitterUvY << ','
         << temporal.taaResolveEnabled << ','
         << temporal.taaResolveConfigured << ','
+        << temporal.taaResolveSuppressedForUpscaler << ','
         << temporal.taaHistoryColorTargetAllocated << ','
         << static_cast<int>(temporal.taaHistoryColorFormat) << ','
         << temporal.taaHistoryColorReady << ','
@@ -636,6 +637,7 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.taauRequested << ','
         << temporal.temporalUpscaleRequested << ','
         << temporal.temporalUpscaleEnabled << ','
+        << temporal.temporalUpscaleInputReady << ','
         << temporal.temporalUpscaleFallbackReason << ','
         << temporal.temporalUpscaleInputReadinessMask << ','
         << temporal.temporalUpscaleRequiredInputMask << ','
@@ -1232,6 +1234,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_jitter_uv_x,temporal_jitter_uv_y,"
         << "temporal_taa_resolve_enabled,"
         << "temporal_taa_resolve_configured,"
+        << "temporal_taa_resolve_suppressed_for_upscaler,"
         << "temporal_taa_history_color_target_allocated,"
         << "temporal_taa_history_color_format,"
         << "temporal_taa_history_color_ready,"
@@ -1277,6 +1280,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_taau_requested,"
         << "temporal_upscale_requested,"
         << "temporal_upscale_enabled,"
+        << "temporal_upscale_input_ready,"
         << "temporal_upscale_fallback_reason,"
         << "temporal_upscale_input_readiness_mask,"
         << "temporal_upscale_required_input_mask,"

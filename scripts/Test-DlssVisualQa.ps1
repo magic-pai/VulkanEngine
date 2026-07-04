@@ -1310,6 +1310,11 @@ if ($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -ne $defaultS
 if ($defaultSceneDlaaMotionRow.temporal_jitter_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
     throw "Default-scene moving DLAA did not apply the expected projection jitter policy"
 }
+if ($defaultSceneDlaaMotionRow.temporal_upscale_input_ready -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady -or
+    $defaultSceneDlaaMotionRow.temporal_taa_resolve_enabled -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled -or
+    $defaultSceneDlaaMotionRow.temporal_taa_resolve_suppressed_for_upscaler -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler) {
+    throw "Default-scene moving DLAA did not keep DLSS input readiness separate from native TAA resolve"
+}
 if ($defaultSceneDlaaMotionRow.temporal_render_scale_active -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleActive -or
     $defaultSceneDlaaMotionRow.temporal_render_scale_applied -ne $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.renderScaleApplied) {
     throw "Default-scene moving DLAA did not stay on the full-resolution render path"
@@ -1576,6 +1581,8 @@ $defaultSceneDlaaMotionDrawRoute =
     "$($defaultSceneDlaaMotionRow.main_draws)/$($defaultSceneDlaaMotionRow.gbuffer_draws)/$($defaultSceneDlaaMotionRow.forward_residual_draws)/$($defaultSceneDlaaMotionRow.weighted_translucency_draws)"
 $defaultSceneDlaaMotionCameraMotion =
     "$($defaultSceneDlaaMotionRow.temporal_velocity_camera_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)"
+$defaultSceneDlaaMotionTaaResolve =
+    "input/enabled/suppressed=$($defaultSceneDlaaMotionRow.temporal_upscale_input_ready)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_enabled)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
 $wboitNativePostSource =
     "$($wboitNativeRow.temporal_upscale_post_source_requested)/$($wboitNativeRow.temporal_upscale_post_source_active)/$($wboitNativeRow.temporal_upscale_post_source_fallback_reason)"
 $wboitNativeQualityGate =
@@ -1652,6 +1659,7 @@ Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.renderScale" -Actu
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityMode" -Actual $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_mode -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.qualityMode
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.recommendedPreset" -Actual $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.recommendedPreset
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.cameraMotion" -Actual $defaultSceneDlaaMotionCameraMotion -Expected "$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)"
+Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.taaResolve" -Actual $defaultSceneDlaaMotionTaaResolve -Expected "input/enabled/suppressed=$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler)"
 Assert-BaselineText -Name "wboit.native.postSource" -Actual $wboitNativePostSource -Expected $wboitBaselineManifest.expected.native.postSource
 Assert-BaselineText -Name "wboit.native.qualityGate" -Actual $wboitNativeQualityGate -Expected $wboitBaselineManifest.expected.native.qualityGate
 Assert-BaselineText -Name "wboit.dlssPresent.evaluateOutput" -Actual $wboitDlssEvaluateOutput -Expected $wboitBaselineManifest.expected.dlssPresent.evaluateOutput
@@ -2009,6 +2017,7 @@ $summary = [pscustomobject]@{
         dlssExtents = $defaultSceneDlaaMotionDlssExtents
         drawRoute = $defaultSceneDlaaMotionDrawRoute
         cameraMotion = $defaultSceneDlaaMotionCameraMotion
+        taaResolve = $defaultSceneDlaaMotionTaaResolve
         jitter = "$($defaultSceneDlaaMotionRow.temporal_jitter_enabled)/$($defaultSceneDlaaMotionRow.temporal_jitter_applied)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
         imageStats = $defaultSceneDlaaMotionImageStats
         sequenceComparison = $defaultSceneDlaaMotionSequenceComparison

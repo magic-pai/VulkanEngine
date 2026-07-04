@@ -580,7 +580,8 @@ enum class RendererTaaFallbackReason : u32 {
     CompositeUnavailable = 2,
     HistoryInvalid = 3,
     HistoryColorCold = 4,
-    VelocityUnavailable = 5
+    VelocityUnavailable = 5,
+    SuppressedForTemporalUpscaler = 6
 };
 
 enum class RendererTemporalUpscaleFallbackReason : u32 {
@@ -628,6 +629,7 @@ struct RendererTemporalStats {
     f32 jitterUvY = 0.0f;
     u32 taaResolveConfigured = 0;
     u32 taaResolveEnabled = 0;
+    u32 taaResolveSuppressedForUpscaler = 0;
     u32 taaHistoryColorTargetAllocated = 0;
     VkFormat taaHistoryColorFormat = VK_FORMAT_UNDEFINED;
     u32 taaHistoryColorReady = 0;
@@ -673,6 +675,7 @@ struct RendererTemporalStats {
     u32 taauRequested = 0;
     u32 temporalUpscaleRequested = 0;
     u32 temporalUpscaleEnabled = 0;
+    u32 temporalUpscaleInputReady = 0;
     u32 temporalUpscaleFallbackReason = 0;
     u32 temporalUpscaleInputReadinessMask = 0;
     u32 temporalUpscaleRequiredInputMask = 0;

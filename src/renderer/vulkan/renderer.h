@@ -102,8 +102,10 @@ struct FrameTemporalState {
     bool velocityCameraMotionReady = false;
     bool velocityObjectMotionReady = false;
     bool velocityMaterialAuxMigrated = false;
+    bool temporalUpscaleInputReady = false;
     bool taaResolveConfigured = false;
     bool taaResolveEnabled = false;
+    bool taaResolveSuppressedForUpscaler = false;
     bool taaHistoryColorTargetAllocated = false;
     bool taaHistoryColorReady = false;
     bool taaVelocityReprojectionEnabled = false;
@@ -453,7 +455,8 @@ private:
         bool taaNeighborhoodClampEnabled,
         f32 taaVelocityRejectionThreshold,
         f32 taaDepthRejectionThreshold,
-        bool temporalJitterApplyRequested
+        bool temporalJitterApplyRequested,
+        bool suppressNativeTaaResolveForUpscaler
     ) const;
     FrameTemporalUpscaleState BuildFrameTemporalUpscaleState(
         const VkExtent2D& displayExtent,
