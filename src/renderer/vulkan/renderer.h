@@ -424,6 +424,7 @@ public:
     void WaitIdle() const;
     void SetFrameMatricesProvider(FrameMatricesProvider provider);
     void SetRenderQueueBuilder(RenderQueueBuilder builder);
+    void SetDlssQualitySceneContentMotionSupported(bool supported);
     void SetImGui3DContext(Scene3D* scene, Camera3D* camera);
     void SetOverlay3DContext(Scene3D* scene, Camera3D* camera, PipelineSpec pipelineSpec);
     void RefreshMaterialDescriptors();
@@ -616,6 +617,7 @@ private:
     u32 m_TemporalFrameCounter = 0;
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
+    bool m_DlssQualitySceneContentMotionSupported = true;
     std::vector<bool> m_TemporalUpscaleOutputInitialized;
     std::vector<bool> m_DlssMaskInputsInitialized;
 

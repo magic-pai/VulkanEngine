@@ -3994,8 +3994,11 @@ void VulkanRenderer::DrawFrame() {
     );
     frameStats.temporal.velocityObjectMotionReady =
         objectMotionVectorsReady ? 1u : 0u;
+    const bool dlssQualityObjectMotionReady =
+        objectMotionVectorsReady &&
+        m_DlssQualitySceneContentMotionSupported;
     frameStats.temporal.temporalUpscalerDlssQualityObjectMotionReady =
-        objectMotionVectorsReady ? 1u : 0u;
+        dlssQualityObjectMotionReady ? 1u : 0u;
     FinalizeDlssQualityGateStats(frameStats.temporal);
     frameStats.binds.forwardResidualAlphaReferenceEnabled =
         recordTransparentAlphaReference ? 1u : 0u;
@@ -4780,6 +4783,10 @@ void VulkanRenderer::SetFrameMatricesProvider(FrameMatricesProvider provider) {
 
 void VulkanRenderer::SetRenderQueueBuilder(RenderQueueBuilder builder) {
     m_RenderQueueBuilder = std::move(builder);
+}
+
+void VulkanRenderer::SetDlssQualitySceneContentMotionSupported(bool supported) {
+    m_DlssQualitySceneContentMotionSupported = supported;
 }
 
 void VulkanRenderer::SetImGui3DContext(Scene3D* scene, Camera3D* camera) {
@@ -7111,7 +7118,9 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.upscalerPackage.providerKind == TemporalUpscalerProviderKind::Dlss;
     state.dlssQualityEvaluateOutputReady = false;
     state.dlssQualityCameraMotionReady = temporalState.velocityCameraMotionReady;
-    state.dlssQualityObjectMotionReady = temporalState.velocityObjectMotionReady;
+    state.dlssQualityObjectMotionReady =
+        temporalState.velocityObjectMotionReady &&
+        m_DlssQualitySceneContentMotionSupported;
     state.dlssQualityReactiveMaskReady = false;
     state.dlssQualityTransparencyMaskReady = false;
     state.dlssQualityExposurePolicyReady = true;

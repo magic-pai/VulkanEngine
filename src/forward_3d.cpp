@@ -2375,6 +2375,9 @@ int main() {
     sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
         defaultModelLoad.skinnedAnimationUnsupported;
     se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);
+    app.Renderer()->SetDlssQualitySceneContentMotionSupported(
+        sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported == 0u
+    );
     app.Renderer()->SetFrameMatricesProvider([&](se::f32 aspectRatio) {
         return se::FrameMatrices{
             camera.ViewMatrix(),

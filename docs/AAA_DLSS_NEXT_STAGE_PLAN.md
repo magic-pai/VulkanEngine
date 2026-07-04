@@ -579,8 +579,8 @@ Verification on 2026-07-05:
   `mesh/material=1/1`,
   `animation/meshWithBones/bones/unsupported=1/1/2/1`.
 - DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
-- Quality gate: `1/1/0`, masks `255/255/0`, inputs
-  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Quality gate: expected blocked `1/0/4`, masks `255/251/4`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1`.
 - Draw and scene counters:
   `main/gbuffer/forwardResidual/weightedTranslucency=1/1/0/0`,
   `materials=1`, `textured=0`, `lights=4`, `local=3`.
@@ -589,6 +589,62 @@ This closes the positive unsupported-diagnostic proof. True skinned/animated
 DLSS/DLAA quality still requires animation sampling, skinned vertex carriers,
 previous-bone or previous-pose data, skinned velocity output, and a visual
 dynamic skinned lane.
+
+## Slice 4.25 Execution Plan
+
+Slice 4.25 wires the skinned/animation unsupported diagnostic into the DLSS
+quality gate. Slice 4.24 proved the runtime importer can see the unsupported
+source features; this slice prevents that diagnostic from coexisting with a
+green production-quality gate.
+
+1. Renderer scene-content motion support.
+   - Add a renderer-side flag for whether current scene content has DLSS-ready
+     object motion semantics.
+   - Let Forward 3D set that flag from
+     `runtimeImportSkinnedAnimationUnsupported`.
+
+2. Quality gate behavior.
+   - Keep base velocity diagnostics honest: transform/object velocity may still
+     report ready for the rigid fallback draw.
+   - Mark DLSS quality object-motion readiness false when imported skinned or
+     animated source content is unsupported.
+   - Use the existing object-motion blocker and fallback reason instead of
+     inventing a broad new mask bit before true skinned velocity exists.
+
+3. QA contract.
+   - Allow focused diagnostic baselines to expect a nonzero quality blocker.
+   - Keep all production visual QA lanes strict: if their expected blocker is
+     `0`, any nonzero blocker still fails immediately.
+
+## Slice 4.25 Execution Evidence
+
+Slice 4.25 is implemented and verified. `VulkanRenderer` now exposes
+`SetDlssQualitySceneContentMotionSupported`, Forward 3D drives it from runtime
+import diagnostics, and the final object-motion quality readiness path also
+honors the flag after draw-route coverage analysis.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- CSV shape: `791/791` columns.
+- FrameGraph validation issues: `0`.
+- Runtime import diagnostics:
+  `requested/loaded/cache=1/1/0`,
+  `mesh/material=1/1`,
+  `animation/meshWithBones/bones/unsupported=1/1/2/1`.
+- Velocity versus DLSS quality object readiness:
+  `temporal_velocity_object_motion_ready/temporal_upscaler_dlss_quality_object_motion_ready=1/0`.
+- Quality gate: expected blocked `1/0/4`, masks `255/251/4`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1`.
+- DLSS output/post remains visible for diagnosis:
+  evaluate/output `1/1`, post source `1/1/0`.
+
+This makes the skinned probe an explicit "visible but not production-cleared"
+lane. True skinned/animated DLSS/DLAA quality still requires animation sampling,
+skinned vertex carriers, previous-bone or previous-pose data, and skinned
+velocity output.
 
 ## Slice 4.4 Execution Plan
 

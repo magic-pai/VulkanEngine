@@ -1535,7 +1535,18 @@ function Assert-QuickDlssPresentRow {
     if ($Row.temporal_upscaler_dlss_output_ready -ne "1") {
         throw "$Name did not produce DLSS output"
     }
-    if ($Row.temporal_upscaler_dlss_quality_blocker_mask -ne "0") {
+    $expectedQualityBlockerMask = "0"
+    $expectedQualityMasksProperty = $Expected.PSObject.Properties["qualityMasks"]
+    if ($null -ne $expectedQualityMasksProperty) {
+        $expectedQualityMaskParts =
+            ([string]$expectedQualityMasksProperty.Value).Split('/')
+        if ($expectedQualityMaskParts.Count -ge 3) {
+            $expectedQualityBlockerMask =
+                $expectedQualityMaskParts[$expectedQualityMaskParts.Count - 1]
+        }
+    }
+    if ($Row.temporal_upscaler_dlss_quality_blocker_mask -ne "0" -and
+        $expectedQualityBlockerMask -eq "0") {
         throw "$Name quality gate still reports blockers: $($Row.temporal_upscaler_dlss_quality_blocker_mask)"
     }
 
