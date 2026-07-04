@@ -186,7 +186,8 @@ ReflectionProbe3D& Scene3D::CreateReflectionProbe(
     f32 blendStrength,
     f32 falloff,
     ReflectionProbeCaptureSource captureSource,
-    std::string captureAssetId
+    std::string captureAssetId,
+    ReflectionProbeRefreshPolicy refreshPolicy
 ) {
     m_ReflectionProbes.push_back(ReflectionProbe3D{
         std::move(name),
@@ -199,7 +200,8 @@ ReflectionProbe3D& Scene3D::CreateReflectionProbe(
         std::clamp(falloff, 0.25f, 8.0f),
         true,
         captureSource,
-        std::move(captureAssetId)
+        std::move(captureAssetId),
+        refreshPolicy
     });
     MarkLightsChanged();
 

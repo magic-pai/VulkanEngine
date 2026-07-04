@@ -360,6 +360,13 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedAuthoredAssetSpecifiedMask << ','
         << reflectionProbe.selectedAuthoredAssetFoundMask << ','
         << reflectionProbe.selectedAuthoredAssetMissingMask << ','
+        << reflectionProbe.capturedSceneRequestedCount << ','
+        << reflectionProbe.capturedScenePlaceholderAllocatedCount << ','
+        << reflectionProbe.capturedScenePlaceholderReadyCount << ','
+        << reflectionProbe.capturedSceneInvalidatedCount << ','
+        << reflectionProbe.capturedSceneRefreshRequestedCount << ','
+        << reflectionProbe.forcedRefreshRequested << ','
+        << reflectionProbe.sceneDirtyRequested << ','
         << reflectionProbe.authoredCubemapLoadedCount << ','
         << reflectionProbe.authoredCubemapMissingCount << ','
         << reflectionProbe.authoredCubemapLoadFailedCount << ','
@@ -403,6 +410,18 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedCaptureFallbackReasons[1] << ','
         << reflectionProbe.selectedCaptureFallbackReasons[2] << ','
         << reflectionProbe.selectedCaptureFallbackReasons[3] << ','
+        << reflectionProbe.selectedRefreshPolicies[0] << ','
+        << reflectionProbe.selectedRefreshPolicies[1] << ','
+        << reflectionProbe.selectedRefreshPolicies[2] << ','
+        << reflectionProbe.selectedRefreshPolicies[3] << ','
+        << reflectionProbe.selectedCapturedScenePlaceholderReady[0] << ','
+        << reflectionProbe.selectedCapturedScenePlaceholderReady[1] << ','
+        << reflectionProbe.selectedCapturedScenePlaceholderReady[2] << ','
+        << reflectionProbe.selectedCapturedScenePlaceholderReady[3] << ','
+        << reflectionProbe.selectedCapturedSceneInvalidated[0] << ','
+        << reflectionProbe.selectedCapturedSceneInvalidated[1] << ','
+        << reflectionProbe.selectedCapturedSceneInvalidated[2] << ','
+        << reflectionProbe.selectedCapturedSceneInvalidated[3] << ','
         << reflectionProbe.selectedProbeIndex << ','
         << reflectionProbe.droppedProbeCount << ','
         << reflectionProbe.maxBlendWeight << ','
@@ -425,6 +444,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.localCubemapShaderSamplingEnabled << ','
         << reflectionProbe.localCubemapSourceType << ','
         << reflectionProbe.captureSourceType << ','
+        << reflectionProbe.refreshPolicy << ','
         << reflectionProbe.captureResourceReady << ','
         << reflectionProbe.captureFallbackReason << ','
         << reflectionProbe.captureDescriptorBound << ','
@@ -838,6 +858,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_asset_specified_mask,"
         << "reflection_probe_authored_asset_found_mask,"
         << "reflection_probe_authored_asset_missing_mask,"
+        << "reflection_probe_captured_scene_requested_count,"
+        << "reflection_probe_captured_scene_placeholder_allocated_count,"
+        << "reflection_probe_captured_scene_placeholder_ready_count,"
+        << "reflection_probe_captured_scene_invalidated_count,"
+        << "reflection_probe_captured_scene_refresh_requested_count,"
+        << "reflection_probe_forced_refresh_requested,"
+        << "reflection_probe_scene_dirty_requested,"
         << "reflection_probe_authored_cubemap_loaded_count,"
         << "reflection_probe_authored_cubemap_missing_count,"
         << "reflection_probe_authored_cubemap_load_failed_count,"
@@ -881,6 +908,18 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_selected_capture_fallback_reason_1,"
         << "reflection_probe_selected_capture_fallback_reason_2,"
         << "reflection_probe_selected_capture_fallback_reason_3,"
+        << "reflection_probe_selected_refresh_policy_0,"
+        << "reflection_probe_selected_refresh_policy_1,"
+        << "reflection_probe_selected_refresh_policy_2,"
+        << "reflection_probe_selected_refresh_policy_3,"
+        << "reflection_probe_selected_captured_scene_placeholder_ready_0,"
+        << "reflection_probe_selected_captured_scene_placeholder_ready_1,"
+        << "reflection_probe_selected_captured_scene_placeholder_ready_2,"
+        << "reflection_probe_selected_captured_scene_placeholder_ready_3,"
+        << "reflection_probe_selected_captured_scene_invalidated_0,"
+        << "reflection_probe_selected_captured_scene_invalidated_1,"
+        << "reflection_probe_selected_captured_scene_invalidated_2,"
+        << "reflection_probe_selected_captured_scene_invalidated_3,"
         << "reflection_probe_selected_probe_index,"
         << "reflection_probe_dropped_probe_count,"
         << "reflection_probe_max_blend_weight,"
@@ -898,6 +937,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_cubemap_shader_sampling_enabled,"
         << "reflection_probe_cubemap_source_type,"
         << "reflection_probe_capture_source_type,"
+        << "reflection_probe_refresh_policy,"
         << "reflection_probe_capture_resource_ready,"
         << "reflection_probe_capture_fallback_reason,"
         << "reflection_probe_capture_descriptor_bound,"

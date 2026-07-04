@@ -295,6 +295,13 @@ struct CurrentVulkanFrameGraphInputs {
     bool reflectionCaptureSourceAllocated = false;
     u32 reflectionCaptureSourceType = 0;
     u32 reflectionCaptureFallbackReason = 0;
+    bool reflectionCaptureRefreshPolicyAllocated = false;
+    u32 reflectionCaptureRefreshPolicy = 0;
+    bool reflectionCaptureForcedRefreshRequested = false;
+    bool reflectionCaptureSceneDirtyRequested = false;
+    bool capturedSceneReflectionProbePlaceholderAllocated = false;
+    u32 capturedSceneReflectionProbePlaceholderReadyCount = 0;
+    u32 capturedSceneReflectionProbeInvalidatedCount = 0;
     bool sceneReflectionProbeCubemapAllocated = false;
     VkFormat sceneReflectionProbeCubemapFormat = VK_FORMAT_UNDEFINED;
     u32 sceneReflectionProbeCubemapFaceSize = 0;

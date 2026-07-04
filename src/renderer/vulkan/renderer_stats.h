@@ -241,6 +241,13 @@ struct RendererReflectionProbeStats {
     u32 selectedAuthoredAssetSpecifiedMask = 0;
     u32 selectedAuthoredAssetFoundMask = 0;
     u32 selectedAuthoredAssetMissingMask = 0;
+    u32 capturedSceneRequestedCount = 0;
+    u32 capturedScenePlaceholderAllocatedCount = 0;
+    u32 capturedScenePlaceholderReadyCount = 0;
+    u32 capturedSceneInvalidatedCount = 0;
+    u32 capturedSceneRefreshRequestedCount = 0;
+    u32 forcedRefreshRequested = 0;
+    u32 sceneDirtyRequested = 0;
     u32 authoredCubemapLoadedCount = 0;
     u32 authoredCubemapMissingCount = 0;
     u32 authoredCubemapLoadFailedCount = 0;
@@ -274,6 +281,9 @@ struct RendererReflectionProbeStats {
     std::array<i32, kMaxFrameReflectionProbes> selectedCaptureSlots{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCaptureSourceTypes{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCaptureFallbackReasons{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedRefreshPolicies{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedCapturedScenePlaceholderReady{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedCapturedSceneInvalidated{};
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
@@ -295,6 +305,7 @@ struct RendererReflectionProbeStats {
     u32 localCubemapShaderSamplingEnabled = 0;
     u32 localCubemapSourceType = 0;
     u32 captureSourceType = 0;
+    u32 refreshPolicy = 0;
     u32 captureResourceReady = 0;
     u32 captureFallbackReason = 0;
     u32 captureDescriptorBound = 0;

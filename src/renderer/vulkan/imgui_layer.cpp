@@ -92,6 +92,23 @@ const char* ReflectionCaptureFallbackReasonName(u32 reason) {
         return "fallback disabled";
     case 8:
         return "authored cubemap asset missing";
+    case 9:
+        return "authored cubemap load failed";
+    default:
+        return "unknown";
+    }
+}
+
+const char* ReflectionProbeRefreshPolicyName(u32 policy) {
+    switch (policy) {
+    case 0:
+        return "static";
+    case 1:
+        return "file signature";
+    case 2:
+        return "forced";
+    case 3:
+        return "scene dirty";
     default:
         return "unknown";
     }
@@ -958,6 +975,21 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedCaptureFallbackReasons[3]
     );
     ImGui::Text(
+        "Reflection refresh top slots: [%u/%u/%u, %u/%u/%u, %u/%u/%u, %u/%u/%u]",
+        stats.reflectionProbe.selectedRefreshPolicies[0],
+        stats.reflectionProbe.selectedCapturedScenePlaceholderReady[0],
+        stats.reflectionProbe.selectedCapturedSceneInvalidated[0],
+        stats.reflectionProbe.selectedRefreshPolicies[1],
+        stats.reflectionProbe.selectedCapturedScenePlaceholderReady[1],
+        stats.reflectionProbe.selectedCapturedSceneInvalidated[1],
+        stats.reflectionProbe.selectedRefreshPolicies[2],
+        stats.reflectionProbe.selectedCapturedScenePlaceholderReady[2],
+        stats.reflectionProbe.selectedCapturedSceneInvalidated[2],
+        stats.reflectionProbe.selectedRefreshPolicies[3],
+        stats.reflectionProbe.selectedCapturedScenePlaceholderReady[3],
+        stats.reflectionProbe.selectedCapturedSceneInvalidated[3]
+    );
+    ImGui::Text(
         "Reflection authored assets: specified %u, found %u, missing %u, found mask 0x%X, hashes [%u, %u, %u, %u]",
         stats.reflectionProbe.selectedAuthoredAssetSpecifiedCount,
         stats.reflectionProbe.selectedAuthoredAssetFoundCount,
@@ -1007,13 +1039,24 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.localCubemapSourceType
     );
     ImGui::Text(
-        "Reflection capture: %s, ready %s, descriptor %s, fallback %s",
+        "Reflection capture: %s, refresh %s, ready %s, descriptor %s, fallback %s",
         ReflectionCaptureSourceName(stats.reflectionProbe.captureSourceType),
+        ReflectionProbeRefreshPolicyName(stats.reflectionProbe.refreshPolicy),
         stats.reflectionProbe.captureResourceReady ? "yes" : "no",
         stats.reflectionProbe.captureDescriptorBound ? "bound" : "fallback",
         ReflectionCaptureFallbackReasonName(
             stats.reflectionProbe.captureFallbackReason
         )
+    );
+    ImGui::Text(
+        "Captured-scene placeholder: requested %u, allocated %u, ready %u, invalidated %u, refresh requests %u, force %u, scene dirty %u",
+        stats.reflectionProbe.capturedSceneRequestedCount,
+        stats.reflectionProbe.capturedScenePlaceholderAllocatedCount,
+        stats.reflectionProbe.capturedScenePlaceholderReadyCount,
+        stats.reflectionProbe.capturedSceneInvalidatedCount,
+        stats.reflectionProbe.capturedSceneRefreshRequestedCount,
+        stats.reflectionProbe.forcedRefreshRequested,
+        stats.reflectionProbe.sceneDirtyRequested
     );
     ImGui::Text(
         "Reflection probe spatial policy: box projection %s, parallax %s, influence mode %u",

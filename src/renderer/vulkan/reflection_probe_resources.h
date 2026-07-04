@@ -28,6 +28,13 @@ enum class RendererReflectionProbeCaptureSource : u32 {
     CapturedScene = 3
 };
 
+enum class RendererReflectionProbeRefreshPolicy : u32 {
+    Static = 0,
+    FileSignature = 1,
+    Forced = 2,
+    SceneDirty = 3
+};
+
 enum class RendererReflectionProbeCaptureFallbackReason : u32 {
     None = 0,
     SourceDisabled = 1,

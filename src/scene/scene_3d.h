@@ -59,6 +59,13 @@ enum class ReflectionProbeCaptureSource : u32 {
     CapturedScene = 3
 };
 
+enum class ReflectionProbeRefreshPolicy : u32 {
+    Static = 0,
+    FileSignature = 1,
+    Forced = 2,
+    SceneDirty = 3
+};
+
 struct ReflectionProbe3D {
     std::string name;
     glm::vec3 center{ 0.0f, 1.2f, 0.0f };
@@ -72,6 +79,8 @@ struct ReflectionProbe3D {
     ReflectionProbeCaptureSource captureSource =
         ReflectionProbeCaptureSource::BuiltInProcedural;
     std::string captureAssetId;
+    ReflectionProbeRefreshPolicy refreshPolicy =
+        ReflectionProbeRefreshPolicy::Static;
 };
 
 class Scene3D {
@@ -122,7 +131,9 @@ public:
         f32 falloff,
         ReflectionProbeCaptureSource captureSource =
             ReflectionProbeCaptureSource::BuiltInProcedural,
-        std::string captureAssetId = {}
+        std::string captureAssetId = {},
+        ReflectionProbeRefreshPolicy refreshPolicy =
+            ReflectionProbeRefreshPolicy::Static
     );
     DirectionalLight3D& SetPrimaryDirectionalLight(
         std::string name,

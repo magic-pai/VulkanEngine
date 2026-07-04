@@ -52,7 +52,7 @@ resolution work evidence-driven.
    - Add smoke cases for disabled grid, blend-zero fallback, debug views, and
      normal HDR path.
 
-3. Reflection capture resource deepening.
+3. Reflection capture resource deepening. Implemented.
    - Add captured-scene resource placeholders with explicit readiness and
      invalidation state.
    - Keep authored cubemap and built-in procedural sources behind the same
@@ -144,6 +144,58 @@ resource and proving the shader path can consume directional probe data.
   debug draw while preserving shader integration and one deferred-lighting draw.
 - Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
   exception, or shader diagnostic matches.
+
+## Slice 3 Execution Evidence
+
+- `ReflectionProbe3D` and `RendererReflectionProbe` now carry an explicit
+  refresh policy: static `0`, file-signature `1`, forced `2`, and scene-dirty
+  `3`.
+- Default policy follows capture source intent: built-in procedural probes use
+  static, authored cubemaps use file-signature refresh, and captured-scene
+  probes use scene-dirty refresh.
+- `SE_REFLECTION_PROBE_REFRESH_POLICY=static|file-signature|forced|scene-dirty`
+  overrides selected probe policy for diagnostics.
+- `SE_REFLECTION_PROBE_SCENE_DIRTY=1` and
+  `SE_REFLECTION_PROBE_FORCE_REFRESH=1` expose invalidation/refresh request
+  state without implementing dynamic cubemap rendering yet.
+- `SE_SCENE_REFLECTION_PROBE_CAPTURED=1` creates a benchmark scene probe whose
+  source intent is `CapturedScene`, so captured-scene fallback is proven from
+  scene data instead of only renderer overrides.
+- Captured-scene probes now report requested count, placeholder allocation,
+  placeholder readiness, invalidation count, refresh-request count, selected
+  refresh policy, selected placeholder readiness, and selected invalidation
+  state in CSV and ImGui.
+- FrameGraph exposes `ReflectionCaptureRefreshPolicy` as the refresh-policy
+  contract and `CapturedSceneReflectionProbePlaceholder` when a captured-scene
+  probe is selected. It also records `ReflectionCaptureRefreshPolicy` and
+  `StaticLightProbeGridFallback` diagnostic passes so disabled-but-visible
+  resources do not produce validation noise.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_reflection_capture_refresh_static_builtin_smoke.csv`,
+  `out/benchmarks/aaa_reflection_capture_file_signature_authored_smoke.csv`,
+  `out/benchmarks/aaa_reflection_capture_captured_placeholder_smoke.csv`,
+  `out/benchmarks/aaa_reflection_capture_forced_refresh_smoke.csv`, and
+  `out/benchmarks/aaa_reflection_capture_scene_dirty_smoke.csv` all have
+  matching 575-column rows and 0 frame-graph validation issues.
+- The static built-in smoke reports source `1`, policy `0`, ready `1`,
+  fallback `0`, and cubemap sampling `1`.
+- The authored file-signature smoke reports source `2`, policy `1`, ready `1`,
+  fallback `0`, one authored cubemap loaded, refresh checks, cache hits,
+  authored irradiance applied, and cubemap sampling `1`.
+- The captured-scene placeholder smoke reports source `3`, policy `3`,
+  capture resource ready `0`, fallback reason `3`, placeholder allocated/ready
+  `1/1`, and no invalidation until a refresh trigger is present.
+- The forced-refresh and scene-dirty smokes both report captured-scene source
+  `3`, fallback reason `3`, placeholder allocated/ready `1/1`, invalidated
+  `1`, and refresh requested `1`; forced policy reports policy `2`, while the
+  scene-dirty smoke reports policy `3` plus scene dirty requested `1`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is a captured-scene resource placeholder and refresh-policy diagnostic
+  contract. It does not implement six-face scene rendering, capture scheduling,
+  dynamic cubemap descriptors, temporal capture filtering, or final production
+  reflection capture.
 
 ## Non-Goals
 

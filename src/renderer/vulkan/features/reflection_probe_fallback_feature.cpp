@@ -56,16 +56,40 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
             "ReflectionCaptureSourceResolve",
             reflectionProbe.captureResourceReady > 0
                 ? context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, SceneReflectionProbeCubemap"
-                    : "ReflectionCaptureSource, SceneReflectionProbeCubemap"
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, ReflectionCaptureRefreshPolicy, SceneReflectionProbeCubemap"
+                    : "ReflectionCaptureSource, ReflectionCaptureRefreshPolicy, SceneReflectionProbeCubemap"
                 : context.renderer.sceneReflectionProbeOwned
-                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource"
-                    : "ReflectionCaptureSource",
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, ReflectionCaptureRefreshPolicy"
+                    : "ReflectionCaptureSource, ReflectionCaptureRefreshPolicy",
             "",
             reflectionProbe.captureResourceReady > 0
                 ? "Resolves selected reflection probe capture sources to per-probe diagnostic slots and renderer-owned cubemap descriptors."
                 : "Selects the active reflection probe sources and records explicit per-probe fallback reasons."
         );
+        if (reflectionProbe.selectedProbeCount > 0) {
+            const bool capturedPlaceholder =
+                reflectionProbe.capturedScenePlaceholderAllocatedCount > 0;
+            const char* refreshPolicyReads =
+                capturedPlaceholder
+                    ? context.renderer.sceneReflectionProbeOwned
+                        ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, ReflectionCaptureRefreshPolicy, CapturedSceneReflectionProbePlaceholder"
+                        : "ReflectionCaptureSource, ReflectionCaptureRefreshPolicy, CapturedSceneReflectionProbePlaceholder"
+                    : context.renderer.sceneReflectionProbeOwned
+                    ? "SceneReflectionProbeSelection, ReflectionCaptureSlotTable, ReflectionCaptureSource, ReflectionCaptureRefreshPolicy"
+                    : "ReflectionCaptureSource, ReflectionCaptureRefreshPolicy";
+            AppendRenderFrameGraphPass(
+                context.plan,
+                RenderFramePassKind::Reflections,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "ReflectionCaptureRefreshPolicy",
+                refreshPolicyReads,
+                "",
+                reflectionProbe.capturedScenePlaceholderAllocatedCount > 0
+                    ? "Records captured-scene placeholder readiness, invalidation, and refresh policy diagnostics before dynamic cubemap capture exists."
+                    : "Records per-probe static, file-signature, forced, and scene-dirty refresh policy diagnostics."
+            );
+        }
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,

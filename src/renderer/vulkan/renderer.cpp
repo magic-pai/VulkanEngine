@@ -989,6 +989,50 @@ ReflectionProbeCaptureSourceOverrideFromEnvironment() {
     return std::nullopt;
 }
 
+RendererReflectionProbeRefreshPolicy DefaultReflectionProbeRefreshPolicy(
+    RendererReflectionProbeCaptureSource source
+) {
+    switch (source) {
+    case RendererReflectionProbeCaptureSource::AuthoredCubemap:
+        return RendererReflectionProbeRefreshPolicy::FileSignature;
+    case RendererReflectionProbeCaptureSource::CapturedScene:
+        return RendererReflectionProbeRefreshPolicy::SceneDirty;
+    case RendererReflectionProbeCaptureSource::None:
+    case RendererReflectionProbeCaptureSource::BuiltInProcedural:
+        return RendererReflectionProbeRefreshPolicy::Static;
+    }
+
+    return RendererReflectionProbeRefreshPolicy::Static;
+}
+
+std::optional<RendererReflectionProbeRefreshPolicy>
+ReflectionProbeRefreshPolicyOverrideFromEnvironment() {
+    const std::string value =
+        ReadEnvironmentString("SE_REFLECTION_PROBE_REFRESH_POLICY");
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    if (value == "static" || value == "Static" || value == "STATIC" ||
+        value == "0") {
+        return RendererReflectionProbeRefreshPolicy::Static;
+    }
+    if (value == "file-signature" || value == "file_signature" ||
+        value == "file" || value == "FileSignature" || value == "1") {
+        return RendererReflectionProbeRefreshPolicy::FileSignature;
+    }
+    if (value == "forced" || value == "force" ||
+        value == "Forced" || value == "2") {
+        return RendererReflectionProbeRefreshPolicy::Forced;
+    }
+    if (value == "scene-dirty" || value == "scene_dirty" ||
+        value == "dirty" || value == "SceneDirty" || value == "3") {
+        return RendererReflectionProbeRefreshPolicy::SceneDirty;
+    }
+
+    return std::nullopt;
+}
+
 std::optional<f32> EnvironmentFloatOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -1189,6 +1233,23 @@ RendererReflectionProbeCaptureSource RendererCaptureSource(
     return RendererReflectionProbeCaptureSource::None;
 }
 
+RendererReflectionProbeRefreshPolicy RendererRefreshPolicy(
+    ReflectionProbeRefreshPolicy policy
+) {
+    switch (policy) {
+    case ReflectionProbeRefreshPolicy::Static:
+        return RendererReflectionProbeRefreshPolicy::Static;
+    case ReflectionProbeRefreshPolicy::FileSignature:
+        return RendererReflectionProbeRefreshPolicy::FileSignature;
+    case ReflectionProbeRefreshPolicy::Forced:
+        return RendererReflectionProbeRefreshPolicy::Forced;
+    case ReflectionProbeRefreshPolicy::SceneDirty:
+        return RendererReflectionProbeRefreshPolicy::SceneDirty;
+    }
+
+    return RendererReflectionProbeRefreshPolicy::Static;
+}
+
 RendererReflectionProbeCaptureFallbackReason CaptureFallbackReasonFor(
     RendererReflectionProbeCaptureSource source,
     bool resourceReady
@@ -1255,6 +1316,11 @@ void ResetFrameReflectionProbeCaptureDiagnostics(FrameReflectionProbeSet& probes
     probes.selectedCaptureFallbackReasons.fill(
         RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
     );
+    probes.selectedRefreshPolicies.fill(
+        RendererReflectionProbeRefreshPolicy::Static
+    );
+    probes.selectedCapturedScenePlaceholderReady.fill(false);
+    probes.selectedCapturedSceneInvalidated.fill(false);
     probes.selectedAuthoredAssetHashes.fill(0u);
     probes.selectedAuthoredAssetSpecified.fill(false);
     probes.selectedAuthoredAssetFound.fill(false);
@@ -1269,7 +1335,9 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
     bool authoredCubemapReady,
     bool authoredAssetFound,
     bool authoredLoadFailed,
-    u32 descriptorSetsBound
+    u32 descriptorSetsBound,
+    bool forcedRefreshRequested,
+    bool sceneDirtyRequested
 ) {
     if (selectedIndex >= probes.selectedCaptureSlots.size()) {
         return;
@@ -1282,6 +1350,17 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
             authoredCubemapReady
         );
     const bool descriptorBound = resourceReady && descriptorSetsBound > 0u;
+    const bool capturedScene =
+        probe.captureSource == RendererReflectionProbeCaptureSource::CapturedScene;
+    const bool policyForced =
+        probe.refreshPolicy == RendererReflectionProbeRefreshPolicy::Forced;
+    const bool policySceneDirty =
+        probe.refreshPolicy == RendererReflectionProbeRefreshPolicy::SceneDirty;
+    const bool capturedSceneRefreshRequested =
+        capturedScene &&
+        (forcedRefreshRequested ||
+            policyForced ||
+            (policySceneDirty && sceneDirtyRequested));
     const bool authoredAssetSpecified =
         probe.captureSource == RendererReflectionProbeCaptureSource::AuthoredCubemap &&
         !probe.captureAssetId.empty();
@@ -1305,6 +1384,10 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
     probes.selectedCaptureResourceReady[selectedIndex] = resourceReady;
     probes.selectedCaptureDescriptorBound[selectedIndex] = descriptorBound;
     probes.selectedCaptureFallbackReasons[selectedIndex] = fallbackReason;
+    probes.selectedRefreshPolicies[selectedIndex] = probe.refreshPolicy;
+    probes.selectedCapturedScenePlaceholderReady[selectedIndex] = capturedScene;
+    probes.selectedCapturedSceneInvalidated[selectedIndex] =
+        capturedSceneRefreshRequested;
     probes.selectedAuthoredAssetHashes[selectedIndex] =
         authoredAssetSpecified ? StableStringHash(probe.captureAssetId) : 0u;
     probes.selectedAuthoredAssetSpecified[selectedIndex] = authoredAssetSpecified;
@@ -1332,6 +1415,18 @@ void SetSelectedReflectionProbeCaptureDiagnostics(
         ++probes.selectedCubemapSamplingCount;
         probes.selectedCubemapSamplingMask |= bit;
     }
+    if (policyForced) {
+        probes.forcedRefreshRequested = true;
+    }
+    if (capturedScene) {
+        ++probes.capturedSceneRequestedCount;
+        ++probes.capturedScenePlaceholderAllocatedCount;
+        ++probes.capturedScenePlaceholderReadyCount;
+        if (capturedSceneRefreshRequested) {
+            ++probes.capturedSceneInvalidatedCount;
+            ++probes.capturedSceneRefreshRequestedCount;
+        }
+    }
 }
 
 RendererReflectionProbe SceneReflectionProbe(
@@ -1351,6 +1446,7 @@ RendererReflectionProbe SceneReflectionProbe(
     probe.sceneIndex = sceneIndex;
     probe.captureSource = RendererCaptureSource(source.captureSource);
     probe.captureAssetId = source.captureAssetId;
+    probe.refreshPolicy = RendererRefreshPolicy(source.refreshPolicy);
     return ClampReflectionProbe(probe);
 }
 
@@ -1376,6 +1472,7 @@ RendererReflectionProbe SettingsReflectionProbe(
     probe.enabled = settings.localReflectionProbeEnabled;
     probe.sceneOwned = false;
     probe.captureSource = RendererReflectionProbeCaptureSource::None;
+    probe.refreshPolicy = RendererReflectionProbeRefreshPolicy::Static;
     return ClampReflectionProbe(probe);
 }
 
@@ -1460,6 +1557,20 @@ void WriteFrameReflectionProbeStats(
         frameProbes.selectedAuthoredAssetFoundMask;
     stats.selectedAuthoredAssetMissingMask =
         frameProbes.selectedAuthoredAssetMissingMask;
+    stats.capturedSceneRequestedCount =
+        frameProbes.capturedSceneRequestedCount;
+    stats.capturedScenePlaceholderAllocatedCount =
+        frameProbes.capturedScenePlaceholderAllocatedCount;
+    stats.capturedScenePlaceholderReadyCount =
+        frameProbes.capturedScenePlaceholderReadyCount;
+    stats.capturedSceneInvalidatedCount =
+        frameProbes.capturedSceneInvalidatedCount;
+    stats.capturedSceneRefreshRequestedCount =
+        frameProbes.capturedSceneRefreshRequestedCount;
+    stats.forcedRefreshRequested =
+        frameProbes.forcedRefreshRequested ? 1u : 0u;
+    stats.sceneDirtyRequested =
+        frameProbes.sceneDirtyRequested ? 1u : 0u;
     stats.droppedProbeCount = frameProbes.droppedSceneProbeCount;
     stats.selectedProbeIndex = frameProbes.selectedSceneProbeIndex;
     stats.selectedProbeIndices.fill(-1);
@@ -1470,6 +1581,11 @@ void WriteFrameReflectionProbeStats(
             RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe
         )
     );
+    stats.selectedRefreshPolicies.fill(
+        static_cast<u32>(RendererReflectionProbeRefreshPolicy::Static)
+    );
+    stats.selectedCapturedScenePlaceholderReady.fill(0u);
+    stats.selectedCapturedSceneInvalidated.fill(0u);
     stats.selectedAuthoredAssetHashes.fill(0u);
     const u32 selectedProbeCount = std::min<u32>(
         frameProbes.selectedProbeCount,
@@ -1484,6 +1600,12 @@ void WriteFrameReflectionProbeStats(
             static_cast<u32>(frameProbes.selectedProbes[index].captureSource);
         stats.selectedCaptureFallbackReasons[index] =
             static_cast<u32>(frameProbes.selectedCaptureFallbackReasons[index]);
+        stats.selectedRefreshPolicies[index] =
+            static_cast<u32>(frameProbes.selectedRefreshPolicies[index]);
+        stats.selectedCapturedScenePlaceholderReady[index] =
+            frameProbes.selectedCapturedScenePlaceholderReady[index] ? 1u : 0u;
+        stats.selectedCapturedSceneInvalidated[index] =
+            frameProbes.selectedCapturedSceneInvalidated[index] ? 1u : 0u;
         stats.selectedAuthoredAssetHashes[index] =
             frameProbes.selectedAuthoredAssetHashes[index];
     }
@@ -1505,6 +1627,8 @@ void WriteFrameReflectionProbeStats(
     stats.localFalloff = localProbe.falloff;
     stats.captureSourceType =
         static_cast<u32>(frameProbes.captureSource);
+    stats.refreshPolicy =
+        static_cast<u32>(frameProbes.refreshPolicy);
     stats.captureResourceReady =
         frameProbes.captureResourceReady ? 1u : 0u;
     stats.captureFallbackReason =
@@ -3404,6 +3528,13 @@ void VulkanRenderer::DrawFrame() {
             frameReflectionProbes.activeLocalProbeCount > 0,
             frameStats.reflectionProbe.captureSourceType,
             frameStats.reflectionProbe.captureFallbackReason,
+            frameStats.reflectionProbe.selectedProbeCount > 0,
+            frameStats.reflectionProbe.refreshPolicy,
+            frameStats.reflectionProbe.forcedRefreshRequested > 0,
+            frameStats.reflectionProbe.sceneDirtyRequested > 0,
+            frameStats.reflectionProbe.capturedScenePlaceholderAllocatedCount > 0,
+            frameStats.reflectionProbe.capturedScenePlaceholderReadyCount,
+            frameStats.reflectionProbe.capturedSceneInvalidatedCount,
             frameStats.reflectionProbe.captureResourceReady > 0,
             frameStats.reflectionProbe.localCubemapFormat,
             frameStats.reflectionProbe.localCubemapFaceSize,
@@ -6165,6 +6296,12 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
 
     const std::optional<RendererReflectionProbeCaptureSource>
         captureSourceOverride = ReflectionProbeCaptureSourceOverrideFromEnvironment();
+    const std::optional<RendererReflectionProbeRefreshPolicy>
+        refreshPolicyOverride = ReflectionProbeRefreshPolicyOverrideFromEnvironment();
+    probes.forcedRefreshRequested =
+        EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_REFRESH");
+    probes.sceneDirtyRequested =
+        EnvironmentFlagEnabled("SE_REFLECTION_PROBE_SCENE_DIRTY");
 
     if (!sceneProbes.empty()) {
         struct ReflectionProbeCandidate {
@@ -6190,6 +6327,11 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             }
             if (captureSourceOverride.has_value()) {
                 candidate.captureSource = *captureSourceOverride;
+                candidate.refreshPolicy =
+                    DefaultReflectionProbeRefreshPolicy(candidate.captureSource);
+            }
+            if (refreshPolicyOverride.has_value()) {
+                candidate.refreshPolicy = *refreshPolicyOverride;
             }
 
             ++probes.eligibleSceneProbeCount;
@@ -6279,7 +6421,9 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                     authoredCubemapReady,
                     authoredAssetFound,
                     authoredLoadFailed,
-                    reflectionProbeDescriptorSetsBound
+                    reflectionProbeDescriptorSetsBound,
+                    probes.forcedRefreshRequested,
+                    probes.sceneDirtyRequested
                 );
             }
 
@@ -6287,6 +6431,7 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             probes.selectedSceneProbeIndex = probes.localProbe.sceneIndex;
             probes.parallaxCorrectionEnabled = probes.boxProjectionEnabled;
             probes.captureSource = probes.localProbe.captureSource;
+            probes.refreshPolicy = probes.localProbe.refreshPolicy;
             probes.captureResourceReady = probes.selectedCaptureResourceReady[0];
             probes.captureDescriptorBound = probes.selectedCaptureDescriptorBound[0];
             probes.captureFallbackReason =
@@ -6297,6 +6442,14 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
 
     RendererReflectionProbe settingsProbe =
         SettingsReflectionProbe(m_ShadowSettings);
+    if (captureSourceOverride.has_value()) {
+        settingsProbe.captureSource = *captureSourceOverride;
+        settingsProbe.refreshPolicy =
+            DefaultReflectionProbeRefreshPolicy(settingsProbe.captureSource);
+    }
+    if (refreshPolicyOverride.has_value()) {
+        settingsProbe.refreshPolicy = *refreshPolicyOverride;
+    }
     if (ReflectionProbeContributes(settingsProbe)) {
         probes.localProbe = settingsProbe;
         probes.selectedProbes[0] = settingsProbe;
@@ -6315,9 +6468,12 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             false,
             false,
             false,
-            reflectionProbeDescriptorSetsBound
+            reflectionProbeDescriptorSetsBound,
+            probes.forcedRefreshRequested,
+            probes.sceneDirtyRequested
         );
         probes.captureSource = settingsProbe.captureSource;
+        probes.refreshPolicy = settingsProbe.refreshPolicy;
         probes.captureResourceReady = probes.selectedCaptureResourceReady[0];
         probes.captureDescriptorBound = probes.selectedCaptureDescriptorBound[0];
         probes.captureFallbackReason =
@@ -6947,9 +7103,32 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources() {
         return;
     }
 
+    const std::optional<RendererReflectionProbeCaptureSource>
+        captureSourceOverride = ReflectionProbeCaptureSourceOverrideFromEnvironment();
+    const std::optional<RendererReflectionProbeRefreshPolicy>
+        refreshPolicyOverride = ReflectionProbeRefreshPolicyOverrideFromEnvironment();
+
     for (const ReflectionProbe3D& probe : m_MainScene3D->ReflectionProbes()) {
-        if (probe.captureSource != ReflectionProbeCaptureSource::AuthoredCubemap ||
+        RendererReflectionProbeCaptureSource captureSource =
+            RendererCaptureSource(probe.captureSource);
+        RendererReflectionProbeRefreshPolicy refreshPolicy =
+            RendererRefreshPolicy(probe.refreshPolicy);
+        if (captureSourceOverride.has_value()) {
+            captureSource = *captureSourceOverride;
+            refreshPolicy = DefaultReflectionProbeRefreshPolicy(captureSource);
+        }
+        if (refreshPolicyOverride.has_value()) {
+            refreshPolicy = *refreshPolicyOverride;
+        }
+        if (captureSource != RendererReflectionProbeCaptureSource::AuthoredCubemap ||
             probe.captureAssetId.empty()) {
+            continue;
+        }
+        if (refreshPolicy == RendererReflectionProbeRefreshPolicy::Static &&
+            m_ReflectionProbeResources.AuthoredCubemapReady(
+                probe.captureAssetId,
+                m_IblSampler
+            )) {
             continue;
         }
         m_ReflectionProbeResources.EnsureAuthoredCubemap(

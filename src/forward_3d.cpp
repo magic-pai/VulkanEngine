@@ -374,6 +374,34 @@ bool BenchmarkSceneReflectionProbeMixedSourcesRequested() {
         value == "YES";
 }
 
+bool BenchmarkSceneReflectionProbeCapturedRequested() {
+    const std::string value =
+        ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_CAPTURED");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
+se::ReflectionProbeRefreshPolicy DefaultReflectionProbeRefreshPolicy(
+    se::ReflectionProbeCaptureSource source
+) {
+    switch (source) {
+    case se::ReflectionProbeCaptureSource::AuthoredCubemap:
+        return se::ReflectionProbeRefreshPolicy::FileSignature;
+    case se::ReflectionProbeCaptureSource::CapturedScene:
+        return se::ReflectionProbeRefreshPolicy::SceneDirty;
+    case se::ReflectionProbeCaptureSource::None:
+    case se::ReflectionProbeCaptureSource::BuiltInProcedural:
+        return se::ReflectionProbeRefreshPolicy::Static;
+    }
+
+    return se::ReflectionProbeRefreshPolicy::Static;
+}
+
 std::string BenchmarkSceneReflectionProbeAuthoredAssetId() {
     return ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_AUTHORED_ASSET");
 }
@@ -1104,11 +1132,15 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             BenchmarkSceneReflectionProbeOverflowRequested();
         const bool mixedSourceProbeRequested =
             BenchmarkSceneReflectionProbeMixedSourcesRequested();
+        const bool capturedSceneProbeRequested =
+            BenchmarkSceneReflectionProbeCapturedRequested();
         const std::string authoredAssetId =
             BenchmarkSceneReflectionProbeAuthoredAssetId();
         const bool authoredAssetProbeRequested = !authoredAssetId.empty();
         const se::ReflectionProbeCaptureSource baseProbeCaptureSource =
-            authoredAssetProbeRequested
+            capturedSceneProbeRequested
+                ? se::ReflectionProbeCaptureSource::CapturedScene
+            : authoredAssetProbeRequested
                 ? se::ReflectionProbeCaptureSource::AuthoredCubemap
                 : se::ReflectionProbeCaptureSource::BuiltInProcedural;
         scene.CreateReflectionProbe(
@@ -1121,9 +1153,14 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             0.72f,
             1.75f,
             baseProbeCaptureSource,
-            authoredAssetId
+            authoredAssetId,
+            DefaultReflectionProbeRefreshPolicy(baseProbeCaptureSource)
         );
         if (multiProbeRequested || overflowProbeRequested || mixedSourceProbeRequested) {
+            const se::ReflectionProbeCaptureSource warmProbeCaptureSource =
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::AuthoredCubemap
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural;
             scene.CreateReflectionProbe(
                 "Benchmark Warm Reflection Probe",
                 { -3.8f, 1.1f, -2.4f },
@@ -1133,11 +1170,14 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 1.05f,
                 0.58f,
                 1.55f,
-                mixedSourceProbeRequested
-                    ? se::ReflectionProbeCaptureSource::AuthoredCubemap
-                    : se::ReflectionProbeCaptureSource::BuiltInProcedural,
-                mixedSourceProbeRequested ? authoredAssetId : std::string{}
+                warmProbeCaptureSource,
+                mixedSourceProbeRequested ? authoredAssetId : std::string{},
+                DefaultReflectionProbeRefreshPolicy(warmProbeCaptureSource)
             );
+            const se::ReflectionProbeCaptureSource coolProbeCaptureSource =
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::CapturedScene
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural;
             scene.CreateReflectionProbe(
                 "Benchmark Cool Reflection Probe",
                 { 3.6f, 1.4f, 2.6f },
@@ -1147,12 +1187,16 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 1.12f,
                 0.62f,
                 1.65f,
-                mixedSourceProbeRequested
-                    ? se::ReflectionProbeCaptureSource::CapturedScene
-                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
+                coolProbeCaptureSource,
+                {},
+                DefaultReflectionProbeRefreshPolicy(coolProbeCaptureSource)
             );
         }
         if (overflowProbeRequested || mixedSourceProbeRequested) {
+            const se::ReflectionProbeCaptureSource gardenProbeCaptureSource =
+                mixedSourceProbeRequested
+                    ? se::ReflectionProbeCaptureSource::None
+                    : se::ReflectionProbeCaptureSource::BuiltInProcedural;
             scene.CreateReflectionProbe(
                 "Benchmark Garden Reflection Probe",
                 { -1.6f, 1.0f, 3.8f },
@@ -1162,9 +1206,9 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
                 0.96f,
                 0.54f,
                 1.5f,
-                mixedSourceProbeRequested
-                    ? se::ReflectionProbeCaptureSource::None
-                    : se::ReflectionProbeCaptureSource::BuiltInProcedural
+                gardenProbeCaptureSource,
+                {},
+                DefaultReflectionProbeRefreshPolicy(gardenProbeCaptureSource)
             );
         }
         if (overflowProbeRequested) {

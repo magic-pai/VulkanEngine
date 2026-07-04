@@ -1656,6 +1656,40 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "fallback-selected source"
         );
     }
+    if (inputs.reflectionCaptureRefreshPolicyAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Planned,
+            RenderGraphResourceLifetime::PerFrame,
+            "ReflectionCaptureRefreshPolicy",
+            "policy record",
+            "per-probe reflection capture refresh, force, and scene-dirty diagnostics",
+            inputs.reflectionCaptureForcedRefreshRequested
+                ? "forced refresh requested"
+                : inputs.reflectionCaptureSceneDirtyRequested
+                ? "scene-dirty refresh requested"
+                : inputs.reflectionCaptureRefreshPolicy == 1u
+                ? "file-signature refresh policy"
+                : inputs.reflectionCaptureRefreshPolicy == 3u
+                ? "scene-dirty refresh policy"
+                : "static refresh policy"
+        );
+    }
+    if (inputs.capturedSceneReflectionProbePlaceholderAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentCache,
+            "CapturedSceneReflectionProbePlaceholder",
+            "capture placeholder",
+            "diagnostic placeholder for future scene-rendered reflection cubemap resources",
+            inputs.capturedSceneReflectionProbeInvalidatedCount > 0
+                ? "invalidated and waiting for scene capture implementation"
+                : inputs.capturedSceneReflectionProbePlaceholderReadyCount > 0
+                ? "placeholder ready, capture image not implemented"
+                : "placeholder allocated without ready capture image"
+        );
+    }
     if (inputs.reflectionCaptureSlotTableAllocated) {
         AppendResource(
             plan,
@@ -1960,6 +1994,21 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "StaticLightProbeGrid, SceneDepth, GBufferNormalRoughness",
             "",
             "Trilinear static light-probe irradiance with first directional lobes integrated into deferred and forward ambient lighting."
+        );
+    }
+    if (inputs.probeGridAllocated &&
+        !inputs.probeGridEnabled &&
+        !inputs.probeGridDebugViewEnabled &&
+        !inputs.probeGridCellDebugViewEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::GlobalIllumination,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "StaticLightProbeGridFallback",
+            "StaticLightProbeGrid",
+            "",
+            "Keeps the allocated static light-probe grid resource visible while recording that shader integration is disabled or in fallback."
         );
     }
     if (inputs.probeGridDebugViewEnabled) {

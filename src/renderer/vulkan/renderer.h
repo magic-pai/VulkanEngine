@@ -142,6 +142,8 @@ struct RendererReflectionProbe {
     RendererReflectionProbeCaptureSource captureSource =
         RendererReflectionProbeCaptureSource::None;
     std::string captureAssetId;
+    RendererReflectionProbeRefreshPolicy refreshPolicy =
+        RendererReflectionProbeRefreshPolicy::Static;
 };
 
 struct FrameReflectionProbeSet {
@@ -152,6 +154,10 @@ struct FrameReflectionProbeSet {
     std::array<bool, kMaxFrameReflectionProbes> selectedCaptureDescriptorBound{};
     std::array<RendererReflectionProbeCaptureFallbackReason, kMaxFrameReflectionProbes>
         selectedCaptureFallbackReasons{};
+    std::array<RendererReflectionProbeRefreshPolicy, kMaxFrameReflectionProbes>
+        selectedRefreshPolicies{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedCapturedScenePlaceholderReady{};
+    std::array<bool, kMaxFrameReflectionProbes> selectedCapturedSceneInvalidated{};
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetSpecified{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetFound{};
@@ -173,6 +179,11 @@ struct FrameReflectionProbeSet {
     u32 selectedAuthoredAssetSpecifiedMask = 0;
     u32 selectedAuthoredAssetFoundMask = 0;
     u32 selectedAuthoredAssetMissingMask = 0;
+    u32 capturedSceneRequestedCount = 0;
+    u32 capturedScenePlaceholderAllocatedCount = 0;
+    u32 capturedScenePlaceholderReadyCount = 0;
+    u32 capturedSceneInvalidatedCount = 0;
+    u32 capturedSceneRefreshRequestedCount = 0;
     u32 droppedSceneProbeCount = 0;
     i32 selectedSceneProbeIndex = -1;
     f32 maxBlendWeight = 0.0f;
@@ -186,6 +197,10 @@ struct FrameReflectionProbeSet {
     bool captureDescriptorBound = false;
     RendererReflectionProbeCaptureSource captureSource =
         RendererReflectionProbeCaptureSource::None;
+    RendererReflectionProbeRefreshPolicy refreshPolicy =
+        RendererReflectionProbeRefreshPolicy::Static;
+    bool forcedRefreshRequested = false;
+    bool sceneDirtyRequested = false;
     RendererReflectionProbeCaptureFallbackReason captureFallbackReason =
         RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe;
 };
