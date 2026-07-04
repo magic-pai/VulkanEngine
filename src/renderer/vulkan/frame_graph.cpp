@@ -1724,7 +1724,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "AuthoredReflectionCubemapCache",
             VulkanFormatName(inputs.authoredReflectionCubemapFormat),
             inputs.authoredReflectionCubemapIrradianceApplied
-                ? "loaded authored reflection-probe cubemaps with GGX specular mips and diffuse irradiance color"
+                ? "loaded authored reflection-probe cubemaps with quality-controlled GGX specular mips and diffuse irradiance color"
+                : inputs.authoredReflectionCubemapSeamAwareFiltering
+                ? "loaded seam-aware GGX authored reflection-probe cubemaps with explicit mip payloads"
                 : inputs.authoredReflectionCubemapPrefilterMode == 1u
                 ? "loaded GGX-weighted authored reflection-probe cubemaps with explicit mip payloads"
                 : inputs.authoredReflectionCubemapPrefilteredLoadedCount > 0
@@ -1736,6 +1738,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "loaded authored reflection-probe cubemaps available for selected capture slots",
             inputs.authoredReflectionCubemapIrradianceApplied
                 ? "authored diffuse irradiance applied to selected local probe"
+                : inputs.authoredReflectionCubemapSeamAwareFiltering
+                ? "seam-aware authored mip chain uploaded"
                 : inputs.authoredReflectionCubemapPrefilterMode == 1u
                 ? "GGX authored mip chain uploaded"
                 : inputs.authoredReflectionCubemapPrefilteredUploadCount > 0

@@ -114,6 +114,21 @@ const char* ReflectionProbeRefreshPolicyName(u32 policy) {
     }
 }
 
+const char* AuthoredProbeFilterQualityName(u32 quality) {
+    switch (quality) {
+    case 0:
+        return "low";
+    case 1:
+        return "medium";
+    case 2:
+        return "high";
+    case 3:
+        return "ultra";
+    default:
+        return "unknown";
+    }
+}
+
 void DrawBlackHoleControls(MaterialProperties& properties) {
     ImGui::SeparatorText("Black Hole");
     ImGui::SliderFloat("Lensing", &properties.custom[1], 0.0f, 2.0f);
@@ -1001,7 +1016,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedAuthoredAssetHashes[3]
     );
     ImGui::Text(
-        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u, irradiance %u/%u [%.2f %.2f %.2f], cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
+        "Reflection authored cubemaps: loaded %u, missing %u, failed %u, uploads %u, six-face %u, equirect %u/%u, hdr %u/%u, prefilter %u/%u/%u samples %u mode %u quality %s seam %s, irradiance %u/%u [%.2f %.2f %.2f], cache hit/reload/check %u/%u/%u, face %u, mips %u, format %d, source %u",
         stats.reflectionProbe.authoredCubemapLoadedCount,
         stats.reflectionProbe.authoredCubemapMissingCount,
         stats.reflectionProbe.authoredCubemapLoadFailedCount,
@@ -1016,6 +1031,10 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.authoredCubemapGeneratedMipCount,
         stats.reflectionProbe.authoredCubemapPrefilterSampleCount,
         stats.reflectionProbe.authoredCubemapPrefilterMode,
+        AuthoredProbeFilterQualityName(
+            stats.reflectionProbe.authoredCubemapFilterQuality
+        ),
+        stats.reflectionProbe.authoredCubemapSeamAwareFiltering ? "on" : "off",
         stats.reflectionProbe.authoredCubemapIrradianceReadyCount,
         stats.reflectionProbe.authoredCubemapIrradianceApplied,
         stats.reflectionProbe.authoredCubemapIrradianceR,

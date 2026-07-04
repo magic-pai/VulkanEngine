@@ -270,6 +270,8 @@ struct RendererReflectionProbeStats {
     u32 authoredCubemapGeneratedMipCount = 0;
     u32 authoredCubemapPrefilterSampleCount = 0;
     u32 authoredCubemapPrefilterMode = 0;
+    u32 authoredCubemapFilterQuality = 1;
+    u32 authoredCubemapSeamAwareFiltering = 0;
     u32 authoredCubemapIrradianceReadyCount = 0;
     u32 authoredCubemapIrradianceApplied = 0;
     f32 authoredCubemapIrradianceR = 0.0f;

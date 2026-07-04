@@ -60,7 +60,7 @@ resolution work evidence-driven.
    - Add per-probe refresh policy: static, file-signature refresh, forced
      refresh, and future scene-dirty refresh.
 
-4. Production probe filtering.
+4. Production probe filtering. In progress.
    - Improve authored cubemap filtering toward seam-aware GGX prefiltering.
    - Add diffuse irradiance convolution or SH/light-probe coefficients instead
      of single-color diffuse fallback.
@@ -196,6 +196,42 @@ resource and proving the shader path can consume directional probe data.
   contract. It does not implement six-face scene rendering, capture scheduling,
   dynamic cubemap descriptors, temporal capture filtering, or final production
   reflection capture.
+
+## Slice 4 Execution Evidence
+
+- Authored reflection-probe filtering now has a renderer-owned policy surface:
+  `SE_REFLECTION_PROBE_FILTER_QUALITY=low|medium|high|ultra` and
+  `SE_REFLECTION_PROBE_SEAM_AWARE_FILTER=1/0`.
+- Default Medium preserves the previous 64-sample GGX path for the tiny
+  authored test fixture; Low reports 16 samples and High reports 128 samples.
+- The authored cubemap cache signature now includes filter quality and the
+  seam-aware filtering flag, so changing quality or seam policy rebuilds the
+  authored mip payload instead of reusing an incompatible cached resource.
+- The GGX prefilter bilinear taps can now cross cubemap face boundaries when
+  seam-aware filtering is enabled, instead of clamping all taps to the selected
+  face edge.
+- CSV, ImGui, and FrameGraph expose authored filter quality and seam-aware
+  filtering state alongside prefilter mode and sample count.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_reflection_probe_filter_quality_low_smoke.csv`,
+  `out/benchmarks/aaa_reflection_probe_filter_quality_high_smoke.csv`, and
+  `out/benchmarks/aaa_reflection_probe_filter_seam_off_smoke.csv` all have
+  matching 577-column rows and 0 frame-graph validation issues.
+- The Low smoke reports quality `0`, seam-aware `1`, 16 samples, mode `1`,
+  resource ready `1`, cubemap sampling `1`, authored loaded `1`, and authored
+  irradiance applied `1`.
+- The High smoke reports quality `2`, seam-aware `1`, 128 samples, mode `1`,
+  resource ready `1`, cubemap sampling `1`, authored loaded `1`, and authored
+  irradiance applied `1`.
+- The seam-off smoke reports default Medium quality `1`, seam-aware `0`, 64
+  samples, mode `1`, resource ready `1`, cubemap sampling `1`, authored loaded
+  `1`, and authored irradiance applied `1`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is the first production-filtering policy slice. It does not implement
+  diffuse irradiance convolution, SH/light-probe coefficients, dynamic scene
+  capture filtering, or final artist quality presets.
 
 ## Non-Goals
 

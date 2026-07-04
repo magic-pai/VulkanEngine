@@ -1033,6 +1033,36 @@ ReflectionProbeRefreshPolicyOverrideFromEnvironment() {
     return std::nullopt;
 }
 
+AuthoredReflectionProbeFilterQuality
+ReflectionProbeFilterQualityFromEnvironment() {
+    const std::string value =
+        ReadEnvironmentString("SE_REFLECTION_PROBE_FILTER_QUALITY");
+    if (value == "low" || value == "Low" || value == "LOW" || value == "0") {
+        return AuthoredReflectionProbeFilterQuality::Low;
+    }
+    if (value == "high" || value == "High" || value == "HIGH" ||
+        value == "2") {
+        return AuthoredReflectionProbeFilterQuality::High;
+    }
+    if (value == "ultra" || value == "Ultra" || value == "ULTRA" ||
+        value == "3") {
+        return AuthoredReflectionProbeFilterQuality::Ultra;
+    }
+
+    return AuthoredReflectionProbeFilterQuality::Medium;
+}
+
+AuthoredReflectionProbeFilteringSettings
+ReflectionProbeFilteringSettingsFromEnvironment() {
+    AuthoredReflectionProbeFilteringSettings settings{};
+    settings.quality = ReflectionProbeFilterQualityFromEnvironment();
+    if (const std::optional<bool> seamAware =
+            EnvironmentFlagOverride("SE_REFLECTION_PROBE_SEAM_AWARE_FILTER")) {
+        settings.seamAwareFiltering = *seamAware;
+    }
+    return settings;
+}
+
 std::optional<f32> EnvironmentFloatOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -3221,6 +3251,18 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapPrefiltered > 0
                 ? 1u
                 : 0u;
+        frameStats.reflectionProbe.authoredCubemapFilterQuality =
+            static_cast<u32>(
+                m_ReflectionProbeResources.AuthoredCubemapFilterQuality(
+                    frameReflectionProbes.selectedProbes[0].captureAssetId
+                )
+            );
+        frameStats.reflectionProbe.authoredCubemapSeamAwareFiltering =
+            m_ReflectionProbeResources.AuthoredCubemapSeamAwareFiltering(
+                frameReflectionProbes.selectedProbes[0].captureAssetId
+            )
+                ? 1u
+                : 0u;
         if (m_ReflectionProbeResources.AuthoredCubemapIrradianceReady(
                 frameReflectionProbes.selectedProbes[0].captureAssetId
             )) {
@@ -3550,6 +3592,8 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.authoredCubemapPrefilteredLoadedCount,
             frameStats.reflectionProbe.authoredCubemapPrefilteredUploadCount,
             frameStats.reflectionProbe.authoredCubemapPrefilterMode,
+            frameStats.reflectionProbe.authoredCubemapFilterQuality,
+            frameStats.reflectionProbe.authoredCubemapSeamAwareFiltering > 0,
             frameStats.reflectionProbe.authoredCubemapIrradianceReadyCount,
             frameStats.reflectionProbe.authoredCubemapIrradianceApplied > 0,
             frameStats.reflectionProbe.authoredCubemapCacheHitCount,
@@ -7107,6 +7151,8 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources() {
         captureSourceOverride = ReflectionProbeCaptureSourceOverrideFromEnvironment();
     const std::optional<RendererReflectionProbeRefreshPolicy>
         refreshPolicyOverride = ReflectionProbeRefreshPolicyOverrideFromEnvironment();
+    const AuthoredReflectionProbeFilteringSettings filteringSettings =
+        ReflectionProbeFilteringSettingsFromEnvironment();
 
     for (const ReflectionProbe3D& probe : m_MainScene3D->ReflectionProbes()) {
         RendererReflectionProbeCaptureSource captureSource =
@@ -7135,7 +7181,8 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources() {
             m_Device,
             m_PhysicalDevice,
             m_CommandPool,
-            probe.captureAssetId
+            probe.captureAssetId,
+            filteringSettings
         );
     }
 }

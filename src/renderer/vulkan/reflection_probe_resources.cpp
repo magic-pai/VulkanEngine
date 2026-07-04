@@ -68,6 +68,9 @@ struct AuthoredCubemapLoadResult {
     bool prefilteredMipChain = false;
     u32 generatedMipCount = 0;
     u32 prefilterSampleCount = 0;
+    AuthoredReflectionProbeFilterQuality filterQuality =
+        AuthoredReflectionProbeFilterQuality::Medium;
+    bool seamAwareFiltering = true;
     bool irradianceReady = false;
     std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
 };
@@ -89,6 +92,9 @@ struct AuthoredCubemapMipChain {
     u32 mipLevels = 1;
     u32 bytesPerTexel = 4;
     u32 prefilterSampleCount = 0;
+    AuthoredReflectionProbeFilterQuality filterQuality =
+        AuthoredReflectionProbeFilterQuality::Medium;
+    bool seamAwareFiltering = true;
 };
 
 std::string Lowercase(std::string value) {
@@ -1091,7 +1097,8 @@ CubemapSampleLocation CubemapLocationForDirection(
 std::array<float, 4> SampleCubemapBaseBilinear(
     const AuthoredCubemapPixelData& pixelData,
     u32 faceSize,
-    const std::array<float, 3>& direction
+    const std::array<float, 3>& direction,
+    bool seamAwareFiltering
 ) {
     const CubemapSampleLocation location =
         CubemapLocationForDirection(direction, faceSize);
@@ -1101,20 +1108,32 @@ std::array<float, 4> SampleCubemapBaseBilinear(
     const float ty = location.y - static_cast<float>(y0);
 
     const auto load = [&](int x, int y) {
-        const u32 clampedX = static_cast<u32>(std::clamp(
-            x,
-            0,
-            static_cast<int>(faceSize) - 1
-        ));
-        const u32 clampedY = static_cast<u32>(std::clamp(
-            y,
-            0,
-            static_cast<int>(faceSize) - 1
-        ));
+        std::size_t sampleFace = location.face;
+        int sampleX = x;
+        int sampleY = y;
+        const int maxTexel = static_cast<int>(faceSize) - 1;
+        if (seamAwareFiltering &&
+            (x < 0 || y < 0 || x > maxTexel || y > maxTexel)) {
+            const float size = static_cast<float>(faceSize);
+            const float u =
+                (2.0f * (static_cast<float>(x) + 0.5f) / size) - 1.0f;
+            const float v =
+                (2.0f * (static_cast<float>(y) + 0.5f) / size) - 1.0f;
+            const CubemapSampleLocation remapped =
+                CubemapLocationForDirection(
+                    CubemapDirection(location.face, u, v),
+                    faceSize
+                );
+            sampleFace = remapped.face;
+            sampleX = static_cast<int>(std::floor(remapped.x + 0.5f));
+            sampleY = static_cast<int>(std::floor(remapped.y + 0.5f));
+        }
+        const u32 clampedX = static_cast<u32>(std::clamp(sampleX, 0, maxTexel));
+        const u32 clampedY = static_cast<u32>(std::clamp(sampleY, 0, maxTexel));
         return LoadCubemapBaseTexel(
             pixelData,
             faceSize,
-            location.face,
+            sampleFace,
             clampedX,
             clampedY
         );
@@ -1158,10 +1177,26 @@ void StoreCubemapMipTexel(
     mipChain.pixels[offset + 3u] = EncodeReflectionChannel(color[3], false);
 }
 
-u32 PrefilterSampleCountForMip(u32 mipLevel, u32 mipLevels) {
+u32 PrefilterSampleCountForMip(
+    u32 mipLevel,
+    u32 mipLevels,
+    AuthoredReflectionProbeFilterQuality quality
+) {
     if (mipLevel == 0u || mipLevels <= 1u) {
         return 1u;
     }
+
+    switch (quality) {
+    case AuthoredReflectionProbeFilterQuality::Low:
+        return std::min(64u, 8u + mipLevel * 8u);
+    case AuthoredReflectionProbeFilterQuality::High:
+        return std::min(256u, 64u + mipLevel * 64u);
+    case AuthoredReflectionProbeFilterQuality::Ultra:
+        return std::min(512u, 128u + mipLevel * 128u);
+    case AuthoredReflectionProbeFilterQuality::Medium:
+        return std::min(128u, 32u + mipLevel * 32u);
+    }
+
     return std::min(128u, 32u + mipLevel * 32u);
 }
 
@@ -1173,7 +1208,8 @@ std::array<float, 4> PrefilterCubemapBaseTexelsForMip(
     u32 mipLevels,
     u32 mipX,
     u32 mipY,
-    u32 sampleCount
+    u32 sampleCount,
+    bool seamAwareFiltering
 ) {
     const u32 mipExtent = MipExtent(faceSize, mipLevel);
     const float faceU =
@@ -1195,7 +1231,12 @@ std::array<float, 4> PrefilterCubemapBaseTexelsForMip(
         : 0.0f;
 
     if (roughness <= 0.0001f || sampleCount <= 1u) {
-        return SampleCubemapBaseBilinear(pixelData, faceSize, normal);
+        return SampleCubemapBaseBilinear(
+            pixelData,
+            faceSize,
+            normal,
+            seamAwareFiltering
+        );
     }
 
     const std::array<float, 3> view = normal;
@@ -1213,7 +1254,12 @@ std::array<float, 4> PrefilterCubemapBaseTexelsForMip(
         }
 
         const std::array<float, 4> sample =
-            SampleCubemapBaseBilinear(pixelData, faceSize, light);
+            SampleCubemapBaseBilinear(
+                pixelData,
+                faceSize,
+                light,
+                seamAwareFiltering
+            );
         for (std::size_t channel = 0; channel < sum.size(); ++channel) {
             sum[channel] += sample[channel] * nDotL;
         }
@@ -1231,7 +1277,8 @@ std::array<float, 4> PrefilterCubemapBaseTexelsForMip(
 
 AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
     const AuthoredCubemapPixelData& pixelData,
-    u32 faceSize
+    u32 faceSize,
+    AuthoredReflectionProbeFilteringSettings filteringSettings
 ) {
     AuthoredCubemapMipChain mipChain{};
     mipChain.format = pixelData.format;
@@ -1243,8 +1290,14 @@ AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
     );
     mipChain.bytesPerTexel = pixelData.bytesPerTexel;
     mipChain.prefiltered = mipChain.mipLevels > 1u;
+    mipChain.filterQuality = filteringSettings.quality;
+    mipChain.seamAwareFiltering = filteringSettings.seamAwareFiltering;
     mipChain.prefilterSampleCount =
-        PrefilterSampleCountForMip(mipChain.mipLevels - 1u, mipChain.mipLevels);
+        PrefilterSampleCountForMip(
+            mipChain.mipLevels - 1u,
+            mipChain.mipLevels,
+            filteringSettings.quality
+        );
     mipChain.copyRegions.reserve(6u * mipChain.mipLevels);
 
     VkDeviceSize bufferOffset = 0;
@@ -1283,7 +1336,8 @@ AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
             } else {
                 const u32 sampleCount = PrefilterSampleCountForMip(
                     mipLevel,
-                    mipChain.mipLevels
+                    mipChain.mipLevels,
+                    filteringSettings.quality
                 );
                 for (u32 y = 0; y < extent; ++y) {
                     for (u32 x = 0; x < extent; ++x) {
@@ -1296,7 +1350,8 @@ AuthoredCubemapMipChain BuildPrefilteredCubemapMipChain(
                                 mipChain.mipLevels,
                                 x,
                                 y,
-                                sampleCount
+                                sampleCount,
+                                filteringSettings.seamAwareFiltering
                             );
                         const std::size_t texelOffset =
                             outputOffset +
@@ -1404,7 +1459,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
-    std::string_view assetId
+    std::string_view assetId,
+    AuthoredReflectionProbeFilteringSettings filteringSettings
 ) {
     const ResolvedAuthoredCubemapSource source =
         ResolveAuthoredCubemapSource(assetId);
@@ -1419,7 +1475,11 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         const std::array<f32, 3> irradianceColor =
             ComputeCubemapDiffuseIrradianceColor(pixelData, faceSize);
         AuthoredCubemapMipChain mipChain =
-            BuildPrefilteredCubemapMipChain(pixelData, faceSize);
+            BuildPrefilteredCubemapMipChain(
+                pixelData,
+                faceSize,
+                filteringSettings
+            );
         return AuthoredCubemapLoadResult{
             UploadAuthoredCubemapMipChain(
                 device,
@@ -1432,6 +1492,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             mipChain.prefiltered,
             mipChain.mipLevels,
             mipChain.prefilterSampleCount,
+            mipChain.filterQuality,
+            mipChain.seamAwareFiltering,
             true,
             irradianceColor
         };
@@ -1457,7 +1519,11 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
             static_cast<u32>(faces[0].width)
         );
     AuthoredCubemapMipChain mipChain =
-        BuildPrefilteredCubemapMipChain(pixelData, static_cast<u32>(faces[0].width));
+        BuildPrefilteredCubemapMipChain(
+            pixelData,
+            static_cast<u32>(faces[0].width),
+            filteringSettings
+        );
 
     return AuthoredCubemapLoadResult{
         UploadAuthoredCubemapMipChain(
@@ -1471,6 +1537,8 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         mipChain.prefiltered,
         mipChain.mipLevels,
         mipChain.prefilterSampleCount,
+        mipChain.filterQuality,
+        mipChain.seamAwareFiltering,
         true,
         irradianceColor
     };
@@ -1496,7 +1564,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
-    std::string_view assetId
+    std::string_view assetId,
+    AuthoredReflectionProbeFilteringSettings filteringSettings
 ) {
     if (assetId.empty()) {
         return;
@@ -1527,6 +1596,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.filterQuality = filteringSettings.quality;
+        resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
         return;
@@ -1539,6 +1610,14 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         assetSignature = AuthoredCubemapSourceSignature(source, assetPath);
     } catch (...) {
         assetSignature = FileSystemEntrySignature(assetPath);
+        assetSignature = HashCombine64(
+            assetSignature,
+            static_cast<u64>(filteringSettings.quality)
+        );
+        assetSignature = HashCombine64(
+            assetSignature,
+            filteringSettings.seamAwareFiltering ? 1u : 0u
+        );
         if (resource.loadFailed && resource.assetSignature == assetSignature) {
             ++m_AuthoredCubemapCacheHitCount;
             return;
@@ -1554,10 +1633,21 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.filterQuality = filteringSettings.quality;
+        resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
         return;
     }
+
+    assetSignature = HashCombine64(
+        assetSignature,
+        static_cast<u64>(filteringSettings.quality)
+    );
+    assetSignature = HashCombine64(
+        assetSignature,
+        filteringSettings.seamAwareFiltering ? 1u : 0u
+    );
 
     if ((resource.image != nullptr || resource.loadFailed) &&
         resource.assetSignature == assetSignature) {
@@ -1575,6 +1665,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     resource.prefiltered = false;
     resource.generatedMipCount = 0;
     resource.prefilterSampleCount = 0;
+    resource.filterQuality = filteringSettings.quality;
+    resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
     resource.irradianceReady = false;
     resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
 
@@ -1583,7 +1675,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
             device,
             physicalDevice,
             commandPool,
-            assetId
+            assetId,
+            filteringSettings
         );
         resource.image = std::move(loadResult.image);
         resource.sourceType = loadResult.sourceType;
@@ -1592,6 +1685,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = loadResult.prefilteredMipChain;
         resource.generatedMipCount = loadResult.generatedMipCount;
         resource.prefilterSampleCount = loadResult.prefilterSampleCount;
+        resource.filterQuality = loadResult.filterQuality;
+        resource.seamAwareFiltering = loadResult.seamAwareFiltering;
         resource.irradianceReady = loadResult.irradianceReady;
         resource.irradianceColor = loadResult.irradianceColor;
         ++m_AuthoredCubemapUploadCount;
@@ -1611,6 +1706,8 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
         resource.prefiltered = false;
         resource.generatedMipCount = 0;
         resource.prefilterSampleCount = 0;
+        resource.filterQuality = filteringSettings.quality;
+        resource.seamAwareFiltering = filteringSettings.seamAwareFiltering;
         resource.irradianceReady = false;
         resource.irradianceColor = { 1.0f, 1.0f, 1.0f };
     }
@@ -1870,6 +1967,25 @@ u32 VulkanReflectionProbeResources::AuthoredCubemapPrefilterSampleCount(
     return found != m_AuthoredCubemaps.end() && found->second.image != nullptr
         ? found->second.prefilterSampleCount
         : 0u;
+}
+
+AuthoredReflectionProbeFilterQuality
+VulkanReflectionProbeResources::AuthoredCubemapFilterQuality(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end()
+        ? found->second.filterQuality
+        : AuthoredReflectionProbeFilterQuality::Medium;
+}
+
+bool VulkanReflectionProbeResources::AuthoredCubemapSeamAwareFiltering(
+    std::string_view assetId
+) const {
+    const auto found = m_AuthoredCubemaps.find(std::string(assetId));
+    return found != m_AuthoredCubemaps.end() &&
+        found->second.image != nullptr &&
+        found->second.seamAwareFiltering;
 }
 
 bool VulkanReflectionProbeResources::AuthoredCubemapIrradianceReady(

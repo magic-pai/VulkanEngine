@@ -317,6 +317,8 @@ struct CurrentVulkanFrameGraphInputs {
     u32 authoredReflectionCubemapPrefilteredLoadedCount = 0;
     u32 authoredReflectionCubemapPrefilteredUploadCount = 0;
     u32 authoredReflectionCubemapPrefilterMode = 0;
+    u32 authoredReflectionCubemapFilterQuality = 1;
+    bool authoredReflectionCubemapSeamAwareFiltering = false;
     u32 authoredReflectionCubemapIrradianceReadyCount = 0;
     bool authoredReflectionCubemapIrradianceApplied = false;
     u32 authoredReflectionCubemapCacheHitCount = 0;

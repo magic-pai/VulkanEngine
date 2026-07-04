@@ -21,6 +21,19 @@ enum class AuthoredReflectionCubemapSourceType : u32 {
     Equirectangular = 2
 };
 
+enum class AuthoredReflectionProbeFilterQuality : u32 {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Ultra = 3
+};
+
+struct AuthoredReflectionProbeFilteringSettings {
+    AuthoredReflectionProbeFilterQuality quality =
+        AuthoredReflectionProbeFilterQuality::Medium;
+    bool seamAwareFiltering = true;
+};
+
 enum class RendererReflectionProbeCaptureSource : u32 {
     None = 0,
     BuiltInProcedural = 1,
@@ -59,7 +72,8 @@ public:
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanCommandPool& commandPool,
-        std::string_view assetId
+        std::string_view assetId,
+        AuthoredReflectionProbeFilteringSettings filteringSettings = {}
     );
     void Release();
 
@@ -97,6 +111,10 @@ public:
     bool AuthoredCubemapPrefiltered(std::string_view assetId) const;
     u32 AuthoredCubemapGeneratedMipCount(std::string_view assetId) const;
     u32 AuthoredCubemapPrefilterSampleCount(std::string_view assetId) const;
+    AuthoredReflectionProbeFilterQuality AuthoredCubemapFilterQuality(
+        std::string_view assetId
+    ) const;
+    bool AuthoredCubemapSeamAwareFiltering(std::string_view assetId) const;
     bool AuthoredCubemapIrradianceReady(std::string_view assetId) const;
     std::array<f32, 3> AuthoredCubemapIrradianceColor(
         std::string_view assetId
@@ -121,6 +139,9 @@ private:
         bool prefiltered = false;
         u32 generatedMipCount = 0;
         u32 prefilterSampleCount = 0;
+        AuthoredReflectionProbeFilterQuality filterQuality =
+            AuthoredReflectionProbeFilterQuality::Medium;
+        bool seamAwareFiltering = true;
         bool irradianceReady = false;
         std::array<f32, 3> irradianceColor{ 1.0f, 1.0f, 1.0f };
     };

@@ -389,6 +389,8 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.authoredCubemapGeneratedMipCount << ','
         << reflectionProbe.authoredCubemapPrefilterSampleCount << ','
         << reflectionProbe.authoredCubemapPrefilterMode << ','
+        << reflectionProbe.authoredCubemapFilterQuality << ','
+        << reflectionProbe.authoredCubemapSeamAwareFiltering << ','
         << reflectionProbe.authoredCubemapIrradianceReadyCount << ','
         << reflectionProbe.authoredCubemapIrradianceApplied << ','
         << reflectionProbe.authoredCubemapIrradianceR << ','
@@ -887,6 +889,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_cubemap_generated_mip_count,"
         << "reflection_probe_authored_cubemap_prefilter_sample_count,"
         << "reflection_probe_authored_cubemap_prefilter_mode,"
+        << "reflection_probe_authored_cubemap_filter_quality,"
+        << "reflection_probe_authored_cubemap_seam_aware_filtering,"
         << "reflection_probe_authored_cubemap_irradiance_ready_count,"
         << "reflection_probe_authored_cubemap_irradiance_applied,"
         << "reflection_probe_authored_cubemap_irradiance_r,"
