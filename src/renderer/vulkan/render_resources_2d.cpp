@@ -50,6 +50,21 @@ void VulkanRenderResources2D::RegisterMaterial(std::string id, VulkanMaterial& m
     m_MaterialIndexById.emplace(std::move(id), index);
 }
 
+void VulkanRenderResources2D::RegisterBonePalette(
+    std::string id,
+    BonePaletteResource palette
+) {
+    SE_ASSERT(!id.empty(), "Bone palette resource id must not be empty");
+    SE_ASSERT(!ContainsBonePalette(id), "Bone palette resource id already exists");
+
+    const std::size_t index = m_BonePalettes.size();
+    m_BonePalettes.push_back(BonePaletteEntry{
+        id,
+        std::move(palette)
+    });
+    m_BonePaletteIndexById.emplace(std::move(id), index);
+}
+
 const VulkanMesh& VulkanRenderResources2D::Mesh(std::string_view id) const {
     const auto found = m_MeshIndexById.find(id);
     SE_ASSERT(found != m_MeshIndexById.end(), "2D mesh resource was not found");
@@ -64,12 +79,24 @@ VulkanMaterial& VulkanRenderResources2D::Material(std::string_view id) const {
     return *m_Materials[found->second].material;
 }
 
+const VulkanRenderResources2D::BonePaletteResource&
+VulkanRenderResources2D::BonePalette(std::string_view id) const {
+    const auto found = m_BonePaletteIndexById.find(id);
+    SE_ASSERT(found != m_BonePaletteIndexById.end(), "Bone palette resource was not found");
+
+    return m_BonePalettes[found->second].palette;
+}
+
 bool VulkanRenderResources2D::ContainsMesh(std::string_view id) const {
     return m_MeshIndexById.find(id) != m_MeshIndexById.end();
 }
 
 bool VulkanRenderResources2D::ContainsMaterial(std::string_view id) const {
     return m_MaterialIndexById.find(id) != m_MaterialIndexById.end();
+}
+
+bool VulkanRenderResources2D::ContainsBonePalette(std::string_view id) const {
+    return m_BonePaletteIndexById.find(id) != m_BonePaletteIndexById.end();
 }
 
 std::vector<const VulkanMaterial*> VulkanRenderResources2D::Materials() const {

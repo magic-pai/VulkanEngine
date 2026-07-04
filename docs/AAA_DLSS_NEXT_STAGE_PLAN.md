@@ -911,6 +911,58 @@ This closes the importer-to-runtime palette carrier gap. The next skinned
 quality work is renderer-facing palette upload/binding, skinned vertex output or
 shader skinning, previous-skinned state, and skinned velocity output.
 
+## Slice 4.31 Execution Plan
+
+Slice 4.31 moves the runtime bone-palette carrier into the renderer resource
+namespace. The goal is to prove that the renderer-facing resource layer can see
+the current and previous imported bone palettes before implementing GPU buffer
+upload, descriptor binding, or shader skinning.
+
+1. Renderer resource carrier.
+   - Add a bone-palette resource entry to `VulkanRenderResources2D`.
+   - Register the current and previous runtime bone palettes from
+     `RuntimeModelLoader` using the imported runtime model resource prefix.
+   - Keep the registered data CPU-side for this slice.
+
+2. Renderer-facing diagnostics.
+   - Expose whether the renderer resource was registered, current/previous
+     palette entry counts, changed-palette entry count, and renderer carrier
+     readiness through `RuntimeModelLoadResult`.
+   - Carry those values into Forward 3D benchmark scene diagnostics, CSV, quick
+     visual-QA metrics, and focused baselines.
+
+3. QA contract.
+   - Extend `imported-skinned-diagnostic` to assert the renderer-facing palette
+     resource counts from `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at zero for the renderer palette fields.
+   - Keep DLSS quality expected-blocked because this is not a GPU palette
+     upload, descriptor bind, skinned vertex path, previous-skinned state, or
+     skinned velocity output.
+
+## Slice 4.31 Execution Evidence
+
+Slice 4.31 is implemented and verified. `VulkanRenderResources2D` now owns a
+bone-palette resource registry, and `RuntimeModelLoader` registers the imported
+runtime current/previous palette into that renderer-facing namespace.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct benchmark CSV probe for `assets/models/skinned_probe.dae` reports
+  `823/823` CSV columns.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- Renderer resource diagnostics:
+  `rendererPoseRegistered/rendererPoseBonePalette/rendererPosePreviousBonePalette/rendererPoseChangedBonePalette/rendererPoseReady=1/2/2/1/1`.
+- Runtime carrier diagnostics remain:
+  `runtimePoseBonePalette/runtimePosePreviousBonePalette/runtimePoseChangedBonePalette/runtimePoseReady=2/2/1/1`.
+- DLSS quality remains expected-blocked at `qualityGate=1/0/4`.
+
+This closes the runtime-to-renderer-resource palette carrier gap. The next
+skinned quality work is GPU palette buffer upload and descriptor visibility,
+then shader skinning or skinned vertex output, previous-skinned state, and
+skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

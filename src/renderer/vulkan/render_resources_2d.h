@@ -3,6 +3,7 @@
 #include "renderer/vulkan/mesh_lod.h"
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <glm/glm.hpp>
 #include <unordered_map>
 
 namespace se {
@@ -12,13 +13,23 @@ class VulkanMesh;
 
 class VulkanRenderResources2D {
 public:
+    struct BonePaletteResource {
+        std::vector<glm::mat4> previousPalette;
+        std::vector<glm::mat4> currentPalette;
+        u32 changedEntryCount = 0;
+        u32 ready = 0;
+    };
+
     void RegisterMesh(std::string id, const VulkanMesh& mesh);
     void RegisterMaterial(std::string id, VulkanMaterial& material);
+    void RegisterBonePalette(std::string id, BonePaletteResource palette);
 
     const VulkanMesh& Mesh(std::string_view id) const;
     VulkanMaterial& Material(std::string_view id) const;
+    const BonePaletteResource& BonePalette(std::string_view id) const;
     bool ContainsMesh(std::string_view id) const;
     bool ContainsMaterial(std::string_view id) const;
+    bool ContainsBonePalette(std::string_view id) const;
 
     std::vector<const VulkanMaterial*> Materials() const;
 
@@ -46,10 +57,17 @@ private:
         VulkanMaterial* material = nullptr;
     };
 
+    struct BonePaletteEntry {
+        std::string id;
+        BonePaletteResource palette;
+    };
+
     std::vector<MeshEntry> m_Meshes;
     std::vector<MaterialEntry> m_Materials;
+    std::vector<BonePaletteEntry> m_BonePalettes;
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_MeshIndexById;
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_MaterialIndexById;
+    std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_BonePaletteIndexById;
     std::unordered_map<std::string, MeshLodChain, StringViewHash, std::equal_to<>> m_LodChains;
 };
 

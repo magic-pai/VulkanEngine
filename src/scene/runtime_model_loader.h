@@ -48,6 +48,11 @@ struct RuntimeModelLoadResult {
     u32 runtimePoseCarrierPreviousBonePaletteEntryCount = 0;
     u32 runtimePoseCarrierChangedBonePaletteEntryCount = 0;
     u32 runtimePoseCarrierReady = 0;
+    u32 rendererPosePaletteRegistered = 0;
+    u32 rendererPosePaletteBonePaletteEntryCount = 0;
+    u32 rendererPosePalettePreviousBonePaletteEntryCount = 0;
+    u32 rendererPosePaletteChangedBonePaletteEntryCount = 0;
+    u32 rendererPosePaletteReady = 0;
     u32 sourceMeshWithBonesCount = 0;
     u32 sourceBoneCount = 0;
     u32 sourceSkinnedVertexCount = 0;
@@ -110,6 +115,7 @@ private:
         std::vector<glm::mat4> runtimeCurrentBonePalette;
         u32 runtimePoseCarrierChangedBonePaletteEntryCount = 0;
         u32 runtimePoseCarrierReady = 0;
+        std::string bonePaletteResourceId;
         u32 sourceMeshWithBonesCount = 0;
         u32 sourceBoneCount = 0;
         u32 sourceSkinnedVertexCount = 0;

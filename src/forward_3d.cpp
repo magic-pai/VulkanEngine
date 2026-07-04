@@ -2415,6 +2415,16 @@ int main() {
         defaultModelLoad.runtimePoseCarrierChangedBonePaletteEntryCount;
     sceneDiagnostics.runtimeImportPoseCarrierReady =
         defaultModelLoad.runtimePoseCarrierReady;
+    sceneDiagnostics.runtimeImportRendererPosePaletteRegistered =
+        defaultModelLoad.rendererPosePaletteRegistered;
+    sceneDiagnostics.runtimeImportRendererPosePaletteBonePaletteEntryCount =
+        defaultModelLoad.rendererPosePaletteBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportRendererPosePalettePreviousBonePaletteEntryCount =
+        defaultModelLoad.rendererPosePalettePreviousBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportRendererPosePaletteChangedBonePaletteEntryCount =
+        defaultModelLoad.rendererPosePaletteChangedBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportRendererPosePaletteReady =
+        defaultModelLoad.rendererPosePaletteReady;
     sceneDiagnostics.runtimeImportMeshWithBonesCount =
         defaultModelLoad.sourceMeshWithBonesCount;
     sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;
