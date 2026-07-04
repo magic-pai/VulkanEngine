@@ -1203,7 +1203,16 @@ $materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
     $materialStressBaselineManifestPath
 
 $validSuites =
-    @("full", "default", "default-motion", "default-object-motion", "imported-dynamic")
+    @(
+        "full",
+        "default",
+        "default-motion",
+        "default-object-motion",
+        "imported-dynamic",
+        "wboit",
+        "forward-special",
+        "material-stress"
+    )
 $selectedSuites = @(
     @(
         foreach ($suiteValue in $Suite) {
@@ -1242,7 +1251,10 @@ function New-QuickNativeMetrics {
         mainDraws = "$($Row.main_draws)"
         gbufferDraws = "$($Row.gbuffer_draws)"
         forwardResidualDraws = "$($Row.forward_residual_draws)"
+        hybridForwardSpecialDraws = "$($Row.hybrid_forward_special_draws)"
+        forwardSpecialMaterialCount = "$($Row.frame_material_forward_special_count)"
         weightedTranslucencyDraws = "$($Row.weighted_translucency_draws)"
+        weightedTranslucencyResolveDraws = "$($Row.weighted_translucency_resolve_draws)"
         frameMaterialCount = "$($Row.frame_material_count)"
         frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
         frameLightTotalCount = "$($Row.frame_light_total_count)"
@@ -1257,6 +1269,7 @@ function New-QuickDlssPresentMetrics {
 
     return [pscustomobject]@{
         postSource = "$($Row.temporal_upscale_post_source_requested)/$($Row.temporal_upscale_post_source_active)/$($Row.temporal_upscale_post_source_fallback_reason)"
+        evaluateOutput = "$($Row.temporal_upscaler_dlss_evaluate_result)/$($Row.temporal_upscaler_dlss_output_ready)"
         qualityGate = "$($Row.temporal_upscaler_dlss_quality_gate_requested)/$($Row.temporal_upscaler_dlss_quality_gate_ready)/$($Row.temporal_upscaler_dlss_quality_gate_fallback_reason)"
         qualityMasks = "$($Row.temporal_upscaler_dlss_quality_required_mask)/$($Row.temporal_upscaler_dlss_quality_ready_mask)/$($Row.temporal_upscaler_dlss_quality_blocker_mask)"
         qualityInputs = "output/camera/object/reactive/transparency/exposure/post/baseline=$($Row.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($Row.temporal_upscaler_dlss_quality_camera_motion_ready)/$($Row.temporal_upscaler_dlss_quality_object_motion_ready)/$($Row.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($Row.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($Row.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($Row.temporal_upscaler_dlss_quality_post_ordering_ready)/$($Row.temporal_upscaler_dlss_quality_reference_baseline_ready)"
@@ -1279,9 +1292,26 @@ function New-QuickDlssPresentMetrics {
         mainDraws = "$($Row.main_draws)"
         gbufferDraws = "$($Row.gbuffer_draws)"
         forwardResidualDraws = "$($Row.forward_residual_draws)"
+        hybridForwardSpecialDraws = "$($Row.hybrid_forward_special_draws)"
+        forwardResidualSharedLightListDraws = "$($Row.forward_residual_shared_light_list_draws)"
+        forwardResidualVelocityDraws = "$($Row.forward_residual_velocity_draws)"
+        forwardSpecialMaterialCount = "$($Row.frame_material_forward_special_count)"
         weightedTranslucencyDraws = "$($Row.weighted_translucency_draws)"
+        weightedTranslucencyResolveDraws = "$($Row.weighted_translucency_resolve_draws)"
+        weightedTranslucencyVelocityDraws = "$($Row.weighted_translucency_velocity_draws)"
+        dlssMaskDraws = "$($Row.dlss_mask_draws)"
+        dlssMaskWeightedTranslucencyDraws = "$($Row.dlss_mask_weighted_translucency_draws)"
+        dlssMaskForwardResidualDraws = "$($Row.dlss_mask_forward_residual_draws)"
         frameMaterialCount = "$($Row.frame_material_count)"
         frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
+        texturedMaterials = "$($Row.frame_material_textured_count)"
+        specularTextureMaterials = "$($Row.frame_material_specular_texture_count)"
+        uvTransformMaterials = "$($Row.frame_material_uv_transform_count)"
+        doubleSidedMaterials = "$($Row.frame_material_double_sided_count)"
+        clearcoatTextureMaterials = "$($Row.frame_material_clearcoat_texture_count)"
+        clearcoatRoughnessTextureMaterials = "$($Row.frame_material_clearcoat_roughness_texture_count)"
+        transmissionTextureMaterials = "$($Row.frame_material_transmission_texture_count)"
+        volumeMaterials = "$($Row.frame_material_volume_count)"
         frameLightTotalCount = "$($Row.frame_light_total_count)"
         frameLocalLightCount = "$($Row.frame_local_light_count)"
         frameRectLightCount = "$($Row.frame_rect_light_count)"
@@ -1452,6 +1482,19 @@ function New-QuickSequenceThresholdSummary {
     }
 }
 
+function New-QuickComparisonThresholdSummary {
+    param([Parameter(Mandatory = $true)]$Manifest)
+
+    return [ordered]@{
+        centralDifferentPixelsMin = [int]$Manifest.thresholds.centralDifferentPixelsMin
+        comparisonChangedPixelsMin = [int]$Manifest.thresholds.comparisonChangedPixelsMin
+        comparisonChangedPixelsMax = [int]$Manifest.thresholds.comparisonChangedPixelsMax
+        comparisonMeanDeltaMin = [double]$Manifest.thresholds.comparisonMeanDeltaMin
+        comparisonMeanDeltaMax = [double]$Manifest.thresholds.comparisonMeanDeltaMax
+        comparisonMaxDeltaMax = [int]$Manifest.thresholds.comparisonMaxDeltaMax
+    }
+}
+
 function New-QuickLaneSummary {
     param(
         [Parameter(Mandatory = $true)]$Benchmark,
@@ -1490,6 +1533,69 @@ function New-QuickLaneSummary {
     }
 
     return $lane
+}
+
+function Invoke-QuickDlssPairSuite {
+    param(
+        [Parameter(Mandatory = $true)][string]$NativeName,
+        [Parameter(Mandatory = $true)][string]$DlssName,
+        [Parameter(Mandatory = $true)][string]$LaneKey,
+        [Parameter(Mandatory = $true)][hashtable]$NativeEnvironment,
+        [Parameter(Mandatory = $true)][hashtable]$DlssEnvironment,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    $nativeBenchmark = Invoke-BenchmarkRun `
+        -Name $NativeName `
+        -Environment $NativeEnvironment
+    $nativeMetrics = Assert-QuickNativeRow `
+        -Name "$LaneKey.native" `
+        -Row $nativeBenchmark.LastRow `
+        -Expected $Manifest.expected.native
+    $dlssBenchmark = Invoke-BenchmarkRun `
+        -Name $DlssName `
+        -Environment $DlssEnvironment
+    $dlssMetrics = Assert-QuickDlssPresentRow `
+        -Name "$LaneKey.dlssPresent" `
+        -Row $dlssBenchmark.LastRow `
+        -Expected $Manifest.expected.dlssPresent
+
+    $nativeImage = Capture-WindowImage `
+        -Name $NativeName `
+        -Environment $NativeEnvironment
+    $dlssImage = Capture-WindowImage `
+        -Name $DlssName `
+        -Environment $DlssEnvironment
+    $nativeImageStats = Get-ImageVariationStats -Path $nativeImage
+    $dlssImageStats = Get-ImageVariationStats -Path $dlssImage
+    $comparison = Compare-Images -A $nativeImage -B $dlssImage
+
+    Assert-QuickImageStats `
+        -Name "$LaneKey.native" `
+        -Stats $nativeImageStats `
+        -Manifest $Manifest
+    Assert-QuickImageStats `
+        -Name "$LaneKey.dlssPresent" `
+        -Stats $dlssImageStats `
+        -Manifest $Manifest
+    Assert-QuickComparison `
+        -Name $LaneKey `
+        -Comparison $comparison `
+        -Manifest $Manifest
+
+    return [pscustomobject]@{
+        NativeLane = New-QuickLaneSummary `
+            -Benchmark $nativeBenchmark `
+            -Metrics $nativeMetrics `
+            -Images @($nativeImage) `
+            -ImageStats @($nativeImageStats)
+        DlssLane = New-QuickLaneSummary `
+            -Benchmark $dlssBenchmark `
+            -Metrics $dlssMetrics `
+            -Images @($dlssImage) `
+            -ImageStats @($dlssImageStats) `
+            -Comparison $comparison
+    }
 }
 
 function Invoke-QuickDlaaSequenceSuite {
@@ -1658,6 +1764,64 @@ if (-not ($selectedSuites -contains "full")) {
                 -Environment $importedDynamicDlaaObjectMotionPresentEnvironment `
                 -Manifest $importedDynamicDlaaObjectMotionBaselineManifest `
                 -Model $importedDynamicModelPath
+    }
+
+    if ($selectedSuites -contains "wboit") {
+        $quickSummary["baselines"]["wboit"] = [ordered]@{
+            manifest = $wboitBaselineManifestPath
+            name = $wboitBaselineManifest.name
+        }
+        $quickSummary["thresholds"]["wboit"] =
+            New-QuickComparisonThresholdSummary -Manifest $wboitBaselineManifest
+        $wboitLanes = Invoke-QuickDlssPairSuite `
+            -NativeName "wboit_native_deferred_hdr" `
+            -DlssName "wboit_dlss_present" `
+            -LaneKey "wboit" `
+            -NativeEnvironment $wboitNativeEnvironment `
+            -DlssEnvironment $wboitDlssPresentEnvironment `
+            -Manifest $wboitBaselineManifest
+        $quickSummary["lanes"]["wboitNative"] = $wboitLanes.NativeLane
+        $quickSummary["lanes"]["wboitDlssPresent"] = $wboitLanes.DlssLane
+    }
+
+    if ($selectedSuites -contains "forward-special") {
+        $quickSummary["baselines"]["forwardSpecial"] = [ordered]@{
+            manifest = $forwardSpecialBaselineManifestPath
+            name = $forwardSpecialBaselineManifest.name
+        }
+        $quickSummary["thresholds"]["forwardSpecial"] =
+            New-QuickComparisonThresholdSummary -Manifest $forwardSpecialBaselineManifest
+        $forwardSpecialLanes = Invoke-QuickDlssPairSuite `
+            -NativeName "forward_special_native_deferred_hdr" `
+            -DlssName "forward_special_dlss_present" `
+            -LaneKey "forwardSpecial" `
+            -NativeEnvironment $forwardSpecialNativeEnvironment `
+            -DlssEnvironment $forwardSpecialDlssPresentEnvironment `
+            -Manifest $forwardSpecialBaselineManifest
+        $quickSummary["lanes"]["forwardSpecialNative"] =
+            $forwardSpecialLanes.NativeLane
+        $quickSummary["lanes"]["forwardSpecialDlssPresent"] =
+            $forwardSpecialLanes.DlssLane
+    }
+
+    if ($selectedSuites -contains "material-stress") {
+        $quickSummary["baselines"]["materialStress"] = [ordered]@{
+            manifest = $materialStressBaselineManifestPath
+            name = $materialStressBaselineManifest.name
+        }
+        $quickSummary["thresholds"]["materialStress"] =
+            New-QuickComparisonThresholdSummary -Manifest $materialStressBaselineManifest
+        $materialStressLanes = Invoke-QuickDlssPairSuite `
+            -NativeName "material_stress_native_deferred_hdr" `
+            -DlssName "material_stress_dlss_present" `
+            -LaneKey "materialStress" `
+            -NativeEnvironment $materialStressNativeEnvironment `
+            -DlssEnvironment $materialStressDlssPresentEnvironment `
+            -Manifest $materialStressBaselineManifest
+        $quickSummary["lanes"]["materialStressNative"] =
+            $materialStressLanes.NativeLane
+        $quickSummary["lanes"]["materialStressDlssPresent"] =
+            $materialStressLanes.DlssLane
     }
 
     $summaryPath = Join-Path $outputRoot "summary.json"
@@ -2173,7 +2337,8 @@ if ($materialStressDlssRow.frame_material_specular_texture_count -ne $materialSt
     $materialStressDlssRow.frame_material_clearcoat_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.clearcoatTextureMaterials -or
     $materialStressDlssRow.frame_material_clearcoat_roughness_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.clearcoatRoughnessTextureMaterials -or
     $materialStressDlssRow.frame_material_transmission_texture_count -ne $materialStressBaselineManifest.expected.dlssPresent.transmissionTextureMaterials -or
-    $materialStressDlssRow.frame_material_volume_count -ne $materialStressBaselineManifest.expected.dlssPresent.volumeMaterials) {
+    $materialStressDlssRow.frame_material_volume_count -ne $materialStressBaselineManifest.expected.dlssPresent.volumeMaterials -or
+    $materialStressDlssRow.frame_material_textured_count -ne $materialStressBaselineManifest.expected.dlssPresent.texturedMaterials) {
     throw "Material-stress DLSS material counter mismatch"
 }
 

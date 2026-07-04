@@ -63,7 +63,7 @@
       "clearcoatRoughnessTextureMaterials": "1",
       "transmissionTextureMaterials": "1",
       "volumeMaterials": "1",
-      "texturedMaterials": "3"
+      "texturedMaterials": "2"
     }
   },
   "thresholds": {
@@ -90,7 +90,7 @@
       "clearcoatRoughnessTextureMaterials": 1,
       "transmissionTextureMaterials": 1,
       "volumeMaterials": 1,
-      "texturedMaterials": 3
+      "texturedMaterials": 2
     },
     "comparisonChangedPixels": 122,
     "comparisonMeanDelta": 0.4556,
