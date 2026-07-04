@@ -428,19 +428,8 @@ void main() {
     } else if (view == 6) {
         outColor = vec4(emissive.rgb, 1.0);
     } else if (view == 7) {
-        MaterialRecord materialRecord;
-        vec2 debugVelocity = velocity;
-        if (TryGetMaterialRecord(material.a, materialRecord)) {
-            float textureFlags = materialRecord.materialFlags.y;
-            if (HasTextureFlag(textureFlags, 1024.0)) {
-                debugVelocity.x = 0.0;
-            }
-            if (HasTextureFlag(textureFlags, 512.0)) {
-                debugVelocity.y = 0.0;
-            }
-        }
-        float velocityMagnitude = min(length(debugVelocity) * 24.0, 1.0);
-        outColor = vec4(abs(debugVelocity) * 12.0, velocityMagnitude, 1.0);
+        float velocityMagnitude = min(length(velocity) * 24.0, 1.0);
+        outColor = vec4(abs(velocity) * 12.0, velocityMagnitude, 1.0);
     } else if (view == 8) {
         if (depth >= 0.999999 || albedo.a <= 0.001) {
             outColor = vec4(vec3(1.0), 1.0);

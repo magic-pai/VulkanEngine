@@ -133,6 +133,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererPostProcessStats& postProcess = stats.postProcess;
     const RendererBindStats& binds = stats.binds;
     const RendererGpuStats& gpu = stats.gpu;
+    const RendererTemporalStats& temporal = stats.temporal;
     const BenchmarkSceneDiagnostics& sceneDiagnostics =
         GetBenchmarkSceneDiagnostics();
 
@@ -570,6 +571,25 @@ void BenchmarkRecorder::RecordFrame(
         << weightedTranslucency.sharedLightListDraws << ','
         << weightedTranslucency.shadowReadyDraws << ','
         << weightedTranslucency.resolveDraws << ','
+        << temporal.velocityTargetAllocated << ','
+        << static_cast<int>(temporal.velocityFormat) << ','
+        << temporal.velocityCameraMotionEnabled << ','
+        << temporal.velocityCameraMotionReady << ','
+        << temporal.velocityObjectMotionReady << ','
+        << temporal.velocityMaterialAuxTargetAllocated << ','
+        << static_cast<int>(temporal.velocityMaterialAuxFormat) << ','
+        << temporal.velocityMaterialAuxMigrated << ','
+        << temporal.historyValid << ','
+        << temporal.historyReset << ','
+        << temporal.historyResetReason << ','
+        << temporal.jitterEnabled << ','
+        << temporal.jitterApplied << ','
+        << temporal.jitterSequenceIndex << ','
+        << temporal.jitterPixelsX << ','
+        << temporal.jitterPixelsY << ','
+        << temporal.jitterUvX << ','
+        << temporal.jitterUvY << ','
+        << temporal.taaResolveEnabled << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1032,6 +1052,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_framebuffer_count,weighted_translucency_clear_passes,"
         << "weighted_translucency_draws,weighted_translucency_shared_light_list_draws,"
         << "weighted_translucency_shadow_ready_draws,weighted_translucency_resolve_draws,"
+        << "temporal_velocity_target_allocated,temporal_velocity_format,"
+        << "temporal_velocity_camera_motion_enabled,"
+        << "temporal_velocity_camera_motion_ready,"
+        << "temporal_velocity_object_motion_ready,"
+        << "temporal_velocity_material_aux_target_allocated,"
+        << "temporal_velocity_material_aux_format,"
+        << "temporal_velocity_material_aux_migrated,"
+        << "temporal_history_valid,temporal_history_reset,"
+        << "temporal_history_reset_reason,"
+        << "temporal_jitter_enabled,temporal_jitter_applied,"
+        << "temporal_jitter_sequence_index,"
+        << "temporal_jitter_pixels_x,temporal_jitter_pixels_y,"
+        << "temporal_jitter_uv_x,temporal_jitter_uv_y,"
+        << "temporal_taa_resolve_enabled,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

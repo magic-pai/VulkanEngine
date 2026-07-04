@@ -1862,6 +1862,32 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "color attachment, sampled, storage",
             "window extent"
         );
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "GBufferMaterialAux",
+            VulkanFormatName(inputs.gBufferMaterialAuxFormat),
+            "color attachment, sampled",
+            inputs.velocityMaterialAuxMigrated
+                ? "clearcoat roughness/transmission payload split out of Velocity"
+                : "material auxiliary payload"
+        );
+    }
+    if (inputs.temporalStateAllocated) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PersistentHistory,
+            "TemporalFrameState",
+            "matrix history",
+            "previous view/projection, camera-jitter state, and history-reset diagnostics",
+            inputs.temporalHistoryReset
+                ? "history reset this frame"
+                : inputs.temporalHistoryValid
+                    ? "history valid"
+                    : "history cold"
+        );
     }
     if (inputs.lightTileCullComputeEnabled) {
         AppendResource(
@@ -1883,6 +1909,20 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "per frame"
         );
     }
+    if (inputs.temporalStateAllocated) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::FrameSetup,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "TemporalFoundation",
+            inputs.temporalHistoryValid ? "TemporalFrameState" : "",
+            "TemporalFrameState",
+            inputs.velocityCameraMotionReady
+                ? "Frame setup publishes previous camera matrices for GBuffer velocity and records jitter/history state without enabling TAA resolve."
+                : "Frame setup records temporal history reset/fallback state before TAA resolve is enabled."
+        );
+    }
     if (inputs.gBufferRenderPassAllocated) {
         AppendPass(
             plan,
@@ -1890,10 +1930,10 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             inputs.gBufferGeometryEnabled ? "GBufferOpaque" : "GBufferTarget",
-            "",
-            "SceneDepth, Velocity, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive",
+            inputs.velocityCameraMotionReady ? "TemporalFrameState" : "",
+            "SceneDepth, Velocity, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux",
             inputs.gBufferGeometryEnabled
-                ? "Writes the first deferred opaque material data while legacy forward still owns the visible image."
+                ? "Writes deferred opaque material data, camera motion velocity, and material aux payload while legacy forward still owns the visible image."
                 : "Recorded clear-only GBuffer pass; opaque geometry migration follows."
         );
     }
@@ -1982,8 +2022,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "HdrOffscreenTarget",
             inputs.deferredLightingEnabled
                 ? (inputs.lightTileCullComputeEnabled
-                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
-                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
+                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
                 : "",
             "HDRSceneColor",
             inputs.deferredLightingEnabled
@@ -2082,7 +2122,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
             "GBufferDebug",
-            "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, SceneDepth, Velocity, LegacyShadowMap",
+            "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, Velocity, LegacyShadowMap",
             "SwapchainColor",
             "Debug visualizer for deferred attachments and reconstructed deferred shadow visibility."
         );

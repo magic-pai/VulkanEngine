@@ -5,12 +5,15 @@ layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
 layout(location = 3) in vec3 fragWorldPosition;
 layout(location = 4) in vec4 fragTangent;
+layout(location = 5) in vec4 fragCurrentClip;
+layout(location = 6) in vec4 fragPreviousClip;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormalRoughness;
 layout(location = 2) out vec4 outMaterial;
 layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out vec2 outVelocity;
+layout(location = 5) out vec2 outMaterialAux;
 
 struct MaterialRecord {
     vec4 baseColorFactor;
@@ -223,7 +226,12 @@ void main() {
     outNormalRoughness = vec4(normal * 0.5 + 0.5, roughness);
     outMaterial = vec4(metallic, occlusion, specularTextureFactor, max(objectData.materialControls.w, 0.0));
     outEmissive = vec4(emissive, clearcoat);
-    outVelocity = vec2(
+    vec2 currentNdc = fragCurrentClip.xy / max(abs(fragCurrentClip.w), 0.000001);
+    vec2 previousNdc = fragPreviousClip.xy / max(abs(fragPreviousClip.w), 0.000001);
+    vec2 currentUv = currentNdc * 0.5 + 0.5;
+    vec2 previousUv = previousNdc * 0.5 + 0.5;
+    outVelocity = currentUv - previousUv;
+    outMaterialAux = vec2(
         hasClearcoatRoughnessTexture ? clearcoatRoughness : 0.0,
         hasTransmissionTexture ? transmission : 0.0
     );

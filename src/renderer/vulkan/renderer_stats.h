@@ -554,6 +554,36 @@ struct RendererGpuStats {
     f32 totalRecordedMs = 0.0f;
 };
 
+enum class RendererTemporalHistoryResetReason : u32 {
+    None = 0,
+    FirstFrame = 1,
+    ExtentChanged = 2,
+    MatricesUnavailable = 3,
+    Forced = 4
+};
+
+struct RendererTemporalStats {
+    u32 velocityTargetAllocated = 0;
+    VkFormat velocityFormat = VK_FORMAT_UNDEFINED;
+    u32 velocityCameraMotionEnabled = 0;
+    u32 velocityCameraMotionReady = 0;
+    u32 velocityObjectMotionReady = 0;
+    u32 velocityMaterialAuxTargetAllocated = 0;
+    VkFormat velocityMaterialAuxFormat = VK_FORMAT_UNDEFINED;
+    u32 velocityMaterialAuxMigrated = 0;
+    u32 historyValid = 0;
+    u32 historyReset = 0;
+    u32 historyResetReason = 0;
+    u32 jitterEnabled = 0;
+    u32 jitterApplied = 0;
+    u32 jitterSequenceIndex = 0;
+    f32 jitterPixelsX = 0.0f;
+    f32 jitterPixelsY = 0.0f;
+    f32 jitterUvX = 0.0f;
+    f32 jitterUvY = 0.0f;
+    u32 taaResolveEnabled = 0;
+};
+
 struct RendererStats {
     RendererCpuStats cpu;
     RendererDrawStats draw;
@@ -569,6 +599,7 @@ struct RendererStats {
     RendererPostProcessStats postProcess;
     RendererBindStats binds;
     RendererGpuStats gpu;
+    RendererTemporalStats temporal;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();
 };
 

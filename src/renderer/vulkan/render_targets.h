@@ -147,6 +147,7 @@ public:
     VkImageView GBufferNormalRoughnessView(std::size_t index) const;
     VkImageView GBufferMaterialView(std::size_t index) const;
     VkImageView GBufferEmissiveView(std::size_t index) const;
+    VkImageView GBufferMaterialAuxView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
     VkFormat WeightedTranslucencyAccumFormat() const;
     VkFormat WeightedTranslucencyRevealageFormat() const;
@@ -156,6 +157,7 @@ public:
     VkFormat GBufferNormalRoughnessFormat() const;
     VkFormat GBufferMaterialFormat() const;
     VkFormat GBufferEmissiveFormat() const;
+    VkFormat GBufferMaterialAuxFormat() const;
     VkExtent2D Extent() const;
     std::size_t Count() const;
 
@@ -180,6 +182,8 @@ public:
     static constexpr VkFormat kGBufferMaterialFormat = VK_FORMAT_R8G8B8A8_UNORM;
     static constexpr VkFormat kGBufferEmissiveFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat kGBufferMaterialAuxFormat =
+        VK_FORMAT_R16G16_SFLOAT;
 
 private:
     void CreateImageArray(
@@ -202,6 +206,7 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferNormalRoughnessImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialAuxImages;
     VkExtent2D m_Extent{};
 };
 

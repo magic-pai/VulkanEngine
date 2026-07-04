@@ -1144,6 +1144,19 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureFallbacks
     );
     ImGui::Text(
+        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s",
+        stats.temporal.velocityCameraMotionReady ? "camera-ready" : "cold",
+        stats.temporal.historyValid ? "valid" : "cold",
+        stats.temporal.historyReset,
+        stats.temporal.historyResetReason,
+        stats.temporal.jitterEnabled ? "prepared" : "off",
+        stats.temporal.jitterApplied,
+        stats.temporal.jitterPixelsX,
+        stats.temporal.jitterPixelsY,
+        stats.temporal.velocityMaterialAuxMigrated ? "split" : "missing",
+        stats.temporal.taaResolveEnabled ? "enabled" : "off"
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,

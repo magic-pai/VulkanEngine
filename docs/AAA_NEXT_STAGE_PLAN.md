@@ -60,7 +60,7 @@ resolution work evidence-driven.
    - Add per-probe refresh policy: static, file-signature refresh, forced
      refresh, and future scene-dirty refresh.
 
-4. Production probe filtering. In progress.
+4. Production probe filtering. Implemented.
    - Improve authored cubemap filtering toward seam-aware GGX prefiltering.
    - Add diffuse irradiance convolution or SH/light-probe coefficients instead
      of single-color diffuse fallback.
@@ -71,7 +71,7 @@ resolution work evidence-driven.
      diagnostics, and selected-probe masks.
    - Cover deferred, forward, and WBOIT paths with the same selected-probe set.
 
-6. Temporal foundation handoff.
+6. Temporal foundation handoff. Implemented.
    - Add velocity correctness diagnostics and history-reset state.
    - Add camera jitter state without changing default presentation.
    - Implement the first TAA resolve only after probe/lighting fallbacks are
@@ -286,6 +286,45 @@ resource and proving the shader path can consume directional probe data.
 - This is diagnostic strengthening for the existing top-4 blend path. It does
   not add new capture images, priority-volume authoring, dynamic scene capture,
   or final artist blending controls.
+
+## Slice 6 Execution Evidence
+
+- The previous placeholder use of `Velocity` for clearcoat roughness and
+  transmission payload has been split into a new `GBufferMaterialAux` target, so
+  `Velocity` now carries screen-space camera motion vectors.
+- The frame UBO appends previous view/projection matrices, temporal jitter
+  pixels/UVs, and temporal control flags while keeping default presentation
+  unjittered.
+- `SE_TEMPORAL_HISTORY_RESET=1` / `SE_TEMPORAL_FORCE_HISTORY_RESET=1` expose a
+  forced history-reset path, and `SE_TEMPORAL_JITTER=1` /
+  `SE_CAMERA_JITTER=1` expose prepared jitter state without applying it.
+- CSV, ImGui, and FrameGraph now expose velocity allocation/format, camera and
+  object motion readiness, material-aux migration, temporal history validity,
+  reset reason, jitter state, and explicit `taaResolveEnabled=0`.
+- FrameGraph exposes `GBufferMaterialAux` and `TemporalFrameState`, records an
+  active `TemporalFoundation` pass, and wires temporal history into the GBuffer
+  pass only when camera motion is ready.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_temporal_foundation_deferred_hdr_smoke.csv`,
+  `out/benchmarks/aaa_temporal_foundation_history_reset_smoke.csv`, and
+  `out/benchmarks/aaa_temporal_foundation_jitter_smoke.csv` all have matching
+  615-column rows and 0 frame-graph validation issues.
+- The normal deferred-HDR smoke reports velocity target allocation `1`, velocity
+  format `83`, camera motion ready `1`, object motion ready `0`, material aux
+  allocated/migrated `1/1`, history valid `1`, history reset `0`, jitter
+  disabled, and TAA resolve `0`.
+- The forced-reset smoke reports history valid `0`, history reset `1`, reset
+  reason `4`, camera motion ready `0`, material aux allocated/migrated `1/1`,
+  and TAA resolve `0`.
+- The jitter smoke reports jitter enabled `1`, jitter applied `0`, non-zero
+  jitter pixels/UVs, history valid `1`, camera motion ready `1`, and TAA
+  resolve `0`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is a temporal-readiness handoff. It deliberately does not implement the
+  first TAA resolve, object motion vectors, TAA history color, history
+  rejection, TAAU, dynamic resolution, motion blur, or temporal denoising.
 
 ## Non-Goals
 

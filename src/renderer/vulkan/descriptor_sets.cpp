@@ -773,7 +773,9 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
         } else {
             imageInfos[6] = imageInfos[0];
         }
-        imageInfos[7] = imageInfos[0];
+        imageInfos[7].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[7].imageView = renderTargets.GBufferMaterialAuxView(index);
+        imageInfos[7].sampler = sampler.Handle();
         imageInfos[8] = imageInfos[0];
         imageInfos[9] = imageInfos[0];
         imageInfos[10] = imageInfos[0];

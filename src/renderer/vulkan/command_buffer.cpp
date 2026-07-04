@@ -1406,13 +1406,14 @@ void VulkanCommandBuffer::Record(
     }
 
     if (gBufferRenderPass != nullptr && gBufferFramebuffer != nullptr) {
-        std::array<VkClearValue, 6> gBufferClearValues{};
+        std::array<VkClearValue, 7> gBufferClearValues{};
         gBufferClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
         gBufferClearValues[1].color = { { 0.5f, 0.5f, 1.0f, 1.0f } };
         gBufferClearValues[2].color = { { 0.0f, 1.0f, 0.0f, 1.0f } };
         gBufferClearValues[3].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
         gBufferClearValues[4].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        gBufferClearValues[5].depthStencil = { 1.0f, 0 };
+        gBufferClearValues[5].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+        gBufferClearValues[6].depthStencil = { 1.0f, 0 };
 
         VkRenderPassBeginInfo gBufferPassInfo{};
         gBufferPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;

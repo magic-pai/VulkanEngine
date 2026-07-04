@@ -932,6 +932,27 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "YES";
 }
 
+f32 Halton(u32 index, u32 base) {
+    f32 result = 0.0f;
+    f32 fraction = 1.0f / static_cast<f32>(base);
+    while (index > 0u) {
+        result += fraction * static_cast<f32>(index % base);
+        index /= base;
+        fraction /= static_cast<f32>(base);
+    }
+    return result;
+}
+
+bool TemporalJitterEnabledFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TEMPORAL_JITTER") ||
+        EnvironmentFlagEnabled("SE_CAMERA_JITTER");
+}
+
+bool TemporalHistoryForceResetFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TEMPORAL_HISTORY_RESET") ||
+        EnvironmentFlagEnabled("SE_TEMPORAL_FORCE_HISTORY_RESET");
+}
+
 std::optional<bool> EnvironmentFlagOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -2963,6 +2984,14 @@ void VulkanRenderer::DrawFrame() {
         showDeferredHdr &&
         m_HdrCompositePipeline != nullptr &&
         m_HdrDescriptorSets != nullptr;
+    const bool velocityTargetAllocated = m_SceneRenderTargets != nullptr;
+    const bool materialAuxTargetAllocated = m_SceneRenderTargets != nullptr;
+    const FrameTemporalState temporalState = BuildFrameTemporalState(
+        mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
+        extent,
+        velocityTargetAllocated,
+        materialAuxTargetAllocated
+    );
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     PrepareReflectionProbeCaptureResources();
     const FrameReflectionProbeSet frameReflectionProbes =
@@ -3025,7 +3054,8 @@ void VulkanRenderer::DrawFrame() {
         lightViewProjection,
         frameLights,
         frameReflectionProbes,
-        shadowSamplingEnabled
+        shadowSamplingEnabled,
+        &temporalState
     );
     UpdateOverlayUniformBuffer(
         imageIndex,
@@ -3398,6 +3428,18 @@ void VulkanRenderer::DrawFrame() {
         frameStats.weightedTranslucency.framebufferCount =
             static_cast<u32>(m_WeightedTranslucencyFramebuffer->Count());
     }
+    WriteTemporalStats(
+        temporalState,
+        velocityTargetAllocated,
+        m_SceneRenderTargets != nullptr
+            ? m_SceneRenderTargets->VelocityFormat()
+            : VK_FORMAT_UNDEFINED,
+        materialAuxTargetAllocated,
+        m_SceneRenderTargets != nullptr
+            ? m_SceneRenderTargets->GBufferMaterialAuxFormat()
+            : VK_FORMAT_UNDEFINED,
+        frameStats.temporal
+    );
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,
@@ -3691,8 +3733,20 @@ void VulkanRenderer::DrawFrame() {
             m_SceneRenderTargets != nullptr
                 ? m_SceneRenderTargets->GBufferEmissiveFormat()
                 : VK_FORMAT_UNDEFINED,
+            m_SceneRenderTargets != nullptr
+                ? m_SceneRenderTargets->GBufferMaterialAuxFormat()
+                : VK_FORMAT_UNDEFINED,
             m_GBufferRenderPass != nullptr && m_GBufferFramebuffer != nullptr,
             has3DMainPass && m_GBufferGraphicsPipeline != nullptr,
+            frameStats.temporal.velocityTargetAllocated > 0,
+            frameStats.temporal.historyValid > 0,
+            frameStats.temporal.historyReset > 0,
+            frameStats.temporal.historyResetReason,
+            frameStats.temporal.jitterEnabled > 0,
+            frameStats.temporal.jitterApplied > 0,
+            frameStats.temporal.velocityCameraMotionReady > 0,
+            frameStats.temporal.velocityObjectMotionReady > 0,
+            frameStats.temporal.velocityMaterialAuxMigrated > 0,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
@@ -3921,6 +3975,10 @@ void VulkanRenderer::DrawFrame() {
         throw std::runtime_error("Failed to present Vulkan swapchain image");
     }
 
+    StoreTemporalHistory(
+        mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
+        extent
+    );
     m_CurrentFrame = (m_CurrentFrame + 1) % VulkanSyncObjects::kMaxFramesInFlight;
 }
 
@@ -5753,13 +5811,146 @@ glm::vec2 VulkanRenderer::CursorToWorldPosition(const VkExtent2D& extent) const 
     return glm::vec2(worldPosition);
 }
 
+FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
+    const FrameMatrices* matrices,
+    const VkExtent2D& extent,
+    bool velocityTargetAllocated,
+    bool materialAuxTargetAllocated
+) const {
+    FrameTemporalState state{};
+    state.previousMatrices = m_PreviousTemporalMatrices;
+    state.jitterEnabled = TemporalJitterEnabledFromEnvironment();
+    state.jitterApplied = false;
+    state.jitterSequenceIndex = m_TemporalFrameCounter % 8u;
+    if (state.jitterEnabled && extent.width > 0u && extent.height > 0u) {
+        const u32 haltonIndex = state.jitterSequenceIndex + 1u;
+        state.jitterPixels = glm::vec2(
+            Halton(haltonIndex, 2u) - 0.5f,
+            Halton(haltonIndex, 3u) - 0.5f
+        );
+        state.jitterUv = glm::vec2(
+            state.jitterPixels.x / static_cast<f32>(extent.width),
+            state.jitterPixels.y / static_cast<f32>(extent.height)
+        );
+    }
+
+    state.velocityMaterialAuxMigrated = materialAuxTargetAllocated;
+    const bool forcedReset = TemporalHistoryForceResetFromEnvironment();
+    const bool matricesAvailable = matrices != nullptr;
+    const bool extentChanged =
+        m_TemporalHistoryValid &&
+        (m_PreviousTemporalExtent.width != extent.width ||
+            m_PreviousTemporalExtent.height != extent.height);
+
+    if (!matricesAvailable) {
+        state.resetReason =
+            RendererTemporalHistoryResetReason::MatricesUnavailable;
+    } else if (forcedReset) {
+        state.resetReason = RendererTemporalHistoryResetReason::Forced;
+    } else if (!m_TemporalHistoryValid) {
+        state.resetReason = RendererTemporalHistoryResetReason::FirstFrame;
+    } else if (extentChanged) {
+        state.resetReason = RendererTemporalHistoryResetReason::ExtentChanged;
+    } else {
+        state.resetReason = RendererTemporalHistoryResetReason::None;
+        state.historyValid = true;
+    }
+
+    state.historyReset = !state.historyValid;
+    state.velocityCameraMotionReady =
+        velocityTargetAllocated && matricesAvailable && state.historyValid;
+    state.velocityObjectMotionReady = false;
+    if (!state.historyValid && matricesAvailable) {
+        state.previousMatrices = *matrices;
+    }
+
+    return state;
+}
+
+void VulkanRenderer::StoreTemporalHistory(
+    const FrameMatrices* matrices,
+    const VkExtent2D& extent
+) {
+    if (matrices == nullptr) {
+        m_TemporalHistoryValid = false;
+        return;
+    }
+
+    m_PreviousTemporalMatrices = *matrices;
+    m_PreviousTemporalExtent = extent;
+    m_TemporalHistoryValid = true;
+    ++m_TemporalFrameCounter;
+}
+
+void VulkanRenderer::PopulateTemporalUniforms(
+    UniformBufferObject& uniformData,
+    const FrameTemporalState* temporalState
+) const {
+    if (temporalState == nullptr) {
+        uniformData.previousView = uniformData.view;
+        uniformData.previousProj = uniformData.proj;
+        uniformData.temporalJitter = glm::vec4(0.0f);
+        uniformData.temporalControls = glm::vec4(0.0f);
+        return;
+    }
+
+    uniformData.previousView = temporalState->previousMatrices.view;
+    uniformData.previousProj = temporalState->previousMatrices.proj;
+    uniformData.temporalJitter = glm::vec4(
+        temporalState->jitterPixels,
+        temporalState->jitterUv
+    );
+    uniformData.temporalControls = glm::vec4(
+        temporalState->velocityCameraMotionReady ? 1.0f : 0.0f,
+        temporalState->historyValid ? 1.0f : 0.0f,
+        temporalState->jitterApplied ? 1.0f : 0.0f,
+        static_cast<f32>(temporalState->jitterSequenceIndex)
+    );
+}
+
+void VulkanRenderer::WriteTemporalStats(
+    const FrameTemporalState& temporalState,
+    bool velocityTargetAllocated,
+    VkFormat velocityFormat,
+    bool materialAuxTargetAllocated,
+    VkFormat materialAuxFormat,
+    RendererTemporalStats& stats
+) const {
+    stats.velocityTargetAllocated = velocityTargetAllocated ? 1u : 0u;
+    stats.velocityFormat =
+        velocityTargetAllocated ? velocityFormat : VK_FORMAT_UNDEFINED;
+    stats.velocityCameraMotionEnabled = 1u;
+    stats.velocityCameraMotionReady =
+        temporalState.velocityCameraMotionReady ? 1u : 0u;
+    stats.velocityObjectMotionReady =
+        temporalState.velocityObjectMotionReady ? 1u : 0u;
+    stats.velocityMaterialAuxTargetAllocated =
+        materialAuxTargetAllocated ? 1u : 0u;
+    stats.velocityMaterialAuxFormat =
+        materialAuxTargetAllocated ? materialAuxFormat : VK_FORMAT_UNDEFINED;
+    stats.velocityMaterialAuxMigrated =
+        temporalState.velocityMaterialAuxMigrated ? 1u : 0u;
+    stats.historyValid = temporalState.historyValid ? 1u : 0u;
+    stats.historyReset = temporalState.historyReset ? 1u : 0u;
+    stats.historyResetReason = static_cast<u32>(temporalState.resetReason);
+    stats.jitterEnabled = temporalState.jitterEnabled ? 1u : 0u;
+    stats.jitterApplied = temporalState.jitterApplied ? 1u : 0u;
+    stats.jitterSequenceIndex = temporalState.jitterSequenceIndex;
+    stats.jitterPixelsX = temporalState.jitterPixels.x;
+    stats.jitterPixelsY = temporalState.jitterPixels.y;
+    stats.jitterUvX = temporalState.jitterUv.x;
+    stats.jitterUvY = temporalState.jitterUv.y;
+    stats.taaResolveEnabled = 0u;
+}
+
 void VulkanRenderer::UpdateUniformBuffer(
     std::size_t imageIndex,
     const FrameMatrices* matrices,
     const glm::mat4& lightViewProjection,
     const FrameLightConstants& lights,
     const FrameReflectionProbeSet& reflectionProbes,
-    bool shadowSamplingEnabled
+    bool shadowSamplingEnabled,
+    const FrameTemporalState* temporalState
 ) const {
     UniformBufferObject uniformData{};
     if (matrices != nullptr) {
@@ -5768,6 +5959,7 @@ void VulkanRenderer::UpdateUniformBuffer(
         uniformData.invView = glm::inverse(matrices->view);
         uniformData.invProj = glm::inverse(matrices->proj);
     }
+    PopulateTemporalUniforms(uniformData, temporalState);
     uniformData.lightViewProj = lightViewProjection;
     uniformData.directionalLight = lights.directionalLight;
     uniformData.ambientLight = lights.ambientLight;

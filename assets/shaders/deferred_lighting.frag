@@ -130,6 +130,7 @@ layout(set = 1, binding = 3) uniform sampler2D gBufferVelocity;
 layout(set = 1, binding = 4) uniform sampler2D sceneDepth;
 layout(set = 1, binding = 5) uniform sampler2D gBufferEmissive;
 layout(set = 1, binding = 6) uniform sampler2D shadowSampler;
+layout(set = 1, binding = 7) uniform sampler2D gBufferMaterialAux;
 layout(set = 1, binding = 12) uniform sampler2D localShadowSampler;
 
 const float PI = 3.14159265359;
@@ -1942,7 +1943,7 @@ void main() {
     vec4 normalRoughness = texture(gBufferNormalRoughness, fragUv);
     vec4 material = texture(gBufferMaterial, fragUv);
     vec4 emissive = texture(gBufferEmissive, fragUv);
-    vec2 velocity = texture(gBufferVelocity, fragUv).rg;
+    vec2 materialAux = texture(gBufferMaterialAux, fragUv).rg;
     float depth = texture(sceneDepth, fragUv).r;
 
     if (depth >= 0.999999 || albedo.a <= 0.001) {
@@ -1971,10 +1972,10 @@ void main() {
         ? clamp(emissive.a, 0.0, 1.0)
         : (hasMaterialRecord ? clamp(materialRecord.uvControls.w, 0.0, 1.0) : 0.0);
     float clearcoatRoughness = hasClearcoatRoughnessTexture
-        ? clamp(velocity.x, 0.0, 1.0)
+        ? clamp(materialAux.x, 0.0, 1.0)
         : (hasMaterialRecord ? clamp(materialRecord.emissiveFactor.w, 0.0, 1.0) : 0.0);
     float transmission = hasTransmissionTexture
-        ? clamp(velocity.y, 0.0, 1.0)
+        ? clamp(materialAux.y, 0.0, 1.0)
         : (hasMaterialRecord ? clamp(materialRecord.materialCustom.w, 0.0, 1.0) : 0.0);
     vec3 specularColorFactor = clamp(
         specularFactor.rgb * max(specularFactor.a, 0.0),
@@ -2281,10 +2282,10 @@ void main() {
             ? clamp(emissive.a, 0.0, 1.0)
             : clamp(materialRecord.uvControls.w, 0.0, 1.0);
         float tableClearcoatRoughness = clearcoatRoughnessTextured
-            ? clamp(velocity.x, 0.0, 1.0)
+            ? clamp(materialAux.x, 0.0, 1.0)
             : clamp(materialRecord.emissiveFactor.w, 0.0, 1.0);
         float tableTransmission = transmissionTextured
-            ? clamp(velocity.y, 0.0, 1.0)
+            ? clamp(materialAux.y, 0.0, 1.0)
             : clamp(materialRecord.materialCustom.w, 0.0, 1.0);
         float tableVolume = materialRecord.volumeFactor.w > 0.5
             ? clamp(materialRecord.volumeFactor.x / max(materialRecord.volumeFactor.y, 0.0001), 0.0, 1.0)

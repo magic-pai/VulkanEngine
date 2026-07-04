@@ -11,6 +11,8 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec2 fragTexCoord;
 layout(location = 3) out vec3 fragWorldPosition;
 layout(location = 4) out vec4 fragTangent;
+layout(location = 5) out vec4 fragCurrentClip;
+layout(location = 6) out vec4 fragPreviousClip;
 
 layout(set = 0, binding = 0) uniform FrameData {
     mat4 view;
@@ -47,6 +49,10 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
     vec4 reflectionProbeDiffuseLobes[24];
+    mat4 previousView;
+    mat4 previousProj;
+    vec4 temporalJitter;
+    vec4 temporalControls;
 } frame;
 
 layout(push_constant) uniform ObjectPushConstants {
@@ -71,4 +77,8 @@ void main() {
     fragWorldPosition = worldPosition.xyz;
     fragTangent = vec4(normalize(modelLinear * inTangent.xyz), inTangent.w);
     gl_Position = frame.proj * frame.view * worldPosition;
+    fragCurrentClip = gl_Position;
+    fragPreviousClip = frame.temporalControls.x > 0.5
+        ? frame.previousProj * frame.previousView * worldPosition
+        : gl_Position;
 }

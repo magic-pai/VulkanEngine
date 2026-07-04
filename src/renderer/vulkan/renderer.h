@@ -83,6 +83,22 @@ struct FrameMatrices {
     glm::mat4 proj{ 1.0f };
 };
 
+struct FrameTemporalState {
+    FrameMatrices previousMatrices{};
+    glm::vec2 jitterPixels{ 0.0f };
+    glm::vec2 jitterUv{ 0.0f };
+    u32 jitterSequenceIndex = 0;
+    RendererTemporalHistoryResetReason resetReason =
+        RendererTemporalHistoryResetReason::FirstFrame;
+    bool historyValid = false;
+    bool historyReset = true;
+    bool jitterEnabled = false;
+    bool jitterApplied = false;
+    bool velocityCameraMotionReady = false;
+    bool velocityObjectMotionReady = false;
+    bool velocityMaterialAuxMigrated = false;
+};
+
 struct FrameLightConstants {
     glm::vec4 directionalLight{ -0.45f, -0.82f, -0.35f, 0.78f };
     glm::vec4 ambientLight{ 0.22f, 0.24f, 0.0f, 0.0f };
@@ -365,6 +381,28 @@ private:
     void ApplyShadowMapSettings();
     void ResetLocalShadowCacheStates();
     void HandleObjectPicking();
+    FrameTemporalState BuildFrameTemporalState(
+        const FrameMatrices* matrices,
+        const VkExtent2D& extent,
+        bool velocityTargetAllocated,
+        bool materialAuxTargetAllocated
+    ) const;
+    void StoreTemporalHistory(
+        const FrameMatrices* matrices,
+        const VkExtent2D& extent
+    );
+    void PopulateTemporalUniforms(
+        UniformBufferObject& uniformData,
+        const FrameTemporalState* temporalState
+    ) const;
+    void WriteTemporalStats(
+        const FrameTemporalState& temporalState,
+        bool velocityTargetAllocated,
+        VkFormat velocityFormat,
+        bool materialAuxTargetAllocated,
+        VkFormat materialAuxFormat,
+        RendererTemporalStats& stats
+    ) const;
     bool LocalReflectionProbeCubemapReady() const;
     void PrepareReflectionProbeCaptureResources();
     u32 UpdateEnvironmentDescriptorSets(
@@ -379,7 +417,8 @@ private:
         const glm::mat4& lightViewProjection,
         const FrameLightConstants& lights,
         const FrameReflectionProbeSet& reflectionProbes,
-        bool shadowSamplingEnabled
+        bool shadowSamplingEnabled,
+        const FrameTemporalState* temporalState
     ) const;
     void UpdateOverlayUniformBuffer(
         std::size_t imageIndex,
@@ -487,6 +526,10 @@ private:
     VulkanRenderFeatureRegistry m_RenderFeatures;
     RendererStats m_LastStats;
     std::size_t m_CurrentFrame = 0;
+    FrameMatrices m_PreviousTemporalMatrices{};
+    VkExtent2D m_PreviousTemporalExtent{};
+    u32 m_TemporalFrameCounter = 0;
+    bool m_TemporalHistoryValid = false;
 
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;

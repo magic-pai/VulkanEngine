@@ -258,13 +258,14 @@ void VulkanGBufferRenderPass::CreateRenderPass(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
 ) {
-    std::array<VkAttachmentDescription, 6> attachments{};
+    std::array<VkAttachmentDescription, 7> attachments{};
     attachments[0].format = renderTargets.GBufferAlbedoFormat();
     attachments[1].format = renderTargets.GBufferNormalRoughnessFormat();
     attachments[2].format = renderTargets.GBufferMaterialFormat();
     attachments[3].format = renderTargets.GBufferEmissiveFormat();
     attachments[4].format = renderTargets.VelocityFormat();
-    for (std::size_t index = 0; index < 5; ++index) {
+    attachments[5].format = renderTargets.GBufferMaterialAuxFormat();
+    for (std::size_t index = 0; index < 6; ++index) {
         attachments[index].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[index].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachments[index].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -273,23 +274,23 @@ void VulkanGBufferRenderPass::CreateRenderPass(
         attachments[index].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         attachments[index].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
-    attachments[5].format = renderTargets.SceneDepthFormat();
-    attachments[5].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[5].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[5].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[5].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[5].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[5].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[5].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    attachments[6].format = renderTargets.SceneDepthFormat();
+    attachments[6].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[6].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[6].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[6].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[6].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[6].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[6].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
-    std::array<VkAttachmentReference, 5> colorAttachmentReferences{};
+    std::array<VkAttachmentReference, 6> colorAttachmentReferences{};
     for (std::size_t index = 0; index < colorAttachmentReferences.size(); ++index) {
         colorAttachmentReferences[index].attachment = static_cast<u32>(index);
         colorAttachmentReferences[index].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
     VkAttachmentReference depthAttachmentReference{};
-    depthAttachmentReference.attachment = 5;
+    depthAttachmentReference.attachment = 6;
     depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     VkSubpassDescription subpass{};
@@ -498,6 +499,14 @@ VkImageView VulkanSceneRenderTargets::GBufferEmissiveView(std::size_t index) con
     return m_GBufferEmissiveImages[index]->View();
 }
 
+VkImageView VulkanSceneRenderTargets::GBufferMaterialAuxView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_GBufferMaterialAuxImages.size(),
+        "GBuffer material aux index is out of range"
+    );
+    return m_GBufferMaterialAuxImages[index]->View();
+}
+
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
     return kHdrSceneColorFormat;
 }
@@ -532,6 +541,10 @@ VkFormat VulkanSceneRenderTargets::GBufferMaterialFormat() const {
 
 VkFormat VulkanSceneRenderTargets::GBufferEmissiveFormat() const {
     return kGBufferEmissiveFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::GBufferMaterialAuxFormat() const {
+    return kGBufferMaterialAuxFormat;
 }
 
 VkExtent2D VulkanSceneRenderTargets::Extent() const {
@@ -650,6 +663,16 @@ void VulkanSceneRenderTargets::Recreate(
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_GBufferEmissiveImages
     );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kGBufferMaterialAuxFormat,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_GBufferMaterialAuxImages
+    );
 }
 
 void VulkanSceneRenderTargets::Release() {
@@ -662,6 +685,7 @@ void VulkanSceneRenderTargets::Release() {
     m_GBufferNormalRoughnessImages.clear();
     m_GBufferMaterialImages.clear();
     m_GBufferEmissiveImages.clear();
+    m_GBufferMaterialAuxImages.clear();
     m_Extent = {};
 }
 
@@ -1170,12 +1194,13 @@ void VulkanGBufferFramebuffer::CreateFramebuffers(
     m_Framebuffers.resize(renderTargets.Count());
 
     for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
-        const std::array<VkImageView, 6> attachments = {
+        const std::array<VkImageView, 7> attachments = {
             renderTargets.GBufferAlbedoView(index),
             renderTargets.GBufferNormalRoughnessView(index),
             renderTargets.GBufferMaterialView(index),
             renderTargets.GBufferEmissiveView(index),
             renderTargets.VelocityView(index),
+            renderTargets.GBufferMaterialAuxView(index),
             renderTargets.SceneDepthView(index)
         };
 

@@ -97,7 +97,7 @@ PipelineSpec PipelineSpec::GBuffer3D(
     );
     spec.supportsInstancing = false;
     spec.instancedVertexShaderPath.clear();
-    spec.colorAttachmentCount = 5;
+    spec.colorAttachmentCount = 6;
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     return spec;
 }
