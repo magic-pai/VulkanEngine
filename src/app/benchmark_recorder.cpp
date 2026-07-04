@@ -209,6 +209,15 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.ueBridgeBlockedCamera << ','
         << sceneDiagnostics.ueBridgeBlockedLights << ','
         << sceneDiagnostics.ueBridgeBlockedReferenceCapture << ','
+        << sceneDiagnostics.runtimeImportModelRequested << ','
+        << sceneDiagnostics.runtimeImportModelLoaded << ','
+        << sceneDiagnostics.runtimeImportCacheHit << ','
+        << sceneDiagnostics.runtimeImportMeshCount << ','
+        << sceneDiagnostics.runtimeImportMaterialCount << ','
+        << sceneDiagnostics.runtimeImportAnimationCount << ','
+        << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
+        << sceneDiagnostics.runtimeImportBoneCount << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported << ','
         << cpu.totalFrameMs << ','
         << cpu.waitAcquireMs << ','
         << cpu.imguiMs << ','
@@ -993,6 +1002,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "ue_bridge_blocked_mesh_exports,ue_bridge_blocked_mesh_loads,"
         << "ue_bridge_blocked_camera,"
         << "ue_bridge_blocked_lights,ue_bridge_blocked_reference_capture,"
+        << "runtime_import_model_requested,runtime_import_model_loaded,"
+        << "runtime_import_cache_hit,runtime_import_mesh_count,"
+        << "runtime_import_material_count,runtime_import_animation_count,"
+        << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
+        << "runtime_import_skinned_animation_unsupported,"
         << "cpu_total_ms,cpu_wait_acquire_ms,cpu_imgui_ms,cpu_picking_ms,"
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"
         << "gpu_available,gpu_total_recorded_ms,gpu_shadow_ms,gpu_main_ms,gpu_overlay_ms,gpu_imgui_ms,"

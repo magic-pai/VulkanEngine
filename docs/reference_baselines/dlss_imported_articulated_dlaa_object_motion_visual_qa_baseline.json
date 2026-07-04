@@ -53,7 +53,16 @@
       "frameMaterialCount": "1",
       "frameMaterialTexturedCount": "0",
       "frameLightTotalCount": "4",
-      "frameLocalLightCount": "3"
+      "frameLocalLightCount": "3",
+      "runtimeImportModelRequested": "1",
+      "runtimeImportModelLoaded": "1",
+      "runtimeImportCacheHit": "0",
+      "runtimeImportMeshCount": "3",
+      "runtimeImportMaterialCount": "1",
+      "runtimeImportAnimationCount": "0",
+      "runtimeImportMeshWithBonesCount": "0",
+      "runtimeImportBoneCount": "0",
+      "runtimeImportSkinnedAnimationUnsupported": "0"
     }
   },
   "thresholds": {
@@ -69,7 +78,7 @@
   "baselineSource": {
     "capturedAt": "2026-07-05T05:37:00+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
-    "dlssColumns": "782/782",
+    "dlssColumns": "791/791",
     "model": "assets/models/articulated_links.obj",
     "qualityMode": 6,
     "recommendedPreset": 11,

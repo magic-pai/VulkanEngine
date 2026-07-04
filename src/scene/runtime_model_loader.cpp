@@ -406,11 +406,18 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 "Loaded (cached) " + PathLabel(modelPath) + " (" +
                     std::to_string(cached.meshes.size()) + " meshes, " +
                     std::to_string(cached.materials.size()) + " materials)",
-                true};
+                true,
+                static_cast<u32>(cached.meshes.size()),
+                static_cast<u32>(cached.materials.size()),
+                cached.sourceAnimationCount,
+                cached.sourceMeshWithBonesCount,
+                cached.sourceBoneCount,
+                cached.skinnedAnimationUnsupported};
         }
 
         ModelImportOptions importOptions{};
         importOptions.fastImport = true;
+        importOptions.readSkinningMetadata = true;
         importOptions.validateScene = false;
         importOptions.optimizeMeshes = false;
         ImportedModel3D importedModelData =
@@ -964,6 +971,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
 
         const std::size_t meshCount = importedModelData.meshes.size();
         const std::size_t materialCount = importedModelData.materials.size();
+        loadedModel->sourceAnimationCount = importedModelData.sourceAnimationCount;
+        loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
+        loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
+        loadedModel->skinnedAnimationUnsupported =
+            importedModelData.skinnedAnimationUnsupported ? 1u : 0u;
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -972,7 +984,13 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             "Loaded " + PathLabel(modelPath) + " (" +
                 std::to_string(meshCount) + " mesh(es), " +
                 std::to_string(materialCount) + " material(s))",
-            false
+            false,
+            static_cast<u32>(meshCount),
+            static_cast<u32>(materialCount),
+            importedModelData.sourceAnimationCount,
+            importedModelData.sourceMeshWithBonesCount,
+            importedModelData.sourceBoneCount,
+            importedModelData.skinnedAnimationUnsupported ? 1u : 0u
         };
     } catch (const std::exception& error) {
         return RuntimeModelLoadResult{

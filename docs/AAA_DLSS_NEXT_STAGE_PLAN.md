@@ -469,6 +469,67 @@ This closes the next imported multi-part object-motion gap after the rigid OBJ
 lane. True skinned/animated velocity still requires previous-pose/bone or
 explicit skinned-velocity carriers and remains open.
 
+## Slice 4.23 Execution Plan
+
+Slice 4.23 adds runtime import diagnostics for skinned/animated source assets
+before implementing skinned velocity. The goal is to make unsupported source
+features visible in benchmark CSV and focused baselines so imported assets cannot
+silently pass as rigid meshes when they actually contain animation or bones.
+
+1. Importer source-feature diagnostics.
+   - Record source mesh/material counts, animation count, meshes with bones, and
+     total bone references from the Assimp scene.
+   - Keep runtime geometry import rigid for now, but emit an explicit
+     unsupported flag whenever animations or bone data are present.
+
+2. Runtime and benchmark propagation.
+   - Carry the diagnostics through `RuntimeModelLoadResult`, including cache-hit
+     loads.
+   - Add `runtime_import_*` columns to benchmark CSV after the UE bridge
+     diagnostics block.
+
+3. Focused QA contract.
+   - Add runtime import counters to the imported dynamic and imported
+     articulated DLAA baselines.
+   - Keep validation targeted: build once, then run only the affected focused
+     imported suite instead of the full visual-QA matrix.
+
+4. Scope guard.
+   - This is unsupported-feature visibility only. It does not add previous-bone
+     matrices, morph target carriers, skinned velocity writes, animation
+     sampling, or production skinned DLAA quality.
+
+## Slice 4.23 Execution Evidence
+
+Slice 4.23 is implemented and verified for the imported articulated runtime
+path. The renderer now exports runtime import CSV columns for model requested,
+model loaded, cache hit, mesh/material counts, source animation count, meshes
+with bones, bone references, and skinned-animation unsupported state.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -CaptureDelaySeconds 4 -Suite imported-articulated`
+  passes as the single targeted visual QA run for this slice.
+- Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, physical area
+  `2560,0 2560x1380`.
+- CSV shape: `791/791` columns.
+- Runtime import diagnostics:
+  `requested/loaded/cache=1/1/0`,
+  `mesh/material=3/1`,
+  `animation/meshWithBones/bones/unsupported=0/0/0/0`.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Draw and sequence counters:
+  `main/gbuffer/forwardResidual/weightedTranslucency=3/3/0/0`,
+  `pairs=2`, `minChanged=649`, `maxMean=21.1081`, `edgeMin=231`,
+  `edgeChangedMax=183`, `edgeChangedRatioMax=0.7121`,
+  `edgeMeanMax=90.4753`.
+
+This prevents unsupported skinned/animated source content from being invisible
+to QA, but true skinned/animated velocity remains open.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

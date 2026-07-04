@@ -21,6 +21,12 @@ struct RuntimeModelLoadResult {
     bool loaded = false;
     std::string message;
     bool cacheHit = false;
+    u32 meshCount = 0;
+    u32 materialCount = 0;
+    u32 sourceAnimationCount = 0;
+    u32 sourceMeshWithBonesCount = 0;
+    u32 sourceBoneCount = 0;
+    u32 skinnedAnimationUnsupported = 0;
 };
 
 class RuntimeModelLoader {
@@ -52,6 +58,10 @@ private:
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
         std::vector<MeshLodChain> lodChains;
+        u32 sourceAnimationCount = 0;
+        u32 sourceMeshWithBonesCount = 0;
+        u32 sourceBoneCount = 0;
+        u32 skinnedAnimationUnsupported = 0;
     };
 
     VulkanDevice& m_Device;

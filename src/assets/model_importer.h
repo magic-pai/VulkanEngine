@@ -112,6 +112,12 @@ struct ImportedModel3D {
     std::vector<ImportedMesh3D> meshes;
     std::vector<ImportedMaterial3D> materials;
     std::vector<ImportMessage> messages;
+    u32 sourceMeshCount = 0;
+    u32 sourceMaterialCount = 0;
+    u32 sourceAnimationCount = 0;
+    u32 sourceMeshWithBonesCount = 0;
+    u32 sourceBoneCount = 0;
+    bool skinnedAnimationUnsupported = false;
     glm::vec3 boundsMin{ -0.5f };
     glm::vec3 boundsMax{ 0.5f };
 
@@ -123,6 +129,7 @@ struct ImportedModel3D {
 struct ModelImportOptions {
     bool rebuildNormals = false;
     bool fastImport = false;
+    bool readSkinningMetadata = false;
     bool validateScene = true;
     bool optimizeMeshes = true;
 };

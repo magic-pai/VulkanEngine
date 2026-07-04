@@ -573,6 +573,31 @@ u32 PrimaryUvChannel(const ImportedMaterial3D& material) {
     return static_cast<u32>(primaryTexture->uvChannel);
 }
 
+void PopulateModelSourceDiagnostics(ImportedModel3D& model, const aiScene* scene) {
+    SE_ASSERT(scene != nullptr, "Assimp scene must not be null");
+
+    model.sourceMeshCount = scene->mNumMeshes;
+    model.sourceMaterialCount = scene->mNumMaterials;
+    model.sourceAnimationCount = scene->mNumAnimations;
+    model.sourceMeshWithBonesCount = 0;
+    model.sourceBoneCount = 0;
+
+    for (u32 meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
+        const aiMesh* mesh = scene->mMeshes[meshIndex];
+        if (mesh == nullptr || mesh->mNumBones == 0) {
+            continue;
+        }
+
+        ++model.sourceMeshWithBonesCount;
+        model.sourceBoneCount += mesh->mNumBones;
+    }
+
+    model.skinnedAnimationUnsupported =
+        model.sourceAnimationCount > 0 ||
+        model.sourceMeshWithBonesCount > 0 ||
+        model.sourceBoneCount > 0;
+}
+
 ImportedMesh3D ConvertMeshInstance(
     const aiMesh* source,
     const ImportedModel3D& model,
@@ -685,8 +710,14 @@ void ConfigureImporter(Assimp::Importer& importer, const ModelImportOptions& opt
     if (options.fastImport) {
         importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_CAMERAS, false);
         importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_LIGHTS, false);
-        importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_ANIMATIONS, false);
-        importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_READ_WEIGHTS, false);
+        importer.SetPropertyBool(
+            AI_CONFIG_IMPORT_FBX_READ_ANIMATIONS,
+            options.readSkinningMetadata
+        );
+        importer.SetPropertyBool(
+            AI_CONFIG_IMPORT_FBX_READ_WEIGHTS,
+            options.readSkinningMetadata
+        );
         importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
         importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_IGNORE_UP_DIRECTION, true);
     }
@@ -806,6 +837,7 @@ ImportedModel3D ModelImporter::LoadModel3D(
     model.sourcePath = path;
     model.boundsMin = glm::vec3(std::numeric_limits<f32>::max());
     model.boundsMax = glm::vec3(std::numeric_limits<f32>::lowest());
+    PopulateModelSourceDiagnostics(model, scene);
 
     model.materials.reserve(scene->mNumMaterials > 0 ? scene->mNumMaterials : 1);
     for (u32 materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex) {
@@ -826,6 +858,18 @@ ImportedModel3D ModelImporter::LoadModel3D(
     AppendNodeMeshes(scene, scene->mRootNode, glm::mat4(1.0f), model);
     if (model.meshes.empty()) {
         throw std::runtime_error("No triangle mesh data found in model: " + PathToUtf8(path));
+    }
+
+    if (model.skinnedAnimationUnsupported) {
+        model.messages.push_back({
+            ImportSeverity::Warning,
+            "Source model exposes " + std::to_string(model.sourceAnimationCount) +
+                " animation(s), " +
+                std::to_string(model.sourceMeshWithBonesCount) +
+                " mesh(es) with bones, and " +
+                std::to_string(model.sourceBoneCount) +
+                " bone reference(s); runtime import currently treats it as rigid mesh data."
+        });
     }
 
     model.messages.push_back({

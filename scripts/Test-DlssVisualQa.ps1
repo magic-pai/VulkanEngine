@@ -1441,6 +1441,15 @@ function New-QuickDlssPresentMetrics {
         frameLocalLightCount = "$($Row.frame_local_light_count)"
         frameRectLightCount = "$($Row.frame_rect_light_count)"
         reflectionProbeSceneProbeCount = "$($Row.reflection_probe_scene_probe_count)"
+        runtimeImportModelRequested = "$($Row.runtime_import_model_requested)"
+        runtimeImportModelLoaded = "$($Row.runtime_import_model_loaded)"
+        runtimeImportCacheHit = "$($Row.runtime_import_cache_hit)"
+        runtimeImportMeshCount = "$($Row.runtime_import_mesh_count)"
+        runtimeImportMaterialCount = "$($Row.runtime_import_material_count)"
+        runtimeImportAnimationCount = "$($Row.runtime_import_animation_count)"
+        runtimeImportMeshWithBonesCount = "$($Row.runtime_import_mesh_with_bones_count)"
+        runtimeImportBoneCount = "$($Row.runtime_import_bone_count)"
+        runtimeImportSkinnedAnimationUnsupported = "$($Row.runtime_import_skinned_animation_unsupported)"
         dlssExtents = "$($Row.temporal_upscaler_dlss_render_width)x$($Row.temporal_upscaler_dlss_render_height)->$($Row.temporal_upscaler_dlss_output_width)x$($Row.temporal_upscaler_dlss_output_height)"
     }
 }

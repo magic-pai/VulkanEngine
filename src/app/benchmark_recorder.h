@@ -42,6 +42,15 @@ struct BenchmarkSceneDiagnostics {
     u32 ueBridgeBlockedCamera = 0;
     u32 ueBridgeBlockedLights = 0;
     u32 ueBridgeBlockedReferenceCapture = 0;
+    u32 runtimeImportModelRequested = 0;
+    u32 runtimeImportModelLoaded = 0;
+    u32 runtimeImportCacheHit = 0;
+    u32 runtimeImportMeshCount = 0;
+    u32 runtimeImportMaterialCount = 0;
+    u32 runtimeImportAnimationCount = 0;
+    u32 runtimeImportMeshWithBonesCount = 0;
+    u32 runtimeImportBoneCount = 0;
+    u32 runtimeImportSkinnedAnimationUnsupported = 0;
 };
 
 void SetBenchmarkSceneDiagnostics(const BenchmarkSceneDiagnostics& diagnostics);

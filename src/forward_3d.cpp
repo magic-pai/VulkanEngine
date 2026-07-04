@@ -2270,13 +2270,13 @@ int main() {
         );
     }
 
+    se::RuntimeModelLoadResult defaultModelLoad{};
     if (hasStartupModel) {
         std::cout << "Loading startup model: "
             << se::UnrealPathToUtf8(startupModelPath)
             << std::endl;
         const std::size_t startupModelFirstRenderableIndex = scene.Count();
-        const se::RuntimeModelLoadResult defaultModelLoad =
-            runtimeModelLoader.LoadIntoScene(
+        defaultModelLoad = runtimeModelLoader.LoadIntoScene(
             startupModelPath,
             { 0.0f, 0.0f, 0.0f },
             { 0.0f, 0.0f, 0.0f }
@@ -2356,14 +2356,25 @@ int main() {
     SE_ASSERT(app.Renderer() != nullptr, "Forward 3D demo needs a renderer");
     bridgeLights.skyLightApplied =
         ApplyBridgeSkyLightToRenderer(bridgeLights, *app.Renderer());
-    se::SetBenchmarkSceneDiagnostics(
+    se::BenchmarkSceneDiagnostics sceneDiagnostics =
         BenchmarkDiagnosticsForStartupBridgeScene(
             startupBridgeScene,
             loadedBridgeMeshInstances,
             bridgeCameraApplied,
             bridgeLights
-        )
-    );
+        );
+    sceneDiagnostics.runtimeImportModelRequested = hasStartupModel ? 1u : 0u;
+    sceneDiagnostics.runtimeImportModelLoaded = defaultModelLoad.loaded ? 1u : 0u;
+    sceneDiagnostics.runtimeImportCacheHit = defaultModelLoad.cacheHit ? 1u : 0u;
+    sceneDiagnostics.runtimeImportMeshCount = defaultModelLoad.meshCount;
+    sceneDiagnostics.runtimeImportMaterialCount = defaultModelLoad.materialCount;
+    sceneDiagnostics.runtimeImportAnimationCount = defaultModelLoad.sourceAnimationCount;
+    sceneDiagnostics.runtimeImportMeshWithBonesCount =
+        defaultModelLoad.sourceMeshWithBonesCount;
+    sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;
+    sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
+        defaultModelLoad.skinnedAnimationUnsupported;
+    se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);
     app.Renderer()->SetFrameMatricesProvider([&](se::f32 aspectRatio) {
         return se::FrameMatrices{
             camera.ViewMatrix(),
