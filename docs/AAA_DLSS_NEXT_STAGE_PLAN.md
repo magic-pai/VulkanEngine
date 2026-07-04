@@ -102,13 +102,13 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.8: broaden DLSS coverage from opaque grid and WBOIT
-transparent-grid cases into forward-special residuals and imported/material
-stress content. Slice 4.7 adds WBOIT coverage to the visual-QA runner and proves
-that transparent content produces DLSS output while the production-quality gate
-remains correctly blocked on object-motion/transparent coverage. The next slice
-should add at least one forward-special or imported/material stress baseline
-before DLSS is considered a default presentation path. Do not expand into Frame
+Implement Slice 4.9: broaden DLSS coverage from the controlled opaque, WBOIT,
+and forward-special benchmark grids into imported/material stress content, then
+start removing the forward-residual object-motion blocker with real residual
+velocity or an explicit pre-upscale ordering policy. Slice 4.8 proves
+forward-special residual content produces visible DLSS output while remaining
+blocked from production-clear status. The next slice should add at least one
+imported or complex material stress baseline and should not expand into Frame
 Generation, Ray Reconstruction, Streamline interposition, or default
 presentation changes yet.
 
@@ -858,3 +858,44 @@ after the evaluate contract is stable.
   the production-quality gate. Remaining broad-content work includes
   forward-special residuals, imported/material stress scenes, animated/skinned
   object velocity, and real non-neutral reactive/transparency masks.
+
+## Slice 4.8 Execution Evidence
+
+- Added `SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL=1` to the Forward 3D benchmark
+  scene. The switch marks the green benchmark material as
+  `MaterialRenderClass::ForwardSpecial`, producing a deterministic
+  forward-residual workload without relying on external assets.
+- Added a third renderer-owned DLSS visual-QA baseline manifest at
+  `docs/reference_baselines/dlss_forward_special_visual_qa_baseline.json` for
+  the forward-special residual route. This manifest intentionally expects DLSS
+  output and post-source activation while preserving a production-quality gate
+  blocker for object-motion coverage across forward-residual draws.
+- Extended `scripts/Test-DlssVisualQa.ps1` so the default visual-QA run now
+  executes six captures: native opaque, DLSS opaque, native WBOIT, DLSS WBOIT,
+  native forward-special residual, and DLSS forward-special residual. The
+  script validates all three baseline manifests, CSV quality-gate strings,
+  forward-residual draw counters, screenshots, and image comparison thresholds.
+- Verification commands:
+  - `_quick_build.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild -CaptureDelaySeconds 3`
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/summary.json` reports all three
+  baseline manifests, matching 769-column rows for every CSV, and 0
+  frame-graph validation issues.
+- Forward-special DLSS-present reports evaluate/output `1/1`, post source
+  `1/1/0`, quality gate `1/0/4`, quality masks `255/251/4`, and per-input
+  readiness `1/1/0/1/1/1/1/1`, proving the residual path is DLSS-visible but
+  not production-cleared. It records 79 hybrid forward-special draws, 79
+  forward-residual draws, 79 shared-light-list residual draws, one
+  forward-special material, and 0 WBOIT draws.
+- Latest screenshots are nonblank. Opaque native-vs-DLSS comparison samples
+  14352 pixels with 3877 changed pixels, mean RGB delta `19.8901`, and max
+  delta `668`; WBOIT comparison samples 14352 pixels with 308 changed pixels,
+  mean RGB delta `1.1214`, and max delta `564`; forward-special comparison
+  samples 14352 pixels with 189 changed pixels, mean RGB delta `0.8807`, and
+  max delta `564`.
+- This expands DLSS coverage to the forward-special residual path without
+  weakening the production-quality gate. Remaining broad-content work includes
+  imported/material stress scenes, animated/skinned object velocity, forward
+  residual motion-vector policy, and real non-neutral reactive/transparency
+  masks.

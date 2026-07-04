@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_grid_forward_special_render_scale_075",
+  "target": "SelfEngineForward3D",
+  "scene": "grid",
+  "description": "Reference contract for forward-special residual coverage in the experimental DLSS-present path. This baseline intentionally expects DLSS output and post-source activation while preserving a production-quality gate blocker for object-motion coverage across forward-residual draws.",
+  "environment": {
+    "native": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    },
+    "dlssPresent": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_PRESENT": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "native": {
+      "postSource": "0/0/1",
+      "qualityGate": "0/0/1",
+      "forwardSpecialMaterialCount": "1",
+      "hybridForwardSpecialDraws": "79",
+      "forwardResidualDraws": "79",
+      "weightedTranslucencyDraws": "0"
+    },
+    "dlssPresent": {
+      "evaluateOutput": "1/1",
+      "postSource": "1/1/0",
+      "qualityGate": "1/0/4",
+      "qualityMasks": "255/251/4",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1",
+      "forwardSpecialMaterialCount": "1",
+      "hybridForwardSpecialDraws": "79",
+      "forwardResidualDraws": "79",
+      "forwardResidualSharedLightListDraws": "79",
+      "weightedTranslucencyDraws": "0"
+    }
+  },
+  "thresholds": {
+    "comparisonChangedPixelsMin": 128,
+    "comparisonChangedPixelsMax": 12000,
+    "comparisonMeanDeltaMin": 0.0,
+    "comparisonMeanDeltaMax": 160.0,
+    "comparisonMaxDeltaMax": 765,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-04T20:29:41+08:00",
+    "dlssColumns": "769/769",
+    "hybridForwardSpecialDraws": 79,
+    "forwardResidualDraws": 79,
+    "forwardResidualSharedLightListDraws": 79,
+    "forwardSpecialMaterialCount": 1,
+    "weightedTranslucencyDraws": 0,
+    "qualityMasks": "255/251/4",
+    "comparisonChangedPixels": 189,
+    "comparisonMeanDelta": 0.8807,
+    "comparisonMaxDelta": 564
+  }
+}

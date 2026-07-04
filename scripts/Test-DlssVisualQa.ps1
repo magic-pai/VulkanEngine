@@ -9,6 +9,7 @@ param(
     [double]$MaxMeanDelta = 160.0,
     [string]$BaselinePath = "docs\reference_baselines\dlss_visual_qa_baseline.json",
     [string]$WboitBaselinePath = "docs\reference_baselines\dlss_wboit_visual_qa_baseline.json",
+    [string]$ForwardSpecialBaselinePath = "docs\reference_baselines\dlss_forward_special_visual_qa_baseline.json",
     [switch]$SkipBuild
 )
 
@@ -61,6 +62,18 @@ if (!(Test-Path -LiteralPath $wboitBaselineManifestPath)) {
 $wboitBaselineManifest = Get-Content -Raw -LiteralPath $wboitBaselineManifestPath | ConvertFrom-Json
 if ($wboitBaselineManifest.target -ne $Target) {
     throw "DLSS WBOIT visual QA baseline target mismatch: expected $Target, manifest has $($wboitBaselineManifest.target)"
+}
+$forwardSpecialBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($ForwardSpecialBaselinePath)) {
+    [System.IO.Path]::GetFullPath($ForwardSpecialBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ForwardSpecialBaselinePath))
+}
+if (!(Test-Path -LiteralPath $forwardSpecialBaselineManifestPath)) {
+    throw "DLSS forward-special visual QA baseline manifest not found: $forwardSpecialBaselineManifestPath"
+}
+$forwardSpecialBaselineManifest = Get-Content -Raw -LiteralPath $forwardSpecialBaselineManifestPath | ConvertFrom-Json
+if ($forwardSpecialBaselineManifest.target -ne $Target) {
+    throw "DLSS forward-special visual QA baseline target mismatch: expected $Target, manifest has $($forwardSpecialBaselineManifest.target)"
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -117,6 +130,7 @@ $managedEnvironmentKeys = @(
     "SE_AUTO_EXIT_FRAMES",
     "SE_BENCHMARK_SCENE",
     "SE_BENCHMARK_TRANSPARENT_MATERIAL",
+    "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_BENCHMARK_CSV",
@@ -531,16 +545,41 @@ $wboitDlssPresentEnvironment = @{
     "SE_DLSS_REFERENCE_BASELINE_PATH" = $wboitBaselineManifestPath
     "SE_RENDER_VIEW" = "deferred-hdr"
 }
+$forwardSpecialNativeEnvironment = @{
+    "SE_BENCHMARK_SCENE" = "grid"
+    "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL" = "1"
+    "SE_RENDER_SCALE" = "0.75"
+    "SE_RENDER_SCALE_APPLY" = "1"
+    "SE_TAA" = "1"
+    "SE_TEMPORAL_JITTER" = "1"
+    "SE_RENDER_VIEW" = "deferred-hdr"
+}
+$forwardSpecialDlssPresentEnvironment = @{
+    "SE_BENCHMARK_SCENE" = "grid"
+    "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL" = "1"
+    "SE_RENDER_SCALE" = "0.75"
+    "SE_RENDER_SCALE_APPLY" = "1"
+    "SE_TAA" = "1"
+    "SE_TEMPORAL_JITTER" = "1"
+    "SE_UPSCALER_PLUGIN" = "dlss"
+    "SE_DLSS_PRESENT" = "1"
+    "SE_DLSS_REFERENCE_BASELINE_PATH" = $forwardSpecialBaselineManifestPath
+    "SE_RENDER_VIEW" = "deferred-hdr"
+}
 
 $nativeBenchmark = Invoke-BenchmarkRun -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssBenchmark = Invoke-BenchmarkRun -Name "dlss_present" -Environment $dlssPresentEnvironment
 $wboitNativeBenchmark = Invoke-BenchmarkRun -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssBenchmark = Invoke-BenchmarkRun -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
+$forwardSpecialNativeBenchmark = Invoke-BenchmarkRun -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
+$forwardSpecialDlssBenchmark = Invoke-BenchmarkRun -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
 
 $nativeRow = $nativeBenchmark.LastRow
 $dlssRow = $dlssBenchmark.LastRow
 $wboitNativeRow = $wboitNativeBenchmark.LastRow
 $wboitDlssRow = $wboitDlssBenchmark.LastRow
+$forwardSpecialNativeRow = $forwardSpecialNativeBenchmark.LastRow
+$forwardSpecialDlssRow = $forwardSpecialDlssBenchmark.LastRow
 if ($nativeRow.framegraph_validation_issues -ne "0") {
     throw "Native frame graph validation issues: $($nativeRow.framegraph_validation_issues)"
 }
@@ -617,16 +656,54 @@ if ($wboitDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "0" -or
     throw "WBOIT DLSS quality gate did not report the expected object/baseline readiness"
 }
 
+if ($forwardSpecialNativeRow.framegraph_validation_issues -ne "0") {
+    throw "Forward-special native frame graph validation issues: $($forwardSpecialNativeRow.framegraph_validation_issues)"
+}
+if ($forwardSpecialDlssRow.framegraph_validation_issues -ne "0") {
+    throw "Forward-special DLSS frame graph validation issues: $($forwardSpecialDlssRow.framegraph_validation_issues)"
+}
+if ($forwardSpecialNativeRow.frame_material_forward_special_count -ne $forwardSpecialBaselineManifest.expected.native.forwardSpecialMaterialCount -or
+    $forwardSpecialNativeRow.hybrid_forward_special_draws -ne $forwardSpecialBaselineManifest.expected.native.hybridForwardSpecialDraws -or
+    $forwardSpecialNativeRow.forward_residual_draws -ne $forwardSpecialBaselineManifest.expected.native.forwardResidualDraws) {
+    throw "Forward-special native draw/material count mismatch"
+}
+if ($forwardSpecialDlssRow.temporal_upscaler_dlss_output_ready -ne "1" -or
+    $forwardSpecialDlssRow.temporal_upscale_post_source_active -ne "1") {
+    throw "Forward-special DLSS-present run did not produce visible DLSS output"
+}
+if ($forwardSpecialDlssRow.frame_material_forward_special_count -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardSpecialMaterialCount -or
+    $forwardSpecialDlssRow.hybrid_forward_special_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.hybridForwardSpecialDraws -or
+    $forwardSpecialDlssRow.forward_residual_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
+    $forwardSpecialDlssRow.forward_residual_shared_light_list_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualSharedLightListDraws) {
+    throw "Forward-special DLSS draw/material count mismatch"
+}
+if ($forwardSpecialDlssRow.weighted_translucency_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
+    throw "Forward-special DLSS unexpectedly used WBOIT draws"
+}
+if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "0" -or
+    $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "4") {
+    throw "Forward-special DLSS quality gate did not preserve object-motion blocker"
+}
+if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "0" -or
+    $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
+    throw "Forward-special DLSS quality gate did not report the expected object/baseline readiness"
+}
+
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssImage = Capture-WindowImage -Name "dlss_present" -Environment $dlssPresentEnvironment
 $wboitNativeImage = Capture-WindowImage -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssImage = Capture-WindowImage -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
+$forwardSpecialNativeImage = Capture-WindowImage -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
+$forwardSpecialDlssImage = Capture-WindowImage -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
 $nativeImageStats = Get-ImageVariationStats -Path $nativeImage
 $dlssImageStats = Get-ImageVariationStats -Path $dlssImage
 $wboitNativeImageStats = Get-ImageVariationStats -Path $wboitNativeImage
 $wboitDlssImageStats = Get-ImageVariationStats -Path $wboitDlssImage
+$forwardSpecialNativeImageStats = Get-ImageVariationStats -Path $forwardSpecialNativeImage
+$forwardSpecialDlssImageStats = Get-ImageVariationStats -Path $forwardSpecialDlssImage
 $comparison = Compare-Images -A $nativeImage -B $dlssImage
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
+$forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
 if ($comparison.ChangedPixels -lt $MinChangedPixels) {
     throw "Native/DLSS comparison changed only $($comparison.ChangedPixels) sampled pixels; expected at least $MinChangedPixels"
 }
@@ -662,6 +739,20 @@ $wboitDlssQualityMasks =
     "$($wboitDlssRow.temporal_upscaler_dlss_quality_required_mask)/$($wboitDlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($wboitDlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
 $wboitDlssQualityInputs =
     "output/camera/object/reactive/transparency/exposure/post/baseline=$($wboitDlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($wboitDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+$forwardSpecialNativePostSource =
+    "$($forwardSpecialNativeRow.temporal_upscale_post_source_requested)/$($forwardSpecialNativeRow.temporal_upscale_post_source_active)/$($forwardSpecialNativeRow.temporal_upscale_post_source_fallback_reason)"
+$forwardSpecialNativeQualityGate =
+    "$($forwardSpecialNativeRow.temporal_upscaler_dlss_quality_gate_requested)/$($forwardSpecialNativeRow.temporal_upscaler_dlss_quality_gate_ready)/$($forwardSpecialNativeRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$forwardSpecialDlssEvaluateOutput =
+    "$($forwardSpecialDlssRow.temporal_upscaler_dlss_evaluate_result)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_output_ready)"
+$forwardSpecialDlssPostSource =
+    "$($forwardSpecialDlssRow.temporal_upscale_post_source_requested)/$($forwardSpecialDlssRow.temporal_upscale_post_source_active)/$($forwardSpecialDlssRow.temporal_upscale_post_source_fallback_reason)"
+$forwardSpecialDlssQualityGate =
+    "$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_requested)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$forwardSpecialDlssQualityMasks =
+    "$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_required_mask)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
+$forwardSpecialDlssQualityInputs =
+    "output/camera/object/reactive/transparency/exposure/post/baseline=$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
 
 Assert-BaselineText -Name "native.postSource" -Actual $nativePostSource -Expected $baselineManifest.expected.native.postSource
 Assert-BaselineText -Name "native.qualityGate" -Actual $nativeQualityGate -Expected $baselineManifest.expected.native.qualityGate
@@ -677,6 +768,13 @@ Assert-BaselineText -Name "wboit.dlssPresent.postSource" -Actual $wboitDlssPostS
 Assert-BaselineText -Name "wboit.dlssPresent.qualityGate" -Actual $wboitDlssQualityGate -Expected $wboitBaselineManifest.expected.dlssPresent.qualityGate
 Assert-BaselineText -Name "wboit.dlssPresent.qualityMasks" -Actual $wboitDlssQualityMasks -Expected $wboitBaselineManifest.expected.dlssPresent.qualityMasks
 Assert-BaselineText -Name "wboit.dlssPresent.qualityInputs" -Actual $wboitDlssQualityInputs -Expected $wboitBaselineManifest.expected.dlssPresent.qualityInputs
+Assert-BaselineText -Name "forwardSpecial.native.postSource" -Actual $forwardSpecialNativePostSource -Expected $forwardSpecialBaselineManifest.expected.native.postSource
+Assert-BaselineText -Name "forwardSpecial.native.qualityGate" -Actual $forwardSpecialNativeQualityGate -Expected $forwardSpecialBaselineManifest.expected.native.qualityGate
+Assert-BaselineText -Name "forwardSpecial.dlssPresent.evaluateOutput" -Actual $forwardSpecialDlssEvaluateOutput -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.evaluateOutput
+Assert-BaselineText -Name "forwardSpecial.dlssPresent.postSource" -Actual $forwardSpecialDlssPostSource -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.postSource
+Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityGate" -Actual $forwardSpecialDlssQualityGate -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityGate
+Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityMasks" -Actual $forwardSpecialDlssQualityMasks -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityMasks
+Assert-BaselineText -Name "forwardSpecial.dlssPresent.qualityInputs" -Actual $forwardSpecialDlssQualityInputs -Expected $forwardSpecialBaselineManifest.expected.dlssPresent.qualityInputs
 Assert-BaselineRange `
     -Name "native.imageStats.differentPixels" `
     -Actual $nativeImageStats.DifferentPixels `
@@ -727,6 +825,31 @@ Assert-BaselineRange `
     -Actual $wboitComparison.MaxDelta `
     -Min 0 `
     -Max $wboitBaselineManifest.thresholds.comparisonMaxDeltaMax
+Assert-BaselineRange `
+    -Name "forwardSpecial.native.imageStats.differentPixels" `
+    -Actual $forwardSpecialNativeImageStats.DifferentPixels `
+    -Min $forwardSpecialBaselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $forwardSpecialNativeImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "forwardSpecial.dlssPresent.imageStats.differentPixels" `
+    -Actual $forwardSpecialDlssImageStats.DifferentPixels `
+    -Min $forwardSpecialBaselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $forwardSpecialDlssImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "forwardSpecial.comparison.changedPixels" `
+    -Actual $forwardSpecialComparison.ChangedPixels `
+    -Min $forwardSpecialBaselineManifest.thresholds.comparisonChangedPixelsMin `
+    -Max $forwardSpecialBaselineManifest.thresholds.comparisonChangedPixelsMax
+Assert-BaselineRange `
+    -Name "forwardSpecial.comparison.meanDelta" `
+    -Actual $forwardSpecialComparison.MeanDelta `
+    -Min $forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMin `
+    -Max $forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMax
+Assert-BaselineRange `
+    -Name "forwardSpecial.comparison.maxDelta" `
+    -Actual $forwardSpecialComparison.MaxDelta `
+    -Min 0 `
+    -Max $forwardSpecialBaselineManifest.thresholds.comparisonMaxDeltaMax
 
 $summary = [pscustomobject]@{
     target = $Target
@@ -737,6 +860,8 @@ $summary = [pscustomobject]@{
         schemaVersion = [int]$baselineManifest.schemaVersion
         wboitManifest = $wboitBaselineManifestPath
         wboitName = $wboitBaselineManifest.name
+        forwardSpecialManifest = $forwardSpecialBaselineManifestPath
+        forwardSpecialName = $forwardSpecialBaselineManifest.name
     }
     thresholds = [pscustomobject]@{
         minChangedPixels = $MinChangedPixels
@@ -751,6 +876,11 @@ $summary = [pscustomobject]@{
         wboitComparisonMeanDeltaMin = [double]$wboitBaselineManifest.thresholds.comparisonMeanDeltaMin
         wboitComparisonMeanDeltaMax = [double]$wboitBaselineManifest.thresholds.comparisonMeanDeltaMax
         wboitComparisonMaxDeltaMax = [int]$wboitBaselineManifest.thresholds.comparisonMaxDeltaMax
+        forwardSpecialComparisonChangedPixelsMin = [int]$forwardSpecialBaselineManifest.thresholds.comparisonChangedPixelsMin
+        forwardSpecialComparisonChangedPixelsMax = [int]$forwardSpecialBaselineManifest.thresholds.comparisonChangedPixelsMax
+        forwardSpecialComparisonMeanDeltaMin = [double]$forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMin
+        forwardSpecialComparisonMeanDeltaMax = [double]$forwardSpecialBaselineManifest.thresholds.comparisonMeanDeltaMax
+        forwardSpecialComparisonMaxDeltaMax = [int]$forwardSpecialBaselineManifest.thresholds.comparisonMaxDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
@@ -796,8 +926,32 @@ $summary = [pscustomobject]@{
         weightedTranslucency = "$($wboitDlssRow.weighted_translucency_draws)/$($wboitDlssRow.weighted_translucency_resolve_draws)/$($wboitDlssRow.forward_residual_draws)"
         imageStats = $wboitDlssImageStats
     }
+    forwardSpecialNative = [pscustomobject]@{
+        csv = $forwardSpecialNativeBenchmark.CsvPath
+        image = $forwardSpecialNativeImage
+        columns = "$($forwardSpecialNativeBenchmark.HeaderColumns)/$($forwardSpecialNativeBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$forwardSpecialNativeRow.framegraph_validation_issues
+        postSource = $forwardSpecialNativePostSource
+        qualityGate = $forwardSpecialNativeQualityGate
+        forwardResidual = "$($forwardSpecialNativeRow.hybrid_forward_special_draws)/$($forwardSpecialNativeRow.forward_residual_draws)/$($forwardSpecialNativeRow.frame_material_forward_special_count)"
+        imageStats = $forwardSpecialNativeImageStats
+    }
+    forwardSpecialDlssPresent = [pscustomobject]@{
+        csv = $forwardSpecialDlssBenchmark.CsvPath
+        image = $forwardSpecialDlssImage
+        columns = "$($forwardSpecialDlssBenchmark.HeaderColumns)/$($forwardSpecialDlssBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$forwardSpecialDlssRow.framegraph_validation_issues
+        evaluateOutput = $forwardSpecialDlssEvaluateOutput
+        postSource = $forwardSpecialDlssPostSource
+        qualityGate = $forwardSpecialDlssQualityGate
+        qualityMasks = $forwardSpecialDlssQualityMasks
+        qualityInputs = $forwardSpecialDlssQualityInputs
+        forwardResidual = "$($forwardSpecialDlssRow.hybrid_forward_special_draws)/$($forwardSpecialDlssRow.forward_residual_draws)/$($forwardSpecialDlssRow.forward_residual_shared_light_list_draws)/$($forwardSpecialDlssRow.frame_material_forward_special_count)"
+        imageStats = $forwardSpecialDlssImageStats
+    }
     comparison = $comparison
     wboitComparison = $wboitComparison
+    forwardSpecialComparison = $forwardSpecialComparison
 }
 
 $summaryPath = Join-Path $outputRoot "summary.json"
@@ -810,3 +964,5 @@ Write-Host "  dlss:    $dlssImage"
 Write-Host "  diff: sampled=$($comparison.SampledPixels) changed=$($comparison.ChangedPixels) mean=$($comparison.MeanDelta) max=$($comparison.MaxDelta)"
 Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
+Write-Host "  forward: $forwardSpecialDlssImage"
+Write-Host "  fdiff: sampled=$($forwardSpecialComparison.SampledPixels) changed=$($forwardSpecialComparison.ChangedPixels) mean=$($forwardSpecialComparison.MeanDelta) max=$($forwardSpecialComparison.MaxDelta)"

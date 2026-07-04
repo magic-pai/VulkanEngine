@@ -316,6 +316,17 @@ bool BenchmarkTransparentMaterialRequested() {
         value == "YES";
 }
 
+bool BenchmarkForwardSpecialMaterialRequested() {
+    const std::string value = ReadEnvironmentString("SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+
 bool BenchmarkLightOverflowRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_LIGHT_OVERFLOW");
     return value == "1" ||
@@ -1798,6 +1809,12 @@ int main() {
         se::MaterialProperties& transparentProperties = blueCubeMaterial.Properties();
         transparentProperties.baseColorFactor[3] = 0.42f;
         transparentProperties.renderClass = se::MaterialRenderClass::Transparent;
+    }
+    if (useBenchmarkScene && BenchmarkForwardSpecialMaterialRequested()) {
+        se::MaterialProperties& forwardSpecialProperties = greenCubeMaterial.Properties();
+        forwardSpecialProperties.renderClass = se::MaterialRenderClass::ForwardSpecial;
+        forwardSpecialProperties.emissiveFactor = { 0.12f, 0.55f, 0.26f, 1.0f };
+        forwardSpecialProperties.viewControls[1] = 1.12f;
     }
     if (useBenchmarkScene && BenchmarkConstantEmissiveMaterialRequested()) {
         se::MaterialProperties& emissiveProperties = greenCubeMaterial.Properties();
