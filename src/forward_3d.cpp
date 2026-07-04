@@ -640,6 +640,20 @@ bool BenchmarkCameraMotionRequested() {
         value == "ORBIT";
 }
 
+bool BenchmarkObjectMotionRequested() {
+    const std::string value = ReadEnvironmentString("SE_BENCHMARK_OBJECT_MOTION");
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES" ||
+        value == "orbit" ||
+        value == "Orbit" ||
+        value == "ORBIT";
+}
+
 void ApplyBenchmarkCameraMotion(se::Camera3D& camera, se::f32 elapsedSeconds) {
     const se::f32 speed =
         std::max(ReadEnvironmentF32("SE_BENCHMARK_CAMERA_MOTION_SPEED", 0.65f), 0.0f);
@@ -658,6 +672,29 @@ void ApplyBenchmarkCameraMotion(se::Camera3D& camera, se::f32 elapsedSeconds) {
         0.34f + std::sin(motionPhase * 0.73f) * pitchAmplitude,
         distance
     );
+}
+
+void ApplyBenchmarkObjectMotion(
+    se::Renderable3D& renderable,
+    const glm::vec3& basePosition,
+    const glm::vec3& baseRotationDegrees,
+    se::f32 elapsedSeconds
+) {
+    const se::f32 speed =
+        std::max(ReadEnvironmentF32("SE_BENCHMARK_OBJECT_MOTION_SPEED", 0.9f), 0.0f);
+    const se::f32 radius =
+        std::clamp(ReadEnvironmentF32("SE_BENCHMARK_OBJECT_MOTION_RADIUS", 0.42f), 0.0f, 2.0f);
+    const se::f32 phase = elapsedSeconds * speed;
+    renderable.Transform().SetPosition(basePosition + glm::vec3{
+        std::sin(phase) * radius,
+        std::sin(phase * 1.37f) * radius * 0.18f,
+        std::cos(phase * 0.83f) * radius * 0.45f
+    });
+    renderable.Transform().SetRotationDegrees(baseRotationDegrees + glm::vec3{
+        std::sin(phase * 0.67f) * 10.0f,
+        phase * 57.29578f,
+        std::cos(phase * 0.51f) * 8.0f
+    });
 }
 
 std::filesystem::path UnrealProjectRootPath() {
@@ -2029,6 +2066,9 @@ int main() {
     app.RenderResources().RegisterMaterial("GridMaterial", gridMaterial);
 
     se::Scene3D scene;
+    se::Renderable3D* benchmarkMovingObject = nullptr;
+    glm::vec3 benchmarkMovingObjectBasePosition{ 0.0f };
+    glm::vec3 benchmarkMovingObjectBaseRotationDegrees{ 0.0f };
     se::RuntimeModelLoader runtimeModelLoader(
         app.Device(),
         app.PhysicalDevice(),
@@ -2079,6 +2119,10 @@ int main() {
         rightCube.Transform().SetScale({ 1.1f, 1.1f, 1.1f });
         rightCube.Transform().SetRotationDegrees({ 0.0f, -18.0f, 0.0f });
         rightCube.Transform().SetRotationSpeedDegreesPerSecond({ 12.0f, 14.0f, 0.0f });
+        benchmarkMovingObject = &rightCube;
+        benchmarkMovingObjectBasePosition = rightCube.Transform().Position();
+        benchmarkMovingObjectBaseRotationDegrees =
+            rightCube.Transform().RotationDegrees();
 
         scene.CreatePointLight(
             "Warm Key Point Light",
@@ -2194,6 +2238,18 @@ int main() {
     }
     const bool benchmarkCameraMotionRequested =
         !useBenchmarkScene && BenchmarkCameraMotionRequested();
+    const bool benchmarkObjectMotionRequested =
+        !useBenchmarkScene &&
+        benchmarkMovingObject != nullptr &&
+        BenchmarkObjectMotionRequested();
+    if (benchmarkObjectMotionRequested && benchmarkMovingObject != nullptr) {
+        benchmarkMovingObject->Transform().SetAnimateRotation(false);
+        benchmarkMovingObject->Transform().SetRotationSpeedDegreesPerSecond({
+            0.0f,
+            0.0f,
+            0.0f
+        });
+    }
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
         1.1f,
@@ -2201,6 +2257,7 @@ int main() {
     };
     se::f32 benchmarkPartialLocalShadowTime = 0.0f;
     se::f32 benchmarkCameraMotionTime = 0.0f;
+    se::f32 benchmarkObjectMotionTime = 0.0f;
     PickClickState pickClickState{};
 
     app.CreateRenderer();
@@ -2273,6 +2330,18 @@ int main() {
             }
             if (!bridgeLights.anyApplied) {
                 ApplySceneDirectionalLight(scene, camera);
+            }
+            if (benchmarkObjectMotionRequested && benchmarkMovingObject != nullptr) {
+                benchmarkObjectMotionTime += std::max(
+                    clampedDeltaSeconds,
+                    1.0f / 60.0f
+                );
+                ApplyBenchmarkObjectMotion(
+                    *benchmarkMovingObject,
+                    benchmarkMovingObjectBasePosition,
+                    benchmarkMovingObjectBaseRotationDegrees,
+                    benchmarkObjectMotionTime
+                );
             }
         } else if (animateBenchmarkPartialLocalShadowCache) {
             benchmarkPartialLocalShadowTime += std::max(

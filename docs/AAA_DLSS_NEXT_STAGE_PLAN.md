@@ -193,6 +193,82 @@ high-contrast edge temporal stability.
      contract is correct. Do not use model/preset changes to hide invalid
      velocity, jitter, or post-ordering state.
 
+## Slice 4.19 Execution Plan
+
+Slice 4.19 expands the real default-scene DLAA coverage from moving-camera only
+to moving-camera plus deterministic object motion. This is the next required
+step before imported/skinned content: the renderer must prove that the
+`previousModel` object-velocity path remains active when a visible object moves
+independently of the camera.
+
+1. Deterministic default-scene object motion.
+   - Add `SE_BENCHMARK_OBJECT_MOTION=orbit` for the default Forward 3D
+     application scene.
+   - Keep normal interactive scene behavior unchanged when the flag is absent.
+   - Move one existing opaque default-scene cube with a deterministic
+     sinusoidal offset and rotation so the GBuffer velocity path has stable
+     object-motion input.
+
+2. DLAA visual-QA coverage.
+   - Add a new default-scene DLAA visual-QA lane that enables both
+     `SE_BENCHMARK_CAMERA_MOTION=orbit` and
+     `SE_BENCHMARK_OBJECT_MOTION=orbit`.
+   - Keep full-resolution DLAA, applied projection jitter, DLSS post-source
+     presentation, and native TAA final-resolve suppression from Slice 4.18.
+
+3. Assertions and baselines.
+   - Require object-motion readiness, camera-motion readiness, DLSS quality
+     gate readiness, applied-jitter consistency, DLSS input readiness, and
+     native TAA suppression.
+   - Capture a three-frame same-window sequence and record the same frame and
+     high-contrast edge temporal metrics as the moving-camera lane.
+   - Store a separate baseline manifest so moving-camera-only and
+     moving-object evidence cannot be confused.
+
+4. Scope guard.
+   - Do not call this skinned or imported production coverage. This slice only
+     proves deterministic opaque object motion in the real default scene.
+   - Follow with imported static model and then skinned/animated velocity lanes
+     after this path is stable.
+
+## Slice 4.19 Execution Evidence
+
+Slice 4.19 is implemented and verified. The default Forward 3D application scene
+now supports `SE_BENCHMARK_OBJECT_MOTION=orbit`, which moves the existing right
+opaque cube through a deterministic sinusoidal position/rotation path. When this
+benchmark mode is enabled the cube's normal demo self-rotation is disabled so
+the object-motion QA has one explainable transform source.
+
+The DLSS visual QA script now has a separate
+`default_scene_dlaa_object_motion_present` lane. It runs full-resolution DLAA
+with `SE_BENCHMARK_CAMERA_MOTION=orbit`,
+`SE_BENCHMARK_OBJECT_MOTION=orbit`, applied projection jitter, DLSS post-source
+presentation, and native TAA final-resolve suppression. The lane uses its own
+baseline manifest:
+`docs/reference_baselines/dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json`.
+
+Verification from `scripts\Test-DlssVisualQa.ps1 -SkipBuild` on 2026-07-05:
+
+- Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, area
+  `2048,0 2048x1104`.
+- CSV shape: `782/782` columns.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Motion readiness: camera `1/1`, object `1/1`, proving the moving object
+  contributes through the current `previousModel` velocity path.
+- Jitter and resolve policy: jitter `1/1/-0.125/-0.277778`, TAA resolve
+  `input/enabled/suppressed=1/0/1`.
+- Draw route: `main/gbuffer/forwardResidual/weightedTranslucency=5/5/0/0`.
+- Dynamic sequence metric:
+  `pairs=2 minChanged=171 maxMean=2.319 max=564 edgeMin=1069 edgeChangedMax=82 edgeMeanMax=3.8641 edgeMax=188`.
+
+Scope remains intentionally limited: this is not imported-model, skinned,
+transparent, forward-residual, water/particle, or final production image-quality
+coverage. It closes the static-scene/dynamic-scene testing error for the real
+default opaque scene and makes the next imported/static and animated lanes
+meaningful.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

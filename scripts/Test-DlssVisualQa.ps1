@@ -14,6 +14,7 @@ param(
     [string]$DlaaBaselinePath = "docs\reference_baselines\dlss_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_motion_visual_qa_baseline.json",
+    [string]$DefaultSceneDlaaObjectMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_object_motion_visual_qa_baseline.json",
     [int]$CaptureMonitorIndex = 1,
     [switch]$SkipBuild
 )
@@ -130,6 +131,19 @@ $defaultSceneDlaaMotionBaselineManifest =
 if ($defaultSceneDlaaMotionBaselineManifest.target -ne $Target) {
     throw "Default-scene DLAA motion visual QA baseline target mismatch: expected $Target, manifest has $($defaultSceneDlaaMotionBaselineManifest.target)"
 }
+$defaultSceneDlaaObjectMotionBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($DefaultSceneDlaaObjectMotionBaselinePath)) {
+    [System.IO.Path]::GetFullPath($DefaultSceneDlaaObjectMotionBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $DefaultSceneDlaaObjectMotionBaselinePath))
+}
+if (!(Test-Path -LiteralPath $defaultSceneDlaaObjectMotionBaselineManifestPath)) {
+    throw "Default-scene DLAA object-motion visual QA baseline manifest not found: $defaultSceneDlaaObjectMotionBaselineManifestPath"
+}
+$defaultSceneDlaaObjectMotionBaselineManifest =
+    Get-Content -Raw -LiteralPath $defaultSceneDlaaObjectMotionBaselineManifestPath | ConvertFrom-Json
+if ($defaultSceneDlaaObjectMotionBaselineManifest.target -ne $Target) {
+    throw "Default-scene DLAA object-motion visual QA baseline target mismatch: expected $Target, manifest has $($defaultSceneDlaaObjectMotionBaselineManifest.target)"
+}
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
@@ -202,6 +216,9 @@ $managedEnvironmentKeys = @(
     "SE_BENCHMARK_CAMERA_MOTION_YAW",
     "SE_BENCHMARK_CAMERA_MOTION_PITCH",
     "SE_BENCHMARK_CAMERA_MOTION_DISTANCE",
+    "SE_BENCHMARK_OBJECT_MOTION",
+    "SE_BENCHMARK_OBJECT_MOTION_SPEED",
+    "SE_BENCHMARK_OBJECT_MOTION_RADIUS",
     "SE_TAA_APPLY_JITTER",
     "SE_TEMPORAL_APPLY_JITTER",
     "SE_CAMERA_JITTER_APPLY",
@@ -1042,6 +1059,16 @@ $defaultSceneDlaaMotionPresentEnvironment = @{
     "SE_BENCHMARK_CAMERA_MOTION_SPEED" = "0.65"
     "SE_RENDER_VIEW" = "deferred-hdr"
 }
+$defaultSceneDlaaObjectMotionPresentEnvironment =
+    $defaultSceneDlaaMotionPresentEnvironment.Clone()
+$defaultSceneDlaaObjectMotionPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
+    $defaultSceneDlaaObjectMotionBaselineManifestPath
+$defaultSceneDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION"] =
+    "orbit"
+$defaultSceneDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION_SPEED"] =
+    "0.9"
+$defaultSceneDlaaObjectMotionPresentEnvironment["SE_BENCHMARK_OBJECT_MOTION_RADIUS"] =
+    "0.42"
 $wboitNativeEnvironment = @{
     "SE_BENCHMARK_SCENE" = "grid"
     "SE_BENCHMARK_TRANSPARENT_MATERIAL" = "1"
@@ -1122,6 +1149,10 @@ $defaultSceneDlaaMotionBenchmark = Invoke-BenchmarkRun `
     -Name "default_scene_dlaa_motion_present" `
     -Environment $defaultSceneDlaaMotionPresentEnvironment `
     -UseApplicationScene
+$defaultSceneDlaaObjectMotionBenchmark = Invoke-BenchmarkRun `
+    -Name "default_scene_dlaa_object_motion_present" `
+    -Environment $defaultSceneDlaaObjectMotionPresentEnvironment `
+    -UseApplicationScene
 $wboitNativeBenchmark = Invoke-BenchmarkRun -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssBenchmark = Invoke-BenchmarkRun -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeBenchmark = Invoke-BenchmarkRun -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
@@ -1136,6 +1167,7 @@ $dlaaRow = $dlaaBenchmark.LastRow
 $defaultSceneDlaaNativeRow = $defaultSceneDlaaNativeBenchmark.LastRow
 $defaultSceneDlaaRow = $defaultSceneDlaaBenchmark.LastRow
 $defaultSceneDlaaMotionRow = $defaultSceneDlaaMotionBenchmark.LastRow
+$defaultSceneDlaaObjectMotionRow = $defaultSceneDlaaObjectMotionBenchmark.LastRow
 $wboitNativeRow = $wboitNativeBenchmark.LastRow
 $wboitDlssRow = $wboitDlssBenchmark.LastRow
 $forwardSpecialNativeRow = $forwardSpecialNativeBenchmark.LastRow
@@ -1351,6 +1383,46 @@ if ($defaultSceneDlaaMotionRow.main_draws -ne $defaultSceneDlaaMotionBaselineMan
     throw "Default-scene moving DLAA draw route mismatch"
 }
 
+if ($defaultSceneDlaaObjectMotionRow.framegraph_validation_issues -ne "0") {
+    throw "Default-scene object-motion DLAA frame graph validation issues: $($defaultSceneDlaaObjectMotionRow.framegraph_validation_issues)"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_mode -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.qualityMode -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_recommended_preset -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.recommendedPreset) {
+    throw "Default-scene object-motion DLAA did not select the expected DLSS quality mode/preset"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_jitter_applied -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.jitterApplied) {
+    throw "Default-scene object-motion DLAA did not apply the expected projection jitter policy"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscale_input_ready -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady -or
+    $defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_enabled -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled -or
+    $defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler) {
+    throw "Default-scene object-motion DLAA did not keep DLSS input readiness separate from native TAA resolve"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_output_ready -ne "1" -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_active -ne "1" -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_fallback_reason -ne "0") {
+    throw "Default-scene object-motion DLAA-present run did not produce visible DLSS output"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "Default-scene object-motion DLAA quality gate did not pass"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_velocity_camera_motion_ready -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.cameraMotionReady -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.cameraMotionReady -or
+    $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_object_motion_ready -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.objectMotionReady) {
+    throw "Default-scene object-motion DLAA did not report camera/object-motion readiness"
+}
+if ($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
+    throw "Default-scene object-motion DLAA quality gate did not report baseline readiness"
+}
+Assert-DlssJitterConsistency -Name "Default-scene object-motion DLAA-present" -Row $defaultSceneDlaaObjectMotionRow
+if ($defaultSceneDlaaObjectMotionRow.main_draws -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.mainDraws -or
+    $defaultSceneDlaaObjectMotionRow.gbuffer_draws -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.gbufferDraws -or
+    $defaultSceneDlaaObjectMotionRow.forward_residual_draws -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
+    $defaultSceneDlaaObjectMotionRow.weighted_translucency_draws -ne $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
+    throw "Default-scene object-motion DLAA draw route mismatch"
+}
+
 if ($wboitNativeRow.framegraph_validation_issues -ne "0") {
     throw "WBOIT native frame graph validation issues: $($wboitNativeRow.framegraph_validation_issues)"
 }
@@ -1483,6 +1555,12 @@ $defaultSceneDlaaMotionImages = Capture-WindowImageSequence `
     -FrameCount 3 `
     -InitialDelaySeconds 4 `
     -IntervalSeconds 2
+$defaultSceneDlaaObjectMotionImages = Capture-WindowImageSequence `
+    -Name "default_scene_dlaa_object_motion_present" `
+    -Environment $defaultSceneDlaaObjectMotionPresentEnvironment `
+    -FrameCount 3 `
+    -InitialDelaySeconds 4 `
+    -IntervalSeconds 2
 $wboitNativeImage = Capture-WindowImage -Name "wboit_native_deferred_hdr" -Environment $wboitNativeEnvironment
 $wboitDlssImage = Capture-WindowImage -Name "wboit_dlss_present" -Environment $wboitDlssPresentEnvironment
 $forwardSpecialNativeImage = Capture-WindowImage -Name "forward_special_native_deferred_hdr" -Environment $forwardSpecialNativeEnvironment
@@ -1499,6 +1577,11 @@ $defaultSceneDlaaMotionImageStats = @()
 foreach ($motionImage in $defaultSceneDlaaMotionImages) {
     $defaultSceneDlaaMotionImageStats += Get-ImageVariationStats -Path $motionImage
 }
+$defaultSceneDlaaObjectMotionImageStats = @()
+foreach ($objectMotionImage in $defaultSceneDlaaObjectMotionImages) {
+    $defaultSceneDlaaObjectMotionImageStats +=
+        Get-ImageVariationStats -Path $objectMotionImage
+}
 $wboitNativeImageStats = Get-ImageVariationStats -Path $wboitNativeImage
 $wboitDlssImageStats = Get-ImageVariationStats -Path $wboitDlssImage
 $forwardSpecialNativeImageStats = Get-ImageVariationStats -Path $forwardSpecialNativeImage
@@ -1511,6 +1594,8 @@ $defaultSceneDlaaComparison =
     Compare-Images -A $defaultSceneDlaaNativeImage -B $defaultSceneDlaaImage
 $defaultSceneDlaaMotionSequenceComparison =
     Compare-ImageSequence -Paths $defaultSceneDlaaMotionImages
+$defaultSceneDlaaObjectMotionSequenceComparison =
+    Compare-ImageSequence -Paths $defaultSceneDlaaObjectMotionImages
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
 $forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
 $materialStressComparison = Compare-Images -A $materialStressNativeImage -B $materialStressDlssImage
@@ -1583,6 +1668,26 @@ $defaultSceneDlaaMotionCameraMotion =
     "$($defaultSceneDlaaMotionRow.temporal_velocity_camera_motion_ready)/$($defaultSceneDlaaMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)"
 $defaultSceneDlaaMotionTaaResolve =
     "input/enabled/suppressed=$($defaultSceneDlaaMotionRow.temporal_upscale_input_ready)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_enabled)/$($defaultSceneDlaaMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
+$defaultSceneDlaaObjectMotionPostSource =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_requested)/$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_active)/$($defaultSceneDlaaObjectMotionRow.temporal_upscale_post_source_fallback_reason)"
+$defaultSceneDlaaObjectMotionQualityGate =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_gate_requested)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_gate_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$defaultSceneDlaaObjectMotionQualityMasks =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_required_mask)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_ready_mask)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_blocker_mask)"
+$defaultSceneDlaaObjectMotionQualityInputs =
+    "output/camera/object/reactive/transparency/exposure/post/baseline=$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+$defaultSceneDlaaObjectMotionRenderScale =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_render_scale_requested)/$($defaultSceneDlaaObjectMotionRow.temporal_render_scale_active)/$($defaultSceneDlaaObjectMotionRow.temporal_render_scale_applied)"
+$defaultSceneDlaaObjectMotionDlssExtents =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_render_width)x$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_render_height)->$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_output_width)x$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_output_height)"
+$defaultSceneDlaaObjectMotionDrawRoute =
+    "$($defaultSceneDlaaObjectMotionRow.main_draws)/$($defaultSceneDlaaObjectMotionRow.gbuffer_draws)/$($defaultSceneDlaaObjectMotionRow.forward_residual_draws)/$($defaultSceneDlaaObjectMotionRow.weighted_translucency_draws)"
+$defaultSceneDlaaObjectMotionCameraMotion =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_velocity_camera_motion_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_camera_motion_ready)"
+$defaultSceneDlaaObjectMotionObjectMotion =
+    "$($defaultSceneDlaaObjectMotionRow.temporal_velocity_object_motion_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_object_motion_ready)"
+$defaultSceneDlaaObjectMotionTaaResolve =
+    "input/enabled/suppressed=$($defaultSceneDlaaObjectMotionRow.temporal_upscale_input_ready)/$($defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_enabled)/$($defaultSceneDlaaObjectMotionRow.temporal_taa_resolve_suppressed_for_upscaler)"
 $wboitNativePostSource =
     "$($wboitNativeRow.temporal_upscale_post_source_requested)/$($wboitNativeRow.temporal_upscale_post_source_active)/$($wboitNativeRow.temporal_upscale_post_source_fallback_reason)"
 $wboitNativeQualityGate =
@@ -1660,6 +1765,16 @@ Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.qualityMode" -Actu
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.recommendedPreset" -Actual $defaultSceneDlaaMotionRow.temporal_upscaler_dlss_recommended_preset -Expected $defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.recommendedPreset
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.cameraMotion" -Actual $defaultSceneDlaaMotionCameraMotion -Expected "$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)"
 Assert-BaselineText -Name "defaultSceneDlaaMotion.dlssPresent.taaResolve" -Actual $defaultSceneDlaaMotionTaaResolve -Expected "input/enabled/suppressed=$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled)/$($defaultSceneDlaaMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler)"
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.postSource" -Actual $defaultSceneDlaaObjectMotionPostSource -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.postSource
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.qualityGate" -Actual $defaultSceneDlaaObjectMotionQualityGate -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.qualityGate
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.qualityMasks" -Actual $defaultSceneDlaaObjectMotionQualityMasks -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.qualityMasks
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.qualityInputs" -Actual $defaultSceneDlaaObjectMotionQualityInputs -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.qualityInputs
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.renderScale" -Actual $defaultSceneDlaaObjectMotionRenderScale -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.renderScale
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.qualityMode" -Actual $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_mode -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.qualityMode
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.recommendedPreset" -Actual $defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_recommended_preset -Expected $defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.recommendedPreset
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.cameraMotion" -Actual $defaultSceneDlaaObjectMotionCameraMotion -Expected "$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)/$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.cameraMotionReady)"
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.objectMotion" -Actual $defaultSceneDlaaObjectMotionObjectMotion -Expected "$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.objectMotionReady)/$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.objectMotionReady)"
+Assert-BaselineText -Name "defaultSceneDlaaObjectMotion.dlssPresent.taaResolve" -Actual $defaultSceneDlaaObjectMotionTaaResolve -Expected "input/enabled/suppressed=$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.temporalUpscaleInputReady)/$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveEnabled)/$($defaultSceneDlaaObjectMotionBaselineManifest.expected.dlssPresent.nativeTaaResolveSuppressedForUpscaler)"
 Assert-BaselineText -Name "wboit.native.postSource" -Actual $wboitNativePostSource -Expected $wboitBaselineManifest.expected.native.postSource
 Assert-BaselineText -Name "wboit.native.qualityGate" -Actual $wboitNativeQualityGate -Expected $wboitBaselineManifest.expected.native.qualityGate
 Assert-BaselineText -Name "wboit.dlssPresent.evaluateOutput" -Actual $wboitDlssEvaluateOutput -Expected $wboitBaselineManifest.expected.dlssPresent.evaluateOutput
@@ -1788,6 +1903,38 @@ Assert-BaselineRange `
     -Actual $defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta `
     -Min 0 `
     -Max $defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
+for ($index = 0; $index -lt $defaultSceneDlaaObjectMotionImageStats.Count; ++$index) {
+    Assert-BaselineRange `
+        -Name "defaultSceneDlaaObjectMotion.imageStats[$index].differentPixels" `
+        -Actual $defaultSceneDlaaObjectMotionImageStats[$index].DifferentPixels `
+        -Min $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.centralDifferentPixelsMin `
+        -Max $defaultSceneDlaaObjectMotionImageStats[$index].SampledPixels
+}
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.minChangedPixels" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.minChangedPixels `
+    -Min $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin `
+    -Max $defaultSceneDlaaObjectMotionSequenceComparison.pairs[0].SampledPixels
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.maxMeanDelta" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxMeanDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.minEdgePixels" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.minEdgePixels `
+    -Min $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin `
+    -Max $defaultSceneDlaaObjectMotionSequenceComparison.pairs[0].SampledPixels
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.maxMeanEdgeDelta" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
+Assert-BaselineRange `
+    -Name "defaultSceneDlaaObjectMotion.sequence.maxEdgeDelta" `
+    -Actual $defaultSceneDlaaObjectMotionSequenceComparison.maxEdgeDelta `
+    -Min 0 `
+    -Max $defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
 Assert-BaselineRange `
     -Name "wboit.native.imageStats.differentPixels" `
     -Actual $wboitNativeImageStats.DifferentPixels `
@@ -1884,6 +2031,8 @@ $summary = [pscustomobject]@{
         defaultSceneDlaaName = $defaultSceneDlaaBaselineManifest.name
         defaultSceneDlaaMotionManifest = $defaultSceneDlaaMotionBaselineManifestPath
         defaultSceneDlaaMotionName = $defaultSceneDlaaMotionBaselineManifest.name
+        defaultSceneDlaaObjectMotionManifest = $defaultSceneDlaaObjectMotionBaselineManifestPath
+        defaultSceneDlaaObjectMotionName = $defaultSceneDlaaObjectMotionBaselineManifest.name
     }
     thresholds = [pscustomobject]@{
         minChangedPixels = $MinChangedPixels
@@ -1923,6 +2072,11 @@ $summary = [pscustomobject]@{
         defaultSceneDlaaMotionSequencePairEdgePixelsMin = [int]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
         defaultSceneDlaaMotionSequencePairMeanEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
         defaultSceneDlaaMotionSequencePairMaxEdgeDeltaMax = [double]$defaultSceneDlaaMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
+        defaultSceneDlaaObjectMotionSequencePairChangedPixelsMin = [int]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairChangedPixelsMin
+        defaultSceneDlaaObjectMotionSequencePairMeanDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanDeltaMax
+        defaultSceneDlaaObjectMotionSequencePairEdgePixelsMin = [int]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairEdgePixelsMin
+        defaultSceneDlaaObjectMotionSequencePairMeanEdgeDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMeanEdgeDeltaMax
+        defaultSceneDlaaObjectMotionSequencePairMaxEdgeDeltaMax = [double]$defaultSceneDlaaObjectMotionBaselineManifest.thresholds.sequencePairMaxEdgeDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
@@ -2022,6 +2176,28 @@ $summary = [pscustomobject]@{
         imageStats = $defaultSceneDlaaMotionImageStats
         sequenceComparison = $defaultSceneDlaaMotionSequenceComparison
     }
+    defaultSceneDlaaObjectMotionPresent = [pscustomobject]@{
+        csv = $defaultSceneDlaaObjectMotionBenchmark.CsvPath
+        images = $defaultSceneDlaaObjectMotionImages
+        columns = "$($defaultSceneDlaaObjectMotionBenchmark.HeaderColumns)/$($defaultSceneDlaaObjectMotionBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$defaultSceneDlaaObjectMotionRow.framegraph_validation_issues
+        evaluateOutput = "$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_evaluate_result)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_output_ready)"
+        postSource = $defaultSceneDlaaObjectMotionPostSource
+        qualityGate = $defaultSceneDlaaObjectMotionQualityGate
+        qualityMasks = $defaultSceneDlaaObjectMotionQualityMasks
+        qualityInputs = $defaultSceneDlaaObjectMotionQualityInputs
+        renderScale = $defaultSceneDlaaObjectMotionRenderScale
+        qualityMode = [int]$defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_quality_mode
+        recommendedPreset = [int]$defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_recommended_preset
+        dlssExtents = $defaultSceneDlaaObjectMotionDlssExtents
+        drawRoute = $defaultSceneDlaaObjectMotionDrawRoute
+        cameraMotion = $defaultSceneDlaaObjectMotionCameraMotion
+        objectMotion = $defaultSceneDlaaObjectMotionObjectMotion
+        taaResolve = $defaultSceneDlaaObjectMotionTaaResolve
+        jitter = "$($defaultSceneDlaaObjectMotionRow.temporal_jitter_enabled)/$($defaultSceneDlaaObjectMotionRow.temporal_jitter_applied)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_x)/$($defaultSceneDlaaObjectMotionRow.temporal_upscaler_dlss_jitter_offset_y)"
+        imageStats = $defaultSceneDlaaObjectMotionImageStats
+        sequenceComparison = $defaultSceneDlaaObjectMotionSequenceComparison
+    }
     wboitNative = [pscustomobject]@{
         csv = $wboitNativeBenchmark.CsvPath
         image = $wboitNativeImage
@@ -2118,6 +2294,8 @@ Write-Host "  app dlaa: $defaultSceneDlaaImage"
 Write-Host "  appdiff: sampled=$($defaultSceneDlaaComparison.SampledPixels) changed=$($defaultSceneDlaaComparison.ChangedPixels) mean=$($defaultSceneDlaaComparison.MeanDelta) max=$($defaultSceneDlaaComparison.MaxDelta)"
 Write-Host "  app motion: $($defaultSceneDlaaMotionImages -join ', ')"
 Write-Host "  appmotiondiff: pairs=$($defaultSceneDlaaMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($defaultSceneDlaaMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaMotionSequenceComparison.maxEdgeDelta)"
+Write-Host "  app object motion: $($defaultSceneDlaaObjectMotionImages -join ', ')"
+Write-Host "  appobjectmotiondiff: pairs=$($defaultSceneDlaaObjectMotionSequenceComparison.pairCount) minChanged=$($defaultSceneDlaaObjectMotionSequenceComparison.minChangedPixels) maxMean=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanDelta) max=$($defaultSceneDlaaObjectMotionSequenceComparison.maxDelta) edgeMin=$($defaultSceneDlaaObjectMotionSequenceComparison.minEdgePixels) edgeChangedMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxChangedEdgePixels) edgeMeanMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxMeanEdgeDelta) edgeMax=$($defaultSceneDlaaObjectMotionSequenceComparison.maxEdgeDelta)"
 Write-Host "  wboit:   $wboitDlssImage"
 Write-Host "  wdiff: sampled=$($wboitComparison.SampledPixels) changed=$($wboitComparison.ChangedPixels) mean=$($wboitComparison.MeanDelta) max=$($wboitComparison.MaxDelta)"
 Write-Host "  forward: $forwardSpecialDlssImage"

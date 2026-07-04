@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_default_scene_dlaa_object_motion",
+  "target": "SelfEngineForward3D",
+  "scene": "default-application-scene-moving-camera-moving-object",
+  "description": "Reference contract for the real default Forward 3D application scene under deterministic benchmark camera and object motion. This validates that DLAA is exercised with camera-motion vectors, object-motion vectors, applied jitter, and a changing frame sequence instead of only static screenshots.",
+  "environment": {
+    "dlssPresent": {
+      "SE_RENDER_SCALE": "1.0",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_TAA_APPLY_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_QUALITY": "dlaa",
+      "SE_DLSS_PRESENT": "1",
+      "SE_BENCHMARK_CAMERA_MOTION": "orbit",
+      "SE_BENCHMARK_OBJECT_MOTION": "orbit",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "dlssPresent": {
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "renderScale": "1/1/0",
+      "renderScaleActive": "1",
+      "renderScaleApplied": "0",
+      "jitterApplied": "1",
+      "temporalUpscaleInputReady": "1",
+      "nativeTaaResolveEnabled": "0",
+      "nativeTaaResolveSuppressedForUpscaler": "1",
+      "qualityMode": "6",
+      "recommendedPreset": "11",
+      "cameraMotionReady": "1",
+      "objectMotionReady": "1",
+      "mainDraws": "5",
+      "gbufferDraws": "5",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "0"
+    }
+  },
+  "thresholds": {
+    "sequencePairChangedPixelsMin": 16,
+    "sequencePairMeanDeltaMax": 180.0,
+    "sequencePairEdgePixelsMin": 256,
+    "sequencePairMeanEdgeDeltaMax": 64.0,
+    "sequencePairMaxEdgeDeltaMax": 224.0,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-05T02:27:25.7002650+08:00",
+    "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2048,0 2048x1104",
+    "dlssColumns": "782/782",
+    "qualityMode": 6,
+    "recommendedPreset": 11,
+    "renderScale": "1/1/0",
+    "jitterApplied": 1,
+    "taaResolve": "input/enabled/suppressed=1/0/1",
+    "dlssExtents": "1280x720->1280x720",
+    "qualityGate": "1/1/0",
+    "qualityMasks": "255/255/0",
+    "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+    "cameraMotion": "1/1",
+    "objectMotion": "1/1",
+    "sequencePairCount": 2,
+    "sequencePairMinChangedPixels": 171,
+    "sequencePairMaxMeanDelta": 2.319,
+    "sequencePairMaxDelta": 564,
+    "sequencePairMinEdgePixels": 1069,
+    "sequencePairMaxChangedEdgePixels": 82,
+    "sequencePairMaxMeanEdgeDelta": 3.8641,
+    "sequencePairMaxEdgeDelta": 188.0
+  }
+}
