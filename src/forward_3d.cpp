@@ -1980,6 +1980,20 @@ int main() {
         checkerTexturePath,
         ForwardMaterial({ 0.72f, 0.76f, 0.78f, 1.0f }, 0.0f, 0.28f, 0.62f, 0.05f, 16.0f)
     );
+    constexpr std::array<se::u8, 4> kDefaultGroundTexel{
+        72, 78, 82, 255
+    };
+    se::VulkanMaterial& defaultGroundMaterial = app.MaterialLibrary().Create(
+        "DefaultGroundMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kDefaultGroundTexel.data(), kDefaultGroundTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.45f, 0.48f, 0.50f, 1.0f }, 0.0f, 0.26f, 0.58f, 0.04f, 18.0f),
+        false,
+        false
+    );
     se::VulkanMaterial& gridMaterial = app.MaterialLibrary().Create(
         "GridMaterial",
         checkerTexturePath,
@@ -2161,6 +2175,7 @@ int main() {
     app.RenderResources().RegisterMaterial("BlueCubeMaterial", blueCubeMaterial);
     app.RenderResources().RegisterMaterial("GreenCubeMaterial", greenCubeMaterial);
     app.RenderResources().RegisterMaterial("GroundMaterial", groundMaterial);
+    app.RenderResources().RegisterMaterial("DefaultGroundMaterial", defaultGroundMaterial);
     app.RenderResources().RegisterMaterial("GridMaterial", gridMaterial);
 
     se::Scene3D scene;
@@ -2180,7 +2195,7 @@ int main() {
         se::Renderable3D& ground = scene.CreateRenderable(
             "Ground",
             "Plane",
-            "GroundMaterial"
+            "DefaultGroundMaterial"
         );
         ground.Transform().SetPosition({ 0.0f, -1.15f, 0.0f });
         ground.Transform().SetScale({ 8.0f, 1.0f, 8.0f });
@@ -2431,6 +2446,16 @@ int main() {
         defaultModelLoad.gpuPosePaletteBufferUploaded;
     sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorInfoReady =
         defaultModelLoad.gpuPosePaletteDescriptorInfoReady;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetAllocated =
+        defaultModelLoad.gpuPosePaletteDescriptorSetAllocated;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetWritten =
+        defaultModelLoad.gpuPosePaletteDescriptorSetWritten;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetReady =
+        defaultModelLoad.gpuPosePaletteDescriptorSetReady;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorBinding =
+        defaultModelLoad.gpuPosePaletteDescriptorBinding;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorRangeBytes =
+        defaultModelLoad.gpuPosePaletteDescriptorRangeBytes;
     sceneDiagnostics.runtimeImportGpuPosePaletteBufferBytes =
         defaultModelLoad.gpuPosePaletteBufferBytes;
     sceneDiagnostics.runtimeImportGpuPosePaletteCurrentEntryCount =
@@ -2560,6 +2585,7 @@ int main() {
         ApplyCameraToMaterial(camera, blueCubeMaterial);
         ApplyCameraToMaterial(camera, greenCubeMaterial);
         ApplyCameraToMaterial(camera, groundMaterial);
+        ApplyCameraToMaterial(camera, defaultGroundMaterial);
         ApplyCameraToMaterial(camera, gridMaterial);
         if (!useBenchmarkScene) {
             LoadDroppedModels(app, runtimeModelLoader);

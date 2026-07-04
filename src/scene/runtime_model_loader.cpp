@@ -3,6 +3,7 @@
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/material_library.h"
 #include "renderer/vulkan/mesh_lod.h"
+#include "renderer/vulkan/device.h"
 #include "renderer/vulkan/render_resources_2d.h"
 #include "renderer/vulkan/upload_batch.h"
 
@@ -12,8 +13,139 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <stdexcept>
 
 namespace se {
+
+class RuntimeBonePaletteDescriptorSet {
+public:
+    explicit RuntimeBonePaletteDescriptorSet(VkDevice device)
+        : m_Device(device) {
+    }
+
+    ~RuntimeBonePaletteDescriptorSet() {
+        Release();
+    }
+
+    SE_DISABLE_COPY(RuntimeBonePaletteDescriptorSet);
+    SE_DISABLE_MOVE(RuntimeBonePaletteDescriptorSet);
+
+    void Create(const VulkanBuffer& buffer) {
+        Release();
+
+        m_Binding = 0;
+        m_RangeBytes = buffer.Size() > std::numeric_limits<u32>::max()
+            ? std::numeric_limits<u32>::max()
+            : static_cast<u32>(buffer.Size());
+        if (buffer.Handle() == VK_NULL_HANDLE || buffer.Size() == 0) {
+            return;
+        }
+
+        VkDescriptorSetLayoutBinding paletteBinding{};
+        paletteBinding.binding = m_Binding;
+        paletteBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        paletteBinding.descriptorCount = 1;
+        paletteBinding.stageFlags =
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+        paletteBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &paletteBinding;
+
+        if (vkCreateDescriptorSetLayout(
+                m_Device,
+                &layoutInfo,
+                nullptr,
+                &m_Layout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create imported bone palette descriptor layout");
+        }
+
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize.descriptorCount = 1;
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = 1;
+
+        if (vkCreateDescriptorPool(
+                m_Device,
+                &poolInfo,
+                nullptr,
+                &m_Pool
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create imported bone palette descriptor pool");
+        }
+
+        VkDescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocateInfo.descriptorPool = m_Pool;
+        allocateInfo.descriptorSetCount = 1;
+        allocateInfo.pSetLayouts = &m_Layout;
+
+        if (vkAllocateDescriptorSets(m_Device, &allocateInfo, &m_Set) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate imported bone palette descriptor set");
+        }
+        m_Allocated = m_Set != VK_NULL_HANDLE ? 1u : 0u;
+
+        VkDescriptorBufferInfo descriptorInfo{};
+        descriptorInfo.buffer = buffer.Handle();
+        descriptorInfo.offset = 0;
+        descriptorInfo.range = buffer.Size();
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_Set;
+        write.dstBinding = m_Binding;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo = &descriptorInfo;
+
+        vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
+        m_Written = 1u;
+        m_Ready = m_Allocated != 0u && m_Written != 0u && m_RangeBytes > 0
+            ? 1u
+            : 0u;
+    }
+
+    void Release() {
+        m_Set = VK_NULL_HANDLE;
+        if (m_Pool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(m_Device, m_Pool, nullptr);
+            m_Pool = VK_NULL_HANDLE;
+        }
+        if (m_Layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_Device, m_Layout, nullptr);
+            m_Layout = VK_NULL_HANDLE;
+        }
+        m_Allocated = 0;
+        m_Written = 0;
+        m_Ready = 0;
+    }
+
+    u32 Allocated() const { return m_Allocated; }
+    u32 Written() const { return m_Written; }
+    u32 Ready() const { return m_Ready; }
+    u32 Binding() const { return m_Binding; }
+    u32 RangeBytes() const { return m_RangeBytes; }
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_Layout = VK_NULL_HANDLE;
+    VkDescriptorPool m_Pool = VK_NULL_HANDLE;
+    VkDescriptorSet m_Set = VK_NULL_HANDLE;
+    u32 m_Allocated = 0;
+    u32 m_Written = 0;
+    u32 m_Ready = 0;
+    u32 m_Binding = 0;
+    u32 m_RangeBytes = 0;
+};
 
 namespace {
 
@@ -75,6 +207,15 @@ struct GpuBonePaletteUpload {
     u32 byteSize = 0;
     u32 currentEntryCount = 0;
     u32 previousEntryCount = 0;
+};
+
+struct GpuBonePaletteDescriptorWrite {
+    std::unique_ptr<RuntimeBonePaletteDescriptorSet> descriptorSet;
+    u32 allocated = 0;
+    u32 written = 0;
+    u32 ready = 0;
+    u32 binding = 0;
+    u32 rangeBytes = 0;
 };
 
 RendererBonePaletteRegistration RegisterRendererBonePaletteResource(
@@ -172,6 +313,27 @@ GpuBonePaletteUpload CreateGpuBonePaletteBuffer(
         descriptorInfo.range >= bufferSize
             ? 1u
             : 0u;
+
+    return result;
+}
+
+GpuBonePaletteDescriptorWrite CreateGpuBonePaletteDescriptorWrite(
+    const VulkanDevice& device,
+    const VulkanBuffer* buffer
+) {
+    GpuBonePaletteDescriptorWrite result{};
+    if (buffer == nullptr || buffer->Handle() == VK_NULL_HANDLE || buffer->Size() == 0) {
+        return result;
+    }
+
+    result.descriptorSet =
+        std::make_unique<RuntimeBonePaletteDescriptorSet>(device.Handle());
+    result.descriptorSet->Create(*buffer);
+    result.allocated = result.descriptorSet->Allocated();
+    result.written = result.descriptorSet->Written();
+    result.ready = result.descriptorSet->Ready();
+    result.binding = result.descriptorSet->Binding();
+    result.rangeBytes = result.descriptorSet->RangeBytes();
 
     return result;
 }
@@ -511,6 +673,8 @@ RuntimeModelLoader::RuntimeModelLoader(
     m_FallbackTexturePath(std::move(fallbackTexturePath)) {
 }
 
+RuntimeModelLoader::LoadedRuntimeModel::~LoadedRuntimeModel() = default;
+
 RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
     const std::filesystem::path& modelPath,
     glm::vec3 position,
@@ -601,6 +765,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.gpuBonePaletteBuffer != nullptr ? 1u : 0u,
                 cached.gpuPosePaletteBufferUploaded,
                 cached.gpuPosePaletteDescriptorInfoReady,
+                cached.gpuPosePaletteDescriptorSetAllocated,
+                cached.gpuPosePaletteDescriptorSetWritten,
+                cached.gpuPosePaletteDescriptorSetReady,
+                cached.gpuPosePaletteDescriptorBinding,
+                cached.gpuPosePaletteDescriptorRangeBytes,
                 cached.gpuBonePaletteBuffer != nullptr
                     ? static_cast<u32>(cached.gpuBonePaletteBuffer->Size())
                     : 0u,
@@ -1279,6 +1448,33 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         loadedModel->gpuPosePalettePreviousEntryCount =
             gpuBonePalette.previousEntryCount;
         loadedModel->gpuBonePaletteBuffer = std::move(gpuBonePalette.buffer);
+        GpuBonePaletteDescriptorWrite gpuBonePaletteDescriptor =
+            CreateGpuBonePaletteDescriptorWrite(
+                m_Device,
+                loadedModel->gpuBonePaletteBuffer.get()
+            );
+        const u32 gpuPosePaletteDescriptorSetAllocated =
+            gpuBonePaletteDescriptor.allocated;
+        const u32 gpuPosePaletteDescriptorSetWritten =
+            gpuBonePaletteDescriptor.written;
+        const u32 gpuPosePaletteDescriptorSetReady =
+            gpuBonePaletteDescriptor.ready;
+        const u32 gpuPosePaletteDescriptorBinding =
+            gpuBonePaletteDescriptor.binding;
+        const u32 gpuPosePaletteDescriptorRangeBytes =
+            gpuBonePaletteDescriptor.rangeBytes;
+        loadedModel->gpuPosePaletteDescriptorSetAllocated =
+            gpuBonePaletteDescriptor.allocated;
+        loadedModel->gpuPosePaletteDescriptorSetWritten =
+            gpuBonePaletteDescriptor.written;
+        loadedModel->gpuPosePaletteDescriptorSetReady =
+            gpuBonePaletteDescriptor.ready;
+        loadedModel->gpuPosePaletteDescriptorBinding =
+            gpuBonePaletteDescriptor.binding;
+        loadedModel->gpuPosePaletteDescriptorRangeBytes =
+            gpuBonePaletteDescriptor.rangeBytes;
+        loadedModel->gpuBonePaletteDescriptorSet =
+            std::move(gpuBonePaletteDescriptor.descriptorSet);
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -1323,6 +1519,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             gpuPosePaletteBufferAllocated,
             gpuPosePaletteBufferUploaded,
             gpuPosePaletteDescriptorInfoReady,
+            gpuPosePaletteDescriptorSetAllocated,
+            gpuPosePaletteDescriptorSetWritten,
+            gpuPosePaletteDescriptorSetReady,
+            gpuPosePaletteDescriptorBinding,
+            gpuPosePaletteDescriptorRangeBytes,
             gpuPosePaletteBufferBytes,
             gpuPosePaletteCurrentEntryCount,
             gpuPosePalettePreviousEntryCount,

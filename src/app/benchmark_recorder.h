@@ -80,6 +80,11 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportGpuPosePaletteBufferAllocated = 0;
     u32 runtimeImportGpuPosePaletteBufferUploaded = 0;
     u32 runtimeImportGpuPosePaletteDescriptorInfoReady = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorSetAllocated = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorSetWritten = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorSetReady = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorBinding = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorRangeBytes = 0;
     u32 runtimeImportGpuPosePaletteBufferBytes = 0;
     u32 runtimeImportGpuPosePaletteCurrentEntryCount = 0;
     u32 runtimeImportGpuPosePalettePreviousEntryCount = 0;

@@ -17,6 +17,7 @@ class VulkanDevice;
 class VulkanMaterialLibrary;
 class VulkanPhysicalDevice;
 class VulkanRenderResources2D;
+class RuntimeBonePaletteDescriptorSet;
 
 struct RuntimeModelLoadResult {
     bool loaded = false;
@@ -57,6 +58,11 @@ struct RuntimeModelLoadResult {
     u32 gpuPosePaletteBufferAllocated = 0;
     u32 gpuPosePaletteBufferUploaded = 0;
     u32 gpuPosePaletteDescriptorInfoReady = 0;
+    u32 gpuPosePaletteDescriptorSetAllocated = 0;
+    u32 gpuPosePaletteDescriptorSetWritten = 0;
+    u32 gpuPosePaletteDescriptorSetReady = 0;
+    u32 gpuPosePaletteDescriptorBinding = 0;
+    u32 gpuPosePaletteDescriptorRangeBytes = 0;
     u32 gpuPosePaletteBufferBytes = 0;
     u32 gpuPosePaletteCurrentEntryCount = 0;
     u32 gpuPosePalettePreviousEntryCount = 0;
@@ -92,6 +98,8 @@ public:
 
 private:
     struct LoadedRuntimeModel {
+        ~LoadedRuntimeModel();
+
         std::vector<std::unique_ptr<VulkanMesh>> meshes;
         std::vector<VulkanMaterial*> materials;
         std::vector<std::string> meshIds;
@@ -124,8 +132,14 @@ private:
         u32 runtimePoseCarrierReady = 0;
         std::string bonePaletteResourceId;
         std::unique_ptr<VulkanBuffer> gpuBonePaletteBuffer;
+        std::unique_ptr<RuntimeBonePaletteDescriptorSet> gpuBonePaletteDescriptorSet;
         u32 gpuPosePaletteBufferUploaded = 0;
         u32 gpuPosePaletteDescriptorInfoReady = 0;
+        u32 gpuPosePaletteDescriptorSetAllocated = 0;
+        u32 gpuPosePaletteDescriptorSetWritten = 0;
+        u32 gpuPosePaletteDescriptorSetReady = 0;
+        u32 gpuPosePaletteDescriptorBinding = 0;
+        u32 gpuPosePaletteDescriptorRangeBytes = 0;
         u32 gpuPosePaletteCurrentEntryCount = 0;
         u32 gpuPosePalettePreviousEntryCount = 0;
         u32 sourceMeshWithBonesCount = 0;

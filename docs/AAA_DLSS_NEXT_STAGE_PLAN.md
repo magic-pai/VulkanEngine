@@ -1019,6 +1019,58 @@ the skinned probe. The next skinned quality work is descriptor-set writes and
 shader visibility, then shader skinning or skinned vertex output,
 previous-skinned state, and skinned velocity output.
 
+## Slice 4.33 Execution Plan
+
+Slice 4.33 writes the uploaded imported bone-palette buffer into a Vulkan
+descriptor set without binding it into any draw pipeline. The goal is to prove a
+shader-visible descriptor-set write path for the sampled palette data while
+keeping shader skinning, previous-skinned state, and skinned velocity explicitly
+blocked.
+
+1. Diagnostic descriptor resources.
+   - Create an independent descriptor set layout with one binding:
+     storage-buffer binding `0`, visible to vertex/compute shader stages.
+   - Allocate a one-set descriptor pool and descriptor set owned by the cached
+     runtime model.
+   - Write the uploaded bone-palette `VkDescriptorBufferInfo` into binding `0`.
+
+2. Diagnostics and contracts.
+   - Report descriptor-set allocated, written, ready, binding, and range bytes
+     through `RuntimeModelLoadResult`.
+   - Carry those values into Forward 3D benchmark scene diagnostics, CSV, quick
+     visual-QA metrics, and focused imported baselines.
+   - Keep rigid imported lanes at zero and keep the skinned diagnostic quality
+     gate expected-blocked.
+
+3. Non-goals.
+   - Do not add the descriptor set to the main frame/material pipeline layout.
+   - Do not bind it in command buffers.
+   - Do not claim shader skinning, skinned vertex output, previous-skinned
+     state, skinned velocity, or production DLSS/DLAA image quality.
+
+## Slice 4.33 Execution Evidence
+
+Slice 4.33 is implemented and verified. `RuntimeModelLoader` now creates an
+independent diagnostic storage-buffer descriptor set for the uploaded imported
+bone-palette buffer and keeps it alive with the cached runtime model.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct benchmark CSV probe for `assets/models/skinned_probe.dae` reports
+  `834/834` CSV columns and descriptor diagnostics
+  `setAllocated/setWritten/setReady/binding/rangeBytes=1/1/1/0/256`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as the single focused script run.
+- Focused CSV reports `834/834` columns, descriptor range/buffer bytes
+  `256/256`, and DLSS quality remains expected-blocked at `qualityGate=1/0/4`
+  with masks `255/251/4`.
+
+This closes the GPU-buffer-to-descriptor-set diagnostic chain for the skinned
+probe. The next skinned quality work is draw-time descriptor binding and shader
+visibility, then shader skinning or skinned vertex output, previous-skinned
+state, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

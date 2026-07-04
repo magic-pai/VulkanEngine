@@ -247,6 +247,11 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportGpuPosePaletteBufferAllocated << ','
         << sceneDiagnostics.runtimeImportGpuPosePaletteBufferUploaded << ','
         << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorInfoReady << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetAllocated << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetWritten << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorSetReady << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorBinding << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorRangeBytes << ','
         << sceneDiagnostics.runtimeImportGpuPosePaletteBufferBytes << ','
         << sceneDiagnostics.runtimeImportGpuPosePaletteCurrentEntryCount << ','
         << sceneDiagnostics.runtimeImportGpuPosePalettePreviousEntryCount << ','
@@ -1075,6 +1080,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_gpu_pose_palette_buffer_allocated,"
         << "runtime_import_gpu_pose_palette_buffer_uploaded,"
         << "runtime_import_gpu_pose_palette_descriptor_info_ready,"
+        << "runtime_import_gpu_pose_palette_descriptor_set_allocated,"
+        << "runtime_import_gpu_pose_palette_descriptor_set_written,"
+        << "runtime_import_gpu_pose_palette_descriptor_set_ready,"
+        << "runtime_import_gpu_pose_palette_descriptor_binding,"
+        << "runtime_import_gpu_pose_palette_descriptor_range_bytes,"
         << "runtime_import_gpu_pose_palette_buffer_bytes,"
         << "runtime_import_gpu_pose_palette_current_entry_count,"
         << "runtime_import_gpu_pose_palette_previous_entry_count,"
