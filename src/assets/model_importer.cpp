@@ -13,9 +13,11 @@
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -846,6 +848,350 @@ void PopulateModelNodeHierarchy(ImportedModel3D& model, const aiScene* scene) {
     model.sourceNodeCount = static_cast<u32>(model.nodes.size());
 }
 
+struct TransformComponents {
+    glm::vec3 translation{ 0.0f };
+    glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
+    glm::vec3 scale{ 1.0f };
+};
+
+TransformComponents DecomposeTransform(const glm::mat4& transform) {
+    TransformComponents components;
+    components.translation = glm::vec3(transform[3]);
+    components.scale = glm::vec3(
+        glm::length(glm::vec3(transform[0])),
+        glm::length(glm::vec3(transform[1])),
+        glm::length(glm::vec3(transform[2]))
+    );
+
+    glm::mat3 rotationMatrix{ 1.0f };
+    if (components.scale.x > 0.0f) {
+        rotationMatrix[0] = glm::vec3(transform[0]) / components.scale.x;
+    }
+    if (components.scale.y > 0.0f) {
+        rotationMatrix[1] = glm::vec3(transform[1]) / components.scale.y;
+    }
+    if (components.scale.z > 0.0f) {
+        rotationMatrix[2] = glm::vec3(transform[2]) / components.scale.z;
+    }
+    components.rotation = glm::normalize(glm::quat_cast(rotationMatrix));
+    return components;
+}
+
+glm::mat4 ComposeTransform(const TransformComponents& components) {
+    return glm::translate(glm::mat4(1.0f), components.translation) *
+        glm::mat4_cast(components.rotation) *
+        glm::scale(glm::mat4(1.0f), components.scale);
+}
+
+glm::vec3 SampleVec3Keys(
+    const std::vector<ImportedAnimationVec3Key>& keys,
+    f64 timeTicks,
+    glm::vec3 fallback
+) {
+    if (keys.empty()) {
+        return fallback;
+    }
+    if (timeTicks <= keys.front().time) {
+        return keys.front().value;
+    }
+    if (timeTicks >= keys.back().time) {
+        return keys.back().value;
+    }
+
+    for (std::size_t keyIndex = 1; keyIndex < keys.size(); ++keyIndex) {
+        const ImportedAnimationVec3Key& next = keys[keyIndex];
+        if (timeTicks > next.time) {
+            continue;
+        }
+
+        const ImportedAnimationVec3Key& previous = keys[keyIndex - 1];
+        const f64 duration = next.time - previous.time;
+        const f32 t = duration > 0.0
+            ? static_cast<f32>((timeTicks - previous.time) / duration)
+            : 0.0f;
+        return glm::mix(previous.value, next.value, std::clamp(t, 0.0f, 1.0f));
+    }
+
+    return keys.back().value;
+}
+
+glm::quat SampleQuatKeys(
+    const std::vector<ImportedAnimationQuatKey>& keys,
+    f64 timeTicks,
+    glm::quat fallback
+) {
+    if (keys.empty()) {
+        return fallback;
+    }
+    if (timeTicks <= keys.front().time) {
+        return glm::normalize(keys.front().value);
+    }
+    if (timeTicks >= keys.back().time) {
+        return glm::normalize(keys.back().value);
+    }
+
+    for (std::size_t keyIndex = 1; keyIndex < keys.size(); ++keyIndex) {
+        const ImportedAnimationQuatKey& next = keys[keyIndex];
+        if (timeTicks > next.time) {
+            continue;
+        }
+
+        const ImportedAnimationQuatKey& previous = keys[keyIndex - 1];
+        const f64 duration = next.time - previous.time;
+        const f32 t = duration > 0.0
+            ? static_cast<f32>((timeTicks - previous.time) / duration)
+            : 0.0f;
+        return glm::normalize(
+            glm::slerp(previous.value, next.value, std::clamp(t, 0.0f, 1.0f))
+        );
+    }
+
+    return glm::normalize(keys.back().value);
+}
+
+f64 LastAnimationKeyTime(const ImportedAnimationClip3D& clip) {
+    f64 result = 0.0;
+    for (const ImportedAnimationChannel3D& channel : clip.channels) {
+        if (!channel.positions.empty()) {
+            result = std::max(result, channel.positions.back().time);
+        }
+        if (!channel.rotations.empty()) {
+            result = std::max(result, channel.rotations.back().time);
+        }
+        if (!channel.scales.empty()) {
+            result = std::max(result, channel.scales.back().time);
+        }
+    }
+
+    return result;
+}
+
+std::unordered_map<std::string, u32> BuildNodeNameLookup(
+    const ImportedModel3D& model
+) {
+    std::unordered_map<std::string, u32> lookup;
+    lookup.reserve(model.nodes.size());
+    for (u32 nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex) {
+        if (!model.nodes[nodeIndex].name.empty()) {
+            lookup[model.nodes[nodeIndex].name] = nodeIndex;
+        }
+    }
+
+    return lookup;
+}
+
+std::vector<glm::mat4> SampleLocalPose(
+    const ImportedModel3D& model,
+    const ImportedAnimationClip3D& clip,
+    const std::unordered_map<std::string, u32>& nodeLookup,
+    f64 timeTicks
+) {
+    std::vector<glm::mat4> localTransforms;
+    localTransforms.reserve(model.nodes.size());
+    for (const ImportedNode3D& node : model.nodes) {
+        localTransforms.push_back(node.localTransform);
+    }
+
+    for (const ImportedAnimationChannel3D& channel : clip.channels) {
+        const auto foundNode = nodeLookup.find(channel.nodeName);
+        if (foundNode == nodeLookup.end()) {
+            continue;
+        }
+
+        const u32 nodeIndex = foundNode->second;
+        const TransformComponents base =
+            DecomposeTransform(model.nodes[nodeIndex].localTransform);
+        TransformComponents sampled = base;
+        sampled.translation =
+            SampleVec3Keys(channel.positions, timeTicks, base.translation);
+        sampled.rotation =
+            SampleQuatKeys(channel.rotations, timeTicks, base.rotation);
+        sampled.scale =
+            SampleVec3Keys(channel.scales, timeTicks, base.scale);
+        localTransforms[nodeIndex] = ComposeTransform(sampled);
+    }
+
+    return localTransforms;
+}
+
+std::vector<glm::mat4> BuildGlobalPose(
+    const ImportedModel3D& model,
+    const std::vector<glm::mat4>& localTransforms
+) {
+    std::vector<glm::mat4> globalTransforms(
+        localTransforms.size(),
+        glm::mat4(1.0f)
+    );
+    for (u32 nodeIndex = 0; nodeIndex < localTransforms.size(); ++nodeIndex) {
+        const i32 parentIndex = model.nodes[nodeIndex].parentIndex;
+        if (parentIndex >= 0 &&
+            static_cast<std::size_t>(parentIndex) < globalTransforms.size()) {
+            globalTransforms[nodeIndex] =
+                globalTransforms[static_cast<std::size_t>(parentIndex)] *
+                localTransforms[nodeIndex];
+        } else {
+            globalTransforms[nodeIndex] = localTransforms[nodeIndex];
+        }
+    }
+
+    return globalTransforms;
+}
+
+std::vector<glm::mat4> BuildBonePalette(
+    const ImportedModel3D& model,
+    const std::unordered_map<std::string, u32>& nodeLookup,
+    const std::vector<glm::mat4>& globalTransforms
+) {
+    std::vector<glm::mat4> palette;
+    palette.reserve(model.sourceBoneCount);
+    for (const ImportedMesh3D& mesh : model.meshes) {
+        for (const ImportedMesh3D::Bone& bone : mesh.bones) {
+            const auto foundNode = nodeLookup.find(bone.name);
+            if (foundNode == nodeLookup.end()) {
+                continue;
+            }
+
+            const u32 nodeIndex = foundNode->second;
+            if (nodeIndex >= globalTransforms.size()) {
+                continue;
+            }
+
+            palette.push_back(globalTransforms[nodeIndex] * bone.offsetMatrix);
+        }
+    }
+
+    return palette;
+}
+
+bool MatrixChanged(
+    const glm::mat4& previous,
+    const glm::mat4& current,
+    f32 epsilon = 0.0001f
+) {
+    for (u32 column = 0; column < 4; ++column) {
+        for (u32 row = 0; row < 4; ++row) {
+            if (std::abs(previous[column][row] - current[column][row]) > epsilon) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+u32 CountChangedMatrices(
+    const std::vector<glm::mat4>& previous,
+    const std::vector<glm::mat4>& current
+) {
+    const std::size_t count = std::min(previous.size(), current.size());
+    u32 changed = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (MatrixChanged(previous[index], current[index])) {
+            ++changed;
+        }
+    }
+
+    return changed;
+}
+
+u32 CountSampledChannels(
+    const ImportedAnimationClip3D& clip,
+    const std::unordered_map<std::string, u32>& nodeLookup
+) {
+    u32 sampled = 0;
+    for (const ImportedAnimationChannel3D& channel : clip.channels) {
+        if (nodeLookup.find(channel.nodeName) == nodeLookup.end()) {
+            continue;
+        }
+        if (channel.positions.empty() &&
+            channel.rotations.empty() &&
+            channel.scales.empty()) {
+            continue;
+        }
+
+        ++sampled;
+    }
+
+    return sampled;
+}
+
+void PopulateModelAnimationPoseDiagnostics(ImportedModel3D& model) {
+    model.diagnosticPoseSamples.clear();
+    model.sourcePoseSampledClipCount = 0;
+    model.sourcePoseSampledChannelCount = 0;
+    model.sourcePoseSampledNodeCount = 0;
+    model.sourcePoseAnimatedNodeCount = 0;
+    model.sourcePoseBonePaletteEntryCount = 0;
+    model.sourcePosePreviousBonePaletteEntryCount = 0;
+    model.sourcePoseChangedBonePaletteEntryCount = 0;
+    model.sourcePoseBonePaletteReady = 0;
+
+    if (model.animations.empty() ||
+        model.nodes.empty()) {
+        return;
+    }
+
+    const std::unordered_map<std::string, u32> nodeLookup =
+        BuildNodeNameLookup(model);
+    for (u32 clipIndex = 0; clipIndex < model.animations.size(); ++clipIndex) {
+        const ImportedAnimationClip3D& clip = model.animations[clipIndex];
+        const u32 sampledChannelCount = CountSampledChannels(clip, nodeLookup);
+        if (sampledChannelCount == 0) {
+            continue;
+        }
+
+        const f64 previousTimeTicks = 0.0;
+        const f64 currentTimeTicks = clip.durationTicks > 0.0
+            ? clip.durationTicks
+            : LastAnimationKeyTime(clip);
+        if (currentTimeTicks <= previousTimeTicks) {
+            continue;
+        }
+
+        ImportedPoseSample3D sample;
+        sample.clipIndex = clipIndex;
+        sample.previousTimeTicks = previousTimeTicks;
+        sample.currentTimeTicks = currentTimeTicks;
+
+        const std::vector<glm::mat4> previousLocalPose =
+            SampleLocalPose(model, clip, nodeLookup, previousTimeTicks);
+        const std::vector<glm::mat4> currentLocalPose =
+            SampleLocalPose(model, clip, nodeLookup, currentTimeTicks);
+        sample.previousNodeGlobalTransforms =
+            BuildGlobalPose(model, previousLocalPose);
+        sample.currentNodeGlobalTransforms =
+            BuildGlobalPose(model, currentLocalPose);
+        sample.previousBonePalette =
+            BuildBonePalette(model, nodeLookup, sample.previousNodeGlobalTransforms);
+        sample.currentBonePalette =
+            BuildBonePalette(model, nodeLookup, sample.currentNodeGlobalTransforms);
+
+        model.sourcePoseSampledClipCount = 1;
+        model.sourcePoseSampledChannelCount = sampledChannelCount;
+        model.sourcePoseSampledNodeCount =
+            static_cast<u32>(sample.currentNodeGlobalTransforms.size());
+        model.sourcePoseAnimatedNodeCount = CountChangedMatrices(
+            sample.previousNodeGlobalTransforms,
+            sample.currentNodeGlobalTransforms
+        );
+        model.sourcePoseBonePaletteEntryCount =
+            static_cast<u32>(sample.currentBonePalette.size());
+        model.sourcePosePreviousBonePaletteEntryCount =
+            static_cast<u32>(sample.previousBonePalette.size());
+        model.sourcePoseChangedBonePaletteEntryCount =
+            CountChangedMatrices(sample.previousBonePalette, sample.currentBonePalette);
+        model.sourcePoseBonePaletteReady =
+            model.sourceBoneCount > 0 &&
+            model.sourcePoseBonePaletteEntryCount == model.sourceBoneCount &&
+            model.sourcePosePreviousBonePaletteEntryCount == model.sourceBoneCount
+                ? 1u
+                : 0u;
+
+        model.diagnosticPoseSamples.push_back(std::move(sample));
+        return;
+    }
+}
+
 void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
     SE_ASSERT(source != nullptr, "Assimp mesh must not be null");
     if (source->mNumBones == 0 || source->mNumVertices == 0) {
@@ -1146,6 +1492,7 @@ ImportedModel3D ModelImporter::LoadModel3D(
     if (model.meshes.empty()) {
         throw std::runtime_error("No triangle mesh data found in model: " + PathToUtf8(path));
     }
+    PopulateModelAnimationPoseDiagnostics(model);
 
     if (model.skinnedAnimationUnsupported) {
         model.messages.push_back({

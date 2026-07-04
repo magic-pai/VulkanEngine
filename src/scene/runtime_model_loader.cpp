@@ -422,6 +422,14 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourceAnimationScaleKeyCount,
                 cached.sourceAnimationKeyCount,
                 cached.sourceMaxAnimationKeysPerChannel,
+                cached.sourcePoseSampledClipCount,
+                cached.sourcePoseSampledChannelCount,
+                cached.sourcePoseSampledNodeCount,
+                cached.sourcePoseAnimatedNodeCount,
+                cached.sourcePoseBonePaletteEntryCount,
+                cached.sourcePosePreviousBonePaletteEntryCount,
+                cached.sourcePoseChangedBonePaletteEntryCount,
+                cached.sourcePoseBonePaletteReady,
                 cached.sourceMeshWithBonesCount,
                 cached.sourceBoneCount,
                 cached.sourceSkinnedVertexCount,
@@ -1009,6 +1017,22 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceAnimationKeyCount;
         loadedModel->sourceMaxAnimationKeysPerChannel =
             importedModelData.sourceMaxAnimationKeysPerChannel;
+        loadedModel->sourcePoseSampledClipCount =
+            importedModelData.sourcePoseSampledClipCount;
+        loadedModel->sourcePoseSampledChannelCount =
+            importedModelData.sourcePoseSampledChannelCount;
+        loadedModel->sourcePoseSampledNodeCount =
+            importedModelData.sourcePoseSampledNodeCount;
+        loadedModel->sourcePoseAnimatedNodeCount =
+            importedModelData.sourcePoseAnimatedNodeCount;
+        loadedModel->sourcePoseBonePaletteEntryCount =
+            importedModelData.sourcePoseBonePaletteEntryCount;
+        loadedModel->sourcePosePreviousBonePaletteEntryCount =
+            importedModelData.sourcePosePreviousBonePaletteEntryCount;
+        loadedModel->sourcePoseChangedBonePaletteEntryCount =
+            importedModelData.sourcePoseChangedBonePaletteEntryCount;
+        loadedModel->sourcePoseBonePaletteReady =
+            importedModelData.sourcePoseBonePaletteReady;
         loadedModel->sourceMeshWithBonesCount = importedModelData.sourceMeshWithBonesCount;
         loadedModel->sourceBoneCount = importedModelData.sourceBoneCount;
         loadedModel->sourceSkinnedVertexCount = importedModelData.sourceSkinnedVertexCount;
@@ -1041,6 +1065,14 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceAnimationScaleKeyCount,
             importedModelData.sourceAnimationKeyCount,
             importedModelData.sourceMaxAnimationKeysPerChannel,
+            importedModelData.sourcePoseSampledClipCount,
+            importedModelData.sourcePoseSampledChannelCount,
+            importedModelData.sourcePoseSampledNodeCount,
+            importedModelData.sourcePoseAnimatedNodeCount,
+            importedModelData.sourcePoseBonePaletteEntryCount,
+            importedModelData.sourcePosePreviousBonePaletteEntryCount,
+            importedModelData.sourcePoseChangedBonePaletteEntryCount,
+            importedModelData.sourcePoseBonePaletteReady,
             importedModelData.sourceMeshWithBonesCount,
             importedModelData.sourceBoneCount,
             importedModelData.sourceSkinnedVertexCount,

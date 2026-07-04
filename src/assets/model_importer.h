@@ -151,12 +151,23 @@ struct ImportedNode3D {
     bool animationChannelTarget = false;
 };
 
+struct ImportedPoseSample3D {
+    u32 clipIndex = 0;
+    f64 previousTimeTicks = 0.0;
+    f64 currentTimeTicks = 0.0;
+    std::vector<glm::mat4> previousNodeGlobalTransforms;
+    std::vector<glm::mat4> currentNodeGlobalTransforms;
+    std::vector<glm::mat4> previousBonePalette;
+    std::vector<glm::mat4> currentBonePalette;
+};
+
 struct ImportedModel3D {
     std::filesystem::path sourcePath;
     std::vector<ImportedMesh3D> meshes;
     std::vector<ImportedMaterial3D> materials;
     std::vector<ImportedAnimationClip3D> animations;
     std::vector<ImportedNode3D> nodes;
+    std::vector<ImportedPoseSample3D> diagnosticPoseSamples;
     std::vector<ImportMessage> messages;
     u32 sourceMeshCount = 0;
     u32 sourceMaterialCount = 0;
@@ -173,6 +184,14 @@ struct ImportedModel3D {
     u32 sourceAnimationScaleKeyCount = 0;
     u32 sourceAnimationKeyCount = 0;
     u32 sourceMaxAnimationKeysPerChannel = 0;
+    u32 sourcePoseSampledClipCount = 0;
+    u32 sourcePoseSampledChannelCount = 0;
+    u32 sourcePoseSampledNodeCount = 0;
+    u32 sourcePoseAnimatedNodeCount = 0;
+    u32 sourcePoseBonePaletteEntryCount = 0;
+    u32 sourcePosePreviousBonePaletteEntryCount = 0;
+    u32 sourcePoseChangedBonePaletteEntryCount = 0;
+    u32 sourcePoseBonePaletteReady = 0;
     u32 sourceMeshWithBonesCount = 0;
     u32 sourceBoneCount = 0;
     u32 sourceSkinnedVertexCount = 0;

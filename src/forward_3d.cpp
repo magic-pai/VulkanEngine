@@ -2391,6 +2391,22 @@ int main() {
         defaultModelLoad.sourceAnimationKeyCount;
     sceneDiagnostics.runtimeImportMaxAnimationKeysPerChannel =
         defaultModelLoad.sourceMaxAnimationKeysPerChannel;
+    sceneDiagnostics.runtimeImportPoseSampledClipCount =
+        defaultModelLoad.sourcePoseSampledClipCount;
+    sceneDiagnostics.runtimeImportPoseSampledChannelCount =
+        defaultModelLoad.sourcePoseSampledChannelCount;
+    sceneDiagnostics.runtimeImportPoseSampledNodeCount =
+        defaultModelLoad.sourcePoseSampledNodeCount;
+    sceneDiagnostics.runtimeImportPoseAnimatedNodeCount =
+        defaultModelLoad.sourcePoseAnimatedNodeCount;
+    sceneDiagnostics.runtimeImportPoseBonePaletteEntryCount =
+        defaultModelLoad.sourcePoseBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportPosePreviousBonePaletteEntryCount =
+        defaultModelLoad.sourcePosePreviousBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportPoseChangedBonePaletteEntryCount =
+        defaultModelLoad.sourcePoseChangedBonePaletteEntryCount;
+    sceneDiagnostics.runtimeImportPoseBonePaletteReady =
+        defaultModelLoad.sourcePoseBonePaletteReady;
     sceneDiagnostics.runtimeImportMeshWithBonesCount =
         defaultModelLoad.sourceMeshWithBonesCount;
     sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;

@@ -227,6 +227,14 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportAnimationScaleKeyCount << ','
         << sceneDiagnostics.runtimeImportAnimationKeyCount << ','
         << sceneDiagnostics.runtimeImportMaxAnimationKeysPerChannel << ','
+        << sceneDiagnostics.runtimeImportPoseSampledClipCount << ','
+        << sceneDiagnostics.runtimeImportPoseSampledChannelCount << ','
+        << sceneDiagnostics.runtimeImportPoseSampledNodeCount << ','
+        << sceneDiagnostics.runtimeImportPoseAnimatedNodeCount << ','
+        << sceneDiagnostics.runtimeImportPoseBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPosePreviousBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPoseChangedBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportPoseBonePaletteReady << ','
         << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
         << sceneDiagnostics.runtimeImportBoneCount << ','
         << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
@@ -1032,6 +1040,14 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_animation_scale_key_count,"
         << "runtime_import_animation_key_count,"
         << "runtime_import_max_animation_keys_per_channel,"
+        << "runtime_import_pose_sampled_clip_count,"
+        << "runtime_import_pose_sampled_channel_count,"
+        << "runtime_import_pose_sampled_node_count,"
+        << "runtime_import_pose_animated_node_count,"
+        << "runtime_import_pose_bone_palette_entry_count,"
+        << "runtime_import_pose_previous_bone_palette_entry_count,"
+        << "runtime_import_pose_changed_bone_palette_entry_count,"
+        << "runtime_import_pose_bone_palette_ready,"
         << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
         << "runtime_import_skinned_vertex_count,"
         << "runtime_import_bone_influence_count,"

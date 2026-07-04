@@ -801,6 +801,64 @@ This closes the node-binding diagnostic gap for the skinned probe. The next
 skinned quality work is animation sampling, current/previous bone palette
 storage, skinned vertex output, and skinned velocity output.
 
+## Slice 4.29 Execution Plan
+
+Slice 4.29 adds the first CPU pose-sampling and bone-palette diagnostic carrier.
+The goal is to prove the imported animation channels, node hierarchy, bone
+names, and offset matrices can produce current and previous sampled pose data.
+This is still not GPU skinning and must not unblock the skinned DLSS quality
+gate by itself.
+
+1. CPU pose sampling.
+   - Pick the first imported animation clip with at least one bound keyed
+     channel.
+   - Sample previous time `0` and current time at the clip duration, or the
+     last key time when duration is absent.
+   - Compose sampled local node transforms from position, rotation, and scale
+     keys, falling back to imported local node components when a channel omits
+     a component.
+
+2. Bone-palette diagnostic carrier.
+   - Build global previous/current node poses from the imported hierarchy.
+   - Build previous/current bone palettes for matched bone names using imported
+     bone offset matrices.
+   - Count sampled clips/channels/nodes, changed animated nodes, current and
+     previous palette entries, changed palette entries, and palette readiness.
+
+3. QA contract.
+   - Extend the skinned diagnostic baseline to assert the pose and palette
+     counts from `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at zero for the pose fields.
+   - Keep DLSS quality expected-blocked because there is still no renderer bone
+     palette storage, skinned vertex output, previous-skinned-vertex state, or
+     skinned velocity output.
+
+## Slice 4.29 Execution Evidence
+
+Slice 4.29 is implemented and verified. The importer now samples a deterministic
+previous/current CPU pose for the first bound animation clip, builds global node
+poses, and creates current/previous diagnostic bone palettes from matched bone
+nodes and imported offset matrices. Runtime import diagnostics now include pose
+sampling and bone-palette counters.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct benchmark CSV probe for `assets/models/skinned_probe.dae` reports
+  `814/814` CSV columns.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- Pose diagnostics:
+  `poseClip/poseChannel/poseNode/poseAnimatedNode/poseBonePalette/posePreviousBonePalette/poseChangedBonePalette/poseReady=1/1/4/1/2/2/1/1`.
+- Full runtime import diagnostics:
+  `requested/loaded/cache/mesh/material/node/boneNode/chBound/chUnbound/boneMatched/boneUnmatched/animation/channels/posKeys/rotKeys/scaleKeys/keys/maxChannelKeys/poseClip/poseChannel/poseNode/poseAnimatedNode/poseBonePalette/posePreviousBonePalette/poseChangedBonePalette/poseReady/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/4/2/1/0/2/0/1/1/2/2/2/6/6/1/1/4/1/2/2/1/1/1/2/3/5/2/1`.
+- DLSS quality remains expected-blocked at `qualityGate=1/0/4`.
+
+This creates CPU-side sampled pose and palette evidence for the skinned probe.
+The remaining work is carrying renderer-owned current/previous bone palettes to
+the draw path, outputting skinned vertices or shader skinning, and writing
+skinned motion vectors before skinned DLSS/DLAA can be production-cleared.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming
