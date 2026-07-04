@@ -9,6 +9,8 @@ class VulkanDepthBuffer;
 class VulkanDescriptorSets;
 class VulkanDevice;
 class VulkanFramebuffer;
+class VulkanForwardResidualVelocityFramebuffer;
+class VulkanForwardResidualVelocityRenderPass;
 class VulkanGBufferFramebuffer;
 class VulkanGBufferDescriptorSets;
 class VulkanGBufferRenderPass;
@@ -140,6 +142,11 @@ public:
         const VulkanDepthBuffer* swapchainDepthBuffer = nullptr,
         const VulkanGBufferRenderPass* gBufferRenderPass = nullptr,
         const VulkanGBufferFramebuffer* gBufferFramebuffer = nullptr,
+        const VulkanForwardResidualVelocityRenderPass* forwardResidualVelocityRenderPass = nullptr,
+        const VulkanForwardResidualVelocityFramebuffer* forwardResidualVelocityFramebuffer = nullptr,
+        const VulkanGraphicsPipeline* forwardResidualVelocityGraphicsPipeline = nullptr,
+        const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline = nullptr,
+        std::span<const RenderCommand> forwardResidualVelocityRenderCommands = {},
         const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass = nullptr,
         const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer = nullptr,
         const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline = nullptr,

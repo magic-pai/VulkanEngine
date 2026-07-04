@@ -32,6 +32,8 @@ class VulkanDescriptorSetLayout;
 class VulkanDescriptorSets;
 class VulkanDevice;
 class VulkanFramebuffer;
+class VulkanForwardResidualVelocityFramebuffer;
+class VulkanForwardResidualVelocityRenderPass;
 class VulkanGpuTimer;
 class VulkanGBufferDescriptorSets;
 class VulkanGraphicsPipeline;
@@ -639,6 +641,8 @@ private:
     std::unique_ptr<VulkanSampler> m_SceneTargetSampler;
     std::unique_ptr<VulkanGBufferRenderPass> m_GBufferRenderPass;
     std::unique_ptr<VulkanGBufferFramebuffer> m_GBufferFramebuffer;
+    std::unique_ptr<VulkanForwardResidualVelocityRenderPass> m_ForwardResidualVelocityRenderPass;
+    std::unique_ptr<VulkanForwardResidualVelocityFramebuffer> m_ForwardResidualVelocityFramebuffer;
     std::unique_ptr<VulkanHdrRenderPass> m_HdrRenderPass;
     std::unique_ptr<VulkanHdrFramebuffer> m_HdrFramebuffer;
     std::unique_ptr<VulkanBloomRenderPass> m_BloomDownsampleRenderPass;
@@ -685,6 +689,8 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedWeightedTranslucencyGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyResolvePipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualVelocityGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedForwardResidualVelocityGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualHdrGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedForwardResidualHdrGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_ForwardResidualGraphicsPipeline;

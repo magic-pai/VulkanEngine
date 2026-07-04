@@ -3,7 +3,7 @@
   "name": "dlss_visual_qa_grid_forward_special_render_scale_075",
   "target": "SelfEngineForward3D",
   "scene": "grid",
-  "description": "Reference contract for forward-special residual coverage in the experimental DLSS-present path. This baseline intentionally expects DLSS output and post-source activation while preserving a production-quality gate blocker for object-motion coverage across forward-residual draws.",
+  "description": "Reference contract for forward-special residual coverage in the experimental DLSS-present path. This baseline expects DLSS output, post-source activation, and production-quality gate readiness after the pre-upscale residual color and velocity passes cover the forward-special route.",
   "environment": {
     "native": {
       "SE_BENCHMARK_SCENE": "grid",
@@ -38,13 +38,14 @@
     "dlssPresent": {
       "evaluateOutput": "1/1",
       "postSource": "1/1/0",
-      "qualityGate": "1/0/4",
-      "qualityMasks": "255/251/4",
-      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
       "forwardSpecialMaterialCount": "1",
       "hybridForwardSpecialDraws": "79",
       "forwardResidualDraws": "79",
       "forwardResidualSharedLightListDraws": "79",
+      "forwardResidualVelocityDraws": "79",
       "weightedTranslucencyDraws": "0"
     }
   },
@@ -57,16 +58,17 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T20:29:41+08:00",
-    "dlssColumns": "769/769",
+    "capturedAt": "2026-07-04T22:26:58+08:00",
+    "dlssColumns": "772/772",
     "hybridForwardSpecialDraws": 79,
     "forwardResidualDraws": 79,
     "forwardResidualSharedLightListDraws": 79,
+    "forwardResidualVelocityDraws": 79,
     "forwardSpecialMaterialCount": 1,
     "weightedTranslucencyDraws": 0,
-    "qualityMasks": "255/251/4",
-    "comparisonChangedPixels": 189,
-    "comparisonMeanDelta": 0.8807,
+    "qualityMasks": "255/255/0",
+    "comparisonChangedPixels": 204,
+    "comparisonMeanDelta": 1.0113,
     "comparisonMaxDelta": 564
   }
 }

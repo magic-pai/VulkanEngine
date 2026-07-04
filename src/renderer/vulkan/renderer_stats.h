@@ -479,6 +479,9 @@ struct RendererBindStats {
     u32 forwardResidualSharedLightListDraws = 0;
     u32 forwardResidualMaterialBinds = 0;
     u32 forwardResidualMeshBinds = 0;
+    u32 forwardResidualVelocityDraws = 0;
+    u32 forwardResidualVelocityMaterialBinds = 0;
+    u32 forwardResidualVelocityMeshBinds = 0;
     u32 overlayMaterialBinds = 0;
     u32 overlayMeshBinds = 0;
     u32 shadowMeshBinds = 0;

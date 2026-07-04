@@ -848,6 +848,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.forwardResidualSharedLightListDraws << ','
         << binds.forwardResidualMaterialBinds << ','
         << binds.forwardResidualMeshBinds << ','
+        << binds.forwardResidualVelocityDraws << ','
+        << binds.forwardResidualVelocityMaterialBinds << ','
+        << binds.forwardResidualVelocityMeshBinds << ','
         << binds.overlayMaterialBinds << ','
         << binds.overlayMeshBinds << ','
         << binds.shadowMeshBinds << ','
@@ -1434,6 +1437,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"
         << "forward_residual_material_binds,forward_residual_mesh_binds,"
+        << "forward_residual_velocity_draws,"
+        << "forward_residual_velocity_material_binds,"
+        << "forward_residual_velocity_mesh_binds,"
         << "overlay_material_binds,overlay_mesh_binds,"
         << "shadow_mesh_binds,shadow_cascade_atlas_passes,"
         << "shadow_cascade_atlas_draws,shadow_cascade_atlas_mesh_binds,"

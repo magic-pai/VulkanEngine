@@ -50,6 +50,10 @@ struct PipelineSpec {
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );
+    static PipelineSpec ForwardResidualVelocity3D(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
     static PipelineSpec WeightedTranslucency3D(
         std::string vertexShaderPath,
         std::string fragmentShaderPath

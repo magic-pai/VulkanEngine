@@ -4,7 +4,7 @@ param(
     [string]$WindowTitle = "SelfEngine Forward 3D",
     [string]$OutputDirectory = "out\reference_captures\dlss_visual_qa",
     [int]$TimeoutSeconds = 15,
-    [int]$CaptureDelaySeconds = 3,
+    [int]$CaptureDelaySeconds = 8,
     [int]$MinChangedPixels = 512,
     [double]$MaxMeanDelta = 160.0,
     [string]$BaselinePath = "docs\reference_baselines\dlss_visual_qa_baseline.json",
@@ -298,21 +298,48 @@ function Invoke-BenchmarkRun {
     $runEnvironment["SE_BENCHMARK_CSV"] = $csvPath
 
     Invoke-WithEnvironment -Environment $runEnvironment -Script {
-        $process = Start-Process `
-            -FilePath $exePath `
-            -WorkingDirectory $repoRoot `
-            -PassThru `
-            -Wait `
-            -RedirectStandardOutput $logPath `
-            -RedirectStandardError $errPath
-        if ($process.ExitCode -ne 0) {
-            throw "$Name benchmark failed with exit code $($process.ExitCode)"
+        Push-Location $repoRoot
+        try {
+            $output = & $exePath 2>&1
+            $exitCode = Get-NativeExitCode
+        } finally {
+            Pop-Location
+        }
+
+        if ($output) {
+            $output | Set-Content -Encoding UTF8 -LiteralPath $logPath
+        } else {
+            New-Item -ItemType File -Force -Path $logPath | Out-Null
+        }
+        New-Item -ItemType File -Force -Path $errPath | Out-Null
+        if ($exitCode -ne 0) {
+            throw "$Name benchmark failed with exit code $exitCode"
         }
     }
 
     Assert-CleanLog -Path $logPath
     Assert-CleanLog -Path $errPath
-    $shape = Assert-CsvShape -Path $csvPath
+
+    $shape = $null
+    $shapeError = $null
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $shape = Assert-CsvShape -Path $csvPath
+            break
+        } catch {
+            $shapeError = $_
+            Start-Sleep -Milliseconds 100
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    if ($null -eq $shape) {
+        if ($null -ne $shapeError) {
+            throw $shapeError
+        }
+        throw "CSV not found: $csvPath"
+    }
+
     return [pscustomobject]@{
         Name = $Name
         CsvPath = $csvPath
@@ -719,17 +746,18 @@ if ($forwardSpecialDlssRow.temporal_upscaler_dlss_output_ready -ne "1" -or
 if ($forwardSpecialDlssRow.frame_material_forward_special_count -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardSpecialMaterialCount -or
     $forwardSpecialDlssRow.hybrid_forward_special_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.hybridForwardSpecialDraws -or
     $forwardSpecialDlssRow.forward_residual_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
-    $forwardSpecialDlssRow.forward_residual_shared_light_list_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualSharedLightListDraws) {
+    $forwardSpecialDlssRow.forward_residual_shared_light_list_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualSharedLightListDraws -or
+    $forwardSpecialDlssRow.forward_residual_velocity_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualVelocityDraws) {
     throw "Forward-special DLSS draw/material count mismatch"
 }
 if ($forwardSpecialDlssRow.weighted_translucency_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
     throw "Forward-special DLSS unexpectedly used WBOIT draws"
 }
-if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "0" -or
-    $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "4") {
-    throw "Forward-special DLSS quality gate did not preserve object-motion blocker"
+if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "Forward-special DLSS quality gate did not pass"
 }
-if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "0" -or
+if ($forwardSpecialDlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1" -or
     $forwardSpecialDlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
     throw "Forward-special DLSS quality gate did not report the expected object/baseline readiness"
 }

@@ -967,3 +967,35 @@ after the evaluate contract is stable.
   content. The pass-ordering problem is now addressed, but residual/transparent
   content still needs real velocity/depth/material policy before the gate can
   mark object motion ready.
+
+## Slice 4.11 Execution Evidence
+
+- Added a pre-upscale forward-special residual velocity pass. The new
+  `forward_velocity_3d.frag` reuses the temporal clip-position payload from the
+  3D vertex path, respects masked material alpha/opacity discard, and writes
+  residual motion into the existing `Velocity` target before DLSS evaluation.
+- Added `VulkanForwardResidualVelocityRenderPass` and framebuffer ownership for
+  a velocity-only color attachment plus read-only `SceneDepth`, wired
+  `PipelineSpec::ForwardResidualVelocity3D`, command-buffer recording, CSV bind
+  counters, and a FrameGraph-visible `ForwardResidualVelocityPreUpscale` pass.
+- The DLSS object-motion gate now treats forward-special residuals as ready only
+  when every residual command is covered by the velocity pass. Transparent/WBOIT
+  content remains blocked until it has real transparent/object-motion policy.
+- Verification: `_quick_build.bat` passes for `SelfEngineForward3D`. The
+  focused probe
+  `out/benchmarks/aaa_dlss_forward_special_velocity_probe_dlss.csv` reports
+  `framegraph_validation_issues=0`, DLSS output/post source `1/1` and `1/1/0`,
+  production quality gate `1/1/0`, masks `255/255/0`, object motion ready `1`,
+  79 forward-residual draws, 79 forward-residual velocity draws, 79 shared
+  light-list residual draws, and `depth_copy_ops=0`.
+- The WBOIT guard probe
+  `out/benchmarks/aaa_dlss_wboit_velocity_guard_probe.csv` still reports
+  quality gate `1/0/4`, masks `255/251/4`, object motion ready `0`, 79 WBOIT
+  draws, 0 forward-residual velocity draws, and `depth_copy_ops=0`.
+- Full visual QA now uses an 8-second capture delay to avoid grabbing DLSS
+  windows before their first stable present. `scripts\Test-DlssVisualQa.ps1
+  -SkipBuild -CaptureDelaySeconds 8` passes with matching `772/772` CSV columns
+  and 0 frame-graph validation issues. The forward-special DLSS capture reports
+  quality gate `1/1/0`, masks `255/255/0`, per-input readiness
+  `1/1/1/1/1/1/1/1`, and 79 residual velocity draws. WBOIT remains correctly
+  blocked at `1/0/4`.

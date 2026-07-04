@@ -1475,6 +1475,11 @@ void VulkanCommandBuffer::Record(
     const VulkanDepthBuffer* swapchainDepthBuffer,
     const VulkanGBufferRenderPass* gBufferRenderPass,
     const VulkanGBufferFramebuffer* gBufferFramebuffer,
+    const VulkanForwardResidualVelocityRenderPass* forwardResidualVelocityRenderPass,
+    const VulkanForwardResidualVelocityFramebuffer* forwardResidualVelocityFramebuffer,
+    const VulkanGraphicsPipeline* forwardResidualVelocityGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline,
+    std::span<const RenderCommand> forwardResidualVelocityRenderCommands,
     const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass,
     const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer,
     const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline,
@@ -1558,6 +1563,12 @@ void VulkanCommandBuffer::Record(
         SE_ASSERT(
             gBufferFramebuffer->Count() == m_CommandBuffers.size(),
             "GBuffer framebuffer count must match command buffer count"
+        );
+    }
+    if (forwardResidualVelocityFramebuffer != nullptr) {
+        SE_ASSERT(
+            forwardResidualVelocityFramebuffer->Count() == m_CommandBuffers.size(),
+            "Forward residual velocity framebuffer count must match command buffer count"
         );
     }
     SE_ASSERT(
@@ -1927,6 +1938,62 @@ void VulkanCommandBuffer::Record(
                 bindStats->pushConstantUpdates += gBufferPushConstantUpdates;
                 bindStats->pushConstantBytes += gBufferPushConstantBytes;
             }
+        }
+
+        vkCmdEndRenderPass(commandBuffer);
+    }
+
+    if (forwardResidualVelocityRenderPass != nullptr &&
+        forwardResidualVelocityFramebuffer != nullptr &&
+        forwardResidualVelocityGraphicsPipeline != nullptr &&
+        !forwardResidualVelocityRenderCommands.empty()) {
+        VkRenderPassBeginInfo velocityPassInfo{};
+        velocityPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        velocityPassInfo.renderPass = forwardResidualVelocityRenderPass->Handle();
+        velocityPassInfo.framebuffer =
+            forwardResidualVelocityFramebuffer->Handle(imageIndex);
+        velocityPassInfo.renderArea.offset = { 0, 0 };
+        velocityPassInfo.renderArea.extent =
+            forwardResidualVelocityFramebuffer->Extent();
+        velocityPassInfo.clearValueCount = 0;
+        velocityPassInfo.pClearValues = nullptr;
+
+        vkCmdBeginRenderPass(
+            commandBuffer,
+            &velocityPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+        SetViewportAndScissor(
+            commandBuffer,
+            { 0, 0 },
+            forwardResidualVelocityFramebuffer->Extent()
+        );
+
+        u32 velocityMaterialBinds = 0;
+        u32 velocityMeshBinds = 0;
+        u32 velocityPushConstantUpdates = 0;
+        u64 velocityPushConstantBytes = 0;
+        const u32 velocityDraws = DrawForwardResidualCommands(
+            commandBuffer,
+            forwardResidualVelocityGraphicsPipeline,
+            doubleSidedForwardResidualVelocityGraphicsPipeline,
+            descriptorSets,
+            materialDescriptorSets,
+            frameMaterials,
+            forwardResidualVelocityRenderCommands,
+            forwardResidualVelocityFramebuffer->Extent(),
+            imageIndex,
+            velocityMaterialBinds,
+            velocityMeshBinds,
+            velocityPushConstantUpdates,
+            velocityPushConstantBytes
+        );
+        if (bindStats != nullptr) {
+            bindStats->forwardResidualVelocityDraws += velocityDraws;
+            bindStats->forwardResidualVelocityMaterialBinds += velocityMaterialBinds;
+            bindStats->forwardResidualVelocityMeshBinds += velocityMeshBinds;
+            bindStats->pushConstantUpdates += velocityPushConstantUpdates;
+            bindStats->pushConstantBytes += velocityPushConstantBytes;
         }
 
         vkCmdEndRenderPass(commandBuffer);

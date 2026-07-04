@@ -2011,6 +2011,20 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "Recorded clear-only GBuffer pass; opaque geometry migration follows."
         );
     }
+    if (inputs.forwardResidualVelocityPreUpscaleEnabled) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Forward,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "ForwardResidualVelocityPreUpscale",
+            inputs.temporalStateAllocated
+                ? "SceneDepth, TemporalFrameState"
+                : "SceneDepth",
+            "Velocity",
+            "Writes forward-special residual object motion vectors into the shared velocity target before TAA/DLSS consume it."
+        );
+    }
     if (inputs.shadowPassEnabled) {
         AppendPass(
             plan,

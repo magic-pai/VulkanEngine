@@ -355,6 +355,7 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat gBufferMaterialAuxFormat = VK_FORMAT_UNDEFINED;
     bool gBufferRenderPassAllocated = false;
     bool gBufferGeometryEnabled = false;
+    bool forwardResidualVelocityPreUpscaleEnabled = false;
     bool temporalStateAllocated = false;
     bool temporalHistoryValid = false;
     bool temporalHistoryReset = false;

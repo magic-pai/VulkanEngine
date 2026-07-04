@@ -224,7 +224,8 @@ bool DlssObjectMotionVectorsReady(
     const FrameTemporalState& temporalState,
     std::span<const RenderCommand> gBufferCommands,
     std::span<const RenderCommand> weightedTranslucencyCommands,
-    std::span<const RenderCommand> forwardResidualCommands
+    std::span<const RenderCommand> forwardResidualCommands,
+    bool forwardResidualVelocityCoverageReady
 ) {
     return has3DMainPass &&
         gBufferPipelineReady &&
@@ -232,7 +233,7 @@ bool DlssObjectMotionVectorsReady(
         temporalState.velocityCameraMotionReady &&
         !gBufferCommands.empty() &&
         weightedTranslucencyCommands.empty() &&
-        forwardResidualCommands.empty();
+        (forwardResidualCommands.empty() || forwardResidualVelocityCoverageReady);
 }
 
 std::size_t ProbeGridLinearIndex(
@@ -3091,6 +3092,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_AutoExposureComputePipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
+    m_ForwardResidualVelocityGraphicsPipeline.reset();
+    m_DoubleSidedForwardResidualVelocityGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
     m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
     m_WeightedTranslucencyGraphicsPipeline.reset();
@@ -3108,6 +3111,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_RenderPass.reset();
     m_GBufferFramebuffer.reset();
     m_GBufferRenderPass.reset();
+    m_ForwardResidualVelocityFramebuffer.reset();
+    m_ForwardResidualVelocityRenderPass.reset();
     m_WeightedTranslucencyFramebuffer.reset();
     m_WeightedTranslucencyRenderPass.reset();
     m_HdrFramebuffer.reset();
@@ -3350,6 +3355,7 @@ void VulkanRenderer::DrawFrame() {
     std::vector<RenderCommand> gBufferCommands;
     std::vector<RenderCommand> weightedTranslucencyCommands;
     std::vector<RenderCommand> forwardResidualCommands;
+    std::vector<RenderCommand> forwardResidualVelocityCommands;
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
@@ -3922,6 +3928,19 @@ void VulkanRenderer::DrawFrame() {
             frameStats.draw
         );
     }
+    forwardResidualVelocityCommands.clear();
+    forwardResidualVelocityCommands.reserve(forwardResidualCommands.size());
+    for (const RenderCommand& command : forwardResidualCommands) {
+        if (RenderClassForCommand(command) == MaterialRenderClass::ForwardSpecial) {
+            forwardResidualVelocityCommands.push_back(command);
+        }
+    }
+    const bool forwardResidualVelocityCoverageReady =
+        !forwardResidualCommands.empty() &&
+        forwardResidualVelocityCommands.size() == forwardResidualCommands.size() &&
+        m_ForwardResidualVelocityRenderPass != nullptr &&
+        m_ForwardResidualVelocityFramebuffer != nullptr &&
+        m_ForwardResidualVelocityGraphicsPipeline != nullptr;
     const bool objectMotionVectorsReady = DlssObjectMotionVectorsReady(
         has3DMainPass,
         m_GBufferGraphicsPipeline != nullptr &&
@@ -3937,7 +3956,8 @@ void VulkanRenderer::DrawFrame() {
         std::span<const RenderCommand>(
             forwardResidualCommands.data(),
             forwardResidualCommands.size()
-        )
+        ),
+        forwardResidualVelocityCoverageReady
     );
     frameStats.temporal.velocityObjectMotionReady =
         objectMotionVectorsReady ? 1u : 0u;
@@ -4237,6 +4257,11 @@ void VulkanRenderer::DrawFrame() {
                 : VK_FORMAT_UNDEFINED,
             m_GBufferRenderPass != nullptr && m_GBufferFramebuffer != nullptr,
             has3DMainPass && m_GBufferGraphicsPipeline != nullptr,
+            has3DMainPass &&
+                !forwardResidualVelocityCommands.empty() &&
+                m_ForwardResidualVelocityRenderPass != nullptr &&
+                m_ForwardResidualVelocityFramebuffer != nullptr &&
+                m_ForwardResidualVelocityGraphicsPipeline != nullptr,
             frameStats.temporal.velocityTargetAllocated > 0,
             frameStats.temporal.historyValid > 0,
             frameStats.temporal.historyReset > 0,
@@ -4430,6 +4455,16 @@ void VulkanRenderer::DrawFrame() {
         has3DMainPass ? m_DepthBuffer.get() : nullptr,
         m_GBufferRenderPass.get(),
         m_GBufferFramebuffer.get(),
+        m_ForwardResidualVelocityRenderPass.get(),
+        m_ForwardResidualVelocityFramebuffer.get(),
+        has3DMainPass ? m_ForwardResidualVelocityGraphicsPipeline.get() : nullptr,
+        has3DMainPass ? m_DoubleSidedForwardResidualVelocityGraphicsPipeline.get() : nullptr,
+        has3DMainPass
+            ? std::span<const RenderCommand>(
+                forwardResidualVelocityCommands.data(),
+                forwardResidualVelocityCommands.size()
+            )
+            : std::span<const RenderCommand>{},
         m_WeightedTranslucencyRenderPass.get(),
         m_WeightedTranslucencyFramebuffer.get(),
         has3DMainPass ? m_WeightedTranslucencyGraphicsPipeline.get() : nullptr,
@@ -4908,6 +4943,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_Device,
         *m_SceneRenderTargets
     );
+    m_ForwardResidualVelocityRenderPass =
+        std::make_unique<VulkanForwardResidualVelocityRenderPass>(
+            m_Device,
+            *m_SceneRenderTargets
+        );
     m_HdrFramebuffer = std::make_unique<VulkanHdrFramebuffer>(
         m_Device,
         *m_HdrRenderPass,
@@ -4934,6 +4974,12 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_GBufferRenderPass,
         *m_SceneRenderTargets
     );
+    m_ForwardResidualVelocityFramebuffer =
+        std::make_unique<VulkanForwardResidualVelocityFramebuffer>(
+            m_Device,
+            *m_ForwardResidualVelocityRenderPass,
+            *m_SceneRenderTargets
+        );
     m_ShadowMap = std::make_unique<VulkanShadowMap>(
         m_Device,
         m_PhysicalDevice,
@@ -5120,6 +5166,33 @@ void VulkanRenderer::CreateSwapchainResources() {
                 m_PipelineSpec.vertexShaderPath,
                 m_PipelineSpec.fragmentShaderPath
             );
+        const std::string gBufferVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/gbuffer_3d.vert.spv";
+        const std::string forwardVelocityFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/forward_velocity_3d.frag.spv";
+        const PipelineSpec forwardResidualVelocitySpec =
+            PipelineSpec::ForwardResidualVelocity3D(
+                gBufferVertexShaderPath,
+                forwardVelocityFragmentShaderPath
+            );
+        m_ForwardResidualVelocityGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_ForwardResidualVelocityRenderPass->Handle(),
+                *m_Swapchain,
+                forwardResidualVelocitySpec
+            );
+        m_DoubleSidedForwardResidualVelocityGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_ForwardResidualVelocityRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(forwardResidualVelocitySpec)
+            );
         m_ForwardResidualHdrGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
             *m_DescriptorSetLayout,
@@ -5158,6 +5231,8 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
         m_WeightedTranslucencyGraphicsPipeline.reset();
         m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
+        m_ForwardResidualVelocityGraphicsPipeline.reset();
+        m_DoubleSidedForwardResidualVelocityGraphicsPipeline.reset();
         m_ForwardResidualHdrGraphicsPipeline.reset();
         m_DoubleSidedForwardResidualHdrGraphicsPipeline.reset();
         m_ForwardResidualGraphicsPipeline.reset();
@@ -5432,6 +5507,12 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_WeightedTranslucencyGraphicsPipeline != nullptr) {
         m_WeightedTranslucencyGraphicsPipeline->Release();
     }
+    if (m_DoubleSidedForwardResidualVelocityGraphicsPipeline != nullptr) {
+        m_DoubleSidedForwardResidualVelocityGraphicsPipeline->Release();
+    }
+    if (m_ForwardResidualVelocityGraphicsPipeline != nullptr) {
+        m_ForwardResidualVelocityGraphicsPipeline->Release();
+    }
     if (m_DoubleSidedForwardResidualHdrGraphicsPipeline != nullptr) {
         m_DoubleSidedForwardResidualHdrGraphicsPipeline->Release();
     }
@@ -5482,6 +5563,12 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_GBufferRenderPass != nullptr) {
         m_GBufferRenderPass->Release();
+    }
+    if (m_ForwardResidualVelocityFramebuffer != nullptr) {
+        m_ForwardResidualVelocityFramebuffer->Release();
+    }
+    if (m_ForwardResidualVelocityRenderPass != nullptr) {
+        m_ForwardResidualVelocityRenderPass->Release();
     }
     if (m_HdrFramebuffer != nullptr) {
         m_HdrFramebuffer->Release();
@@ -5711,6 +5798,13 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneRenderTargets
         );
     }
+    if (m_ForwardResidualVelocityRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_ForwardResidualVelocityRenderPass->Recreate(
+            m_Device,
+            *m_SceneRenderTargets
+        );
+    }
     if (m_HdrFramebuffer != nullptr &&
         m_HdrRenderPass != nullptr &&
         m_SceneRenderTargets != nullptr) {
@@ -5753,6 +5847,15 @@ void VulkanRenderer::RecreateSwapchain() {
         m_GBufferFramebuffer->Recreate(
             m_Device,
             *m_GBufferRenderPass,
+            *m_SceneRenderTargets
+        );
+    }
+    if (m_ForwardResidualVelocityFramebuffer != nullptr &&
+        m_ForwardResidualVelocityRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_ForwardResidualVelocityFramebuffer->Recreate(
+            m_Device,
+            *m_ForwardResidualVelocityRenderPass,
             *m_SceneRenderTargets
         );
     }
@@ -5935,6 +6038,37 @@ void VulkanRenderer::RecreateSwapchain() {
                 m_PipelineSpec.vertexShaderPath,
                 m_PipelineSpec.fragmentShaderPath
             );
+        const std::string gBufferVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/gbuffer_3d.vert.spv";
+        const std::string forwardVelocityFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/forward_velocity_3d.frag.spv";
+        const PipelineSpec forwardResidualVelocitySpec =
+            PipelineSpec::ForwardResidualVelocity3D(
+                gBufferVertexShaderPath,
+                forwardVelocityFragmentShaderPath
+            );
+        if (m_ForwardResidualVelocityGraphicsPipeline != nullptr &&
+            m_ForwardResidualVelocityRenderPass != nullptr) {
+            m_ForwardResidualVelocityGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_ForwardResidualVelocityRenderPass->Handle(),
+                *m_Swapchain,
+                forwardResidualVelocitySpec
+            );
+        }
+        if (m_DoubleSidedForwardResidualVelocityGraphicsPipeline != nullptr &&
+            m_ForwardResidualVelocityRenderPass != nullptr) {
+            m_DoubleSidedForwardResidualVelocityGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_ForwardResidualVelocityRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(forwardResidualVelocitySpec)
+            );
+        }
         if (m_ForwardResidualHdrGraphicsPipeline != nullptr &&
             m_HdrRenderPass != nullptr) {
             m_ForwardResidualHdrGraphicsPipeline->Recreate(

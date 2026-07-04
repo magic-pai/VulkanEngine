@@ -100,6 +100,36 @@ private:
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
 };
 
+class VulkanForwardResidualVelocityRenderPass {
+public:
+    explicit VulkanForwardResidualVelocityRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    ~VulkanForwardResidualVelocityRenderPass();
+
+    SE_DISABLE_COPY(VulkanForwardResidualVelocityRenderPass);
+    SE_DISABLE_MOVE(VulkanForwardResidualVelocityRenderPass);
+
+    VkRenderPass Handle() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    void Release();
+
+private:
+    void CreateRenderPass(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+};
+
 class VulkanBloomRenderPass {
 public:
     VulkanBloomRenderPass(
@@ -475,6 +505,43 @@ private:
     void CreateFramebuffers(
         const VulkanDevice& device,
         const VulkanGBufferRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> m_Framebuffers;
+    VkExtent2D m_Extent{};
+};
+
+class VulkanForwardResidualVelocityFramebuffer {
+public:
+    VulkanForwardResidualVelocityFramebuffer(
+        const VulkanDevice& device,
+        const VulkanForwardResidualVelocityRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+
+    ~VulkanForwardResidualVelocityFramebuffer();
+
+    SE_DISABLE_COPY(VulkanForwardResidualVelocityFramebuffer);
+    SE_DISABLE_MOVE(VulkanForwardResidualVelocityFramebuffer);
+
+    VkFramebuffer Handle(std::size_t index) const;
+    VkExtent2D Extent() const;
+    std::size_t Count() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanForwardResidualVelocityRenderPass& renderPass,
+        const VulkanSceneRenderTargets& renderTargets
+    );
+    void Release();
+
+private:
+    void CreateFramebuffers(
+        const VulkanDevice& device,
+        const VulkanForwardResidualVelocityRenderPass& renderPass,
         const VulkanSceneRenderTargets& renderTargets
     );
 

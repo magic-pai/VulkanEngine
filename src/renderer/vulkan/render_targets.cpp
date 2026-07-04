@@ -356,6 +356,107 @@ void VulkanGBufferRenderPass::Release() {
     }
 }
 
+VulkanForwardResidualVelocityRenderPass::VulkanForwardResidualVelocityRenderPass(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) : m_Device(device.Handle()) {
+    CreateRenderPass(device, renderTargets);
+}
+
+VulkanForwardResidualVelocityRenderPass::~VulkanForwardResidualVelocityRenderPass() {
+    Release();
+}
+
+VkRenderPass VulkanForwardResidualVelocityRenderPass::Handle() const {
+    return m_RenderPass;
+}
+
+void VulkanForwardResidualVelocityRenderPass::Recreate(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateRenderPass(device, renderTargets);
+}
+
+void VulkanForwardResidualVelocityRenderPass::CreateRenderPass(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    std::array<VkAttachmentDescription, 2> attachments{};
+    attachments[0].format = renderTargets.VelocityFormat();
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    attachments[1].format = renderTargets.SceneDepthFormat();
+    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference velocityAttachmentReference{};
+    velocityAttachmentReference.attachment = 0;
+    velocityAttachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthAttachmentReference{};
+    depthAttachmentReference.attachment = 1;
+    depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &velocityAttachmentReference;
+    subpass.pDepthStencilAttachment = &depthAttachmentReference;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_SHADER_READ_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.attachmentCount = static_cast<u32>(attachments.size());
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan forward residual velocity render pass");
+    }
+}
+
+void VulkanForwardResidualVelocityRenderPass::Release() {
+    if (m_RenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+        m_RenderPass = VK_NULL_HANDLE;
+    }
+}
+
 VulkanBloomRenderPass::VulkanBloomRenderPass(
     const VulkanDevice& device,
     VkFormat bloomFormat,
@@ -1430,6 +1531,85 @@ void VulkanGBufferFramebuffer::CreateFramebuffers(
 }
 
 void VulkanGBufferFramebuffer::Release() {
+    for (VkFramebuffer framebuffer : m_Framebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+        }
+    }
+
+    m_Framebuffers.clear();
+    m_Extent = {};
+}
+
+VulkanForwardResidualVelocityFramebuffer::VulkanForwardResidualVelocityFramebuffer(
+    const VulkanDevice& device,
+    const VulkanForwardResidualVelocityRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) : m_Device(device.Handle()) {
+    CreateFramebuffers(device, renderPass, renderTargets);
+}
+
+VulkanForwardResidualVelocityFramebuffer::~VulkanForwardResidualVelocityFramebuffer() {
+    Release();
+}
+
+VkFramebuffer VulkanForwardResidualVelocityFramebuffer::Handle(std::size_t index) const {
+    SE_ASSERT(
+        index < m_Framebuffers.size(),
+        "Forward residual velocity framebuffer index is out of range"
+    );
+    return m_Framebuffers[index];
+}
+
+VkExtent2D VulkanForwardResidualVelocityFramebuffer::Extent() const {
+    return m_Extent;
+}
+
+std::size_t VulkanForwardResidualVelocityFramebuffer::Count() const {
+    return m_Framebuffers.size();
+}
+
+void VulkanForwardResidualVelocityFramebuffer::Recreate(
+    const VulkanDevice& device,
+    const VulkanForwardResidualVelocityRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateFramebuffers(device, renderPass, renderTargets);
+}
+
+void VulkanForwardResidualVelocityFramebuffer::CreateFramebuffers(
+    const VulkanDevice& device,
+    const VulkanForwardResidualVelocityRenderPass& renderPass,
+    const VulkanSceneRenderTargets& renderTargets
+) {
+    m_Extent = renderTargets.Extent();
+    m_Framebuffers.resize(renderTargets.Count());
+
+    for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        const std::array<VkImageView, 2> attachments = {
+            renderTargets.VelocityView(index),
+            renderTargets.SceneDepthView(index)
+        };
+
+        VkFramebufferCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        createInfo.renderPass = renderPass.Handle();
+        createInfo.attachmentCount = static_cast<u32>(attachments.size());
+        createInfo.pAttachments = attachments.data();
+        createInfo.width = m_Extent.width;
+        createInfo.height = m_Extent.height;
+        createInfo.layers = 1;
+
+        if (vkCreateFramebuffer(device.Handle(), &createInfo, nullptr, &m_Framebuffers[index]) != VK_SUCCESS) {
+            Release();
+            throw std::runtime_error("Failed to create Vulkan forward residual velocity framebuffer");
+        }
+    }
+}
+
+void VulkanForwardResidualVelocityFramebuffer::Release() {
     for (VkFramebuffer framebuffer : m_Framebuffers) {
         if (framebuffer != VK_NULL_HANDLE) {
             vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
