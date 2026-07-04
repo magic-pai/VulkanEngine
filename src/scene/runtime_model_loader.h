@@ -1,6 +1,7 @@
 #pragma once
 
 #include "assets/model_importer.h"
+#include "renderer/vulkan/buffer.h"
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
 #include "renderer/vulkan/mesh_lod.h"
@@ -53,6 +54,12 @@ struct RuntimeModelLoadResult {
     u32 rendererPosePalettePreviousBonePaletteEntryCount = 0;
     u32 rendererPosePaletteChangedBonePaletteEntryCount = 0;
     u32 rendererPosePaletteReady = 0;
+    u32 gpuPosePaletteBufferAllocated = 0;
+    u32 gpuPosePaletteBufferUploaded = 0;
+    u32 gpuPosePaletteDescriptorInfoReady = 0;
+    u32 gpuPosePaletteBufferBytes = 0;
+    u32 gpuPosePaletteCurrentEntryCount = 0;
+    u32 gpuPosePalettePreviousEntryCount = 0;
     u32 sourceMeshWithBonesCount = 0;
     u32 sourceBoneCount = 0;
     u32 sourceSkinnedVertexCount = 0;
@@ -116,6 +123,11 @@ private:
         u32 runtimePoseCarrierChangedBonePaletteEntryCount = 0;
         u32 runtimePoseCarrierReady = 0;
         std::string bonePaletteResourceId;
+        std::unique_ptr<VulkanBuffer> gpuBonePaletteBuffer;
+        u32 gpuPosePaletteBufferUploaded = 0;
+        u32 gpuPosePaletteDescriptorInfoReady = 0;
+        u32 gpuPosePaletteCurrentEntryCount = 0;
+        u32 gpuPosePalettePreviousEntryCount = 0;
         u32 sourceMeshWithBonesCount = 0;
         u32 sourceBoneCount = 0;
         u32 sourceSkinnedVertexCount = 0;

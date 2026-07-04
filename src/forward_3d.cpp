@@ -2425,6 +2425,18 @@ int main() {
         defaultModelLoad.rendererPosePaletteChangedBonePaletteEntryCount;
     sceneDiagnostics.runtimeImportRendererPosePaletteReady =
         defaultModelLoad.rendererPosePaletteReady;
+    sceneDiagnostics.runtimeImportGpuPosePaletteBufferAllocated =
+        defaultModelLoad.gpuPosePaletteBufferAllocated;
+    sceneDiagnostics.runtimeImportGpuPosePaletteBufferUploaded =
+        defaultModelLoad.gpuPosePaletteBufferUploaded;
+    sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorInfoReady =
+        defaultModelLoad.gpuPosePaletteDescriptorInfoReady;
+    sceneDiagnostics.runtimeImportGpuPosePaletteBufferBytes =
+        defaultModelLoad.gpuPosePaletteBufferBytes;
+    sceneDiagnostics.runtimeImportGpuPosePaletteCurrentEntryCount =
+        defaultModelLoad.gpuPosePaletteCurrentEntryCount;
+    sceneDiagnostics.runtimeImportGpuPosePalettePreviousEntryCount =
+        defaultModelLoad.gpuPosePalettePreviousEntryCount;
     sceneDiagnostics.runtimeImportMeshWithBonesCount =
         defaultModelLoad.sourceMeshWithBonesCount;
     sceneDiagnostics.runtimeImportBoneCount = defaultModelLoad.sourceBoneCount;

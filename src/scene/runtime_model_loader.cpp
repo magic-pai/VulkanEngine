@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <span>
 
 namespace se {
 
@@ -66,6 +67,16 @@ struct RendererBonePaletteRegistration {
     u32 ready = 0;
 };
 
+struct GpuBonePaletteUpload {
+    std::unique_ptr<VulkanBuffer> buffer;
+    u32 allocated = 0;
+    u32 uploaded = 0;
+    u32 descriptorInfoReady = 0;
+    u32 byteSize = 0;
+    u32 currentEntryCount = 0;
+    u32 previousEntryCount = 0;
+};
+
 RendererBonePaletteRegistration RegisterRendererBonePaletteResource(
     VulkanRenderResources2D& renderResources,
     const std::string& resourceId,
@@ -104,6 +115,63 @@ RendererBonePaletteRegistration RegisterRendererBonePaletteResource(
         result.changedEntryCount = resource.changedEntryCount;
         result.ready = resource.ready;
     }
+
+    return result;
+}
+
+GpuBonePaletteUpload CreateGpuBonePaletteBuffer(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const std::vector<glm::mat4>& previousPalette,
+    const std::vector<glm::mat4>& currentPalette
+) {
+    GpuBonePaletteUpload result{};
+    result.currentEntryCount = static_cast<u32>(currentPalette.size());
+    result.previousEntryCount = static_cast<u32>(previousPalette.size());
+    if (previousPalette.empty() || currentPalette.empty()) {
+        return result;
+    }
+
+    std::vector<glm::mat4> paletteData;
+    paletteData.reserve(previousPalette.size() + currentPalette.size());
+    paletteData.insert(
+        paletteData.end(),
+        previousPalette.begin(),
+        previousPalette.end()
+    );
+    paletteData.insert(
+        paletteData.end(),
+        currentPalette.begin(),
+        currentPalette.end()
+    );
+
+    const VkDeviceSize bufferSize =
+        static_cast<VkDeviceSize>(paletteData.size() * sizeof(glm::mat4));
+    result.byteSize = static_cast<u32>(bufferSize);
+    result.buffer = std::make_unique<VulkanBuffer>(
+        device,
+        physicalDevice,
+        bufferSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    result.allocated = result.buffer->Handle() != VK_NULL_HANDLE ? 1u : 0u;
+    if (result.allocated == 0u) {
+        return result;
+    }
+
+    result.buffer->Upload(std::as_bytes(std::span<const glm::mat4>(paletteData)));
+    result.uploaded = 1u;
+
+    VkDescriptorBufferInfo descriptorInfo{};
+    descriptorInfo.buffer = result.buffer->Handle();
+    descriptorInfo.offset = 0;
+    descriptorInfo.range = result.buffer->Size();
+    result.descriptorInfoReady =
+        descriptorInfo.buffer != VK_NULL_HANDLE &&
+        descriptorInfo.range >= bufferSize
+            ? 1u
+            : 0u;
 
     return result;
 }
@@ -530,6 +598,14 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 rendererBonePalette.previousEntryCount,
                 rendererBonePalette.changedEntryCount,
                 rendererBonePalette.ready,
+                cached.gpuBonePaletteBuffer != nullptr ? 1u : 0u,
+                cached.gpuPosePaletteBufferUploaded,
+                cached.gpuPosePaletteDescriptorInfoReady,
+                cached.gpuBonePaletteBuffer != nullptr
+                    ? static_cast<u32>(cached.gpuBonePaletteBuffer->Size())
+                    : 0u,
+                cached.gpuPosePaletteCurrentEntryCount,
+                cached.gpuPosePalettePreviousEntryCount,
                 cached.sourceMeshWithBonesCount,
                 cached.sourceBoneCount,
                 cached.sourceSkinnedVertexCount,
@@ -1179,6 +1255,30 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 loadedModel->runtimePoseCarrierChangedBonePaletteEntryCount,
                 loadedModel->runtimePoseCarrierReady
             );
+        GpuBonePaletteUpload gpuBonePalette = CreateGpuBonePaletteBuffer(
+            m_Device,
+            m_PhysicalDevice,
+            loadedModel->runtimePreviousBonePalette,
+            loadedModel->runtimeCurrentBonePalette
+        );
+        const u32 gpuPosePaletteBufferAllocated = gpuBonePalette.allocated;
+        const u32 gpuPosePaletteBufferUploaded = gpuBonePalette.uploaded;
+        const u32 gpuPosePaletteDescriptorInfoReady =
+            gpuBonePalette.descriptorInfoReady;
+        const u32 gpuPosePaletteBufferBytes = gpuBonePalette.byteSize;
+        const u32 gpuPosePaletteCurrentEntryCount =
+            gpuBonePalette.currentEntryCount;
+        const u32 gpuPosePalettePreviousEntryCount =
+            gpuBonePalette.previousEntryCount;
+        loadedModel->gpuPosePaletteBufferUploaded =
+            gpuBonePalette.uploaded;
+        loadedModel->gpuPosePaletteDescriptorInfoReady =
+            gpuBonePalette.descriptorInfoReady;
+        loadedModel->gpuPosePaletteCurrentEntryCount =
+            gpuBonePalette.currentEntryCount;
+        loadedModel->gpuPosePalettePreviousEntryCount =
+            gpuBonePalette.previousEntryCount;
+        loadedModel->gpuBonePaletteBuffer = std::move(gpuBonePalette.buffer);
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -1220,6 +1320,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             rendererBonePalette.previousEntryCount,
             rendererBonePalette.changedEntryCount,
             rendererBonePalette.ready,
+            gpuPosePaletteBufferAllocated,
+            gpuPosePaletteBufferUploaded,
+            gpuPosePaletteDescriptorInfoReady,
+            gpuPosePaletteBufferBytes,
+            gpuPosePaletteCurrentEntryCount,
+            gpuPosePalettePreviousEntryCount,
             importedModelData.sourceMeshWithBonesCount,
             importedModelData.sourceBoneCount,
             importedModelData.sourceSkinnedVertexCount,

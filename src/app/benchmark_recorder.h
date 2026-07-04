@@ -77,6 +77,12 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportRendererPosePalettePreviousBonePaletteEntryCount = 0;
     u32 runtimeImportRendererPosePaletteChangedBonePaletteEntryCount = 0;
     u32 runtimeImportRendererPosePaletteReady = 0;
+    u32 runtimeImportGpuPosePaletteBufferAllocated = 0;
+    u32 runtimeImportGpuPosePaletteBufferUploaded = 0;
+    u32 runtimeImportGpuPosePaletteDescriptorInfoReady = 0;
+    u32 runtimeImportGpuPosePaletteBufferBytes = 0;
+    u32 runtimeImportGpuPosePaletteCurrentEntryCount = 0;
+    u32 runtimeImportGpuPosePalettePreviousEntryCount = 0;
     u32 runtimeImportMeshWithBonesCount = 0;
     u32 runtimeImportBoneCount = 0;
     u32 runtimeImportSkinnedVertexCount = 0;

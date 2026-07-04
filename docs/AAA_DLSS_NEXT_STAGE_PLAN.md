@@ -963,6 +963,62 @@ skinned quality work is GPU palette buffer upload and descriptor visibility,
 then shader skinning or skinned vertex output, previous-skinned state, and
 skinned velocity output.
 
+## Slice 4.32 Execution Plan
+
+Slice 4.32 uploads the imported runtime bone-palette carrier into a GPU-visible
+storage buffer and exposes descriptor-info readiness. The goal is to prove the
+sampled current/previous bone palettes can be represented as a Vulkan buffer
+resource before wiring descriptor sets or shader consumption.
+
+1. GPU palette buffer carrier.
+   - Concatenate previous and current runtime bone palettes into a single
+     storage-buffer payload.
+   - Allocate a host-visible Vulkan storage buffer owned by the cached runtime
+     model.
+   - Upload the palette payload and keep the buffer alive with the cached
+     runtime model.
+
+2. Descriptor visibility diagnostics.
+   - Create a `VkDescriptorBufferInfo` for the uploaded palette buffer.
+   - Expose buffer allocation, upload, descriptor-info readiness, byte size,
+     current entry count, and previous entry count through
+     `RuntimeModelLoadResult`.
+   - Carry those values into Forward 3D benchmark scene diagnostics, CSV, quick
+     visual-QA metrics, and focused baselines.
+
+3. QA contract.
+   - Extend `imported-skinned-diagnostic` to assert the GPU buffer diagnostics
+     from `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at zero for the GPU palette fields.
+   - Keep DLSS quality expected-blocked because this is not a descriptor-set
+     write, shader bind, skinned vertex path, previous-skinned state, or
+     skinned velocity output.
+
+## Slice 4.32 Execution Evidence
+
+Slice 4.32 is implemented and verified. `RuntimeModelLoader` now creates a
+host-visible Vulkan storage buffer for the imported runtime bone palettes,
+uploads previous and current matrices, and verifies descriptor-buffer-info
+readiness for the uploaded buffer.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes.
+- Direct benchmark CSV probe for `assets/models/skinned_probe.dae` reports
+  `829/829` CSV columns.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- GPU palette diagnostics:
+  `gpuPoseAllocated/gpuPoseUploaded/gpuPoseDescriptorReady/gpuPoseBytes/gpuPoseCurrent/gpuPosePrevious=1/1/1/256/2/2`.
+- Renderer resource diagnostics remain:
+  `rendererPoseRegistered/rendererPoseBonePalette/rendererPosePreviousBonePalette/rendererPoseChangedBonePalette/rendererPoseReady=1/2/2/1/1`.
+- DLSS quality remains expected-blocked at `qualityGate=1/0/4`.
+
+This closes the CPU/runtime/renderer-resource-to-GPU-buffer diagnostic chain for
+the skinned probe. The next skinned quality work is descriptor-set writes and
+shader visibility, then shader skinning or skinned vertex output,
+previous-skinned state, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

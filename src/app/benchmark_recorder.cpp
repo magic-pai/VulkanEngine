@@ -244,6 +244,12 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportRendererPosePalettePreviousBonePaletteEntryCount << ','
         << sceneDiagnostics.runtimeImportRendererPosePaletteChangedBonePaletteEntryCount << ','
         << sceneDiagnostics.runtimeImportRendererPosePaletteReady << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteBufferAllocated << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteBufferUploaded << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteDescriptorInfoReady << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteBufferBytes << ','
+        << sceneDiagnostics.runtimeImportGpuPosePaletteCurrentEntryCount << ','
+        << sceneDiagnostics.runtimeImportGpuPosePalettePreviousEntryCount << ','
         << sceneDiagnostics.runtimeImportMeshWithBonesCount << ','
         << sceneDiagnostics.runtimeImportBoneCount << ','
         << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
@@ -1066,6 +1072,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_renderer_pose_palette_previous_bone_palette_entry_count,"
         << "runtime_import_renderer_pose_palette_changed_bone_palette_entry_count,"
         << "runtime_import_renderer_pose_palette_ready,"
+        << "runtime_import_gpu_pose_palette_buffer_allocated,"
+        << "runtime_import_gpu_pose_palette_buffer_uploaded,"
+        << "runtime_import_gpu_pose_palette_descriptor_info_ready,"
+        << "runtime_import_gpu_pose_palette_buffer_bytes,"
+        << "runtime_import_gpu_pose_palette_current_entry_count,"
+        << "runtime_import_gpu_pose_palette_previous_entry_count,"
         << "runtime_import_mesh_with_bones_count,runtime_import_bone_count,"
         << "runtime_import_skinned_vertex_count,"
         << "runtime_import_bone_influence_count,"
