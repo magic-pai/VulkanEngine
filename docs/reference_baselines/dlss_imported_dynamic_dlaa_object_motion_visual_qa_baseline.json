@@ -60,7 +60,7 @@
     "centralDifferentPixelsMin": 512
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T03:56:16.1810489+08:00",
+    "capturedAt": "2026-07-05T04:15:24.0271604+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
     "dlssColumns": "782/782",
     "model": "assets/models/demo_crystal.obj",
@@ -78,12 +78,12 @@
     "drawRoute": "1/1/0/0",
     "materialCounters": "materials=1,textured=0,lights=4,local=3,rect=0",
     "sequencePairCount": 2,
-    "sequencePairMinChangedPixels": 1120,
-    "sequencePairMaxMeanDelta": 39.7803,
-    "sequencePairMaxDelta": 546,
-    "sequencePairMinEdgePixels": 389,
-    "sequencePairMaxChangedEdgePixels": 289,
-    "sequencePairMaxMeanEdgeDelta": 80.1224,
-    "sequencePairMaxEdgeDelta": 182.0732
+    "sequencePairMinChangedPixels": 1587,
+    "sequencePairMaxMeanDelta": 50.8339,
+    "sequencePairMaxDelta": 559,
+    "sequencePairMinEdgePixels": 373,
+    "sequencePairMaxChangedEdgePixels": 332,
+    "sequencePairMaxMeanEdgeDelta": 87.9192,
+    "sequencePairMaxEdgeDelta": 184.1414
   }
 }

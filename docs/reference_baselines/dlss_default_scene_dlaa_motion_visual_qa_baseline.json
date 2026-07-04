@@ -34,8 +34,8 @@
       "qualityMode": "6",
       "recommendedPreset": "11",
       "cameraMotionReady": "1",
-      "mainDraws": "5",
-      "gbufferDraws": "5",
+      "mainDraws": "4",
+      "gbufferDraws": "4",
       "forwardResidualDraws": "0",
       "weightedTranslucencyDraws": "0"
     }
@@ -49,7 +49,7 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-05T03:27:50.7278582+08:00",
+    "capturedAt": "2026-07-05T04:15:24.0271604+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
     "dlssColumns": "782/782",
     "qualityMode": 6,
@@ -60,12 +60,12 @@
     "dlssExtents": "1280x720->1280x720",
     "qualityGate": "1/1/0",
     "qualityMasks": "255/255/0",
-    "sequencePairMinChangedPixels": 5691,
-    "sequencePairMaxMeanDelta": 48.3707,
-    "sequencePairMaxDelta": 575,
-    "sequencePairMinEdgePixels": 1751,
-    "sequencePairMaxChangedEdgePixels": 585,
-    "sequencePairMaxMeanEdgeDelta": 23.0069,
-    "sequencePairMaxEdgeDelta": 203.8426
+    "sequencePairMinChangedPixels": 1459,
+    "sequencePairMaxMeanDelta": 93.5157,
+    "sequencePairMaxDelta": 597,
+    "sequencePairMinEdgePixels": 1859,
+    "sequencePairMaxChangedEdgePixels": 482,
+    "sequencePairMaxMeanEdgeDelta": 24.6082,
+    "sequencePairMaxEdgeDelta": 199
   }
 }

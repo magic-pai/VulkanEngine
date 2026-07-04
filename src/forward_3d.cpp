@@ -1931,7 +1931,7 @@ int main() {
     se::VulkanMaterial& groundMaterial = app.MaterialLibrary().Create(
         "GroundMaterial",
         checkerTexturePath,
-        ForwardMaterial({ 0.72f, 0.76f, 0.78f, 1.0f }, 0.35f, 0.28f, 0.62f, 0.05f, 16.0f)
+        ForwardMaterial({ 0.72f, 0.76f, 0.78f, 1.0f }, 0.0f, 0.28f, 0.62f, 0.05f, 16.0f)
     );
     se::VulkanMaterial& gridMaterial = app.MaterialLibrary().Create(
         "GridMaterial",
@@ -2259,18 +2259,6 @@ int main() {
             scene,
             bridgeFirstRenderableIndex
         );
-    }
-
-    if (!hasStartupModel && !useBenchmarkScene) {
-        se::Renderable3D& grid = scene.CreateRenderable(
-            "Viewport Grid",
-            "Grid",
-            "GridMaterial"
-        );
-        grid.Transform().SetPosition({ 0.0f, -1.125f, 0.0f });
-        grid.Transform().SetAnimateRotation(false);
-        grid.SetDrawOrder(-9);
-        grid.SetPickable(false);
     }
 
     se::Camera3D camera;

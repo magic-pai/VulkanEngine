@@ -261,7 +261,7 @@ on 2026-07-05:
   contributes through the current `previousModel` velocity path.
 - Jitter and resolve policy: jitter `1/1/-0.125/-0.277778`, TAA resolve
   `input/enabled/suppressed=1/0/1`.
-- Draw route: `main/gbuffer/forwardResidual/weightedTranslucency=5/5/0/0`.
+- Draw route: `main/gbuffer/forwardResidual/weightedTranslucency=4/4/0/0`.
 - Dynamic sequence metric:
   `pairs=2 minChanged=171 maxMean=2.319 max=564 edgeMin=1069 edgeChangedMax=82 edgeMeanMax=3.8641 edgeMax=188`.
 
@@ -1349,7 +1349,7 @@ after the evaluate contract is stable.
 ## Slice 4.15 Execution Evidence
 
 - Added the real default Forward 3D application scene to the DLAA visual-QA
-  queue. This is the startup scene with the large viewport grid/ground, three
+  queue. This is the startup scene with smooth ground, three
   cube renderables, six total lights, five local lights, one rect light, and one
   scene reflection probe; it is the scene used for the reported visible jagged
   edges, not the benchmark-grid stress scene.
@@ -1365,8 +1365,8 @@ after the evaluate contract is stable.
   The baseline requires native/DLAA render scale `1/1/0`, DLSS quality
   mode/preset `6/11`, full-resolution DLSS extents `1280x720->1280x720`,
   post source `1/1/0`, quality gate `1/1/0`, quality masks `255/255/0`, draw
-  route `5/5/0/0`, and scene counters
-  `materials=5,lights=6,local=5,rect=1,probes=1`.
+  route `4/4/0/0`, and scene counters
+  `materials=4,lights=6,local=5,rect=1,probes=1`.
 - Verification:
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
   passes with matching `780/780` CSV columns and 0 frame-graph validation
@@ -1457,7 +1457,7 @@ after the evaluate contract is stable.
   passes. The new motion row reports matching `780/780` columns, 0 frame-graph
   validation issues, evaluate/output `1/1`, post source `1/1/0`, quality gate
   `1/1/0`, quality masks `255/255/0`, render scale `1/1/0`, quality mode/
-  preset `6/11`, draw route `5/5/0/0`, camera-motion readiness `1/1`, and
+  preset `6/11`, draw route `4/4/0/0`, camera-motion readiness `1/1`, and
   DLSS jitter `0/0` while projection jitter is not applied.
 - The dynamic screenshot sequence reports two adjacent-frame comparisons with
   minimum changed sampled pixels `125`, maximum mean RGB delta `3.9588`, and
@@ -1491,7 +1491,7 @@ after the evaluate contract is stable.
   frame-graph validation issues, output/post `1/1` and `1/1/0`, quality gate
   `1/1/0`, camera-motion readiness `1/1`, jitter applied `1`, DLSS input ready
   `1`, native TAA resolve `0`, native TAA suppress-for-upscaler `1`, draw route
-  `5/5/0/0`, and DLSS quality mode/preset `6/11`.
+  `4/4/0/0`, and DLSS quality mode/preset `6/11`.
 - The same slice also splits DLSS input readiness from native TAA final-
   composite resolve. In the moving DLAA row, `SE_TAA=1` still prepares the
   history/velocity inputs required by the upscaler contract, but the final HDR
