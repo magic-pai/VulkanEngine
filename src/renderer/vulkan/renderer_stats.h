@@ -600,6 +600,11 @@ struct RendererTemporalStats {
     u32 taaVelocityReprojectionEnabled = 0;
     u32 taaFallbackReason = 0;
     u32 taaDebugViewEnabled = 0;
+    u32 taaRejectionEnabled = 0;
+    u32 taaNeighborhoodClampEnabled = 0;
+    f32 taaVelocityRejectionThreshold = 0.0f;
+    f32 taaDepthRejectionThreshold = 0.0f;
+    u32 taaRejectionDebugViewEnabled = 0;
 };
 
 struct RendererStats {

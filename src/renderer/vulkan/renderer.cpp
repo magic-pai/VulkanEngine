@@ -1110,6 +1110,34 @@ f32 TaaHistoryWeightFromEnvironment() {
     return glm::clamp(overrideValue.value_or(0.10f), 0.0f, 0.95f);
 }
 
+bool TaaRejectionEnabledFromEnvironment() {
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_TAA_REJECTION")) {
+        return *overrideValue;
+    }
+    return true;
+}
+
+bool TaaNeighborhoodClampEnabledFromEnvironment() {
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_TAA_CLAMP")) {
+        return *overrideValue;
+    }
+    return true;
+}
+
+f32 TaaVelocityRejectionThresholdFromEnvironment() {
+    const std::optional<f32> overrideValue =
+        EnvironmentFloatOverride("SE_TAA_VELOCITY_REJECTION_THRESHOLD");
+    return glm::clamp(overrideValue.value_or(0.035f), 0.0f, 1.0f);
+}
+
+f32 TaaDepthRejectionThresholdFromEnvironment() {
+    const std::optional<f32> overrideValue =
+        EnvironmentFloatOverride("SE_TAA_DEPTH_REJECTION_THRESHOLD");
+    return glm::clamp(overrideValue.value_or(0.02f), 0.0f, 1.0f);
+}
+
 bool WeightedTranslucencyAlphaReferenceEnabled() {
     return EnvironmentFlagEnabled("SE_WBOIT_REFERENCE_ALPHA") ||
         EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_ALPHA_REFERENCE");
@@ -2358,6 +2386,7 @@ bool UsesDeferredHdrComposite(ForwardDebugView view) {
         view == ForwardDebugView::AutoExposure ||
         view == ForwardDebugView::Sharpening ||
         view == ForwardDebugView::Taa ||
+        view == ForwardDebugView::TaaRejection ||
         view == ForwardDebugView::WeightedTranslucencyAccum ||
         view == ForwardDebugView::WeightedTranslucencyRevealage ||
         view == ForwardDebugView::WeightedTranslucencyWeight;
@@ -2549,6 +2578,14 @@ std::optional<ForwardDebugView> ForwardDebugViewFromEnvironment() {
         value == "temporal-antialiasing" ||
         value == "temporal_antialiasing") {
         return ForwardDebugView::Taa;
+    }
+    if (value == "taa-rejection" ||
+        value == "taa_rejection" ||
+        value == "temporal-rejection" ||
+        value == "temporal_rejection" ||
+        value == "history-rejection" ||
+        value == "history_rejection") {
+        return ForwardDebugView::TaaRejection;
     }
     if (value == "wboit-accum" ||
         value == "wboit_accum" ||
@@ -3009,6 +3046,13 @@ void VulkanRenderer::DrawFrame() {
     const bool historyColorTargetAllocated = m_SceneRenderTargets != nullptr;
     const bool taaResolveConfigured = TaaResolveEnabledFromEnvironment();
     const f32 taaHistoryWeight = TaaHistoryWeightFromEnvironment();
+    const bool taaRejectionEnabled = TaaRejectionEnabledFromEnvironment();
+    const bool taaNeighborhoodClampEnabled =
+        TaaNeighborhoodClampEnabledFromEnvironment();
+    const f32 taaVelocityRejectionThreshold =
+        TaaVelocityRejectionThresholdFromEnvironment();
+    const f32 taaDepthRejectionThreshold =
+        TaaDepthRejectionThresholdFromEnvironment();
     const FrameTemporalState temporalState = BuildFrameTemporalState(
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         extent,
@@ -3018,7 +3062,11 @@ void VulkanRenderer::DrawFrame() {
         historyColorTargetAllocated,
         m_TemporalHistoryColorValid,
         taaResolveConfigured,
-        taaHistoryWeight
+        taaHistoryWeight,
+        taaRejectionEnabled,
+        taaNeighborhoodClampEnabled,
+        taaVelocityRejectionThreshold,
+        taaDepthRejectionThreshold
     );
     const FrameLightSet frameLightSet = BuildFrameLightSet(mainCommands);
     PrepareReflectionProbeCaptureResources();
@@ -3479,6 +3527,8 @@ void VulkanRenderer::DrawFrame() {
     );
     frameStats.temporal.taaDebugViewEnabled =
         m_RenderDebugSettings.forwardView == ForwardDebugView::Taa ? 1u : 0u;
+    frameStats.temporal.taaRejectionDebugViewEnabled =
+        m_RenderDebugSettings.forwardView == ForwardDebugView::TaaRejection ? 1u : 0u;
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,
@@ -5873,7 +5923,11 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     bool historyColorTargetAllocated,
     bool historyColorReady,
     bool taaResolveConfigured,
-    f32 taaHistoryWeight
+    f32 taaHistoryWeight,
+    bool taaRejectionEnabled,
+    bool taaNeighborhoodClampEnabled,
+    f32 taaVelocityRejectionThreshold,
+    f32 taaDepthRejectionThreshold
 ) const {
     FrameTemporalState state{};
     state.previousMatrices = m_PreviousTemporalMatrices;
@@ -5922,6 +5976,10 @@ FrameTemporalState VulkanRenderer::BuildFrameTemporalState(
     state.taaHistoryColorTargetAllocated = historyColorTargetAllocated;
     state.taaHistoryColorReady = historyColorReady;
     state.taaHistoryWeight = taaHistoryWeight;
+    state.taaRejectionEnabled = taaRejectionEnabled;
+    state.taaNeighborhoodClampEnabled = taaNeighborhoodClampEnabled;
+    state.taaVelocityRejectionThreshold = taaVelocityRejectionThreshold;
+    state.taaDepthRejectionThreshold = taaDepthRejectionThreshold;
     state.taaVelocityReprojectionEnabled =
         state.velocityCameraMotionReady && velocityTargetAllocated;
     if (!taaResolveConfigured) {
@@ -5970,6 +6028,7 @@ void VulkanRenderer::PopulateTemporalUniforms(
         uniformData.temporalJitter = glm::vec4(0.0f);
         uniformData.temporalControls = glm::vec4(0.0f);
         uniformData.temporalResolveControls = glm::vec4(0.0f);
+        uniformData.temporalRejectionControls = glm::vec4(0.0f);
         return;
     }
 
@@ -5990,6 +6049,12 @@ void VulkanRenderer::PopulateTemporalUniforms(
         temporalState->taaHistoryWeight,
         temporalState->taaHistoryColorReady ? 1.0f : 0.0f,
         temporalState->taaVelocityReprojectionEnabled ? 1.0f : 0.0f
+    );
+    uniformData.temporalRejectionControls = glm::vec4(
+        temporalState->taaRejectionEnabled ? 1.0f : 0.0f,
+        temporalState->taaVelocityRejectionThreshold,
+        temporalState->taaDepthRejectionThreshold,
+        temporalState->taaNeighborhoodClampEnabled ? 1.0f : 0.0f
     );
 }
 
@@ -6044,6 +6109,14 @@ void VulkanRenderer::WriteTemporalStats(
         temporalState.taaVelocityReprojectionEnabled ? 1u : 0u;
     stats.taaFallbackReason =
         static_cast<u32>(temporalState.taaFallbackReason);
+    stats.taaRejectionEnabled =
+        temporalState.taaRejectionEnabled ? 1u : 0u;
+    stats.taaNeighborhoodClampEnabled =
+        temporalState.taaNeighborhoodClampEnabled ? 1u : 0u;
+    stats.taaVelocityRejectionThreshold =
+        temporalState.taaVelocityRejectionThreshold;
+    stats.taaDepthRejectionThreshold =
+        temporalState.taaDepthRejectionThreshold;
 }
 
 void VulkanRenderer::UpdateUniformBuffer(

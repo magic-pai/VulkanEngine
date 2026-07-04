@@ -103,6 +103,10 @@ struct FrameTemporalState {
     bool taaHistoryColorReady = false;
     bool taaVelocityReprojectionEnabled = false;
     f32 taaHistoryWeight = 0.0f;
+    bool taaRejectionEnabled = false;
+    bool taaNeighborhoodClampEnabled = false;
+    f32 taaVelocityRejectionThreshold = 0.0f;
+    f32 taaDepthRejectionThreshold = 0.0f;
     RendererTaaFallbackReason taaFallbackReason =
         RendererTaaFallbackReason::Disabled;
 };
@@ -398,7 +402,11 @@ private:
         bool historyColorTargetAllocated,
         bool historyColorReady,
         bool taaResolveConfigured,
-        f32 taaHistoryWeight
+        f32 taaHistoryWeight,
+        bool taaRejectionEnabled,
+        bool taaNeighborhoodClampEnabled,
+        f32 taaVelocityRejectionThreshold,
+        f32 taaDepthRejectionThreshold
     ) const;
     void StoreTemporalHistory(
         const FrameMatrices* matrices,

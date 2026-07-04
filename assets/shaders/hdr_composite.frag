@@ -43,6 +43,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 temporalJitter;
     vec4 temporalControls;
     vec4 temporalResolveControls;
+    vec4 temporalRejectionControls;
 } frame;
 
 layout(set = 0, binding = 10) readonly buffer AutoExposureState {
@@ -55,6 +56,7 @@ layout(set = 1, binding = 1) uniform sampler2D bloomTexture;
 layout(set = 1, binding = 2) uniform sampler2D colorGradingLut;
 layout(set = 1, binding = 3) uniform sampler2D temporalHistoryColor;
 layout(set = 1, binding = 4) uniform sampler2D gBufferVelocity;
+layout(set = 1, binding = 5) uniform sampler2D sceneDepth;
 
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
@@ -62,6 +64,7 @@ const int DEBUG_VIEW_TONE_MAPPING = 39;
 const int DEBUG_VIEW_AUTO_EXPOSURE = 40;
 const int DEBUG_VIEW_SHARPENING = 41;
 const int DEBUG_VIEW_TAA = 44;
+const int DEBUG_VIEW_TAA_REJECTION = 45;
 
 vec3 ToneMapAces(vec3 value) {
     const float a = 2.51;
@@ -212,13 +215,49 @@ void main() {
     float historyWeight = clamp(frame.temporalResolveControls.y, 0.0, 0.95);
     float historyReady = clamp(frame.temporalResolveControls.z, 0.0, 1.0);
     float reprojectionEnabled = clamp(frame.temporalResolveControls.w, 0.0, 1.0);
+    float rejectionEnabled = clamp(frame.temporalRejectionControls.x, 0.0, 1.0);
+    float velocityRejectThreshold = max(frame.temporalRejectionControls.y, 0.0);
+    float depthRejectThreshold = max(frame.temporalRejectionControls.z, 0.0);
+    float neighborhoodClampEnabled = clamp(frame.temporalRejectionControls.w, 0.0, 1.0);
+    float currentDepth = texture(sceneDepth, fragUv).r;
+    float historyDepth = texture(sceneDepth, historyUv).r;
+    bool historyRejected = false;
+    if (rejectionEnabled > 0.5) {
+        historyRejected =
+            length(velocity) > velocityRejectThreshold ||
+            abs(currentDepth - historyDepth) > depthRejectThreshold;
+    }
+    if (neighborhoodClampEnabled > 0.5) {
+        vec2 texelSize = 1.0 / vec2(max(textureSize(hdrSceneColor, 0), ivec2(1)));
+        vec3 c0 = texture(hdrSceneColor, fragUv).rgb;
+        vec3 c1 = texture(hdrSceneColor, clamp(fragUv + vec2(texelSize.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+        vec3 c2 = texture(hdrSceneColor, clamp(fragUv - vec2(texelSize.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
+        vec3 c3 = texture(hdrSceneColor, clamp(fragUv + vec2(0.0, texelSize.y), vec2(0.0), vec2(1.0))).rgb;
+        vec3 c4 = texture(hdrSceneColor, clamp(fragUv - vec2(0.0, texelSize.y), vec2(0.0), vec2(1.0))).rgb;
+        vec3 neighborhoodMin = min(c0, min(min(c1, c2), min(c3, c4)));
+        vec3 neighborhoodMax = max(c0, max(max(c1, c2), max(c3, c4)));
+        historyHdrColor = clamp(historyHdrColor, neighborhoodMin, neighborhoodMax);
+    }
     vec3 resolvedHdrColor = currentHdrColor;
-    if (taaEnabled > 0.5 && historyReady > 0.5 && reprojectionEnabled > 0.5) {
+    if (taaEnabled > 0.5 &&
+        historyReady > 0.5 &&
+        reprojectionEnabled > 0.5 &&
+        !historyRejected) {
         resolvedHdrColor = mix(currentHdrColor, historyHdrColor, historyWeight);
     }
     vec3 hdrColor = resolvedHdrColor * exposure;
     vec3 bloom = BloomContribution();
     int debugView = int(frame.shadowFiltering.z + 0.5);
+    if (debugView == DEBUG_VIEW_TAA_REJECTION) {
+        if (taaEnabled <= 0.5 || historyReady <= 0.5) {
+            outColor = vec4(0.0, 0.0, 0.25, 1.0);
+        } else {
+            outColor = historyRejected
+                ? vec4(1.0, 0.05, 0.02, 1.0)
+                : vec4(0.05, 0.85, 0.18, 1.0);
+        }
+        return;
+    }
     if (debugView == DEBUG_VIEW_TAA) {
         vec3 delta = abs(currentHdrColor - historyHdrColor) * exposure;
         outColor = vec4(ToneMapHdr(delta), 1.0);

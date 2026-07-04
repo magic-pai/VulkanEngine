@@ -599,6 +599,11 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.taaVelocityReprojectionEnabled << ','
         << temporal.taaFallbackReason << ','
         << temporal.taaDebugViewEnabled << ','
+        << temporal.taaRejectionEnabled << ','
+        << temporal.taaNeighborhoodClampEnabled << ','
+        << temporal.taaVelocityRejectionThreshold << ','
+        << temporal.taaDepthRejectionThreshold << ','
+        << temporal.taaRejectionDebugViewEnabled << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1084,6 +1089,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_taa_velocity_reprojection_enabled,"
         << "temporal_taa_fallback_reason,"
         << "temporal_taa_debug_view_enabled,"
+        << "temporal_taa_rejection_enabled,"
+        << "temporal_taa_neighborhood_clamp_enabled,"
+        << "temporal_taa_velocity_rejection_threshold,"
+        << "temporal_taa_depth_rejection_threshold,"
+        << "temporal_taa_rejection_debug_view_enabled,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

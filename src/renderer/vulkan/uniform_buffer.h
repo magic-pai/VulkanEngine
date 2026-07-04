@@ -81,6 +81,7 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 temporalJitter{ 0.0f };
     alignas(16) glm::vec4 temporalControls{ 0.0f };
     alignas(16) glm::vec4 temporalResolveControls{ 0.0f };
+    alignas(16) glm::vec4 temporalRejectionControls{ 0.0f };
 };
 
 struct GpuLocalLightRecord {
@@ -197,7 +198,7 @@ static_assert(
     sizeof(UniformBufferObject) ==
         sizeof(glm::mat4) * 7 +
         sizeof(glm::vec4) *
-            (27 + kMaxFrameReflectionProbes *
+            (28 + kMaxFrameReflectionProbes *
                 (4 + kReflectionProbeDiffuseLobeCount)),
     "UniformBufferObject layout must match the shader uniform block"
 );

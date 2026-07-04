@@ -52,7 +52,7 @@ feature explicitly off/fallback-safe by default.
      next frame has a real history source.
    - Add CSV, ImGui, FrameGraph, and smoke evidence for off/enabled/reset paths.
 
-2. Rejection and clamping diagnostics.
+2. Rejection and clamping diagnostics. Implemented.
    - Add depth/velocity-aware rejection thresholds and neighborhood color clamp
      controls.
    - Report fallback/rejection reasons and debug the rejected-history mask.
@@ -137,6 +137,43 @@ change unless explicitly enabled by environment.
   implement final neighborhood clamping, depth/normal rejection, jittered
   projection application, object motion vectors, TAAU, dynamic resolution,
   motion blur, SSR/GTAO temporal denoise, or upscaler plugin integration.
+
+## Slice 2 Execution Evidence
+
+- HDR composite now applies conservative history rejection before blending:
+  velocity magnitude above `SE_TAA_VELOCITY_REJECTION_THRESHOLD` or depth
+  mismatch above `SE_TAA_DEPTH_REJECTION_THRESHOLD` rejects the history sample.
+- `SE_TAA_REJECTION=1/0` gates rejection, and `SE_TAA_CLAMP=1/0` gates a
+  current-frame five-tap neighborhood clamp over the reprojected history color.
+- The default threshold controls are conservative and measurable:
+  velocity threshold `0.035` UV units and depth threshold `0.02`; smoke runs
+  override velocity threshold to `0.03` where needed.
+- `SE_RENDER_VIEW=taa-rejection` visualizes the rejection mask through HDR
+  composite: red for rejected history, green for accepted history, and blue for
+  unavailable TAA/history.
+- CSV and ImGui expose rejection enabled state, neighborhood clamp enabled
+  state, velocity/depth thresholds, and rejection-debug view state.
+- `_quick_build.bat` passes for `SelfEngineForward3D`; the only build warning
+  is the pre-existing MSVC runtime-library conflict warning.
+- Smoke evidence:
+  `out/benchmarks/aaa_taa_rejection_enabled_smoke.csv`,
+  `out/benchmarks/aaa_taa_rejection_debug_smoke.csv`, and
+  `out/benchmarks/aaa_taa_rejection_off_smoke.csv` all have matching
+  629-column rows and 0 frame-graph validation issues.
+- The enabled smoke reports TAA configured/enabled `1/1`, history ready `1`,
+  reprojection `1`, fallback `0`, rejection/clamp `1/1`, velocity threshold
+  `0.03`, and depth threshold `0.02`.
+- The rejection-debug smoke reports the same enabled/rejection/clamp state plus
+  rejection debug view `1`.
+- The rejection-off smoke reports TAA configured/enabled `1/1`, fallback `0`,
+  rejection/clamp `0/0`, default velocity threshold `0.035`, and depth threshold
+  `0.02`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is still a first conservative rejection/clamp tier. It does not yet
+  implement final neighborhood variance clipping, normal-aware rejection,
+  reactive/transparency masks, object motion vectors, jittered projection
+  application, TAAU, dynamic resolution, or temporal denoising consumers.
 
 ## Previous Stage Summary
 
