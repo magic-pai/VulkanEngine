@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_grid_mask_policy_render_scale_075",
+  "target": "SelfEngineForward3D",
+  "scene": "grid",
+  "description": "Reference contract for material-authored DLSS mask policy coverage. This baseline combines alpha-blended material state, an opacity-textured transparent route, and an emissive material hint, then requires WBOIT velocity coverage and matching DLSS mask draws before the DLSS-present quality gate can pass.",
+  "environment": {
+    "native": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_ALPHA_BLEND_MATERIAL": "1",
+      "SE_BENCHMARK_OPACITY_BLEND_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    },
+    "dlssPresent": {
+      "SE_BENCHMARK_SCENE": "grid",
+      "SE_BENCHMARK_ALPHA_BLEND_MATERIAL": "1",
+      "SE_BENCHMARK_OPACITY_BLEND_TEXTURE_MATERIAL": "1",
+      "SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL": "1",
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_PRESENT": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    }
+  },
+  "expected": {
+    "native": {
+      "postSource": "0/0/1",
+      "qualityGate": "0/0/1",
+      "gbufferDraws": "80",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "162",
+      "weightedTranslucencyResolveDraws": "1",
+      "frameMaterialCount": "4",
+      "emissiveHintMaterials": "1",
+      "alphaBlendMaterials": "2",
+      "opacityTextureMaterials": "1",
+      "texturedMaterials": "1"
+    },
+    "dlssPresent": {
+      "evaluateOutput": "1/1",
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "gbufferDraws": "80",
+      "forwardResidualDraws": "0",
+      "weightedTranslucencyDraws": "162",
+      "weightedTranslucencyResolveDraws": "1",
+      "weightedTranslucencyVelocityDraws": "162",
+      "dlssMaskDraws": "162",
+      "dlssMaskWeightedTranslucencyDraws": "162",
+      "dlssMaskForwardResidualDraws": "0",
+      "frameMaterialCount": "4",
+      "emissiveHintMaterials": "1",
+      "alphaBlendMaterials": "2",
+      "opacityTextureMaterials": "1",
+      "texturedMaterials": "1"
+    }
+  },
+  "thresholds": {
+    "comparisonChangedPixelsMin": 0,
+    "comparisonChangedPixelsMax": 15000,
+    "comparisonMeanDeltaMin": 0.0,
+    "comparisonMeanDeltaMax": 160.0,
+    "comparisonMaxDeltaMax": 765,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-05T05:22:00+08:00",
+    "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
+    "dlssColumns": "782/782",
+    "gbufferDraws": 80,
+    "forwardResidualDraws": 0,
+    "weightedTranslucencyDraws": 162,
+    "weightedTranslucencyResolveDraws": 1,
+    "weightedTranslucencyVelocityDraws": 162,
+    "dlssMaskDraws": 162,
+    "dlssMaskWeightedTranslucencyDraws": 162,
+    "dlssMaskForwardResidualDraws": 0,
+    "qualityMasks": "255/255/0",
+    "materialCounters": {
+      "frameMaterialCount": 4,
+      "emissiveHintMaterials": 1,
+      "alphaBlendMaterials": 2,
+      "opacityTextureMaterials": 1,
+      "texturedMaterials": 1
+    },
+    "comparisonChangedPixels": 797,
+    "comparisonMeanDelta": 2.2752,
+    "comparisonMaxDelta": 564
+  }
+}

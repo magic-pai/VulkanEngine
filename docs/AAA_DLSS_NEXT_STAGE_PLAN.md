@@ -349,6 +349,62 @@ Scope remains intentionally limited: imported dynamic opaque OBJ coverage is now
 in the DLAA queue, but skinned/animated imported assets and imported transparent
 or material-specific mask cases are still open.
 
+## Slice 4.21 Execution Plan
+
+Slice 4.21 adds the first material-authored mask-policy QA lane. The goal is to
+prove that alpha/opacity/emissive material state does not only appear in the
+material table, but also drives the transparent velocity and DLSS mask routes
+that affect visible DLSS/DLAA stability.
+
+1. Mask-policy material setup.
+   - Use the existing grid benchmark with alpha-blended material state,
+     opacity-textured transparent material state, and a constant emissive
+     material hint.
+   - Keep the render-scale SR path at `0.75` so the route exercises the same
+     DLSS-present mask and WBOIT ordering as the existing transparent lanes.
+
+2. Focused QA lane.
+   - Add `mask-policy` as a focused visual-QA suite and include it in the
+     `mask-material` suite group.
+   - Require WBOIT color/resolve execution, matching WBOIT velocity coverage,
+     matching DLSS mask draws, DLSS output/post-source activation, quality-gate
+     readiness, and alpha/opacity/emissive material counters.
+
+3. Scope guard.
+   - Do not treat this as particle, water, refraction, skinned, or subjective
+     production tuning. It is the first material-authored alpha/opacity mask
+     policy proof on controlled grid content.
+
+## Slice 4.21 Execution Evidence
+
+Slice 4.21 is implemented and verified. The new focused visual-QA lane is
+`mask_policy_dlss_present`, backed by
+`docs/reference_baselines/dlss_mask_policy_visual_qa_baseline.json`.
+
+Verification from
+`powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -CaptureDelaySeconds 4 -Suite mask-policy`
+on 2026-07-05:
+
+- Capture monitor: requested `1`, actual `1/2`, `\\.\DISPLAY2`, physical area
+  `2560,0 2560x1380`.
+- CSV shape: `782/782` columns.
+- FrameGraph validation issues: `0`.
+- DLSS output/post: evaluate/output `1/1`, post source `1/1/0`.
+- Quality gate: `1/1/0`, masks `255/255/0`, inputs
+  `output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1`.
+- Draw and mask route:
+  `gbuffer/WBOIT/forwardResidual=80/162/0`,
+  WBOIT resolve/velocity `1/162`, DLSS masks `162/162/0`.
+- Material counters:
+  `frameMaterialCount=4`, `emissiveHint=1`, `alphaBlend=2`,
+  `opacityTexture=1`, `textured=1`.
+- Latest native-vs-DLSS comparison samples `14352` pixels with `797` changed
+  pixels, mean RGB delta `2.2752`, and max delta `564`.
+
+This extends mask-policy evidence from generic WBOIT/forward-special routes
+into material-authored alpha/opacity coverage. Particles, water/refraction,
+animated/skinned content, and final DLSS/DLAA tuning remain open.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

@@ -11,6 +11,7 @@ param(
     [string]$WboitBaselinePath = "docs\reference_baselines\dlss_wboit_visual_qa_baseline.json",
     [string]$ForwardSpecialBaselinePath = "docs\reference_baselines\dlss_forward_special_visual_qa_baseline.json",
     [string]$MaterialStressBaselinePath = "docs\reference_baselines\dlss_material_stress_visual_qa_baseline.json",
+    [string]$MaskPolicyBaselinePath = "docs\reference_baselines\dlss_mask_policy_visual_qa_baseline.json",
     [string]$DlaaBaselinePath = "docs\reference_baselines\dlss_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_visual_qa_baseline.json",
     [string]$DefaultSceneDlaaMotionBaselinePath = "docs\reference_baselines\dlss_default_scene_dlaa_motion_visual_qa_baseline.json",
@@ -37,7 +38,8 @@ $baseSuites =
         "imported-dynamic",
         "wboit",
         "forward-special",
-        "material-stress"
+        "material-stress",
+        "mask-policy"
     )
 $suiteGroups =
     [ordered]@{
@@ -49,7 +51,8 @@ $suiteGroups =
         "mask-material" = @(
             "wboit",
             "forward-special",
-            "material-stress"
+            "material-stress",
+            "mask-policy"
         )
     }
 $validSuites = @($baseSuites + @($suiteGroups.Keys))
@@ -170,6 +173,18 @@ if (!(Test-Path -LiteralPath $materialStressBaselineManifestPath)) {
 $materialStressBaselineManifest = Get-Content -Raw -LiteralPath $materialStressBaselineManifestPath | ConvertFrom-Json
 if ($materialStressBaselineManifest.target -ne $Target) {
     throw "DLSS material-stress visual QA baseline target mismatch: expected $Target, manifest has $($materialStressBaselineManifest.target)"
+}
+$maskPolicyBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($MaskPolicyBaselinePath)) {
+    [System.IO.Path]::GetFullPath($MaskPolicyBaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $MaskPolicyBaselinePath))
+}
+if (!(Test-Path -LiteralPath $maskPolicyBaselineManifestPath)) {
+    throw "DLSS mask-policy visual QA baseline manifest not found: $maskPolicyBaselineManifestPath"
+}
+$maskPolicyBaselineManifest = Get-Content -Raw -LiteralPath $maskPolicyBaselineManifestPath | ConvertFrom-Json
+if ($maskPolicyBaselineManifest.target -ne $Target) {
+    throw "DLSS mask-policy visual QA baseline target mismatch: expected $Target, manifest has $($maskPolicyBaselineManifest.target)"
 }
 $dlaaBaselineManifestPath = if ([System.IO.Path]::IsPathRooted($DlaaBaselinePath)) {
     [System.IO.Path]::GetFullPath($DlaaBaselinePath)
@@ -310,11 +325,19 @@ $managedEnvironmentKeys = @(
     "SE_BENCHMARK_SCENE",
     "SE_BENCHMARK_TRANSPARENT_MATERIAL",
     "SE_BENCHMARK_FORWARD_SPECIAL_MATERIAL",
+    "SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL",
+    "SE_BENCHMARK_SPECULAR_MATERIAL",
     "SE_BENCHMARK_SPECULAR_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_ALPHA_MASK_MATERIAL",
+    "SE_BENCHMARK_ALPHA_BLEND_MATERIAL",
     "SE_BENCHMARK_UV_TRANSFORM_MATERIAL",
+    "SE_BENCHMARK_OPACITY_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_OPACITY_BLEND_TEXTURE_MATERIAL",
     "SE_BENCHMARK_DOUBLE_SIDED_MATERIAL",
+    "SE_BENCHMARK_CLEARCOAT_MATERIAL",
     "SE_BENCHMARK_CLEARCOAT_TEXTURE_MATERIAL",
     "SE_BENCHMARK_CLEARCOAT_ROUGHNESS_TEXTURE_MATERIAL",
+    "SE_BENCHMARK_TRANSMISSION_MATERIAL",
     "SE_BENCHMARK_TRANSMISSION_TEXTURE_MATERIAL",
     "SE_BENCHMARK_VOLUME_MATERIAL",
     "SE_BENCHMARK_WARMUP_FRAMES",
@@ -1278,6 +1301,24 @@ $materialStressDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
 $materialStressDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
     $materialStressBaselineManifestPath
 
+$maskPolicyEnvironmentBase = @{
+    "SE_BENCHMARK_SCENE" = "grid"
+    "SE_BENCHMARK_ALPHA_BLEND_MATERIAL" = "1"
+    "SE_BENCHMARK_OPACITY_BLEND_TEXTURE_MATERIAL" = "1"
+    "SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL" = "1"
+    "SE_RENDER_SCALE" = "0.75"
+    "SE_RENDER_SCALE_APPLY" = "1"
+    "SE_TAA" = "1"
+    "SE_TEMPORAL_JITTER" = "1"
+    "SE_RENDER_VIEW" = "deferred-hdr"
+}
+$maskPolicyNativeEnvironment = $maskPolicyEnvironmentBase.Clone()
+$maskPolicyDlssPresentEnvironment = $maskPolicyEnvironmentBase.Clone()
+$maskPolicyDlssPresentEnvironment["SE_UPSCALER_PLUGIN"] = "dlss"
+$maskPolicyDlssPresentEnvironment["SE_DLSS_PRESENT"] = "1"
+$maskPolicyDlssPresentEnvironment["SE_DLSS_REFERENCE_BASELINE_PATH"] =
+    $maskPolicyBaselineManifestPath
+
 function New-QuickNativeMetrics {
     param([Parameter(Mandatory = $true)]$Row)
 
@@ -1295,6 +1336,11 @@ function New-QuickNativeMetrics {
         weightedTranslucencyResolveDraws = "$($Row.weighted_translucency_resolve_draws)"
         frameMaterialCount = "$($Row.frame_material_count)"
         frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
+        texturedMaterials = "$($Row.frame_material_textured_count)"
+        emissiveHintMaterials = "$($Row.frame_material_emissive_hint_count)"
+        alphaMaskMaterials = "$($Row.frame_material_alpha_mask_count)"
+        alphaBlendMaterials = "$($Row.frame_material_alpha_blend_count)"
+        opacityTextureMaterials = "$($Row.frame_material_opacity_texture_count)"
         frameLightTotalCount = "$($Row.frame_light_total_count)"
         frameLocalLightCount = "$($Row.frame_local_light_count)"
         frameRectLightCount = "$($Row.frame_rect_light_count)"
@@ -1343,6 +1389,10 @@ function New-QuickDlssPresentMetrics {
         frameMaterialCount = "$($Row.frame_material_count)"
         frameMaterialTexturedCount = "$($Row.frame_material_textured_count)"
         texturedMaterials = "$($Row.frame_material_textured_count)"
+        emissiveHintMaterials = "$($Row.frame_material_emissive_hint_count)"
+        alphaMaskMaterials = "$($Row.frame_material_alpha_mask_count)"
+        alphaBlendMaterials = "$($Row.frame_material_alpha_blend_count)"
+        opacityTextureMaterials = "$($Row.frame_material_opacity_texture_count)"
         specularTextureMaterials = "$($Row.frame_material_specular_texture_count)"
         uvTransformMaterials = "$($Row.frame_material_uv_transform_count)"
         doubleSidedMaterials = "$($Row.frame_material_double_sided_count)"
@@ -1869,6 +1919,26 @@ if (-not ($selectedSuites -contains "full")) {
             $materialStressLanes.DlssLane
     }
 
+    if ($selectedSuites -contains "mask-policy") {
+        $quickSummary["baselines"]["maskPolicy"] = [ordered]@{
+            manifest = $maskPolicyBaselineManifestPath
+            name = $maskPolicyBaselineManifest.name
+        }
+        $quickSummary["thresholds"]["maskPolicy"] =
+            New-QuickComparisonThresholdSummary -Manifest $maskPolicyBaselineManifest
+        $maskPolicyLanes = Invoke-QuickDlssPairSuite `
+            -NativeName "mask_policy_native_deferred_hdr" `
+            -DlssName "mask_policy_dlss_present" `
+            -LaneKey "maskPolicy" `
+            -NativeEnvironment $maskPolicyNativeEnvironment `
+            -DlssEnvironment $maskPolicyDlssPresentEnvironment `
+            -Manifest $maskPolicyBaselineManifest
+        $quickSummary["lanes"]["maskPolicyNative"] =
+            $maskPolicyLanes.NativeLane
+        $quickSummary["lanes"]["maskPolicyDlssPresent"] =
+            $maskPolicyLanes.DlssLane
+    }
+
     $summaryPath = Join-Path $outputRoot "summary.json"
     $quickSummary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
@@ -1922,6 +1992,8 @@ $forwardSpecialNativeBenchmark = Invoke-BenchmarkRun -Name "forward_special_nati
 $forwardSpecialDlssBenchmark = Invoke-BenchmarkRun -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
 $materialStressNativeBenchmark = Invoke-BenchmarkRun -Name "material_stress_native_deferred_hdr" -Environment $materialStressNativeEnvironment
 $materialStressDlssBenchmark = Invoke-BenchmarkRun -Name "material_stress_dlss_present" -Environment $materialStressDlssPresentEnvironment
+$maskPolicyNativeBenchmark = Invoke-BenchmarkRun -Name "mask_policy_native_deferred_hdr" -Environment $maskPolicyNativeEnvironment
+$maskPolicyDlssBenchmark = Invoke-BenchmarkRun -Name "mask_policy_dlss_present" -Environment $maskPolicyDlssPresentEnvironment
 
 $nativeRow = $nativeBenchmark.LastRow
 $dlssRow = $dlssBenchmark.LastRow
@@ -1938,6 +2010,8 @@ $forwardSpecialNativeRow = $forwardSpecialNativeBenchmark.LastRow
 $forwardSpecialDlssRow = $forwardSpecialDlssBenchmark.LastRow
 $materialStressNativeRow = $materialStressNativeBenchmark.LastRow
 $materialStressDlssRow = $materialStressDlssBenchmark.LastRow
+$maskPolicyNativeRow = $maskPolicyNativeBenchmark.LastRow
+$maskPolicyDlssRow = $maskPolicyDlssBenchmark.LastRow
 if ($nativeRow.framegraph_validation_issues -ne "0") {
     throw "Native frame graph validation issues: $($nativeRow.framegraph_validation_issues)"
 }
@@ -2386,6 +2460,14 @@ if ($materialStressDlssRow.frame_material_specular_texture_count -ne $materialSt
     $materialStressDlssRow.frame_material_textured_count -ne $materialStressBaselineManifest.expected.dlssPresent.texturedMaterials) {
     throw "Material-stress DLSS material counter mismatch"
 }
+$maskPolicyNativeMetrics = Assert-QuickNativeRow `
+    -Name "maskPolicy.native" `
+    -Row $maskPolicyNativeRow `
+    -Expected $maskPolicyBaselineManifest.expected.native
+$maskPolicyDlssMetrics = Assert-QuickDlssPresentRow `
+    -Name "maskPolicy.dlssPresent" `
+    -Row $maskPolicyDlssRow `
+    -Expected $maskPolicyBaselineManifest.expected.dlssPresent
 
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment
 $dlssImage = Capture-WindowImage -Name "dlss_present" -Environment $dlssPresentEnvironment
@@ -2421,6 +2503,8 @@ $forwardSpecialNativeImage = Capture-WindowImage -Name "forward_special_native_d
 $forwardSpecialDlssImage = Capture-WindowImage -Name "forward_special_dlss_present" -Environment $forwardSpecialDlssPresentEnvironment
 $materialStressNativeImage = Capture-WindowImage -Name "material_stress_native_deferred_hdr" -Environment $materialStressNativeEnvironment
 $materialStressDlssImage = Capture-WindowImage -Name "material_stress_dlss_present" -Environment $materialStressDlssPresentEnvironment
+$maskPolicyNativeImage = Capture-WindowImage -Name "mask_policy_native_deferred_hdr" -Environment $maskPolicyNativeEnvironment
+$maskPolicyDlssImage = Capture-WindowImage -Name "mask_policy_dlss_present" -Environment $maskPolicyDlssPresentEnvironment
 $nativeImageStats = Get-ImageVariationStats -Path $nativeImage
 $dlssImageStats = Get-ImageVariationStats -Path $dlssImage
 $dlaaNativeImageStats = Get-ImageVariationStats -Path $dlaaNativeImage
@@ -2447,6 +2531,8 @@ $forwardSpecialNativeImageStats = Get-ImageVariationStats -Path $forwardSpecialN
 $forwardSpecialDlssImageStats = Get-ImageVariationStats -Path $forwardSpecialDlssImage
 $materialStressNativeImageStats = Get-ImageVariationStats -Path $materialStressNativeImage
 $materialStressDlssImageStats = Get-ImageVariationStats -Path $materialStressDlssImage
+$maskPolicyNativeImageStats = Get-ImageVariationStats -Path $maskPolicyNativeImage
+$maskPolicyDlssImageStats = Get-ImageVariationStats -Path $maskPolicyDlssImage
 $comparison = Compare-Images -A $nativeImage -B $dlssImage
 $dlaaComparison = Compare-Images -A $dlaaNativeImage -B $dlaaImage
 $defaultSceneDlaaComparison =
@@ -2460,6 +2546,7 @@ $importedDynamicDlaaObjectMotionSequenceComparison =
 $wboitComparison = Compare-Images -A $wboitNativeImage -B $wboitDlssImage
 $forwardSpecialComparison = Compare-Images -A $forwardSpecialNativeImage -B $forwardSpecialDlssImage
 $materialStressComparison = Compare-Images -A $materialStressNativeImage -B $materialStressDlssImage
+$maskPolicyComparison = Compare-Images -A $maskPolicyNativeImage -B $maskPolicyDlssImage
 
 $nativePostSource =
     "$($nativeRow.temporal_upscale_post_source_requested)/$($nativeRow.temporal_upscale_post_source_active)/$($nativeRow.temporal_upscale_post_source_fallback_reason)"
@@ -2983,6 +3070,18 @@ Assert-BaselineRange `
     -Actual $materialStressComparison.MaxDelta `
     -Min 0 `
     -Max $materialStressBaselineManifest.thresholds.comparisonMaxDeltaMax
+Assert-QuickImageStats `
+    -Name "maskPolicy.native" `
+    -Stats $maskPolicyNativeImageStats `
+    -Manifest $maskPolicyBaselineManifest
+Assert-QuickImageStats `
+    -Name "maskPolicy.dlssPresent" `
+    -Stats $maskPolicyDlssImageStats `
+    -Manifest $maskPolicyBaselineManifest
+Assert-QuickComparison `
+    -Name "maskPolicy" `
+    -Comparison $maskPolicyComparison `
+    -Manifest $maskPolicyBaselineManifest
 
 $summary = [pscustomobject]@{
     target = $Target
@@ -2998,6 +3097,8 @@ $summary = [pscustomobject]@{
         forwardSpecialName = $forwardSpecialBaselineManifest.name
         materialStressManifest = $materialStressBaselineManifestPath
         materialStressName = $materialStressBaselineManifest.name
+        maskPolicyManifest = $maskPolicyBaselineManifestPath
+        maskPolicyName = $maskPolicyBaselineManifest.name
         dlaaManifest = $dlaaBaselineManifestPath
         dlaaName = $dlaaBaselineManifest.name
         defaultSceneDlaaManifest = $defaultSceneDlaaBaselineManifestPath
@@ -3033,6 +3134,11 @@ $summary = [pscustomobject]@{
         materialStressComparisonMeanDeltaMin = [double]$materialStressBaselineManifest.thresholds.comparisonMeanDeltaMin
         materialStressComparisonMeanDeltaMax = [double]$materialStressBaselineManifest.thresholds.comparisonMeanDeltaMax
         materialStressComparisonMaxDeltaMax = [int]$materialStressBaselineManifest.thresholds.comparisonMaxDeltaMax
+        maskPolicyComparisonChangedPixelsMin = [int]$maskPolicyBaselineManifest.thresholds.comparisonChangedPixelsMin
+        maskPolicyComparisonChangedPixelsMax = [int]$maskPolicyBaselineManifest.thresholds.comparisonChangedPixelsMax
+        maskPolicyComparisonMeanDeltaMin = [double]$maskPolicyBaselineManifest.thresholds.comparisonMeanDeltaMin
+        maskPolicyComparisonMeanDeltaMax = [double]$maskPolicyBaselineManifest.thresholds.comparisonMeanDeltaMax
+        maskPolicyComparisonMaxDeltaMax = [int]$maskPolicyBaselineManifest.thresholds.comparisonMaxDeltaMax
         dlaaComparisonChangedPixelsMin = [int]$dlaaBaselineManifest.thresholds.comparisonChangedPixelsMin
         dlaaComparisonChangedPixelsMax = [int]$dlaaBaselineManifest.thresholds.comparisonChangedPixelsMax
         dlaaComparisonMeanDeltaMin = [double]$dlaaBaselineManifest.thresholds.comparisonMeanDeltaMin
@@ -3292,12 +3398,29 @@ $summary = [pscustomobject]@{
         materialCounters = "specTex=$($materialStressDlssRow.frame_material_specular_texture_count),uv=$($materialStressDlssRow.frame_material_uv_transform_count),double=$($materialStressDlssRow.frame_material_double_sided_count),clearcoatTex=$($materialStressDlssRow.frame_material_clearcoat_texture_count),clearcoatRoughTex=$($materialStressDlssRow.frame_material_clearcoat_roughness_texture_count),transTex=$($materialStressDlssRow.frame_material_transmission_texture_count),volume=$($materialStressDlssRow.frame_material_volume_count)"
         imageStats = $materialStressDlssImageStats
     }
+    maskPolicyNative = [pscustomobject]@{
+        csv = $maskPolicyNativeBenchmark.CsvPath
+        image = $maskPolicyNativeImage
+        columns = "$($maskPolicyNativeBenchmark.HeaderColumns)/$($maskPolicyNativeBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$maskPolicyNativeRow.framegraph_validation_issues
+        metrics = $maskPolicyNativeMetrics
+        imageStats = $maskPolicyNativeImageStats
+    }
+    maskPolicyDlssPresent = [pscustomobject]@{
+        csv = $maskPolicyDlssBenchmark.CsvPath
+        image = $maskPolicyDlssImage
+        columns = "$($maskPolicyDlssBenchmark.HeaderColumns)/$($maskPolicyDlssBenchmark.LastColumns)"
+        framegraphValidationIssues = [int]$maskPolicyDlssRow.framegraph_validation_issues
+        metrics = $maskPolicyDlssMetrics
+        imageStats = $maskPolicyDlssImageStats
+    }
     comparison = $comparison
     dlaaComparison = $dlaaComparison
     defaultSceneDlaaComparison = $defaultSceneDlaaComparison
     wboitComparison = $wboitComparison
     forwardSpecialComparison = $forwardSpecialComparison
     materialStressComparison = $materialStressComparison
+    maskPolicyComparison = $maskPolicyComparison
 }
 
 $summaryPath = Join-Path $outputRoot "summary.json"
@@ -3324,3 +3447,5 @@ Write-Host "  forward: $forwardSpecialDlssImage"
 Write-Host "  fdiff: sampled=$($forwardSpecialComparison.SampledPixels) changed=$($forwardSpecialComparison.ChangedPixels) mean=$($forwardSpecialComparison.MeanDelta) max=$($forwardSpecialComparison.MaxDelta)"
 Write-Host "  material: $materialStressDlssImage"
 Write-Host "  mdiff: sampled=$($materialStressComparison.SampledPixels) changed=$($materialStressComparison.ChangedPixels) mean=$($materialStressComparison.MeanDelta) max=$($materialStressComparison.MaxDelta)"
+Write-Host "  mask-policy: $maskPolicyDlssImage"
+Write-Host "  maskdiff: sampled=$($maskPolicyComparison.SampledPixels) changed=$($maskPolicyComparison.ChangedPixels) mean=$($maskPolicyComparison.MeanDelta) max=$($maskPolicyComparison.MaxDelta)"
