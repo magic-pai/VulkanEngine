@@ -1364,6 +1364,30 @@ std::filesystem::path TemporalUpscalerSdkRootFromEnvironment() {
     return value.empty() ? std::filesystem::path{} : std::filesystem::path(value);
 }
 
+std::filesystem::path DlssReferenceBaselinePathFromEnvironment() {
+    std::string value = ReadEnvironmentString("SE_DLSS_REFERENCE_BASELINE_PATH");
+    if (value.empty()) {
+        value = ReadEnvironmentString("SE_DLSS_VISUAL_BASELINE_PATH");
+    }
+    return std::filesystem::path(value);
+}
+
+bool DlssReferenceBaselineReadyFromEnvironment() {
+    const std::filesystem::path baselinePath =
+        DlssReferenceBaselinePathFromEnvironment();
+    if (baselinePath.empty()) {
+        return false;
+    }
+
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(baselinePath, error) || error) {
+        return false;
+    }
+
+    const auto size = std::filesystem::file_size(baselinePath, error);
+    return !error && size > 0u;
+}
+
 TemporalUpscalerDlssQualityMode TemporalUpscalerDlssQualityModeFromEnvironment() {
     std::string value = ReadEnvironmentString("SE_DLSS_QUALITY");
     if (value.empty()) {
@@ -6727,7 +6751,8 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
     state.dlssQualityTransparencyMaskReady = false;
     state.dlssQualityExposurePolicyReady = true;
     state.dlssQualityPostOrderingReady = false;
-    state.dlssQualityReferenceBaselineReady = false;
+    state.dlssQualityReferenceBaselineReady =
+        DlssReferenceBaselineReadyFromEnvironment();
     state.dlssQualityRequiredMask = kDlssQualityRequiredMask;
     state.dlssQualityReadyMask =
         (state.dlssQualityEvaluateOutputReady ? kDlssQualityEvaluateOutputBit : 0u) |

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "name": "dlss_visual_qa_grid_deferred_hdr_render_scale_075",
+  "target": "SelfEngineForward3D",
+  "scene": "grid",
+  "description": "Reference contract for the experimental DLSS-present visual QA path. Runtime uses this manifest as the reference-baseline readiness token; Test-DlssVisualQa.ps1 validates the current CSV and screenshot metrics against the thresholds below.",
+  "environment": {
+    "native": {
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_RENDER_VIEW": "deferred-hdr"
+    },
+    "dlssPresent": {
+      "SE_RENDER_SCALE": "0.75",
+      "SE_RENDER_SCALE_APPLY": "1",
+      "SE_TAA": "1",
+      "SE_TEMPORAL_JITTER": "1",
+      "SE_UPSCALER_PLUGIN": "dlss",
+      "SE_DLSS_PRESENT": "1"
+    }
+  },
+  "expected": {
+    "native": {
+      "postSource": "0/0/1",
+      "qualityGate": "0/0/1"
+    },
+    "dlssPresent": {
+      "evaluateOutput": "1/1",
+      "postSource": "1/1/0",
+      "qualityGate": "1/1/0",
+      "qualityMasks": "255/255/0",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1"
+    }
+  },
+  "thresholds": {
+    "minChangedPixels": 512,
+    "maxMeanDelta": 160.0,
+    "comparisonChangedPixelsMin": 512,
+    "comparisonChangedPixelsMax": 12000,
+    "comparisonMeanDeltaMin": 0.0,
+    "comparisonMeanDeltaMax": 160.0,
+    "comparisonMaxDeltaMax": 765,
+    "centralDifferentPixelsMin": 1024
+  },
+  "baselineSource": {
+    "capturedAt": "2026-07-04T19:40:07+08:00",
+    "nativeColumns": "769/769",
+    "dlssColumns": "769/769",
+    "comparisonChangedPixels": 3501,
+    "comparisonMeanDelta": 22.748,
+    "comparisonMaxDelta": 580
+  }
+}

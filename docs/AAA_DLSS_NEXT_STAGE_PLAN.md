@@ -102,15 +102,15 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.5: object motion-vector correctness for DLSS/TAA quality.
-Slice 4.4 added neutral reactive/transparency mask carriers and binds them to
-the DLSS evaluate call, so the production quality gate now blocks on object
-motion vectors and stable reference baselines rather than missing mask inputs.
-The next slice should make static and animated mesh velocity trustworthy across
-Forward 3D, GBuffer, and residual/transparent paths by storing previous object
-transforms, emitting per-object velocity where geometry is rendered, and adding
-debug/CSV evidence. Do not expand into Frame Generation, Ray Reconstruction,
-Streamline interposition, or default presentation changes yet.
+Implement Slice 4.7: broaden DLSS production-quality coverage beyond the
+current opaque deferred grid baseline. Slice 4.6 proves the experimental
+DLSS-present route can pass the production-quality gate for the controlled grid
+scene when the renderer-owned baseline manifest is present. The next slice
+should extend coverage to transparent/WBOIT, forward-special residuals, imported
+model/material stress content, and stricter per-scene visual baselines before
+DLSS is considered a default presentation path. Do not expand into Frame
+Generation, Ray Reconstruction, Streamline interposition, or default
+presentation changes yet.
 
 ## Slice 4.4 Execution Plan
 
@@ -744,3 +744,79 @@ after the evaluate contract is stable.
   production-quality gate. Production DLSS image quality is still intentionally
   blocked on object motion vectors and stable visual baselines, so the next
   slice should focus on previous-transform/object-velocity correctness.
+
+## Slice 4.5 Execution Evidence
+
+- Added opaque 3D object-motion readiness for the DLSS quality gate.
+  `RenderCommand` now carries `previousModel`, the 3D render-queue cache seeds
+  it from the previous command model when a renderable identity persists, and
+  scene-queue reuse keeps static commands neutral by copying current model into
+  previous model.
+- Expanded `ObjectPushConstants` and every shader `ObjectPushConstants` block
+  with `previousModel`, then updated `gbuffer_3d.vert` so previous clip
+  positions are computed from the previous object transform instead of the
+  current transform.
+- Recomputed DLSS object-motion readiness after GBuffer, WBOIT, and
+  forward-residual command splitting. The gate only marks object motion ready
+  when the current 3D frame is covered by opaque GBuffer velocity with no
+  transparent or forward-special gap.
+- Verification commands:
+  - `_quick_build.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  - Invalid-SDK benchmark:
+    `out/benchmarks/aaa_dlss_object_velocity_invalid_sdk_smoke.csv`
+- Latest visual-QA evidence reports native quality gate `0/0/1`; DLSS-present
+  evaluate/output `1/1`, post source `1/1/0`, quality gate `1/0/9`, quality
+  masks `255/127/128`, and per-input readiness
+  `output/camera/object/reactive/transparency/exposure/post/baseline =
+  1/1/1/1/1/1/1/0`.
+- The paired screenshots are `1038x614`, both nonblank, and the comparison
+  samples 14352 pixels with 3501 changed pixels, mean RGB delta `22.748`, and
+  max delta `580`.
+- The invalid-SDK smoke preserves deterministic fallback with package/runtime
+  fallback `3/3`, post source `1/0/3`, and 0 frame-graph validation issues.
+- This removes the core opaque object-motion blocker. Production readiness is
+  still blocked by reference-baseline evidence and broader content coverage.
+
+## Slice 4.6 Execution Evidence
+
+- Added a renderer-owned DLSS visual-QA baseline manifest at
+  `docs/reference_baselines/dlss_visual_qa_baseline.json`. The manifest records
+  the controlled grid-scene environment, expected native/DLSS quality-gate
+  states, and screenshot comparison thresholds for the experimental
+  DLSS-present route.
+- Added runtime reference-baseline readiness through explicit
+  `SE_DLSS_REFERENCE_BASELINE_PATH` / `SE_DLSS_VISUAL_BASELINE_PATH` values. The
+  renderer only treats the reference-baseline input as ready when the provided
+  manifest path exists as a non-empty regular file; `Test-DlssVisualQa.ps1`
+  supplies the controlled grid-scene manifest path.
+- Updated `scripts/Test-DlssVisualQa.ps1` to require the baseline manifest,
+  pass its path into the DLSS-present benchmark environment, assert that the
+  production DLSS quality gate passes, and validate current CSV/screenshot
+  metrics against the manifest thresholds.
+- Verification commands:
+  - `_quick_build.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+  - Invalid-SDK benchmark:
+    `out/benchmarks/aaa_dlss_reference_baseline_invalid_sdk_smoke.csv`
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/summary.json` reports the baseline
+  manifest path, matching 769-column rows, and 0 frame-graph validation issues.
+  Native remains post source `0/0/1` and quality gate `0/0/1`. DLSS-present now
+  reports evaluate/output `1/1`, post source `1/1/0`, production quality gate
+  `1/1/0`, quality masks `255/255/0`, and per-input readiness
+  `output/camera/object/reactive/transparency/exposure/post/baseline =
+  1/1/1/1/1/1/1/1`.
+- The latest paired screenshots are `1038x614`, both nonblank, and the
+  comparison samples 14352 pixels with 3492 changed pixels, mean RGB delta
+  `22.9727`, and max delta `582`, all within the baseline manifest thresholds.
+- The invalid-SDK smoke preserves deterministic fallback even with the baseline
+  manifest present: package/runtime fallback `3/3`, DLSS output ready `0`, post
+  source `1/0/3`, quality gate `1/0/2`, reference-baseline ready `1`, and 0
+  frame-graph validation issues.
+- This proves the controlled opaque deferred grid scene can pass the DLSS
+  production-quality gate. It is not yet a default presentation change or a
+  broad-content production claim; transparent/WBOIT, forward-special residuals,
+  animated/skinned/imported assets, and stricter per-scene baselines remain the
+  next coverage work.

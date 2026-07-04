@@ -7,6 +7,7 @@ param(
     [int]$CaptureDelaySeconds = 8,
     [int]$MinChangedPixels = 512,
     [double]$MaxMeanDelta = 160.0,
+    [string]$BaselinePath = "docs\reference_baselines\dlss_visual_qa_baseline.json",
     [switch]$SkipBuild
 )
 
@@ -36,6 +37,18 @@ if (!(Test-Path -LiteralPath $exePath)) {
 
 $outputRoot = Join-Path $repoRoot $OutputDirectory
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+$baselineManifestPath = if ([System.IO.Path]::IsPathRooted($BaselinePath)) {
+    [System.IO.Path]::GetFullPath($BaselinePath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $BaselinePath))
+}
+if (!(Test-Path -LiteralPath $baselineManifestPath)) {
+    throw "DLSS visual QA baseline manifest not found: $baselineManifestPath"
+}
+$baselineManifest = Get-Content -Raw -LiteralPath $baselineManifestPath | ConvertFrom-Json
+if ($baselineManifest.target -ne $Target) {
+    throw "DLSS visual QA baseline target mismatch: expected $Target, manifest has $($baselineManifest.target)"
+}
 
 Add-Type -AssemblyName System.Drawing
 if (-not ("SelfEngineVisualQaWin32" -as [type])) {
@@ -107,6 +120,8 @@ $managedEnvironmentKeys = @(
     "SE_TEMPORAL_UPSCALE_PRESENT",
     "SE_TEMPORAL_UPSCALE_OUTPUT_PRESENT",
     "SE_UPSCALER_PRESENT",
+    "SE_DLSS_REFERENCE_BASELINE_PATH",
+    "SE_DLSS_VISUAL_BASELINE_PATH",
     "SE_NVIDIA_DLSS_SDK_DIR",
     "SE_DLSS_SDK_DIR",
     "SE_BLOOM"
@@ -440,6 +455,31 @@ function Compare-Images {
     }
 }
 
+function Assert-BaselineText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Actual,
+        [Parameter(Mandatory = $true)][string]$Expected
+    )
+
+    if ($Actual -ne $Expected) {
+        throw "Baseline mismatch for $Name`: expected '$Expected', got '$Actual'"
+    }
+}
+
+function Assert-BaselineRange {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][double]$Actual,
+        [Parameter(Mandatory = $true)][double]$Min,
+        [Parameter(Mandatory = $true)][double]$Max
+    )
+
+    if ($Actual -lt $Min -or $Actual -gt $Max) {
+        throw "Baseline range mismatch for $Name`: expected [$Min, $Max], got $Actual"
+    }
+}
+
 $nativeEnvironment = @{
     "SE_RENDER_SCALE" = "0.75"
     "SE_RENDER_SCALE_APPLY" = "1"
@@ -454,6 +494,7 @@ $dlssPresentEnvironment = @{
     "SE_TEMPORAL_JITTER" = "1"
     "SE_UPSCALER_PLUGIN" = "dlss"
     "SE_DLSS_PRESENT" = "1"
+    "SE_DLSS_REFERENCE_BASELINE_PATH" = $baselineManifestPath
 }
 
 $nativeBenchmark = Invoke-BenchmarkRun -Name "native_deferred_hdr" -Environment $nativeEnvironment
@@ -485,8 +526,9 @@ if ($nativeRow.temporal_upscaler_dlss_quality_gate_requested -ne "0" -or
 if ($dlssRow.temporal_upscaler_dlss_quality_gate_requested -ne "1") {
     throw "DLSS-present run did not request the DLSS quality gate"
 }
-if ($dlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "0") {
-    throw "DLSS-present run unexpectedly passed production DLSS quality gate"
+if ($dlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
+    $dlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
+    throw "DLSS-present run did not pass production DLSS quality gate"
 }
 if ($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready -ne "1" -or
     $dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready -ne "1") {
@@ -499,19 +541,12 @@ if ($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready -ne "1" -or
 if ($dlssRow.temporal_upscaler_dlss_quality_object_motion_ready -ne "1") {
     throw "DLSS-present quality gate did not observe object motion vectors"
 }
+if ($dlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready -ne "1") {
+    throw "DLSS-present quality gate did not observe the reference baseline"
+}
 $dlssQualityBlockerMask = [int]$dlssRow.temporal_upscaler_dlss_quality_blocker_mask
-if ($dlssQualityBlockerMask -le 0) {
-    throw "DLSS-present quality gate did not report remaining blockers"
-}
-if (($dlssQualityBlockerMask -band 128) -eq 0) {
-    throw "DLSS-present quality gate did not preserve reference-baseline blocker"
-}
-if (($dlssQualityBlockerMask -band 4) -ne 0) {
-    throw "DLSS-present quality gate still reports object-motion blocker"
-}
-if (($dlssQualityBlockerMask -band 8) -ne 0 -or
-    ($dlssQualityBlockerMask -band 16) -ne 0) {
-    throw "DLSS-present quality gate still reports mask-carrier blockers"
+if ($dlssQualityBlockerMask -ne 0) {
+    throw "DLSS-present quality gate still reports blockers: $dlssQualityBlockerMask"
 }
 
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment
@@ -526,20 +561,78 @@ if ($comparison.MeanDelta -gt $MaxMeanDelta) {
     throw "Native/DLSS comparison mean delta $($comparison.MeanDelta) exceeded $MaxMeanDelta"
 }
 
+$nativePostSource =
+    "$($nativeRow.temporal_upscale_post_source_requested)/$($nativeRow.temporal_upscale_post_source_active)/$($nativeRow.temporal_upscale_post_source_fallback_reason)"
+$nativeQualityGate =
+    "$($nativeRow.temporal_upscaler_dlss_quality_gate_requested)/$($nativeRow.temporal_upscaler_dlss_quality_gate_ready)/$($nativeRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$dlssEvaluateOutput =
+    "$($dlssRow.temporal_upscaler_dlss_evaluate_result)/$($dlssRow.temporal_upscaler_dlss_output_ready)"
+$dlssPostSource =
+    "$($dlssRow.temporal_upscale_post_source_requested)/$($dlssRow.temporal_upscale_post_source_active)/$($dlssRow.temporal_upscale_post_source_fallback_reason)"
+$dlssQualityGate =
+    "$($dlssRow.temporal_upscaler_dlss_quality_gate_requested)/$($dlssRow.temporal_upscaler_dlss_quality_gate_ready)/$($dlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+$dlssQualityMasks =
+    "$($dlssRow.temporal_upscaler_dlss_quality_required_mask)/$($dlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($dlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
+$dlssQualityInputs =
+    "output/camera/object/reactive/transparency/exposure/post/baseline=$($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($dlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+
+Assert-BaselineText -Name "native.postSource" -Actual $nativePostSource -Expected $baselineManifest.expected.native.postSource
+Assert-BaselineText -Name "native.qualityGate" -Actual $nativeQualityGate -Expected $baselineManifest.expected.native.qualityGate
+Assert-BaselineText -Name "dlssPresent.evaluateOutput" -Actual $dlssEvaluateOutput -Expected $baselineManifest.expected.dlssPresent.evaluateOutput
+Assert-BaselineText -Name "dlssPresent.postSource" -Actual $dlssPostSource -Expected $baselineManifest.expected.dlssPresent.postSource
+Assert-BaselineText -Name "dlssPresent.qualityGate" -Actual $dlssQualityGate -Expected $baselineManifest.expected.dlssPresent.qualityGate
+Assert-BaselineText -Name "dlssPresent.qualityMasks" -Actual $dlssQualityMasks -Expected $baselineManifest.expected.dlssPresent.qualityMasks
+Assert-BaselineText -Name "dlssPresent.qualityInputs" -Actual $dlssQualityInputs -Expected $baselineManifest.expected.dlssPresent.qualityInputs
+Assert-BaselineRange `
+    -Name "native.imageStats.differentPixels" `
+    -Actual $nativeImageStats.DifferentPixels `
+    -Min $baselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $nativeImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "dlssPresent.imageStats.differentPixels" `
+    -Actual $dlssImageStats.DifferentPixels `
+    -Min $baselineManifest.thresholds.centralDifferentPixelsMin `
+    -Max $dlssImageStats.SampledPixels
+Assert-BaselineRange `
+    -Name "comparison.changedPixels" `
+    -Actual $comparison.ChangedPixels `
+    -Min $baselineManifest.thresholds.comparisonChangedPixelsMin `
+    -Max $baselineManifest.thresholds.comparisonChangedPixelsMax
+Assert-BaselineRange `
+    -Name "comparison.meanDelta" `
+    -Actual $comparison.MeanDelta `
+    -Min $baselineManifest.thresholds.comparisonMeanDeltaMin `
+    -Max $baselineManifest.thresholds.comparisonMeanDeltaMax
+Assert-BaselineRange `
+    -Name "comparison.maxDelta" `
+    -Actual $comparison.MaxDelta `
+    -Min 0 `
+    -Max $baselineManifest.thresholds.comparisonMaxDeltaMax
+
 $summary = [pscustomobject]@{
     target = $Target
     generatedAt = (Get-Date).ToString("o")
+    baseline = [pscustomobject]@{
+        manifest = $baselineManifestPath
+        name = $baselineManifest.name
+        schemaVersion = [int]$baselineManifest.schemaVersion
+    }
     thresholds = [pscustomobject]@{
         minChangedPixels = $MinChangedPixels
         maxMeanDelta = $MaxMeanDelta
+        comparisonChangedPixelsMin = [int]$baselineManifest.thresholds.comparisonChangedPixelsMin
+        comparisonChangedPixelsMax = [int]$baselineManifest.thresholds.comparisonChangedPixelsMax
+        comparisonMeanDeltaMin = [double]$baselineManifest.thresholds.comparisonMeanDeltaMin
+        comparisonMeanDeltaMax = [double]$baselineManifest.thresholds.comparisonMeanDeltaMax
+        comparisonMaxDeltaMax = [int]$baselineManifest.thresholds.comparisonMaxDeltaMax
     }
     native = [pscustomobject]@{
         csv = $nativeBenchmark.CsvPath
         image = $nativeImage
         columns = "$($nativeBenchmark.HeaderColumns)/$($nativeBenchmark.LastColumns)"
         framegraphValidationIssues = [int]$nativeRow.framegraph_validation_issues
-        postSource = "$($nativeRow.temporal_upscale_post_source_requested)/$($nativeRow.temporal_upscale_post_source_active)/$($nativeRow.temporal_upscale_post_source_fallback_reason)"
-        qualityGate = "$($nativeRow.temporal_upscaler_dlss_quality_gate_requested)/$($nativeRow.temporal_upscaler_dlss_quality_gate_ready)/$($nativeRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
+        postSource = $nativePostSource
+        qualityGate = $nativeQualityGate
         imageStats = $nativeImageStats
     }
     dlssPresent = [pscustomobject]@{
@@ -547,11 +640,11 @@ $summary = [pscustomobject]@{
         image = $dlssImage
         columns = "$($dlssBenchmark.HeaderColumns)/$($dlssBenchmark.LastColumns)"
         framegraphValidationIssues = [int]$dlssRow.framegraph_validation_issues
-        evaluateOutput = "$($dlssRow.temporal_upscaler_dlss_evaluate_result)/$($dlssRow.temporal_upscaler_dlss_output_ready)"
-        postSource = "$($dlssRow.temporal_upscale_post_source_requested)/$($dlssRow.temporal_upscale_post_source_active)/$($dlssRow.temporal_upscale_post_source_fallback_reason)"
-        qualityGate = "$($dlssRow.temporal_upscaler_dlss_quality_gate_requested)/$($dlssRow.temporal_upscaler_dlss_quality_gate_ready)/$($dlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason)"
-        qualityMasks = "$($dlssRow.temporal_upscaler_dlss_quality_required_mask)/$($dlssRow.temporal_upscaler_dlss_quality_ready_mask)/$($dlssRow.temporal_upscaler_dlss_quality_blocker_mask)"
-        qualityInputs = "output/camera/object/reactive/transparency/exposure/post/baseline=$($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready)/$($dlssRow.temporal_upscaler_dlss_quality_camera_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_object_motion_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready)/$($dlssRow.temporal_upscaler_dlss_quality_exposure_policy_ready)/$($dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready)/$($dlssRow.temporal_upscaler_dlss_quality_reference_baseline_ready)"
+        evaluateOutput = $dlssEvaluateOutput
+        postSource = $dlssPostSource
+        qualityGate = $dlssQualityGate
+        qualityMasks = $dlssQualityMasks
+        qualityInputs = $dlssQualityInputs
         imageStats = $dlssImageStats
     }
     comparison = $comparison
