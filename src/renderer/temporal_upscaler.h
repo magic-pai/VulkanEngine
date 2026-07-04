@@ -188,6 +188,8 @@ struct TemporalUpscalerEvaluateRequest {
     TemporalUpscalerVulkanImageResource inputColor{};
     TemporalUpscalerVulkanImageResource inputDepth{};
     TemporalUpscalerVulkanImageResource inputMotionVectors{};
+    TemporalUpscalerVulkanImageResource inputBiasCurrentColorMask{};
+    TemporalUpscalerVulkanImageResource inputTransparencyMask{};
     TemporalUpscalerVulkanImageResource outputColor{};
     VkExtent2D renderExtent{};
     VkExtent2D outputExtent{};
@@ -217,6 +219,8 @@ struct TemporalUpscalerEvaluateStatus {
     u32 evaluateAttempted = 0;
     u32 evaluateResult = 0;
     u32 outputReady = 0;
+    u32 biasCurrentColorMaskReady = 0;
+    u32 transparencyMaskReady = 0;
     u32 renderWidth = 0;
     u32 renderHeight = 0;
     u32 outputWidth = 0;

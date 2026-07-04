@@ -4198,6 +4198,15 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.temporalUpscaleOutputFormat,
             frameStats.temporal.temporalUpscaleOutputWidth,
             frameStats.temporal.temporalUpscaleOutputHeight,
+            m_SceneRenderTargets != nullptr &&
+                frameStats.temporal.temporalUpscalerProviderKind ==
+                    static_cast<u32>(TemporalUpscalerProviderKind::Dlss),
+            m_SceneRenderTargets != nullptr
+                ? m_SceneRenderTargets->DlssBiasCurrentColorMaskFormat()
+                : VK_FORMAT_UNDEFINED,
+            m_SceneRenderTargets != nullptr
+                ? m_SceneRenderTargets->DlssTransparencyMaskFormat()
+                : VK_FORMAT_UNDEFINED,
             frameStats.temporal.dynamicResolutionRequested > 0,
             frameStats.temporal.dynamicResolutionEnabled > 0,
             frameStats.temporal.taauRequested > 0,
@@ -4278,6 +4287,10 @@ void VulkanRenderer::DrawFrame() {
         imageIndex < m_TemporalUpscaleOutputInitialized.size()
             ? m_TemporalUpscaleOutputInitialized[imageIndex]
             : false;
+    const bool dlssMaskInputsInitialized =
+        imageIndex < m_DlssMaskInputsInitialized.size()
+            ? m_DlssMaskInputsInitialized[imageIndex]
+            : false;
     m_CommandBuffer->Record(
         imageIndex,
         *m_RenderPass,
@@ -4333,6 +4346,7 @@ void VulkanRenderer::DrawFrame() {
         &temporalState,
         &temporalUpscaleState,
         temporalUpscaleOutputInitialized,
+        dlssMaskInputsInitialized,
         &temporalUpscalerEvaluateStatus,
         &temporalUpscalePostSourceStatus,
         m_GBufferDebugPipeline.get(),
@@ -4391,6 +4405,12 @@ void VulkanRenderer::DrawFrame() {
         m_TemporalUpscaleOutputInitialized[imageIndex] =
             temporalUpscalerEvaluateStatus.outputReady > 0u;
     }
+    if (imageIndex < m_DlssMaskInputsInitialized.size() &&
+        temporalUpscalerEvaluateStatus.attempted > 0u) {
+        m_DlssMaskInputsInitialized[imageIndex] =
+            temporalUpscalerEvaluateStatus.biasCurrentColorMaskReady > 0u &&
+            temporalUpscalerEvaluateStatus.transparencyMaskReady > 0u;
+    }
     frameStats.temporal.temporalUpscalePostSourceRequested =
         temporalUpscalePostSourceStatus.requested;
     frameStats.temporal.temporalUpscalePostSourceActive =
@@ -4447,6 +4467,10 @@ void VulkanRenderer::DrawFrame() {
         temporalUpscalerEvaluateStatus.sharpness;
     frameStats.temporal.temporalUpscalerDlssQualityEvaluateOutputReady =
         temporalUpscalerEvaluateStatus.outputReady;
+    frameStats.temporal.temporalUpscalerDlssQualityReactiveMaskReady =
+        temporalUpscalerEvaluateStatus.biasCurrentColorMaskReady;
+    frameStats.temporal.temporalUpscalerDlssQualityTransparencyMaskReady =
+        temporalUpscalerEvaluateStatus.transparencyMaskReady;
     frameStats.temporal.temporalUpscalerDlssQualityPostOrderingReady =
         temporalUpscalePostSourceStatus.active;
     FinalizeDlssQualityGateStats(frameStats.temporal);
@@ -4765,6 +4789,10 @@ void VulkanRenderer::CreateSwapchainResources() {
         sceneExtent
     );
     m_TemporalUpscaleOutputInitialized.assign(
+        m_Swapchain->Images().size(),
+        false
+    );
+    m_DlssMaskInputsInitialized.assign(
         m_Swapchain->Images().size(),
         false
     );
@@ -5529,6 +5557,10 @@ void VulkanRenderer::RecreateSwapchain() {
         );
         m_TemporalHistoryColorValid = false;
         m_TemporalUpscaleOutputInitialized.assign(
+            m_Swapchain->Images().size(),
+            false
+        );
+        m_DlssMaskInputsInitialized.assign(
             m_Swapchain->Images().size(),
             false
         );

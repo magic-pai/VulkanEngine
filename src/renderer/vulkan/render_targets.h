@@ -142,6 +142,10 @@ public:
     VkImage HdrSceneColorImage(std::size_t index) const;
     VkImageView TemporalUpscaleOutputView(std::size_t index) const;
     VkImage TemporalUpscaleOutputImage(std::size_t index) const;
+    VkImageView DlssBiasCurrentColorMaskView(std::size_t index) const;
+    VkImage DlssBiasCurrentColorMaskImage(std::size_t index) const;
+    VkImageView DlssTransparencyMaskView(std::size_t index) const;
+    VkImage DlssTransparencyMaskImage(std::size_t index) const;
     VkImageView TemporalHistoryColorView(std::size_t index) const;
     VkImage TemporalHistoryColorImage(std::size_t index) const;
     VkImageView WeightedTranslucencyAccumView(std::size_t index) const;
@@ -157,6 +161,8 @@ public:
     VkImageView GBufferMaterialAuxView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
     VkFormat TemporalUpscaleOutputFormat() const;
+    VkFormat DlssBiasCurrentColorMaskFormat() const;
+    VkFormat DlssTransparencyMaskFormat() const;
     VkFormat TemporalHistoryColorFormat() const;
     VkFormat WeightedTranslucencyAccumFormat() const;
     VkFormat WeightedTranslucencyRevealageFormat() const;
@@ -181,6 +187,7 @@ public:
 
     static constexpr VkFormat kHdrSceneColorFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat kDlssMaskFormat = VK_FORMAT_R8_UNORM;
     static constexpr VkFormat kWeightedTranslucencyAccumFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kWeightedTranslucencyRevealageFormat =
@@ -220,6 +227,8 @@ private:
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalUpscaleOutputImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_DlssBiasCurrentColorMaskImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_DlssTransparencyMaskImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalHistoryColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyAccumImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyRevealageImages;

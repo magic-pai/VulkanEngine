@@ -610,6 +610,7 @@ private:
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
     std::vector<bool> m_TemporalUpscaleOutputInitialized;
+    std::vector<bool> m_DlssMaskInputsInitialized;
 
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;

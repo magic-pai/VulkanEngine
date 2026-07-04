@@ -102,15 +102,42 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.4: DLSS motion-vector and mask carrier hardening. Slice 4.3
-now makes production-quality DLSS readiness explicit through CSV, ImGui,
-FrameGraph, and visual-QA assertions. The current DLSS-present path can render
-and present experimental SR/DLAA output, but the production quality gate still
-blocks on object motion vectors, reactive masks, transparency masks, and stable
-reference baselines. The next slice should remove those blockers one at a time,
-starting with real object motion-vector coverage and placeholder mask resources
-that can be bound to NGX when ready. Do not expand into Frame Generation, Ray
-Reconstruction, Streamline interposition, or default presentation changes yet.
+Implement Slice 4.5: object motion-vector correctness for DLSS/TAA quality.
+Slice 4.4 added neutral reactive/transparency mask carriers and binds them to
+the DLSS evaluate call, so the production quality gate now blocks on object
+motion vectors and stable reference baselines rather than missing mask inputs.
+The next slice should make static and animated mesh velocity trustworthy across
+Forward 3D, GBuffer, and residual/transparent paths by storing previous object
+transforms, emitting per-object velocity where geometry is rendered, and adding
+debug/CSV evidence. Do not expand into Frame Generation, Ray Reconstruction,
+Streamline interposition, or default presentation changes yet.
+
+## Slice 4.4 Execution Plan
+
+Slice 4.4 should remove the reactive/transparency mask blocker without claiming
+production image quality. The first implementation is a neutral carrier: allocate
+input-resolution mask images, clear them to zero each frame, bind them to NGX,
+and report them through the existing quality gate. Material-authored reactive
+coverage can follow after object motion vectors are correct.
+
+1. DLSS mask resources.
+   - Allocate per-frame bias-current-color and transparency mask images in
+     `VulkanSceneRenderTargets` at the active internal render extent.
+   - Use a simple single-channel neutral format and clear both masks to zero
+     before DLSS evaluate.
+
+2. NGX binding.
+   - Extend `TemporalUpscalerEvaluateRequest` with optional mask resources.
+   - Bind the bias-current-color mask to `pInBiasCurrentColorMask`.
+   - Bind the transparency mask to `pInTransparencyMask`.
+   - Keep evaluate tolerant of missing optional masks.
+
+3. Diagnostics and QA.
+   - Update the DLSS quality gate so reactive/transparency readiness reflects
+     the current frame's mask binding.
+   - Update FrameGraph so active DLSS evaluate reads the mask resources.
+   - Update visual QA to require mask readiness while keeping the production
+     gate blocked on object motion vectors and reference baselines.
 
 ## Slice 4.3 Execution Plan
 
@@ -641,6 +668,8 @@ after the evaluate contract is stable.
   - `_quick_build.bat`
   - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
   - Invalid-SDK benchmark:
+    `out/benchmarks/aaa_dlss_mask_carrier_invalid_sdk_smoke.csv`
+  - Invalid-SDK benchmark:
     `out/benchmarks/aaa_dlss_quality_gate_invalid_sdk_smoke.csv`
 - `_quick_build.bat` passes for `SelfEngineForward3D`; the existing MSVC
   runtime-library warning remains.
@@ -666,3 +695,52 @@ after the evaluate contract is stable.
   output from production DLSS image-quality readiness. Production readiness is
   still intentionally blocked on object motion vectors, reactive/transparency
   masks, and stable reference baselines.
+
+## Slice 4.4 Execution Evidence
+
+- Added renderer-owned DLSS mask carriers. `VulkanSceneRenderTargets` now
+  allocates per-frame `DlssBiasCurrentColorMask` and `DlssTransparencyMask`
+  images at the active internal render extent using `R8_UNORM`. The command
+  buffer clears both masks to zero before DLSS evaluate, transitions them
+  through the same NGX-readable path as the other DLSS inputs, and tracks
+  per-swapchain-image initialization.
+- Extended the engine-owned `TemporalUpscalerEvaluateRequest` so DLSS evaluate
+  can receive optional mask resources without leaking NGX details into renderer
+  callers. The compiled NGX path binds the neutral bias-current-color carrier to
+  `pInBiasCurrentColorMask` and the transparency carrier to
+  `pInTransparencyMask`, then reports per-frame binding readiness through
+  `TemporalUpscalerEvaluateStatus`.
+- FrameGraph now records `DlssBiasCurrentColorMask` and
+  `DlssTransparencyMask` as physical per-frame resources only when temporal
+  upscaler evaluate is active, and `TemporalUpscalerEvaluate` reads them in the
+  active DLSS path.
+- Updated `scripts/Test-DlssVisualQa.ps1` so the DLSS-present run must observe
+  reactive/transparency mask readiness while production quality remains blocked
+  on object motion vectors and reference baselines.
+- Verification commands:
+  - `_quick_build.bat`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`
+- `_quick_build.bat` passes for `SelfEngineForward3D`; the existing MSVC
+  runtime-library warning remains.
+- Latest visual-QA evidence:
+  `out/reference_captures/dlss_visual_qa/native_deferred_hdr.csv`,
+  `out/reference_captures/dlss_visual_qa/dlss_present.csv`, and
+  `out/reference_captures/dlss_visual_qa/summary.json` report 769-column rows
+  with 0 frame-graph validation issues.
+- Native reports post source `0/0/1` and quality gate `0/0/1`. DLSS-present
+  reports evaluate/output `1/1`, post source `1/1/0`, quality gate `1/0/4`,
+  quality masks `255/123/132`, and per-input readiness
+  `output/camera/object/reactive/transparency/exposure/post/baseline =
+  1/1/0/1/1/1/1/0`.
+- Screenshot evidence remains nonblank: both captures are `1038x614` with
+  8060/8060 sampled central pixels differing from the sampled background. The
+  paired comparison samples 14352 pixels with 2020 changed pixels, mean RGB
+  delta `5.0435`, and max delta `566`.
+- The invalid-SDK smoke preserves deterministic fallback: package ready `0`,
+  runtime fallback `3`, DLSS output ready `0`, post source requested/active/
+  fallback `1/0/3`, quality gate requested/ready `1/0`, quality masks
+  `255/34/221`, mask readiness `0/0`, and 0 frame-graph validation issues.
+- This removes the reactive/transparency mask-carrier blocker from the DLSS
+  production-quality gate. Production DLSS image quality is still intentionally
+  blocked on object motion vectors and stable visual baselines, so the next
+  slice should focus on previous-transform/object-velocity correctness.

@@ -224,6 +224,10 @@ function Invoke-BenchmarkRun {
 
     $csvPath = Join-Path $outputRoot "$Name.csv"
     $logPath = Join-Path $outputRoot "$Name.log"
+    $errPath = Join-Path $outputRoot "$Name.err.log"
+    Remove-Item -LiteralPath $csvPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $logPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $errPath -ErrorAction SilentlyContinue
     $runEnvironment = $Environment.Clone()
     $runEnvironment["SE_BENCHMARK_SCENE"] = "grid"
     $runEnvironment["SE_BENCHMARK_WARMUP_FRAMES"] = "3"
@@ -231,14 +235,20 @@ function Invoke-BenchmarkRun {
     $runEnvironment["SE_BENCHMARK_CSV"] = $csvPath
 
     Invoke-WithEnvironment -Environment $runEnvironment -Script {
-        & $exePath *> $logPath
-        $exitCode = Get-NativeExitCode
-        if ($exitCode -ne 0) {
-            throw "$Name benchmark failed with exit code $exitCode"
+        $process = Start-Process `
+            -FilePath $exePath `
+            -WorkingDirectory $repoRoot `
+            -PassThru `
+            -Wait `
+            -RedirectStandardOutput $logPath `
+            -RedirectStandardError $errPath
+        if ($process.ExitCode -ne 0) {
+            throw "$Name benchmark failed with exit code $($process.ExitCode)"
         }
     }
 
     Assert-CleanLog -Path $logPath
+    Assert-CleanLog -Path $errPath
     $shape = Assert-CsvShape -Path $csvPath
     return [pscustomobject]@{
         Name = $Name
@@ -259,6 +269,9 @@ function Capture-WindowImage {
     $imagePath = Join-Path $outputRoot "$Name.png"
     $stdoutPath = Join-Path $outputRoot "$Name.capture.out.log"
     $stderrPath = Join-Path $outputRoot "$Name.capture.err.log"
+    Remove-Item -LiteralPath $imagePath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stdoutPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stderrPath -ErrorAction SilentlyContinue
     $runEnvironment = $Environment.Clone()
     $runEnvironment["SE_AUTO_EXIT_FRAMES"] = "900"
 
@@ -479,15 +492,21 @@ if ($dlssRow.temporal_upscaler_dlss_quality_evaluate_output_ready -ne "1" -or
     $dlssRow.temporal_upscaler_dlss_quality_post_ordering_ready -ne "1") {
     throw "DLSS-present quality gate did not observe output/post-ordering readiness"
 }
+if ($dlssRow.temporal_upscaler_dlss_quality_reactive_mask_ready -ne "1" -or
+    $dlssRow.temporal_upscaler_dlss_quality_transparency_mask_ready -ne "1") {
+    throw "DLSS-present quality gate did not observe DLSS mask carriers"
+}
 $dlssQualityBlockerMask = [int]$dlssRow.temporal_upscaler_dlss_quality_blocker_mask
 if ($dlssQualityBlockerMask -le 0) {
     throw "DLSS-present quality gate did not report remaining blockers"
 }
 if (($dlssQualityBlockerMask -band 4) -eq 0 -or
-    ($dlssQualityBlockerMask -band 8) -eq 0 -or
-    ($dlssQualityBlockerMask -band 16) -eq 0 -or
     ($dlssQualityBlockerMask -band 128) -eq 0) {
-    throw "DLSS-present quality gate did not preserve object/mask/baseline blockers"
+    throw "DLSS-present quality gate did not preserve object-motion/baseline blockers"
+}
+if (($dlssQualityBlockerMask -band 8) -ne 0 -or
+    ($dlssQualityBlockerMask -band 16) -ne 0) {
+    throw "DLSS-present quality gate still reports mask-carrier blockers"
 }
 
 $nativeImage = Capture-WindowImage -Name "native_deferred_hdr" -Environment $nativeEnvironment

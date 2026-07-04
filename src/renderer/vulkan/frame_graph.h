@@ -387,6 +387,9 @@ struct CurrentVulkanFrameGraphInputs {
     VkFormat temporalUpscaleOutputFormat = VK_FORMAT_UNDEFINED;
     u32 temporalUpscaleOutputWidth = 0;
     u32 temporalUpscaleOutputHeight = 0;
+    bool dlssMaskInputsAllocated = false;
+    VkFormat dlssBiasCurrentColorMaskFormat = VK_FORMAT_UNDEFINED;
+    VkFormat dlssTransparencyMaskFormat = VK_FORMAT_UNDEFINED;
     bool dynamicResolutionRequested = false;
     bool dynamicResolutionEnabled = false;
     bool taauRequested = false;

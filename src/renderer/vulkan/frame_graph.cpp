@@ -1021,6 +1021,8 @@ std::string_view VulkanFormatName(VkFormat format) {
         return "R8G8B8A8_SRGB";
     case VK_FORMAT_R8G8B8A8_UNORM:
         return "R8G8B8A8_UNORM";
+    case VK_FORMAT_R8_UNORM:
+        return "R8_UNORM";
     case VK_FORMAT_R16G16B16A16_SFLOAT:
         return "R16G16B16A16_SFLOAT";
     case VK_FORMAT_R16_SFLOAT:
@@ -1927,6 +1929,26 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             temporalUpscaleOutputScale
         );
     }
+    if (inputs.dlssMaskInputsAllocated && inputs.temporalUpscaleEnabled) {
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "DlssBiasCurrentColorMask",
+            VulkanFormatName(inputs.dlssBiasCurrentColorMaskFormat),
+            "sampled, transfer-cleared neutral bias-current-color mask",
+            sceneExtentScale
+        );
+        AppendResource(
+            plan,
+            RenderGraphResourceStatus::Physical,
+            RenderGraphResourceLifetime::PerFrame,
+            "DlssTransparencyMask",
+            VulkanFormatName(inputs.dlssTransparencyMaskFormat),
+            "sampled, transfer-cleared neutral transparency mask",
+            sceneExtentScale
+        );
+    }
     if (inputs.lightTileCullComputeEnabled) {
         AppendResource(
             plan,
@@ -2221,7 +2243,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassQueue::Compute,
             "TemporalUpscalerEvaluate",
             inputs.temporalUpscaleEnabled
-                ? "HDRSceneColor, SceneDepth, Velocity, TemporalFrameState"
+                ? inputs.dlssMaskInputsAllocated
+                    ? "HDRSceneColor, SceneDepth, Velocity, DlssBiasCurrentColorMask, DlssTransparencyMask, TemporalFrameState"
+                    : "HDRSceneColor, SceneDepth, Velocity, TemporalFrameState"
                 : "",
             inputs.temporalUpscaleEnabled ? "TemporalUpscaleOutput" : "",
             inputs.temporalUpscaleEnabled
@@ -2239,7 +2263,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderFramePassQueue::Graphics,
             "TemporalUpscalerQualityInputs",
             inputs.temporalUpscalerDlssQualityGateReady
-                ? "TemporalUpscaleOutput, Velocity, TemporalFrameState"
+                ? inputs.dlssMaskInputsAllocated
+                    ? "TemporalUpscaleOutput, Velocity, DlssBiasCurrentColorMask, DlssTransparencyMask, TemporalFrameState"
+                    : "TemporalUpscaleOutput, Velocity, TemporalFrameState"
                 : "",
             "",
             inputs.temporalUpscalerDlssQualityGateReady

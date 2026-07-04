@@ -1017,6 +1017,22 @@ TemporalUpscalerEvaluateStatus EvaluateCompiledDlssRuntime(
     NVSDK_NGX_Resource_VK depthResource = NgxImageResource(request.inputDepth);
     NVSDK_NGX_Resource_VK motionResource =
         NgxImageResource(request.inputMotionVectors);
+    NVSDK_NGX_Resource_VK biasCurrentColorMaskResource{};
+    NVSDK_NGX_Resource_VK transparencyMaskResource{};
+    const bool biasCurrentColorMaskReady =
+        IsValidEvaluateImage(request.inputBiasCurrentColorMask);
+    const bool transparencyMaskReady =
+        IsValidEvaluateImage(request.inputTransparencyMask);
+    if (biasCurrentColorMaskReady) {
+        biasCurrentColorMaskResource =
+            NgxImageResource(request.inputBiasCurrentColorMask);
+        status.biasCurrentColorMaskReady = 1u;
+    }
+    if (transparencyMaskReady) {
+        transparencyMaskResource =
+            NgxImageResource(request.inputTransparencyMask);
+        status.transparencyMaskReady = 1u;
+    }
     NVSDK_NGX_Resource_VK outputResource = NgxImageResource(request.outputColor);
 
     NVSDK_NGX_VK_DLSS_Eval_Params evalParams{};
@@ -1025,6 +1041,10 @@ TemporalUpscalerEvaluateStatus EvaluateCompiledDlssRuntime(
     evalParams.Feature.InSharpness = request.sharpness;
     evalParams.pInDepth = &depthResource;
     evalParams.pInMotionVectors = &motionResource;
+    evalParams.pInBiasCurrentColorMask =
+        biasCurrentColorMaskReady ? &biasCurrentColorMaskResource : nullptr;
+    evalParams.pInTransparencyMask =
+        transparencyMaskReady ? &transparencyMaskResource : nullptr;
     evalParams.InJitterOffsetX = request.jitterOffsetX;
     evalParams.InJitterOffsetY = request.jitterOffsetY;
     evalParams.InRenderSubrectDimensions.Width = request.renderExtent.width;

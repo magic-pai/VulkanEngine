@@ -128,6 +128,7 @@ public:
         const FrameTemporalState* temporalState = nullptr,
         const FrameTemporalUpscaleState* temporalUpscaleState = nullptr,
         bool temporalUpscaleOutputInitialized = false,
+        bool dlssMaskInputsInitialized = false,
         TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus = nullptr,
         TemporalUpscalePostSourceStatus* temporalUpscalePostSourceStatus = nullptr,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,

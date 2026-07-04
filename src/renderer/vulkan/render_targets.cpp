@@ -471,6 +471,46 @@ VkImage VulkanSceneRenderTargets::TemporalUpscaleOutputImage(
     return m_TemporalUpscaleOutputImages[index]->Handle();
 }
 
+VkImageView VulkanSceneRenderTargets::DlssBiasCurrentColorMaskView(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_DlssBiasCurrentColorMaskImages.size(),
+        "DLSS bias-current-color mask index is out of range"
+    );
+    return m_DlssBiasCurrentColorMaskImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::DlssBiasCurrentColorMaskImage(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_DlssBiasCurrentColorMaskImages.size(),
+        "DLSS bias-current-color mask index is out of range"
+    );
+    return m_DlssBiasCurrentColorMaskImages[index]->Handle();
+}
+
+VkImageView VulkanSceneRenderTargets::DlssTransparencyMaskView(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_DlssTransparencyMaskImages.size(),
+        "DLSS transparency mask index is out of range"
+    );
+    return m_DlssTransparencyMaskImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::DlssTransparencyMaskImage(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_DlssTransparencyMaskImages.size(),
+        "DLSS transparency mask index is out of range"
+    );
+    return m_DlssTransparencyMaskImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::TemporalHistoryColorView(std::size_t index) const {
     SE_ASSERT(
         index < m_TemporalHistoryColorImages.size(),
@@ -560,6 +600,14 @@ VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
 
 VkFormat VulkanSceneRenderTargets::TemporalUpscaleOutputFormat() const {
     return kHdrSceneColorFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::DlssBiasCurrentColorMaskFormat() const {
+    return kDlssMaskFormat;
+}
+
+VkFormat VulkanSceneRenderTargets::DlssTransparencyMaskFormat() const {
+    return kDlssMaskFormat;
 }
 
 VkFormat VulkanSceneRenderTargets::TemporalHistoryColorFormat() const {
@@ -667,6 +715,26 @@ void VulkanSceneRenderTargets::Recreate(
         device,
         physicalDevice,
         count,
+        kDlssMaskFormat,
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_DlssBiasCurrentColorMaskImages
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kDlssMaskFormat,
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_DlssTransparencyMaskImages
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
         kWeightedTranslucencyAccumFormat,
         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
             VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -764,6 +832,8 @@ void VulkanSceneRenderTargets::Recreate(
 void VulkanSceneRenderTargets::Release() {
     m_HdrSceneColorImages.clear();
     m_TemporalUpscaleOutputImages.clear();
+    m_DlssBiasCurrentColorMaskImages.clear();
+    m_DlssTransparencyMaskImages.clear();
     m_TemporalHistoryColorImages.clear();
     m_WeightedTranslucencyAccumImages.clear();
     m_WeightedTranslucencyRevealageImages.clear();

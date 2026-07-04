@@ -705,6 +705,59 @@ void TransitionColorImage(
     );
 }
 
+void PrepareDlssMaskInput(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    bool initialized
+) {
+    TransitionColorImage(
+        commandBuffer,
+        image,
+        initialized
+            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            : VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        initialized ? VK_ACCESS_SHADER_READ_BIT : 0,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        initialized
+            ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+
+    VkClearColorValue clearValue{};
+    clearValue.float32[0] = 0.0f;
+    clearValue.float32[1] = 0.0f;
+    clearValue.float32[2] = 0.0f;
+    clearValue.float32[3] = 0.0f;
+    const VkImageSubresourceRange range{
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0,
+        1,
+        0,
+        1
+    };
+    vkCmdClearColorImage(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        &clearValue,
+        1,
+        &range
+    );
+
+    TransitionColorImage(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+}
+
 void PrepareTemporalHistoryColorForSampling(
     VkCommandBuffer commandBuffer,
     const VulkanSceneRenderTargets& renderTargets
@@ -807,6 +860,7 @@ void RecordTemporalUpscalerEvaluate(
     const FrameTemporalState& temporalState,
     const FrameTemporalUpscaleState& temporalUpscaleState,
     bool temporalUpscaleOutputInitialized,
+    bool dlssMaskInputsInitialized,
     TemporalUpscalerEvaluateStatus& evaluateStatus
 ) {
     evaluateStatus = TemporalUpscalerEvaluateStatus{};
@@ -849,6 +903,16 @@ void RecordTemporalUpscalerEvaluate(
         VK_ACCESS_SHADER_READ_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+    );
+    PrepareDlssMaskInput(
+        commandBuffer,
+        renderTargets.DlssBiasCurrentColorMaskImage(imageIndex),
+        dlssMaskInputsInitialized
+    );
+    PrepareDlssMaskInput(
+        commandBuffer,
+        renderTargets.DlssTransparencyMaskImage(imageIndex),
+        dlssMaskInputsInitialized
     );
     TransitionColorImage(
         commandBuffer,
@@ -897,6 +961,22 @@ void RecordTemporalUpscalerEvaluate(
                 false
             },
             TemporalUpscalerVulkanImageResource{
+                renderTargets.DlssBiasCurrentColorMaskImage(imageIndex),
+                renderTargets.DlssBiasCurrentColorMaskView(imageIndex),
+                renderTargets.DlssBiasCurrentColorMaskFormat(),
+                renderExtent,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                false
+            },
+            TemporalUpscalerVulkanImageResource{
+                renderTargets.DlssTransparencyMaskImage(imageIndex),
+                renderTargets.DlssTransparencyMaskView(imageIndex),
+                renderTargets.DlssTransparencyMaskFormat(),
+                renderExtent,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                false
+            },
+            TemporalUpscalerVulkanImageResource{
                 renderTargets.TemporalUpscaleOutputImage(imageIndex),
                 renderTargets.TemporalUpscaleOutputView(imageIndex),
                 renderTargets.TemporalUpscaleOutputFormat(),
@@ -922,6 +1002,26 @@ void RecordTemporalUpscalerEvaluate(
         VK_IMAGE_LAYOUT_GENERAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_SHADER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.DlssTransparencyMaskImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        renderTargets.DlssBiasCurrentColorMaskImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_READ_BIT,
         VK_ACCESS_SHADER_READ_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
@@ -1354,6 +1454,7 @@ void VulkanCommandBuffer::Record(
     const FrameTemporalState* temporalState,
     const FrameTemporalUpscaleState* temporalUpscaleState,
     bool temporalUpscaleOutputInitialized,
+    bool dlssMaskInputsInitialized,
     TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus,
     TemporalUpscalePostSourceStatus* temporalUpscalePostSourceStatus,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
@@ -2225,6 +2326,7 @@ void VulkanCommandBuffer::Record(
             *temporalState,
             *temporalUpscaleState,
             temporalUpscaleOutputInitialized,
+            dlssMaskInputsInitialized,
             *temporalUpscalerEvaluateStatus
         );
     } else if (temporalUpscalerEvaluateStatus != nullptr) {
