@@ -577,7 +577,8 @@ enum class RendererTemporalUpscaleFallbackReason : u32 {
     FullResolution = 2,
     InputsUnavailable = 3,
     UpscalerUnavailable = 4,
-    DynamicResolutionUnsupported = 5
+    DynamicResolutionUnsupported = 5,
+    UpscalerEvaluatePathMissing = 6
 };
 
 struct RendererTemporalStats {
@@ -660,6 +661,29 @@ struct RendererTemporalStats {
     u32 temporalUpscalerSdkVersionPatch = 0;
     u32 temporalUpscalerPackageReady = 0;
     u32 temporalUpscalerEvaluateAdapterAvailable = 0;
+    u32 temporalUpscalerRuntimeFallbackReason = 0;
+    u32 temporalUpscalerAdapterCompiled = 0;
+    u32 temporalUpscalerInitializationAttempted = 0;
+    u32 temporalUpscalerInitialized = 0;
+    u32 temporalUpscalerInitializationResult = 0;
+    u32 temporalUpscalerCapabilityParametersReady = 0;
+    u32 temporalUpscalerCapabilityQueryResult = 0;
+    u32 temporalUpscalerDlssSuperResolutionSupported = 0;
+    u32 temporalUpscalerNeedsUpdatedDriver = 0;
+    u32 temporalUpscalerMinDriverVersionMajor = 0;
+    u32 temporalUpscalerMinDriverVersionMinor = 0;
+    u32 temporalUpscalerFeatureInitResult = 0;
+    u32 temporalUpscalerDlssQualityMode = 0;
+    u32 temporalUpscalerDlssRecommendedPreset = 0;
+    u32 temporalUpscalerOptimalSettingsQueried = 0;
+    u32 temporalUpscalerOptimalSettingsResult = 0;
+    u32 temporalUpscalerOptimalRenderWidth = 0;
+    u32 temporalUpscalerOptimalRenderHeight = 0;
+    u32 temporalUpscalerMinRenderWidth = 0;
+    u32 temporalUpscalerMinRenderHeight = 0;
+    u32 temporalUpscalerMaxRenderWidth = 0;
+    u32 temporalUpscalerMaxRenderHeight = 0;
+    f32 temporalUpscalerSharpness = 0.0f;
 };
 
 struct RendererStats {

@@ -71,11 +71,21 @@ machines or incomplete packages.
      fallback reasons.
 
 3. DLSS adapter initialization and capability query.
+   Implemented.
    - Add a Vulkan DLSS adapter behind the TemporalUpscaler interface.
    - Initialize NGX/Streamline only when requested and when package readiness is
      strong enough.
    - Query support, driver requirements, recommended render resolutions, and
      quality modes.
+
+3.5. Vulkan DLSS feature-requirements readiness.
+   - Query and expose NGX Vulkan feature requirements, required instance/device
+     extensions, and device-creation prerequisites before attempting SR
+     evaluation.
+   - Resolve or explicitly report any reason `SuperSampling.Available` remains
+     false after NGX init succeeds.
+   - Do not proceed to SR evaluation until the current Vulkan device reports DLSS
+     Super Resolution support.
 
 4. DLSS SR/DLAA evaluate path.
    - Tag/bind color, depth, motion vectors, jitter, exposure/reset state, and
@@ -91,11 +101,12 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 3: DLSS adapter initialization and capability query. This
-should initialize the selected DLSS Vulkan integration path only when
-`SE_UPSCALER_PLUGIN=dlss` is requested and the package probe is ready, then
-publish support/driver/quality-mode/recommended-resolution state without
-evaluating DLSS yet.
+Implement Slice 3.5: Vulkan DLSS feature-requirements readiness. Slice 3 now
+initializes NGX and queries capability parameters, but the current Vulkan device
+reports `SuperSampling.Available=0` with feature-init result `0xBAD00002`.
+Before Slice 4 can safely evaluate DLSS SR/DLAA, expose NGX feature
+requirements and required Vulkan extension/device prerequisites, then either
+enable the missing prerequisites or keep a deterministic unsupported fallback.
 
 ## Slice 1 Execution Evidence
 
@@ -187,3 +198,55 @@ evaluating DLSS yet.
 - This is an internal render-scale carrier only. It does not initialize NGX or
   Streamline, query DLSS runtime support, evaluate DLSS, enable dynamic
   resolution policy, add a native TAAU/TSR pass, or change default presentation.
+
+## Slice 3 Execution Evidence
+
+- Added optional CMake detection for a local NVIDIA DLSS SDK. When the package
+  has headers, a matching Windows import library, and `nvngx_dlss.dll`, the
+  engine defines `SE_ENABLE_NVIDIA_DLSS=1`, includes NGX headers, links the
+  configuration-matched dynamic-CRT NGX import library, and copies
+  `nvngx_dlss.dll` beside the built executable. Builds without the SDK keep the
+  adapter compiled out and report an explicit runtime fallback.
+- Added `TemporalUpscalerRuntimeStatus` behind the engine-owned
+  `TemporalUpscaler` boundary. Renderer code passes Vulkan instance, physical
+  device, device, function pointers, display extent, and selected DLSS quality
+  mode; NGX types remain contained in `temporal_upscaler.cpp`.
+- `SE_DLSS_QUALITY` / `SE_DLSS_MODE` select the diagnostic quality mode. The
+  default is Quality. The runtime status reports the selected quality mode and
+  the DLSS 4.5 transformer preset policy: K for DLAA/Quality/Balanced/Ultra
+  Quality, M for Performance, and L for Ultra Performance.
+- Runtime diagnostics now expose adapter compile state, initialization attempt,
+  initialization result, capability-parameter readiness/result, Super Resolution
+  support, driver-update requirement, minimum driver, feature-init result,
+  optimal-settings query/result, recommended render dimensions, sharpness, and
+  evaluate-adapter availability in CSV, ImGui, and FrameGraph.
+- FrameGraph now records `TemporalUpscalerRuntimeCapability` separately from
+  `TemporalUpscalerPackageProbe`, so package readiness and actual NGX runtime
+  capability are distinguishable.
+- `_quick_build.bat` passes for `SelfEngineForward3D` after CMake regeneration
+  with the local SDK enabled, and also passes when configured with
+  `SELFENGINE_NVIDIA_DLSS_SDK_DIR=Z:/SelfEngine/missing_dlss_sdk` so the adapter
+  is compiled out. The existing MSVC runtime-library warning remains.
+- Smoke evidence:
+  `out/benchmarks/aaa_dlss_runtime_capability_smoke.csv`,
+  `out/benchmarks/aaa_dlss_runtime_invalid_sdk_smoke.csv`, and
+  `out/benchmarks/aaa_dlss_runtime_not_requested_smoke.csv` all report
+  0 frame-graph validation issues.
+- The package-present runtime smoke reports provider/package
+  `1/1`, package fallback `0`, adapter compiled `1`, initialization attempted
+  and initialized `1/1`, initialization result `1`, capability parameters ready
+  `1`, quality/preset `3/11`, contract ready `1`, and evaluate adapter `0`.
+  The current machine reports `SuperSampling.Available=0`,
+  `SuperSampling.FeatureInitResult=0xBAD00002`, runtime fallback `8`
+  (`SuperResolutionUnavailable`), and temporal-upscale fallback `4`.
+- The invalid-SDK smoke reports provider `1`, package ready `0`, package/runtime
+  fallback `3/3`, adapter compiled `1`, initialization attempted `0`, and
+  0 validation issues.
+- The not-requested smoke reports provider `0`, package/runtime fallback `1/1`,
+  initialization attempted `0`, temporal-upscale requested `0`, and 0 validation
+  issues.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is runtime initialization and capability diagnostics only. It does not
+  create a DLSS feature handle, evaluate DLSS, enable Frame Generation, enable
+  Ray Reconstruction, change presentation, or claim production image quality.

@@ -7,8 +7,17 @@
 #include <fstream>
 #include <string_view>
 
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+#include <nvsdk_ngx_helpers.h>
+#include <nvsdk_ngx_vk.h>
+#endif
+
 namespace se {
 namespace {
+
+constexpr const char* kSelfEngineDlssProjectId =
+    "b62bb5e0-7d74-4a20-9a7f-6a507a29c64c";
+constexpr const char* kSelfEngineDlssEngineVersion = "SelfEngine";
 
 std::string NormalizeProviderName(const std::string& name) {
     std::string normalized;
@@ -59,6 +68,10 @@ bool AnyFileExists(
 
 std::filesystem::path DefaultDlssSdkRoot() {
     return std::filesystem::current_path() / "thirdParty" / "nvidia_dlss";
+}
+
+std::filesystem::path DefaultNgxApplicationDataPath() {
+    return std::filesystem::current_path() / "out" / "ngx";
 }
 
 bool ParseUnsigned(std::string_view text, u32& value) {
@@ -154,7 +167,7 @@ TemporalUpscalerPackageFallbackReason DlssFallbackReason(
     if (status.superResolutionSymbolsFound == 0u) {
         return TemporalUpscalerPackageFallbackReason::SuperResolutionSymbolsMissing;
     }
-    return TemporalUpscalerPackageFallbackReason::EvaluateAdapterMissing;
+    return TemporalUpscalerPackageFallbackReason::None;
 }
 
 void ProbeDlssPackage(TemporalUpscalerPackageStatus& status) {
@@ -228,6 +241,260 @@ void ProbeDlssPackage(TemporalUpscalerPackageStatus& status) {
     status.fallbackReason = DlssFallbackReason(status);
 }
 
+TemporalUpscalerDlssPreset RecommendedDlssPresetForQuality(
+    TemporalUpscalerDlssQualityMode qualityMode
+) {
+    switch (qualityMode) {
+    case TemporalUpscalerDlssQualityMode::UltraPerformance:
+        return TemporalUpscalerDlssPreset::L;
+    case TemporalUpscalerDlssQualityMode::Performance:
+        return TemporalUpscalerDlssPreset::M;
+    case TemporalUpscalerDlssQualityMode::Dlaa:
+    case TemporalUpscalerDlssQualityMode::Balanced:
+    case TemporalUpscalerDlssQualityMode::UltraQuality:
+    case TemporalUpscalerDlssQualityMode::Quality:
+    case TemporalUpscalerDlssQualityMode::Default:
+    default:
+        return TemporalUpscalerDlssPreset::K;
+    }
+}
+
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+NVSDK_NGX_PerfQuality_Value NgxQualityMode(
+    TemporalUpscalerDlssQualityMode qualityMode
+) {
+    switch (qualityMode) {
+    case TemporalUpscalerDlssQualityMode::Performance:
+        return NVSDK_NGX_PerfQuality_Value_MaxPerf;
+    case TemporalUpscalerDlssQualityMode::Balanced:
+        return NVSDK_NGX_PerfQuality_Value_Balanced;
+    case TemporalUpscalerDlssQualityMode::UltraPerformance:
+        return NVSDK_NGX_PerfQuality_Value_UltraPerformance;
+    case TemporalUpscalerDlssQualityMode::UltraQuality:
+        return NVSDK_NGX_PerfQuality_Value_UltraQuality;
+    case TemporalUpscalerDlssQualityMode::Dlaa:
+        return NVSDK_NGX_PerfQuality_Value_DLAA;
+    case TemporalUpscalerDlssQualityMode::Quality:
+    case TemporalUpscalerDlssQualityMode::Default:
+    default:
+        return NVSDK_NGX_PerfQuality_Value_MaxQuality;
+    }
+}
+
+bool NgxGetU32(NVSDK_NGX_Parameter* parameters, const char* name, u32& value) {
+    unsigned int uiValue = 0;
+    NVSDK_NGX_Result result =
+        NVSDK_NGX_Parameter_GetUI(parameters, name, &uiValue);
+    if (NVSDK_NGX_SUCCEED(result)) {
+        value = static_cast<u32>(uiValue);
+        return true;
+    }
+
+    int intValue = 0;
+    result = NVSDK_NGX_Parameter_GetI(parameters, name, &intValue);
+    if (NVSDK_NGX_SUCCEED(result)) {
+        value = intValue < 0 ? 0u : static_cast<u32>(intValue);
+        return true;
+    }
+
+    return false;
+}
+
+struct DlssRuntimeCache {
+    bool initializationAttempted = false;
+    bool initialized = false;
+    VkDevice device = VK_NULL_HANDLE;
+    u32 initializationResult = 0;
+    bool statusCached = false;
+    VkExtent2D cachedDisplayExtent{};
+    TemporalUpscalerDlssQualityMode cachedQualityMode =
+        TemporalUpscalerDlssQualityMode::Quality;
+    TemporalUpscalerRuntimeStatus cachedStatus{};
+};
+
+DlssRuntimeCache g_DlssRuntimeCache{};
+
+void PopulateNgxCapabilityStatus(
+    const TemporalUpscalerRuntimeRequest& request,
+    TemporalUpscalerRuntimeStatus& status
+) {
+    NVSDK_NGX_Parameter* capabilityParameters = nullptr;
+    const NVSDK_NGX_Result capabilityResult =
+        NVSDK_NGX_VULKAN_GetCapabilityParameters(&capabilityParameters);
+    status.capabilityQueryResult = static_cast<u32>(capabilityResult);
+    if (NVSDK_NGX_FAILED(capabilityResult) ||
+        capabilityParameters == nullptr) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::CapabilityParametersFailed;
+        return;
+    }
+
+    status.capabilityParametersReady = 1u;
+    NgxGetU32(
+        capabilityParameters,
+        NVSDK_NGX_Parameter_SuperSampling_Available,
+        status.superResolutionSupported
+    );
+    NgxGetU32(
+        capabilityParameters,
+        NVSDK_NGX_Parameter_SuperSampling_NeedsUpdatedDriver,
+        status.needsUpdatedDriver
+    );
+    NgxGetU32(
+        capabilityParameters,
+        NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMajor,
+        status.minDriverVersionMajor
+    );
+    NgxGetU32(
+        capabilityParameters,
+        NVSDK_NGX_Parameter_SuperSampling_MinDriverVersionMinor,
+        status.minDriverVersionMinor
+    );
+    NgxGetU32(
+        capabilityParameters,
+        NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult,
+        status.featureInitResult
+    );
+
+    if (status.superResolutionSupported == 0u) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::SuperResolutionUnavailable;
+    } else if (status.needsUpdatedDriver != 0u) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::DriverUpdateRequired;
+    } else {
+        unsigned int optimalWidth = 0;
+        unsigned int optimalHeight = 0;
+        unsigned int maxWidth = 0;
+        unsigned int maxHeight = 0;
+        unsigned int minWidth = 0;
+        unsigned int minHeight = 0;
+        float sharpness = 0.0f;
+        status.optimalSettingsQueried = 1u;
+        const NVSDK_NGX_Result optimalResult = NGX_DLSS_GET_OPTIMAL_SETTINGS(
+            capabilityParameters,
+            request.displayExtent.width,
+            request.displayExtent.height,
+            NgxQualityMode(request.dlssQualityMode),
+            &optimalWidth,
+            &optimalHeight,
+            &maxWidth,
+            &maxHeight,
+            &minWidth,
+            &minHeight,
+            &sharpness
+        );
+        status.optimalSettingsResult = static_cast<u32>(optimalResult);
+        if (NVSDK_NGX_SUCCEED(optimalResult)) {
+            status.optimalRenderWidth = optimalWidth;
+            status.optimalRenderHeight = optimalHeight;
+            status.maxRenderWidth = maxWidth;
+            status.maxRenderHeight = maxHeight;
+            status.minRenderWidth = minWidth;
+            status.minRenderHeight = minHeight;
+            status.sharpness = sharpness;
+            status.evaluateAdapterAvailable = 1u;
+            status.fallbackReason = TemporalUpscalerRuntimeFallbackReason::None;
+        } else {
+            status.fallbackReason =
+                TemporalUpscalerRuntimeFallbackReason::OptimalSettingsFailed;
+        }
+    }
+
+    NVSDK_NGX_VULKAN_DestroyParameters(capabilityParameters);
+}
+
+TemporalUpscalerRuntimeStatus QueryCompiledDlssRuntime(
+    const TemporalUpscalerRuntimeRequest& request
+) {
+    TemporalUpscalerRuntimeStatus status{};
+    status.requested = request.packageStatus.requested;
+    status.adapterCompiled = 1u;
+    status.dlssQualityMode = static_cast<u32>(request.dlssQualityMode);
+    status.recommendedPreset =
+        static_cast<u32>(RecommendedDlssPresetForQuality(request.dlssQualityMode));
+
+    if (request.instance == VK_NULL_HANDLE ||
+        request.physicalDevice == VK_NULL_HANDLE ||
+        request.device == VK_NULL_HANDLE ||
+        request.getInstanceProcAddr == nullptr ||
+        request.getDeviceProcAddr == nullptr ||
+        request.displayExtent.width == 0u ||
+        request.displayExtent.height == 0u) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::VulkanHandlesUnavailable;
+        return status;
+    }
+
+    if (!g_DlssRuntimeCache.initializationAttempted) {
+        g_DlssRuntimeCache.initializationAttempted = true;
+        g_DlssRuntimeCache.device = request.device;
+
+        const std::filesystem::path appDataPath =
+            request.applicationDataPath.empty()
+                ? DefaultNgxApplicationDataPath()
+                : request.applicationDataPath;
+        std::error_code error;
+        std::filesystem::create_directories(appDataPath, error);
+
+        const std::filesystem::path runtimePath =
+            request.packageStatus.sdkRoot /
+            "lib" / "Windows_x86_64" / "rel";
+        const std::wstring runtimePathWide = runtimePath.wstring();
+        const wchar_t* featurePaths[] = { runtimePathWide.c_str() };
+        NVSDK_NGX_FeatureCommonInfo featureInfo{};
+        featureInfo.PathListInfo.Path = featurePaths;
+        featureInfo.PathListInfo.Length = 1u;
+
+        const std::wstring appDataPathWide = appDataPath.wstring();
+        const NVSDK_NGX_Result initResult =
+            NVSDK_NGX_VULKAN_Init_with_ProjectID(
+                kSelfEngineDlssProjectId,
+                NVSDK_NGX_ENGINE_TYPE_CUSTOM,
+                kSelfEngineDlssEngineVersion,
+                appDataPathWide.c_str(),
+                request.instance,
+                request.physicalDevice,
+                request.device,
+                request.getInstanceProcAddr,
+                request.getDeviceProcAddr,
+                &featureInfo,
+                NVSDK_NGX_Version_API
+            );
+        g_DlssRuntimeCache.initializationResult =
+            static_cast<u32>(initResult);
+        g_DlssRuntimeCache.initialized = NVSDK_NGX_SUCCEED(initResult);
+    }
+
+    status.initializationAttempted =
+        g_DlssRuntimeCache.initializationAttempted ? 1u : 0u;
+    status.initialized = g_DlssRuntimeCache.initialized ? 1u : 0u;
+    status.initializationResult = g_DlssRuntimeCache.initializationResult;
+
+    if (!g_DlssRuntimeCache.initialized) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::InitializationFailed;
+        return status;
+    }
+
+    if (g_DlssRuntimeCache.statusCached &&
+        g_DlssRuntimeCache.cachedDisplayExtent.width ==
+            request.displayExtent.width &&
+        g_DlssRuntimeCache.cachedDisplayExtent.height ==
+            request.displayExtent.height &&
+        g_DlssRuntimeCache.cachedQualityMode == request.dlssQualityMode) {
+        return g_DlssRuntimeCache.cachedStatus;
+    }
+
+    PopulateNgxCapabilityStatus(request, status);
+    g_DlssRuntimeCache.statusCached = true;
+    g_DlssRuntimeCache.cachedDisplayExtent = request.displayExtent;
+    g_DlssRuntimeCache.cachedQualityMode = request.dlssQualityMode;
+    g_DlssRuntimeCache.cachedStatus = status;
+    return status;
+}
+#endif
+
 }
 
 TemporalUpscalerProviderKind TemporalUpscalerProviderKindFromName(
@@ -247,6 +514,36 @@ TemporalUpscalerProviderKind TemporalUpscalerProviderKindFromName(
         return TemporalUpscalerProviderKind::Dlss;
     }
     return TemporalUpscalerProviderKind::Unsupported;
+}
+
+TemporalUpscalerDlssQualityMode TemporalUpscalerDlssQualityModeFromName(
+    const std::string& name
+) {
+    const std::string normalized = NormalizeProviderName(name);
+    if (normalized == "performance" ||
+        normalized == "perf" ||
+        normalized == "maxperf" ||
+        normalized == "max_performance") {
+        return TemporalUpscalerDlssQualityMode::Performance;
+    }
+    if (normalized == "balanced" || normalized == "balance") {
+        return TemporalUpscalerDlssQualityMode::Balanced;
+    }
+    if (normalized == "ultraperformance" ||
+        normalized == "ultra_performance" ||
+        normalized == "ultra-performance" ||
+        normalized == "ultraperf") {
+        return TemporalUpscalerDlssQualityMode::UltraPerformance;
+    }
+    if (normalized == "ultraquality" ||
+        normalized == "ultra_quality" ||
+        normalized == "ultra-quality") {
+        return TemporalUpscalerDlssQualityMode::UltraQuality;
+    }
+    if (normalized == "dlaa" || normalized == "aa") {
+        return TemporalUpscalerDlssQualityMode::Dlaa;
+    }
+    return TemporalUpscalerDlssQualityMode::Quality;
 }
 
 TemporalUpscalerPackageStatus ProbeTemporalUpscalerPackage(
@@ -275,6 +572,57 @@ TemporalUpscalerPackageStatus ProbeTemporalUpscalerPackage(
 
     ProbeDlssPackage(status);
     return status;
+}
+
+TemporalUpscalerRuntimeStatus QueryTemporalUpscalerRuntime(
+    const TemporalUpscalerRuntimeRequest& request
+) {
+    TemporalUpscalerRuntimeStatus status{};
+    status.requested = request.packageStatus.requested;
+    status.dlssQualityMode = static_cast<u32>(request.dlssQualityMode);
+    status.recommendedPreset =
+        static_cast<u32>(RecommendedDlssPresetForQuality(request.dlssQualityMode));
+
+    if (request.packageStatus.providerKind == TemporalUpscalerProviderKind::None) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::NotRequested;
+        return status;
+    }
+    if (request.packageStatus.providerKind ==
+        TemporalUpscalerProviderKind::Unsupported) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::UnsupportedProvider;
+        return status;
+    }
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+    status.adapterCompiled = 1u;
+#endif
+    if (request.packageStatus.packageReady == 0u) {
+        status.fallbackReason =
+            TemporalUpscalerRuntimeFallbackReason::PackageNotReady;
+        return status;
+    }
+
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+    return QueryCompiledDlssRuntime(request);
+#else
+    status.fallbackReason =
+        TemporalUpscalerRuntimeFallbackReason::AdapterNotCompiled;
+    return status;
+#endif
+}
+
+void ShutdownTemporalUpscalerRuntime(VkDevice device) {
+#if defined(SE_ENABLE_NVIDIA_DLSS) && SE_ENABLE_NVIDIA_DLSS
+    if (g_DlssRuntimeCache.initialized) {
+        NVSDK_NGX_VULKAN_Shutdown1(
+            device != VK_NULL_HANDLE ? device : g_DlssRuntimeCache.device
+        );
+    }
+    g_DlssRuntimeCache = DlssRuntimeCache{};
+#else
+    (void)device;
+#endif
 }
 
 }

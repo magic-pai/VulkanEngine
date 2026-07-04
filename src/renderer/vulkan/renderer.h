@@ -130,6 +130,7 @@ struct FrameTemporalUpscaleState {
     bool upscalerPluginRequested = false;
     bool upscalerPluginAvailable = false;
     TemporalUpscalerPackageStatus upscalerPackage{};
+    TemporalUpscalerRuntimeStatus upscalerRuntime{};
     RendererTemporalUpscaleFallbackReason fallbackReason =
         RendererTemporalUpscaleFallbackReason::Disabled;
 };

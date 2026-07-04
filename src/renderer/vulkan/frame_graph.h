@@ -399,6 +399,13 @@ struct CurrentVulkanFrameGraphInputs {
     bool temporalUpscalerPackageReady = false;
     bool temporalUpscalerSuperResolutionSymbolsFound = false;
     bool temporalUpscalerEvaluateAdapterAvailable = false;
+    u32 temporalUpscalerRuntimeFallbackReason = 0;
+    bool temporalUpscalerAdapterCompiled = false;
+    bool temporalUpscalerInitializationAttempted = false;
+    bool temporalUpscalerInitialized = false;
+    bool temporalUpscalerCapabilityParametersReady = false;
+    bool temporalUpscalerSuperResolutionSupported = false;
+    bool temporalUpscalerOptimalSettingsQueried = false;
     bool reflectionCaptureSlotTableAllocated = false;
     u32 reflectionCaptureSlotCount = 0;
     u32 reflectionCaptureSlotReadyCount = 0;

@@ -650,6 +650,29 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerSdkVersionPatch << ','
         << temporal.temporalUpscalerPackageReady << ','
         << temporal.temporalUpscalerEvaluateAdapterAvailable << ','
+        << temporal.temporalUpscalerRuntimeFallbackReason << ','
+        << temporal.temporalUpscalerAdapterCompiled << ','
+        << temporal.temporalUpscalerInitializationAttempted << ','
+        << temporal.temporalUpscalerInitialized << ','
+        << temporal.temporalUpscalerInitializationResult << ','
+        << temporal.temporalUpscalerCapabilityParametersReady << ','
+        << temporal.temporalUpscalerCapabilityQueryResult << ','
+        << temporal.temporalUpscalerDlssSuperResolutionSupported << ','
+        << temporal.temporalUpscalerNeedsUpdatedDriver << ','
+        << temporal.temporalUpscalerMinDriverVersionMajor << ','
+        << temporal.temporalUpscalerMinDriverVersionMinor << ','
+        << temporal.temporalUpscalerFeatureInitResult << ','
+        << temporal.temporalUpscalerDlssQualityMode << ','
+        << temporal.temporalUpscalerDlssRecommendedPreset << ','
+        << temporal.temporalUpscalerOptimalSettingsQueried << ','
+        << temporal.temporalUpscalerOptimalSettingsResult << ','
+        << temporal.temporalUpscalerOptimalRenderWidth << ','
+        << temporal.temporalUpscalerOptimalRenderHeight << ','
+        << temporal.temporalUpscalerMinRenderWidth << ','
+        << temporal.temporalUpscalerMinRenderHeight << ','
+        << temporal.temporalUpscalerMaxRenderWidth << ','
+        << temporal.temporalUpscalerMaxRenderHeight << ','
+        << temporal.temporalUpscalerSharpness << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1186,6 +1209,29 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_sdk_version_patch,"
         << "temporal_upscaler_package_ready,"
         << "temporal_upscaler_evaluate_adapter_available,"
+        << "temporal_upscaler_runtime_fallback_reason,"
+        << "temporal_upscaler_adapter_compiled,"
+        << "temporal_upscaler_initialization_attempted,"
+        << "temporal_upscaler_initialized,"
+        << "temporal_upscaler_initialization_result,"
+        << "temporal_upscaler_capability_parameters_ready,"
+        << "temporal_upscaler_capability_query_result,"
+        << "temporal_upscaler_dlss_super_resolution_supported,"
+        << "temporal_upscaler_needs_updated_driver,"
+        << "temporal_upscaler_min_driver_version_major,"
+        << "temporal_upscaler_min_driver_version_minor,"
+        << "temporal_upscaler_feature_init_result,"
+        << "temporal_upscaler_dlss_quality_mode,"
+        << "temporal_upscaler_dlss_recommended_preset,"
+        << "temporal_upscaler_optimal_settings_queried,"
+        << "temporal_upscaler_optimal_settings_result,"
+        << "temporal_upscaler_optimal_render_width,"
+        << "temporal_upscaler_optimal_render_height,"
+        << "temporal_upscaler_min_render_width,"
+        << "temporal_upscaler_min_render_height,"
+        << "temporal_upscaler_max_render_width,"
+        << "temporal_upscaler_max_render_height,"
+        << "temporal_upscaler_sharpness,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

@@ -174,6 +174,31 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/mesh_lod.cpp
 )
 
+set(SELFENGINE_NVIDIA_DLSS_SDK_DIR "$ENV{SE_NVIDIA_DLSS_SDK_DIR}" CACHE PATH "Optional NVIDIA DLSS SDK root")
+if (SELFENGINE_NVIDIA_DLSS_SDK_DIR STREQUAL "" AND NOT "$ENV{SE_DLSS_SDK_DIR}" STREQUAL "")
+    set(SELFENGINE_NVIDIA_DLSS_SDK_DIR "$ENV{SE_DLSS_SDK_DIR}" CACHE PATH "Optional NVIDIA DLSS SDK root" FORCE)
+endif()
+if (SELFENGINE_NVIDIA_DLSS_SDK_DIR STREQUAL "")
+    set(SELFENGINE_NVIDIA_DLSS_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/nvidia_dlss" CACHE PATH "Optional NVIDIA DLSS SDK root" FORCE)
+endif()
+
+set(SELFENGINE_NVIDIA_DLSS_ENABLED FALSE)
+set(SELFENGINE_NVIDIA_DLSS_LIBRARY_RELEASE "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib")
+set(SELFENGINE_NVIDIA_DLSS_LIBRARY_DEBUG "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/lib/Windows_x86_64/x64/nvsdk_ngx_d_dbg.lib")
+if (NOT EXISTS "${SELFENGINE_NVIDIA_DLSS_LIBRARY_RELEASE}")
+    set(SELFENGINE_NVIDIA_DLSS_LIBRARY_RELEASE "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/lib/Windows_x86_64/khr/x64/nvsdk_ngx_khr_d.lib")
+    set(SELFENGINE_NVIDIA_DLSS_LIBRARY_DEBUG "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/lib/Windows_x86_64/khr/x64/nvsdk_ngx_khr_d_dbg.lib")
+endif()
+set(SELFENGINE_NVIDIA_DLSS_RUNTIME_DLL "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll")
+if (WIN32 AND
+    EXISTS "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/include/nvsdk_ngx_vk.h" AND
+    EXISTS "${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/include/nvsdk_ngx_helpers.h" AND
+    EXISTS "${SELFENGINE_NVIDIA_DLSS_LIBRARY_RELEASE}" AND
+    EXISTS "${SELFENGINE_NVIDIA_DLSS_LIBRARY_DEBUG}" AND
+    EXISTS "${SELFENGINE_NVIDIA_DLSS_RUNTIME_DLL}")
+    set(SELFENGINE_NVIDIA_DLSS_ENABLED TRUE)
+endif()
+
 add_executable(SelfEngine
     src/main.cpp
     ${SELFENGINE_COMMON_SOURCES}
@@ -207,6 +232,9 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
         SE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
         SE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
     )
+    set_target_properties(${SELFENGINE_TARGET} PROPERTIES
+        CXX_SCAN_FOR_MODULES OFF
+    )
 
     target_include_directories(${SELFENGINE_TARGET} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -225,10 +253,29 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
         gdi32
         shell32
     )
+
+    if (SELFENGINE_NVIDIA_DLSS_ENABLED)
+        target_compile_definitions(${SELFENGINE_TARGET} PRIVATE
+            SE_ENABLE_NVIDIA_DLSS=1
+        )
+        target_include_directories(${SELFENGINE_TARGET} PRIVATE
+            ${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/include
+        )
+        target_link_libraries(${SELFENGINE_TARGET} PRIVATE
+            $<$<CONFIG:Debug>:${SELFENGINE_NVIDIA_DLSS_LIBRARY_DEBUG}>
+            $<$<NOT:$<CONFIG:Debug>>:${SELFENGINE_NVIDIA_DLSS_LIBRARY_RELEASE}>
+        )
+        add_custom_command(TARGET ${SELFENGINE_TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${SELFENGINE_NVIDIA_DLSS_RUNTIME_DLL}
+                $<TARGET_FILE_DIR:${SELFENGINE_TARGET}>
+            VERBATIM
+        )
+    endif()
 endforeach()
 
 if (MSVC)
-    target_compile_options(SelfEngine PRIVATE /W4 /permissive-)
-    target_compile_options(SelfEngineBlackHole PRIVATE /W4 /permissive-)
-    target_compile_options(SelfEngineForward3D PRIVATE /W4 /permissive-)
+    target_compile_options(SelfEngine PRIVATE /W4 /permissive- /FS)
+    target_compile_options(SelfEngineBlackHole PRIVATE /W4 /permissive- /FS)
+    target_compile_options(SelfEngineForward3D PRIVATE /W4 /permissive- /FS)
 endif()

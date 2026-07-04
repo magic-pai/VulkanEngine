@@ -1220,6 +1220,32 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalerEvaluateAdapterAvailable
     );
     ImGui::Text(
+        "Temporal upscaler runtime: fallback %u compiled %u init %u/%u result 0x%X caps %u result 0x%X SR %u driver %u min %u.%u feature 0x%X quality %u preset %u opt %u result 0x%X %ux%u min %ux%u max %ux%u sharp %.3f",
+        stats.temporal.temporalUpscalerRuntimeFallbackReason,
+        stats.temporal.temporalUpscalerAdapterCompiled,
+        stats.temporal.temporalUpscalerInitializationAttempted,
+        stats.temporal.temporalUpscalerInitialized,
+        stats.temporal.temporalUpscalerInitializationResult,
+        stats.temporal.temporalUpscalerCapabilityParametersReady,
+        stats.temporal.temporalUpscalerCapabilityQueryResult,
+        stats.temporal.temporalUpscalerDlssSuperResolutionSupported,
+        stats.temporal.temporalUpscalerNeedsUpdatedDriver,
+        stats.temporal.temporalUpscalerMinDriverVersionMajor,
+        stats.temporal.temporalUpscalerMinDriverVersionMinor,
+        stats.temporal.temporalUpscalerFeatureInitResult,
+        stats.temporal.temporalUpscalerDlssQualityMode,
+        stats.temporal.temporalUpscalerDlssRecommendedPreset,
+        stats.temporal.temporalUpscalerOptimalSettingsQueried,
+        stats.temporal.temporalUpscalerOptimalSettingsResult,
+        stats.temporal.temporalUpscalerOptimalRenderWidth,
+        stats.temporal.temporalUpscalerOptimalRenderHeight,
+        stats.temporal.temporalUpscalerMinRenderWidth,
+        stats.temporal.temporalUpscalerMinRenderHeight,
+        stats.temporal.temporalUpscalerMaxRenderWidth,
+        stats.temporal.temporalUpscalerMaxRenderHeight,
+        stats.temporal.temporalUpscalerSharpness
+    );
+    ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",
         stats.postProcess.colorGradingEnabled ? "enabled" : "off",
         stats.postProcess.colorGradingSaturation,

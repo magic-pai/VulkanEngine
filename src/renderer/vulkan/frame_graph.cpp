@@ -2210,6 +2210,24 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "Reports DLSS package/header/runtime/symbol readiness before any NGX or Streamline evaluate adapter is enabled."
         );
     }
+    if (inputs.temporalUpscalerPluginRequested ||
+        inputs.temporalUpscalerInitializationAttempted ||
+        inputs.temporalUpscalerRuntimeFallbackReason != 0u) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            inputs.temporalUpscalerEvaluateAdapterAvailable
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TemporalUpscalerRuntimeCapability",
+            "",
+            "",
+            inputs.temporalUpscalerEvaluateAdapterAvailable
+                ? "NGX Vulkan initialized and DLSS Super Resolution capability plus recommended render extent were queried; DLSS evaluation is still a later pass."
+                : "Reports optional NGX adapter compile/init/capability fallback before DLSS Super Resolution evaluation is wired."
+        );
+    }
 
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(
