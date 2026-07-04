@@ -641,6 +641,9 @@ struct RendererTemporalStats {
     VkFormat temporalUpscaleOutputFormat = VK_FORMAT_UNDEFINED;
     u32 temporalUpscaleOutputWidth = 0;
     u32 temporalUpscaleOutputHeight = 0;
+    u32 temporalUpscalePostSourceRequested = 0;
+    u32 temporalUpscalePostSourceActive = 0;
+    u32 temporalUpscalePostSourceFallbackReason = 0;
     u32 dynamicResolutionRequested = 0;
     u32 dynamicResolutionEnabled = 0;
     u32 taauRequested = 0;

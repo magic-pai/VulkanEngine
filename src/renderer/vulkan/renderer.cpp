@@ -1214,6 +1214,13 @@ bool TemporalUpscaleRequestedFromEnvironment() {
         EnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE");
 }
 
+bool TemporalUpscalePostSourceRequestedFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE_PRESENT") ||
+        EnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE_OUTPUT_PRESENT") ||
+        EnvironmentFlagEnabled("SE_UPSCALER_PRESENT") ||
+        EnvironmentFlagEnabled("SE_DLSS_PRESENT");
+}
+
 std::string TemporalUpscalerProviderFromEnvironment() {
     std::string value = ReadEnvironmentString("SE_UPSCALER_PLUGIN");
     if (value.empty()) {
@@ -2977,7 +2984,9 @@ VulkanRenderer::~VulkanRenderer() {
     m_BloomDownsampleFramebuffer.reset();
     m_BloomUpsampleRenderPass.reset();
     m_BloomDownsampleRenderPass.reset();
+    m_TemporalUpscaleHdrDescriptorSets.reset();
     m_HdrDescriptorSets.reset();
+    m_TemporalUpscaleBloomDescriptorSets.reset();
     m_BloomDescriptorSets.reset();
     m_WeightedTranslucencyDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
@@ -3205,8 +3214,11 @@ void VulkanRenderer::DrawFrame() {
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
+    const bool temporalUpscalePostSourceRequested =
+        TemporalUpscalePostSourceRequestedFromEnvironment();
     const bool showDeferredHdr =
-        UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView);
+        UsesDeferredHdrComposite(m_RenderDebugSettings.forwardView) ||
+        temporalUpscalePostSourceRequested;
     const bool hdrCompositeAvailable =
         showDeferredHdr &&
         m_HdrCompositePipeline != nullptr &&
@@ -4137,7 +4149,10 @@ void VulkanRenderer::DrawFrame() {
             frameStats.probeGrid.cellCount,
             frameStats.probeGrid.fallbackReason,
             frameStats.probeGrid.debugViewEnabled > 0,
-            frameStats.probeGrid.cellDebugViewEnabled > 0
+            frameStats.probeGrid.cellDebugViewEnabled > 0,
+            frameStats.temporal.temporalUpscalePostSourceRequested > 0,
+            frameStats.temporal.temporalUpscaleEnabled > 0,
+            frameStats.temporal.temporalUpscalePostSourceFallbackReason
         }
     );
 
@@ -4158,6 +4173,7 @@ void VulkanRenderer::DrawFrame() {
         : 0;
 
     TemporalUpscalerEvaluateStatus temporalUpscalerEvaluateStatus{};
+    TemporalUpscalePostSourceStatus temporalUpscalePostSourceStatus{};
     const bool temporalUpscaleOutputInitialized =
         imageIndex < m_TemporalUpscaleOutputInitialized.size()
             ? m_TemporalUpscaleOutputInitialized[imageIndex]
@@ -4195,6 +4211,7 @@ void VulkanRenderer::DrawFrame() {
         deferredPbrDebugView,
         m_HdrCompositePipeline.get(),
         m_HdrDescriptorSets.get(),
+        m_TemporalUpscaleHdrDescriptorSets.get(),
         m_BloomDownsampleRenderPass.get(),
         m_BloomUpsampleRenderPass.get(),
         m_BloomDownsampleFramebuffer.get(),
@@ -4202,8 +4219,10 @@ void VulkanRenderer::DrawFrame() {
         recordBloomPyramid ? m_BloomDownsamplePipeline.get() : nullptr,
         recordBloomPyramid ? m_BloomUpsamplePipeline.get() : nullptr,
         recordBloomPyramid ? m_BloomDescriptorSets.get() : nullptr,
+        recordBloomPyramid ? m_TemporalUpscaleBloomDescriptorSets.get() : nullptr,
         recordBloomPyramid,
         showDeferredHdr,
+        temporalUpscaleState.temporalUpscalePostSourceRequested,
         m_RenderDebugSettings.forwardView == ForwardDebugView::Bloom,
         m_RenderDebugSettings.forwardView == ForwardDebugView::ToneMapping,
         m_RenderDebugSettings.forwardView == ForwardDebugView::AutoExposure,
@@ -4215,6 +4234,7 @@ void VulkanRenderer::DrawFrame() {
         &temporalUpscaleState,
         temporalUpscaleOutputInitialized,
         &temporalUpscalerEvaluateStatus,
+        &temporalUpscalePostSourceStatus,
         m_GBufferDebugPipeline.get(),
         m_GBufferDescriptorSets.get(),
         gBufferDebugView,
@@ -4268,8 +4288,15 @@ void VulkanRenderer::DrawFrame() {
     );
     if (imageIndex < m_TemporalUpscaleOutputInitialized.size() &&
         temporalUpscalerEvaluateStatus.attempted > 0u) {
-        m_TemporalUpscaleOutputInitialized[imageIndex] = true;
+        m_TemporalUpscaleOutputInitialized[imageIndex] =
+            temporalUpscalerEvaluateStatus.outputReady > 0u;
     }
+    frameStats.temporal.temporalUpscalePostSourceRequested =
+        temporalUpscalePostSourceStatus.requested;
+    frameStats.temporal.temporalUpscalePostSourceActive =
+        temporalUpscalePostSourceStatus.active;
+    frameStats.temporal.temporalUpscalePostSourceFallbackReason =
+        static_cast<u32>(temporalUpscalePostSourceStatus.fallbackReason);
     frameStats.temporal.temporalUpscalerEvaluateRequested =
         temporalUpscalerEvaluateStatus.requested;
     frameStats.temporal.temporalUpscalerEvaluateAttempted =
@@ -4770,6 +4797,16 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_ColorGradingLut.get(),
         *m_SceneTargetSampler
     );
+    m_TemporalUpscaleHdrDescriptorSets =
+        std::make_unique<VulkanHdrDescriptorSets>(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            m_BloomPyramid.get(),
+            m_ColorGradingLut.get(),
+            *m_SceneTargetSampler,
+            true
+        );
     m_BloomDescriptorSets = std::make_unique<VulkanBloomDescriptorSets>(
         m_Device,
         *m_MaterialDescriptorSetLayout,
@@ -4777,6 +4814,15 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_BloomPyramid,
         *m_SceneTargetSampler
     );
+    m_TemporalUpscaleBloomDescriptorSets =
+        std::make_unique<VulkanBloomDescriptorSets>(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_BloomPyramid,
+            *m_SceneTargetSampler,
+            true
+        );
     m_WeightedTranslucencyDescriptorSets =
         std::make_unique<VulkanWeightedTranslucencyDescriptorSets>(
             m_Device,
@@ -5263,8 +5309,14 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_HdrDescriptorSets != nullptr) {
         m_HdrDescriptorSets->Release();
     }
+    if (m_TemporalUpscaleHdrDescriptorSets != nullptr) {
+        m_TemporalUpscaleHdrDescriptorSets->Release();
+    }
     if (m_BloomDescriptorSets != nullptr) {
         m_BloomDescriptorSets->Release();
+    }
+    if (m_TemporalUpscaleBloomDescriptorSets != nullptr) {
+        m_TemporalUpscaleBloomDescriptorSets->Release();
     }
     if (m_WeightedTranslucencyDescriptorSets != nullptr) {
         m_WeightedTranslucencyDescriptorSets->Release();
@@ -5557,6 +5609,20 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneTargetSampler
         );
     }
+    if (m_TemporalUpscaleHdrDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_BloomPyramid != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_TemporalUpscaleHdrDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            m_BloomPyramid.get(),
+            m_ColorGradingLut.get(),
+            *m_SceneTargetSampler,
+            true
+        );
+    }
     if (m_BloomDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&
         m_BloomPyramid != nullptr &&
@@ -5567,6 +5633,19 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneRenderTargets,
             *m_BloomPyramid,
             *m_SceneTargetSampler
+        );
+    }
+    if (m_TemporalUpscaleBloomDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_BloomPyramid != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_TemporalUpscaleBloomDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_BloomPyramid,
+            *m_SceneTargetSampler,
+            true
         );
     }
     if (m_WeightedTranslucencyDescriptorSets != nullptr &&
@@ -6401,6 +6480,8 @@ FrameTemporalUpscaleState VulkanRenderer::BuildFrameTemporalUpscaleState(
         state.requestedInternalExtent.height < displayExtent.height;
     state.dynamicResolutionRequested = DynamicResolutionRequestedFromEnvironment();
     state.taauRequested = TemporalUpscaleRequestedFromEnvironment();
+    state.temporalUpscalePostSourceRequested =
+        TemporalUpscalePostSourceRequestedFromEnvironment();
     state.dlssQualityMode = TemporalUpscalerDlssQualityModeFromEnvironment();
     state.upscalerPackage = ProbeTemporalUpscalerPackage(
         TemporalUpscalerProbeRequest{
@@ -6635,6 +6716,17 @@ void VulkanRenderer::WriteTemporalStats(
         temporalUpscaleOutputAllocated
             ? temporalUpscaleOutputExtent.height
             : 0u;
+    stats.temporalUpscalePostSourceRequested =
+        temporalUpscaleState.temporalUpscalePostSourceRequested ? 1u : 0u;
+    stats.temporalUpscalePostSourceActive = 0u;
+    stats.temporalUpscalePostSourceFallbackReason =
+        temporalUpscaleState.temporalUpscalePostSourceRequested
+            ? static_cast<u32>(
+                TemporalUpscalePostSourceFallbackReason::EvaluateOutputUnavailable
+            )
+            : static_cast<u32>(
+                TemporalUpscalePostSourceFallbackReason::Disabled
+            );
     stats.dynamicResolutionRequested =
         temporalUpscaleState.dynamicResolutionRequested ? 1u : 0u;
     stats.dynamicResolutionEnabled =

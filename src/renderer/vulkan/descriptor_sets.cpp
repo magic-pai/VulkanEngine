@@ -815,7 +815,8 @@ VulkanHdrDescriptorSets::VulkanHdrDescriptorSets(
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
     const VulkanColorGradingLut* colorGradingLut,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) : m_Device(device.Handle()) {
     try {
         CreateDescriptorSets(
@@ -824,7 +825,8 @@ VulkanHdrDescriptorSets::VulkanHdrDescriptorSets(
             renderTargets,
             bloomPyramid,
             colorGradingLut,
-            sampler
+            sampler,
+            useTemporalUpscaleOutputSource
         );
     } catch (...) {
         Release();
@@ -851,7 +853,8 @@ void VulkanHdrDescriptorSets::Recreate(
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
     const VulkanColorGradingLut* colorGradingLut,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) {
     Release();
     m_Device = device.Handle();
@@ -863,7 +866,8 @@ void VulkanHdrDescriptorSets::Recreate(
             renderTargets,
             bloomPyramid,
             colorGradingLut,
-            sampler
+            sampler,
+            useTemporalUpscaleOutputSource
         );
     } catch (...) {
         Release();
@@ -907,7 +911,8 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid* bloomPyramid,
     const VulkanColorGradingLut* colorGradingLut,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) {
     const std::size_t count = renderTargets.Count();
     CreateDescriptorPool(device, count);
@@ -929,7 +934,9 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
     for (std::size_t index = 0; index < count; ++index) {
         VkDescriptorImageInfo hdrImageInfo{};
         hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        hdrImageInfo.imageView = renderTargets.HdrSceneColorView(index);
+        hdrImageInfo.imageView = useTemporalUpscaleOutputSource
+            ? renderTargets.TemporalUpscaleOutputView(index)
+            : renderTargets.HdrSceneColorView(index);
         hdrImageInfo.sampler = sampler.Handle();
 
         VkDescriptorImageInfo bloomImageInfo = hdrImageInfo;
@@ -1003,7 +1010,8 @@ VulkanBloomDescriptorSets::VulkanBloomDescriptorSets(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid& bloomPyramid,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) : m_Device(device.Handle()) {
     try {
         CreateDescriptorSets(
@@ -1011,7 +1019,8 @@ VulkanBloomDescriptorSets::VulkanBloomDescriptorSets(
             descriptorSetLayout,
             renderTargets,
             bloomPyramid,
-            sampler
+            sampler,
+            useTemporalUpscaleOutputSource
         );
     } catch (...) {
         Release();
@@ -1060,7 +1069,8 @@ void VulkanBloomDescriptorSets::Recreate(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid& bloomPyramid,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) {
     Release();
     m_Device = device.Handle();
@@ -1071,7 +1081,8 @@ void VulkanBloomDescriptorSets::Recreate(
             descriptorSetLayout,
             renderTargets,
             bloomPyramid,
-            sampler
+            sampler,
+            useTemporalUpscaleOutputSource
         );
     } catch (...) {
         Release();
@@ -1128,7 +1139,8 @@ void VulkanBloomDescriptorSets::CreateDescriptorSets(
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanBloomPyramid& bloomPyramid,
-    const VulkanSampler& sampler
+    const VulkanSampler& sampler,
+    bool useTemporalUpscaleOutputSource
 ) {
     m_Count = renderTargets.Count();
     m_MipCount = bloomPyramid.MipCount();
@@ -1174,7 +1186,9 @@ void VulkanBloomDescriptorSets::CreateDescriptorSets(
             VkDescriptorImageInfo downsampleSourceInfo{};
             downsampleSourceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             downsampleSourceInfo.imageView = mipIndex == 0
-                ? renderTargets.HdrSceneColorView(imageIndex)
+                ? (useTemporalUpscaleOutputSource
+                    ? renderTargets.TemporalUpscaleOutputView(imageIndex)
+                    : renderTargets.HdrSceneColorView(imageIndex))
                 : bloomPyramid.BloomMipView(imageIndex, mipIndex - 1);
             downsampleSourceInfo.sampler = sampler.Handle();
 

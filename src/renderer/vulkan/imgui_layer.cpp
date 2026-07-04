@@ -1275,6 +1275,12 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.temporalUpscalerDlssEvaluateSharpness
     );
     ImGui::Text(
+        "Temporal upscaler post source: requested %u active %u fallback %u",
+        stats.temporal.temporalUpscalePostSourceRequested,
+        stats.temporal.temporalUpscalePostSourceActive,
+        stats.temporal.temporalUpscalePostSourceFallbackReason
+    );
+    ImGui::Text(
         "Temporal upscaler requirements: queried %u result 0x%X supported %u mask 0x%X minHW %u minOS %s inst %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s] dev %u/%u enabled %u missing avail/enabled %u/%u [%s] [%s]",
         stats.temporal.temporalUpscalerFeatureRequirementsQueried,
         stats.temporal.temporalUpscalerFeatureRequirementsResult,

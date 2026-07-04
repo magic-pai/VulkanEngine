@@ -1332,6 +1332,7 @@ void VulkanCommandBuffer::Record(
     int deferredPbrDebugView,
     const VulkanGraphicsPipeline* hdrCompositePipeline,
     const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets,
+    const VulkanHdrDescriptorSets* temporalUpscaleHdrCompositeDescriptorSets,
     const VulkanBloomRenderPass* bloomDownsampleRenderPass,
     const VulkanBloomRenderPass* bloomUpsampleRenderPass,
     const VulkanBloomFramebuffer* bloomDownsampleFramebuffer,
@@ -1339,8 +1340,10 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* bloomDownsamplePipeline,
     const VulkanGraphicsPipeline* bloomUpsamplePipeline,
     const VulkanBloomDescriptorSets* bloomDescriptorSets,
+    const VulkanBloomDescriptorSets* temporalUpscaleBloomDescriptorSets,
     bool recordBloomPyramid,
     bool useHdrCompositeAsMain,
+    bool temporalUpscalePostSourceRequested,
     bool bloomDebugView,
     bool toneMappingDebugView,
     bool autoExposureDebugView,
@@ -1352,6 +1355,7 @@ void VulkanCommandBuffer::Record(
     const FrameTemporalUpscaleState* temporalUpscaleState,
     bool temporalUpscaleOutputInitialized,
     TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus,
+    TemporalUpscalePostSourceStatus* temporalUpscalePostSourceStatus,
     const VulkanGraphicsPipeline* gBufferDebugPipeline,
     const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets,
     int gBufferDebugView,
@@ -2209,65 +2213,6 @@ void VulkanCommandBuffer::Record(
         }
     }
 
-    if (recordBloomPyramid &&
-        bloomDownsampleRenderPass != nullptr &&
-        bloomUpsampleRenderPass != nullptr &&
-        bloomDownsampleFramebuffer != nullptr &&
-        bloomUpsampleFramebuffer != nullptr &&
-        bloomDownsamplePipeline != nullptr &&
-        bloomUpsamplePipeline != nullptr &&
-        bloomDescriptorSets != nullptr &&
-        bloomDescriptorSets->MipCount() > 0) {
-        const u32 mipCount = bloomDescriptorSets->MipCount();
-        for (u32 mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
-            RecordBloomFullscreenPass(
-                commandBuffer,
-                *bloomDownsampleRenderPass,
-                *bloomDownsampleFramebuffer,
-                *bloomDownsamplePipeline,
-                descriptorSets,
-                *bloomDescriptorSets,
-                imageIndex,
-                mipIndex,
-                false,
-                bindStats
-            );
-        }
-        if (mipCount > 1) {
-            for (u32 mipIndex = mipCount - 1; mipIndex > 0; --mipIndex) {
-                RecordBloomFullscreenPass(
-                    commandBuffer,
-                    *bloomUpsampleRenderPass,
-                    *bloomUpsampleFramebuffer,
-                    *bloomUpsamplePipeline,
-                    descriptorSets,
-                    *bloomDescriptorSets,
-                    imageIndex,
-                    mipIndex - 1,
-                    true,
-                    bindStats
-                );
-            }
-        }
-    } else if (useHdrCompositeAsMain &&
-        hdrCompositePipeline != nullptr &&
-        hdrCompositeDescriptorSets != nullptr &&
-        bloomDownsampleRenderPass != nullptr &&
-        bloomDownsampleFramebuffer != nullptr) {
-        ClearBloomMipForSampledRead(
-            commandBuffer,
-            *bloomDownsampleRenderPass,
-            *bloomDownsampleFramebuffer,
-            imageIndex
-        );
-    }
-
-    if (useHdrCompositeAsMain &&
-        sceneRenderTargets != nullptr &&
-        !temporalHistoryColorInitialized) {
-        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
-    }
-
     if (sceneRenderTargets != nullptr &&
         temporalState != nullptr &&
         temporalUpscaleState != nullptr &&
@@ -2286,6 +2231,103 @@ void VulkanCommandBuffer::Record(
         *temporalUpscalerEvaluateStatus = TemporalUpscalerEvaluateStatus{};
     }
 
+    TemporalUpscalePostSourceStatus postSourceStatus{};
+    postSourceStatus.requested = temporalUpscalePostSourceRequested ? 1u : 0u;
+    if (!temporalUpscalePostSourceRequested) {
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::Disabled;
+    } else if (!useHdrCompositeAsMain ||
+        hdrCompositePipeline == nullptr ||
+        hdrCompositeDescriptorSets == nullptr) {
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::CompositeUnavailable;
+    } else if (temporalUpscalerEvaluateStatus == nullptr ||
+        temporalUpscalerEvaluateStatus->outputReady == 0u) {
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::EvaluateOutputUnavailable;
+    } else if (temporalUpscaleHdrCompositeDescriptorSets == nullptr ||
+        (recordBloomPyramid && temporalUpscaleBloomDescriptorSets == nullptr)) {
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::DescriptorUnavailable;
+    } else {
+        postSourceStatus.active = 1u;
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::None;
+    }
+    if (temporalUpscalePostSourceStatus != nullptr) {
+        *temporalUpscalePostSourceStatus = postSourceStatus;
+    }
+
+    const bool routeTemporalUpscaleOutputToPost =
+        postSourceStatus.active > 0u;
+    const VulkanHdrDescriptorSets* activeHdrCompositeDescriptorSets =
+        routeTemporalUpscaleOutputToPost
+            ? temporalUpscaleHdrCompositeDescriptorSets
+            : hdrCompositeDescriptorSets;
+    const VulkanBloomDescriptorSets* activeBloomDescriptorSets =
+        routeTemporalUpscaleOutputToPost
+            ? temporalUpscaleBloomDescriptorSets
+            : bloomDescriptorSets;
+
+    if (recordBloomPyramid &&
+        bloomDownsampleRenderPass != nullptr &&
+        bloomUpsampleRenderPass != nullptr &&
+        bloomDownsampleFramebuffer != nullptr &&
+        bloomUpsampleFramebuffer != nullptr &&
+        bloomDownsamplePipeline != nullptr &&
+        bloomUpsamplePipeline != nullptr &&
+        activeBloomDescriptorSets != nullptr &&
+        activeBloomDescriptorSets->MipCount() > 0) {
+        const u32 mipCount = activeBloomDescriptorSets->MipCount();
+        for (u32 mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
+            RecordBloomFullscreenPass(
+                commandBuffer,
+                *bloomDownsampleRenderPass,
+                *bloomDownsampleFramebuffer,
+                *bloomDownsamplePipeline,
+                descriptorSets,
+                *activeBloomDescriptorSets,
+                imageIndex,
+                mipIndex,
+                false,
+                bindStats
+            );
+        }
+        if (mipCount > 1) {
+            for (u32 mipIndex = mipCount - 1; mipIndex > 0; --mipIndex) {
+                RecordBloomFullscreenPass(
+                    commandBuffer,
+                    *bloomUpsampleRenderPass,
+                    *bloomUpsampleFramebuffer,
+                    *bloomUpsamplePipeline,
+                    descriptorSets,
+                    *activeBloomDescriptorSets,
+                    imageIndex,
+                    mipIndex - 1,
+                    true,
+                    bindStats
+                );
+            }
+        }
+    } else if (useHdrCompositeAsMain &&
+        hdrCompositePipeline != nullptr &&
+        activeHdrCompositeDescriptorSets != nullptr &&
+        bloomDownsampleRenderPass != nullptr &&
+        bloomDownsampleFramebuffer != nullptr) {
+        ClearBloomMipForSampledRead(
+            commandBuffer,
+            *bloomDownsampleRenderPass,
+            *bloomDownsampleFramebuffer,
+            imageIndex
+        );
+    }
+
+    if (useHdrCompositeAsMain &&
+        sceneRenderTargets != nullptr &&
+        !temporalHistoryColorInitialized) {
+        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
+    }
+
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color = { { 0.05f, 0.07f, 0.10f, 1.0f } };
     clearValues[1].depthStencil = { 1.0f, 0 };
@@ -2295,7 +2337,7 @@ void VulkanCommandBuffer::Record(
             gBufferDebugDescriptorSets != nullptr) ||
         (useHdrCompositeAsMain &&
             hdrCompositePipeline != nullptr &&
-            hdrCompositeDescriptorSets != nullptr);
+            activeHdrCompositeDescriptorSets != nullptr);
     const bool needsResidualDepth =
         useDeferredCompositeAsMain &&
         !forwardResidualRenderCommands.empty() &&
@@ -2506,7 +2548,7 @@ void VulkanCommandBuffer::Record(
         }
     } else if (useHdrCompositeAsMain &&
         hdrCompositePipeline != nullptr &&
-        hdrCompositeDescriptorSets != nullptr) {
+        activeHdrCompositeDescriptorSets != nullptr) {
         vkCmdBindPipeline(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -2526,7 +2568,7 @@ void VulkanCommandBuffer::Record(
         );
 
         const VkDescriptorSet hdrDescriptorSet =
-            hdrCompositeDescriptorSets->Handle(imageIndex);
+            activeHdrCompositeDescriptorSets->Handle(imageIndex);
         vkCmdBindDescriptorSets(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,

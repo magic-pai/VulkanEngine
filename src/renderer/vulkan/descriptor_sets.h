@@ -188,7 +188,8 @@ public:
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
         const VulkanColorGradingLut* colorGradingLut,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource = false
     );
 
     ~VulkanHdrDescriptorSets();
@@ -205,7 +206,8 @@ public:
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
         const VulkanColorGradingLut* colorGradingLut,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource = false
     );
     void Release();
 
@@ -217,7 +219,8 @@ private:
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid* bloomPyramid,
         const VulkanColorGradingLut* colorGradingLut,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource
     );
 
 private:
@@ -233,7 +236,8 @@ public:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid& bloomPyramid,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource = false
     );
 
     ~VulkanBloomDescriptorSets();
@@ -251,7 +255,8 @@ public:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid& bloomPyramid,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource = false
     );
     void Release();
 
@@ -266,7 +271,8 @@ private:
         const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanBloomPyramid& bloomPyramid,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool useTemporalUpscaleOutputSource
     );
     std::size_t DescriptorIndex(std::size_t imageIndex, u32 mipIndex) const;
 

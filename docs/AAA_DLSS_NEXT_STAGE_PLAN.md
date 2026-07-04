@@ -102,13 +102,64 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.1: DLSS output presentation/post-ordering hardening. Slice 4
-now creates a DLSS SR/DLAA feature handle and records per-frame
-`NGX_VULKAN_EVALUATE_DLSS_EXT` behind the existing `TemporalUpscaler` boundary.
-The next slice should route `TemporalUpscaleOutput` into the visible
-post/present path under an explicit gate, then add screenshots/visual QA before
-any production image-quality claim. Do not expand into Frame Generation, Ray
-Reconstruction, Streamline interposition, or default presentation changes yet.
+Implement Slice 4.2: DLSS visual QA and quality hardening. Slice 4.1 now routes
+`TemporalUpscaleOutput` into the visible post/present path under an explicit
+gate after current-frame DLSS evaluate reports output ready. The next slice
+should add renderer-owned screenshots/reference captures, compare native HDR
+composite vs DLSS-present output, and start quality gates for object motion
+vectors, reactive/transparency masks, and post-ordering policy. Do not expand
+into Frame Generation, Ray Reconstruction, Streamline interposition, or default
+presentation changes yet.
+
+## Slice 4.1 Execution Plan
+
+Slice 4.1 should make the successful DLSS SR/DLAA evaluate output visible
+without making DLSS the default presentation path. The implementation should
+keep all routing decisions in Vulkan renderer/post-process code and keep NGX
+details behind the existing `TemporalUpscaler` boundary.
+
+1. Explicit presentation gate.
+   - Add an opt-in runtime gate for using `TemporalUpscaleOutput` as the
+     post-process source, with `SE_TEMPORAL_UPSCALE_PRESENT=1` and
+     `SE_DLSS_PRESENT=1` accepted aliases.
+   - The gate may force the deferred HDR composite route so smoke runs can see
+     the output, but DLSS must remain off the default visible path.
+   - If the gate is disabled, Slice 4 evaluate diagnostics should remain
+     unchanged and the visible image should still use the native HDR composite
+     or legacy forward path.
+
+2. Post-process source descriptors.
+   - Keep the existing HDR composite and bloom descriptor sets sampling
+     `HDRSceneColor`.
+   - Add parallel descriptor sets whose first HDR/composite source and bloom
+     mip-0 source sample `TemporalUpscaleOutput`.
+   - Preserve temporal history, velocity, depth, bloom mip, and color-grading
+     bindings so post-process shaders do not need DLSS-specific branches.
+
+3. Ordering.
+   - Record DLSS evaluate after HDR scene color, WBOIT resolve, and auto
+     exposure inputs are available.
+   - Move bloom pyramid and final HDR composite after the evaluate step when the
+     route is requested, so bloom, tone mapping, color grading, sharpening, UI,
+     and present can operate on the upscaled image.
+   - Keep auto exposure metering on the pre-upscale HDR scene color for this
+     slice; per-output metering policy remains future quality work.
+
+4. Fallback and diagnostics.
+   - Only switch to the temporal-upscale descriptor sets when the current frame
+     DLSS evaluate reports output ready.
+   - Fall back to the native HDR composite source if evaluate fails, descriptors
+     are unavailable, or the composite path is not active.
+   - Expose post-source requested/active/fallback diagnostics in CSV, ImGui,
+     and FrameGraph separately from NGX create/evaluate diagnostics.
+
+5. Verification.
+   - Run `_quick_build.bat`.
+   - Run smokes for DLSS-present enabled, invalid SDK with present gate, and
+     DLSS requested without the present gate.
+   - Require 0 frame-graph validation issues and clean logs for `VUID`,
+     validation, error, failed, exception, and shader diagnostics.
+   - Add visual/screenshot QA evidence before claiming production image quality.
 
 ## Slice 4 Execution Plan
 
@@ -408,3 +459,51 @@ after the evaluate contract is stable.
   still does not route the DLSS output into final presentation, enable Frame
   Generation, enable Ray Reconstruction, introduce Streamline interposition,
   change default presentation, or claim production image quality.
+
+## Slice 4.1 Execution Evidence
+
+- Added an explicit DLSS/temporal-upscale presentation gate. Setting
+  `SE_TEMPORAL_UPSCALE_PRESENT=1`, `SE_TEMPORAL_UPSCALE_OUTPUT_PRESENT=1`,
+  `SE_UPSCALER_PRESENT=1`, or `SE_DLSS_PRESENT=1` requests that
+  `TemporalUpscaleOutput` become the visible post-process source. With the gate
+  disabled, DLSS evaluate may still run, but the visible post source stays on
+  the native HDR composite path.
+- Added parallel HDR composite and bloom descriptor sets that bind
+  `TemporalUpscaleOutput` as the post source while preserving the existing
+  shader binding contract for bloom mips, temporal history, velocity, scene
+  depth, and color-grading LUTs. Native HDR descriptor sets remain unchanged.
+- Moved DLSS evaluate ahead of bloom/final composite in command recording while
+  leaving auto exposure on the pre-upscale HDR scene color for this slice.
+  Bloom pyramid and HDR composite select the temporal-upscale descriptor sets
+  only when the current frame reports DLSS output ready; otherwise they fall
+  back to the native HDR descriptor sets.
+- CSV and ImGui now expose `temporal_upscale_post_source_requested`,
+  `temporal_upscale_post_source_active`, and
+  `temporal_upscale_post_source_fallback_reason` separately from NGX
+  create/evaluate diagnostics. FrameGraph records `TemporalUpscalePostSource`
+  when the presentation route is requested.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_dlss_present_smoke.csv`,
+  `out/benchmarks/aaa_dlss_present_bloom_smoke.csv`,
+  `out/benchmarks/aaa_dlss_present_invalid_sdk_smoke.csv`, and
+  `out/benchmarks/aaa_dlss_evaluate_not_present_smoke.csv` all report matching
+  755-column rows and 0 frame-graph validation issues.
+- The DLSS-present smoke reports evaluate result/output ready `1/1`, post
+  source requested/active/fallback `1/1/0`, temporal upscale enabled `1`, and
+  one HDR composite draw. The bloom variant reports the same post-source state
+  plus bloom pyramid enabled with 4 downsample draws and 3 upsample draws,
+  proving the bloom source follows the upscaled output route.
+- The invalid-SDK present smoke reports package ready `0`, runtime fallback `3`,
+  evaluate attempted/output ready `0/0`, post source requested/active/fallback
+  `1/0/3`, and one native HDR composite draw. The evaluate-not-present smoke
+  reports evaluate result/output ready `1/1` while post source
+  requested/active/fallback remains `0/0/1`, proving evaluate does not change
+  presentation without the explicit gate.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This makes DLSS SR/DLAA output visible under an explicit experimental gate.
+  It is still not production image-quality validation: renderer-owned
+  screenshots/reference captures, object motion vectors, reactive/transparency
+  masks, exposure policy refinement, and visual-diff evidence remain follow-up
+  work before any production IQ claim.

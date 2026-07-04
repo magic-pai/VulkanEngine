@@ -44,6 +44,21 @@ struct FrameTemporalState;
 struct FrameTemporalUpscaleState;
 struct TemporalUpscalerEvaluateStatus;
 
+enum class TemporalUpscalePostSourceFallbackReason : u32 {
+    None = 0,
+    Disabled = 1,
+    CompositeUnavailable = 2,
+    EvaluateOutputUnavailable = 3,
+    DescriptorUnavailable = 4
+};
+
+struct TemporalUpscalePostSourceStatus {
+    u32 requested = 0;
+    u32 active = 0;
+    TemporalUpscalePostSourceFallbackReason fallbackReason =
+        TemporalUpscalePostSourceFallbackReason::Disabled;
+};
+
 class VulkanCommandBuffer {
 public:
     VulkanCommandBuffer(
@@ -91,6 +106,7 @@ public:
         int deferredPbrDebugView = 0,
         const VulkanGraphicsPipeline* hdrCompositePipeline = nullptr,
         const VulkanHdrDescriptorSets* hdrCompositeDescriptorSets = nullptr,
+        const VulkanHdrDescriptorSets* temporalUpscaleHdrCompositeDescriptorSets = nullptr,
         const VulkanBloomRenderPass* bloomDownsampleRenderPass = nullptr,
         const VulkanBloomRenderPass* bloomUpsampleRenderPass = nullptr,
         const VulkanBloomFramebuffer* bloomDownsampleFramebuffer = nullptr,
@@ -98,8 +114,10 @@ public:
         const VulkanGraphicsPipeline* bloomDownsamplePipeline = nullptr,
         const VulkanGraphicsPipeline* bloomUpsamplePipeline = nullptr,
         const VulkanBloomDescriptorSets* bloomDescriptorSets = nullptr,
+        const VulkanBloomDescriptorSets* temporalUpscaleBloomDescriptorSets = nullptr,
         bool recordBloomPyramid = false,
         bool useHdrCompositeAsMain = false,
+        bool temporalUpscalePostSourceRequested = false,
         bool bloomDebugView = false,
         bool toneMappingDebugView = false,
         bool autoExposureDebugView = false,
@@ -111,6 +129,7 @@ public:
         const FrameTemporalUpscaleState* temporalUpscaleState = nullptr,
         bool temporalUpscaleOutputInitialized = false,
         TemporalUpscalerEvaluateStatus* temporalUpscalerEvaluateStatus = nullptr,
+        TemporalUpscalePostSourceStatus* temporalUpscalePostSourceStatus = nullptr,
         const VulkanGraphicsPipeline* gBufferDebugPipeline = nullptr,
         const VulkanGBufferDescriptorSets* gBufferDebugDescriptorSets = nullptr,
         int gBufferDebugView = -1,

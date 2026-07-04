@@ -628,6 +628,9 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscaleOutputFormat << ','
         << temporal.temporalUpscaleOutputWidth << ','
         << temporal.temporalUpscaleOutputHeight << ','
+        << temporal.temporalUpscalePostSourceRequested << ','
+        << temporal.temporalUpscalePostSourceActive << ','
+        << temporal.temporalUpscalePostSourceFallbackReason << ','
         << temporal.dynamicResolutionRequested << ','
         << temporal.dynamicResolutionEnabled << ','
         << temporal.taauRequested << ','
@@ -1241,6 +1244,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscale_output_format,"
         << "temporal_upscale_output_width,"
         << "temporal_upscale_output_height,"
+        << "temporal_upscale_post_source_requested,"
+        << "temporal_upscale_post_source_active,"
+        << "temporal_upscale_post_source_fallback_reason,"
         << "temporal_dynamic_resolution_requested,"
         << "temporal_dynamic_resolution_enabled,"
         << "temporal_taau_requested,"

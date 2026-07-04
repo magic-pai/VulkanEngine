@@ -433,6 +433,9 @@ struct CurrentVulkanFrameGraphInputs {
     u32 probeGridFallbackReason = 0;
     bool probeGridDebugViewEnabled = false;
     bool probeGridCellDebugViewEnabled = false;
+    bool temporalUpscalePostSourceRequested = false;
+    bool temporalUpscalePostSourceExpected = false;
+    u32 temporalUpscalePostSourceFallbackReason = 0;
 };
 
 std::string_view RenderFramePassStatusName(RenderFramePassStatus status);

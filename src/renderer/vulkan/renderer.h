@@ -127,6 +127,7 @@ struct FrameTemporalUpscaleState {
     bool temporalUpscaleRequested = false;
     bool temporalUpscaleEnabled = false;
     bool temporalUpscaleContractReady = false;
+    bool temporalUpscalePostSourceRequested = false;
     bool upscalerPluginRequested = false;
     bool upscalerPluginAvailable = false;
     TemporalUpscalerDlssQualityMode dlssQualityMode =
@@ -605,7 +606,9 @@ private:
     std::unique_ptr<VulkanMaterialDescriptorSets> m_MaterialDescriptorSets;
     std::unique_ptr<VulkanGBufferDescriptorSets> m_GBufferDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
+    std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;
     std::unique_ptr<VulkanBloomDescriptorSets> m_BloomDescriptorSets;
+    std::unique_ptr<VulkanBloomDescriptorSets> m_TemporalUpscaleBloomDescriptorSets;
     std::unique_ptr<VulkanWeightedTranslucencyDescriptorSets> m_WeightedTranslucencyDescriptorSets;
     std::unique_ptr<VulkanLightBuffer> m_LightBuffer;
     std::unique_ptr<VulkanLightTileDiagnosticsBuffer> m_LightTileDiagnosticsBuffer;

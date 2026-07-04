@@ -2229,6 +2229,25 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "DLSS SR/DLAA evaluate waits for runtime, contract, and output-resource readiness."
         );
     }
+    if (inputs.temporalUpscalePostSourceRequested ||
+        inputs.temporalUpscalePostSourceExpected) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::PostProcess,
+            inputs.temporalUpscalePostSourceExpected
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "TemporalUpscalePostSource",
+            inputs.temporalUpscalePostSourceExpected
+                ? "TemporalUpscaleOutput"
+                : "",
+            "",
+            inputs.temporalUpscalePostSourceExpected
+                ? "Routes DLSS SR/DLAA output into the visible post-process source when the current evaluate reports output ready."
+                : "Temporal upscaler output presentation was requested but remains on native HDR fallback."
+        );
+    }
     if (inputs.temporalUpscalerPluginRequested ||
         inputs.temporalUpscalerPackageReady ||
         inputs.temporalUpscalerProviderKind != 0u) {
