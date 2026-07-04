@@ -1156,7 +1156,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.postProcess.autoExposureFallbacks
     );
     ImGui::Text(
-        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s/%s history %s copies %u weight %.2f fallback %u reject %s clamp %s",
+        "Temporal: velocity %s, history %s reset %u reason %u, jitter %s applied %u [%.3f %.3f] px, aux %s, TAA %s/%s history %s copies %u weight %.2f fallback %u reject %s clamp %s consumers ready 0x%X active 0x%X unsupported 0x%X",
         stats.temporal.velocityCameraMotionReady ? "camera-ready" : "cold",
         stats.temporal.historyValid ? "valid" : "cold",
         stats.temporal.historyReset,
@@ -1173,7 +1173,10 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.temporal.taaHistoryWeight,
         stats.temporal.taaFallbackReason,
         stats.temporal.taaRejectionEnabled ? "on" : "off",
-        stats.temporal.taaNeighborhoodClampEnabled ? "on" : "off"
+        stats.temporal.taaNeighborhoodClampEnabled ? "on" : "off",
+        stats.temporal.temporalConsumerReadinessMask,
+        stats.temporal.temporalConsumerActiveMask,
+        stats.temporal.temporalConsumerUnsupportedMask
     );
     ImGui::Text(
         "Color grading: %s, saturation %.3f, contrast %.3f, gamma %.3f, LUT %s size %u strength %.3f fallbacks %u",

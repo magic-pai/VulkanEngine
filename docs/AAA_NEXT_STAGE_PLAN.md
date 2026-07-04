@@ -70,7 +70,7 @@ feature explicitly off/fallback-safe by default.
    - Add screenshot/reference-capture hooks if the existing renderer tooling is
      sufficient.
 
-5. Temporal consumers readiness.
+5. Temporal consumers readiness. Implemented.
    - Expose which systems are allowed to consume temporal history: SSR, GTAO,
      motion blur, dynamic resolution, and future upscaler plugins.
    - Add explicit unsupported/fallback reporting instead of silent no-ops.
@@ -239,6 +239,38 @@ change unless explicitly enabled by environment.
 - This is debug-view coverage for the first temporal path. It does not yet add
   screenshot/reference-capture automation, visual-diff baselines, temporal
   history inspection tools outside HDR composite, or editor camera bookmarks.
+
+## Slice 5 Execution Evidence
+
+- Temporal stats now expose consumer readiness, active, and unsupported masks.
+  Bit `1` is SSR, bit `2` is GTAO, bit `4` is motion blur, bit `8` is dynamic
+  resolution, and bit `16` is future upscaler integration.
+- SSR can report temporal-history readiness when SSR is enabled and TAA history,
+  velocity, and resolve readiness are present, but `temporalConsumerSsrActive`
+  remains `0` until SSR actually consumes temporal history.
+- GTAO, motion blur, dynamic resolution, and upscaler readiness remain `0` and
+  are explicitly reported through the unsupported mask instead of silent no-ops.
+- FrameGraph records `TemporalConsumersReadiness` when consumer readiness or
+  unsupported state is present, reading temporal history resources only when a
+  consumer is actually ready.
+- CSV and ImGui expose readiness, active, unsupported, SSR-ready/active, GTAO,
+  motion-blur, dynamic-resolution, and upscaler readiness fields.
+- `_quick_build.bat` passes for `SelfEngineForward3D`.
+- Smoke evidence:
+  `out/benchmarks/aaa_taa_consumers_ssr_ready_smoke.csv` and
+  `out/benchmarks/aaa_taa_consumers_forced_reset_smoke.csv` both have matching
+  640-column rows and 0 frame-graph validation issues.
+- The SSR-ready smoke reports TAA enabled `1`, SSR enabled `1`, readiness mask
+  `1`, active mask `0`, unsupported mask `31`, SSR ready/active `1/0`, and all
+  other consumer readiness values `0`.
+- The forced-reset smoke reports TAA enabled `0`, SSR enabled `1`, readiness
+  mask `0`, active mask `0`, unsupported mask `30`, SSR ready/active `0/0`,
+  temporal reset `1`, and reset reason `4`.
+- Smoke stdout/stderr logs contain no `VUID`, validation, error, failed,
+  exception, or shader diagnostic matches.
+- This is an explicit temporal-consumer readiness contract. It does not yet make
+  SSR consume history, implement GTAO, motion blur, dynamic resolution, TAAU, or
+  any upscaler plugin integration.
 
 ## Previous Stage Summary
 

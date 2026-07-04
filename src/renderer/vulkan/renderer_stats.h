@@ -607,6 +607,15 @@ struct RendererTemporalStats {
     u32 taaRejectionDebugViewEnabled = 0;
     u32 taaHistoryDebugViewEnabled = 0;
     u32 taaReprojectionDebugViewEnabled = 0;
+    u32 temporalConsumerReadinessMask = 0;
+    u32 temporalConsumerActiveMask = 0;
+    u32 temporalConsumerUnsupportedMask = 0;
+    u32 temporalConsumerSsrReady = 0;
+    u32 temporalConsumerSsrActive = 0;
+    u32 temporalConsumerGtaoReady = 0;
+    u32 temporalConsumerMotionBlurReady = 0;
+    u32 temporalConsumerDynamicResolutionReady = 0;
+    u32 temporalConsumerUpscalerReady = 0;
 };
 
 struct RendererStats {

@@ -606,6 +606,15 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.taaRejectionDebugViewEnabled << ','
         << temporal.taaHistoryDebugViewEnabled << ','
         << temporal.taaReprojectionDebugViewEnabled << ','
+        << temporal.temporalConsumerReadinessMask << ','
+        << temporal.temporalConsumerActiveMask << ','
+        << temporal.temporalConsumerUnsupportedMask << ','
+        << temporal.temporalConsumerSsrReady << ','
+        << temporal.temporalConsumerSsrActive << ','
+        << temporal.temporalConsumerGtaoReady << ','
+        << temporal.temporalConsumerMotionBlurReady << ','
+        << temporal.temporalConsumerDynamicResolutionReady << ','
+        << temporal.temporalConsumerUpscalerReady << ','
         << binds.mainMaterialBinds << ','
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
@@ -1098,6 +1107,15 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_taa_rejection_debug_view_enabled,"
         << "temporal_taa_history_debug_view_enabled,"
         << "temporal_taa_reprojection_debug_view_enabled,"
+        << "temporal_consumer_readiness_mask,"
+        << "temporal_consumer_active_mask,"
+        << "temporal_consumer_unsupported_mask,"
+        << "temporal_consumer_ssr_ready,"
+        << "temporal_consumer_ssr_active,"
+        << "temporal_consumer_gtao_ready,"
+        << "temporal_consumer_motion_blur_ready,"
+        << "temporal_consumer_dynamic_resolution_ready,"
+        << "temporal_consumer_upscaler_ready,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"

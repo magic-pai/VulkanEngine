@@ -2152,6 +2152,21 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "TAA resolve is allocated/configured but currently falls back before sampling history."
         );
     }
+    if (inputs.temporalConsumerReadinessMask != 0u ||
+        inputs.temporalConsumerUnsupportedMask != 0u) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::TemporalUpscale,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Graphics,
+            "TemporalConsumersReadiness",
+            inputs.temporalConsumerReadinessMask != 0u
+                ? "TemporalHistoryColor, Velocity, TemporalFrameState"
+                : "",
+            "",
+            "Reports ready, active, and unsupported temporal-history consumers before SSR/GTAO/motion-blur/upscaler integrations consume history."
+        );
+    }
 
     if (inputs.appendRenderFeatures != nullptr) {
         inputs.appendRenderFeatures(

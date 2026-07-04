@@ -371,6 +371,9 @@ struct CurrentVulkanFrameGraphInputs {
     bool taaResolveEnabled = false;
     bool taaVelocityReprojectionEnabled = false;
     u32 taaFallbackReason = 0;
+    u32 temporalConsumerReadinessMask = 0;
+    u32 temporalConsumerActiveMask = 0;
+    u32 temporalConsumerUnsupportedMask = 0;
     bool reflectionCaptureSlotTableAllocated = false;
     u32 reflectionCaptureSlotCount = 0;
     u32 reflectionCaptureSlotReadyCount = 0;

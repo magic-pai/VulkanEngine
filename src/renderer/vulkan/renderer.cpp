@@ -99,6 +99,11 @@ constexpr f32 kShadowDepthPadding = 4.0f;
 constexpr f32 kLocalShadowNearPlane = 0.05f;
 const glm::vec3 kProbeGridOrigin{ -18.0f, -4.0f, -18.0f };
 constexpr f32 kProbeGridSpacing = 12.0f;
+constexpr u32 kTemporalConsumerSsrBit = 1u << 0u;
+constexpr u32 kTemporalConsumerGtaoBit = 1u << 1u;
+constexpr u32 kTemporalConsumerMotionBlurBit = 1u << 2u;
+constexpr u32 kTemporalConsumerDynamicResolutionBit = 1u << 3u;
+constexpr u32 kTemporalConsumerUpscalerBit = 1u << 4u;
 
 using FrameClock = std::chrono::steady_clock;
 
@@ -3560,6 +3565,30 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::TaaHistory ? 1u : 0u;
     frameStats.temporal.taaReprojectionDebugViewEnabled =
         m_RenderDebugSettings.forwardView == ForwardDebugView::TaaReprojection ? 1u : 0u;
+    const bool temporalHistoryReadyForConsumers =
+        frameStats.temporal.taaResolveEnabled > 0 &&
+        frameStats.temporal.taaHistoryColorReady > 0 &&
+        frameStats.temporal.velocityCameraMotionReady > 0;
+    frameStats.temporal.temporalConsumerSsrReady =
+        temporalHistoryReadyForConsumers && frameStats.ssr.enabled > 0 ? 1u : 0u;
+    frameStats.temporal.temporalConsumerSsrActive = 0u;
+    frameStats.temporal.temporalConsumerGtaoReady = 0u;
+    frameStats.temporal.temporalConsumerMotionBlurReady = 0u;
+    frameStats.temporal.temporalConsumerDynamicResolutionReady = 0u;
+    frameStats.temporal.temporalConsumerUpscalerReady = 0u;
+    frameStats.temporal.temporalConsumerReadinessMask =
+        frameStats.temporal.temporalConsumerSsrReady > 0
+            ? kTemporalConsumerSsrBit
+            : 0u;
+    frameStats.temporal.temporalConsumerActiveMask = 0u;
+    frameStats.temporal.temporalConsumerUnsupportedMask =
+        kTemporalConsumerGtaoBit |
+        kTemporalConsumerMotionBlurBit |
+        kTemporalConsumerDynamicResolutionBit |
+        kTemporalConsumerUpscalerBit |
+        (frameStats.temporal.temporalConsumerSsrReady > 0
+            ? kTemporalConsumerSsrBit
+            : 0u);
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
         BuildGBufferCommandList(
             mainCommands,
@@ -3875,6 +3904,9 @@ void VulkanRenderer::DrawFrame() {
             frameStats.temporal.taaResolveEnabled > 0,
             frameStats.temporal.taaVelocityReprojectionEnabled > 0,
             frameStats.temporal.taaFallbackReason,
+            frameStats.temporal.temporalConsumerReadinessMask,
+            frameStats.temporal.temporalConsumerActiveMask,
+            frameStats.temporal.temporalConsumerUnsupportedMask,
             frameReflectionProbes.activeLocalProbeCount > 0 &&
                 frameReflectionProbes.localProbe.sceneOwned,
             frameStats.reflectionProbe.selectedCaptureSlotCount,
