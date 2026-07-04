@@ -23,6 +23,12 @@ struct RuntimeModelLoadResult {
     bool cacheHit = false;
     u32 meshCount = 0;
     u32 materialCount = 0;
+    u32 sourceNodeCount = 0;
+    u32 sourceBoneNodeCount = 0;
+    u32 sourceAnimationChannelBoundCount = 0;
+    u32 sourceAnimationChannelUnboundCount = 0;
+    u32 sourceBoneNameMatchedNodeCount = 0;
+    u32 sourceBoneNameUnmatchedCount = 0;
     u32 sourceAnimationCount = 0;
     u32 sourceAnimationChannelCount = 0;
     u32 sourceAnimationPositionKeyCount = 0;
@@ -67,6 +73,12 @@ private:
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
         std::vector<MeshLodChain> lodChains;
+        u32 sourceNodeCount = 0;
+        u32 sourceBoneNodeCount = 0;
+        u32 sourceAnimationChannelBoundCount = 0;
+        u32 sourceAnimationChannelUnboundCount = 0;
+        u32 sourceBoneNameMatchedNodeCount = 0;
+        u32 sourceBoneNameUnmatchedCount = 0;
         u32 sourceAnimationCount = 0;
         u32 sourceAnimationChannelCount = 0;
         u32 sourceAnimationPositionKeyCount = 0;

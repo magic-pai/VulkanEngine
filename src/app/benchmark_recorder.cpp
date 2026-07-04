@@ -214,6 +214,12 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportCacheHit << ','
         << sceneDiagnostics.runtimeImportMeshCount << ','
         << sceneDiagnostics.runtimeImportMaterialCount << ','
+        << sceneDiagnostics.runtimeImportNodeCount << ','
+        << sceneDiagnostics.runtimeImportBoneNodeCount << ','
+        << sceneDiagnostics.runtimeImportAnimationChannelBoundCount << ','
+        << sceneDiagnostics.runtimeImportAnimationChannelUnboundCount << ','
+        << sceneDiagnostics.runtimeImportBoneNameMatchedNodeCount << ','
+        << sceneDiagnostics.runtimeImportBoneNameUnmatchedCount << ','
         << sceneDiagnostics.runtimeImportAnimationCount << ','
         << sceneDiagnostics.runtimeImportAnimationChannelCount << ','
         << sceneDiagnostics.runtimeImportAnimationPositionKeyCount << ','
@@ -1013,7 +1019,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "ue_bridge_blocked_lights,ue_bridge_blocked_reference_capture,"
         << "runtime_import_model_requested,runtime_import_model_loaded,"
         << "runtime_import_cache_hit,runtime_import_mesh_count,"
-        << "runtime_import_material_count,runtime_import_animation_count,"
+        << "runtime_import_material_count,runtime_import_node_count,"
+        << "runtime_import_bone_node_count,"
+        << "runtime_import_animation_channel_bound_count,"
+        << "runtime_import_animation_channel_unbound_count,"
+        << "runtime_import_bone_name_matched_node_count,"
+        << "runtime_import_bone_name_unmatched_count,"
+        << "runtime_import_animation_count,"
         << "runtime_import_animation_channel_count,"
         << "runtime_import_animation_position_key_count,"
         << "runtime_import_animation_rotation_key_count,"

@@ -409,6 +409,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 true,
                 static_cast<u32>(cached.meshes.size()),
                 static_cast<u32>(cached.materials.size()),
+                cached.sourceNodeCount,
+                cached.sourceBoneNodeCount,
+                cached.sourceAnimationChannelBoundCount,
+                cached.sourceAnimationChannelUnboundCount,
+                cached.sourceBoneNameMatchedNodeCount,
+                cached.sourceBoneNameUnmatchedCount,
                 cached.sourceAnimationCount,
                 cached.sourceAnimationChannelCount,
                 cached.sourceAnimationPositionKeyCount,
@@ -980,6 +986,16 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
 
         const std::size_t meshCount = importedModelData.meshes.size();
         const std::size_t materialCount = importedModelData.materials.size();
+        loadedModel->sourceNodeCount = importedModelData.sourceNodeCount;
+        loadedModel->sourceBoneNodeCount = importedModelData.sourceBoneNodeCount;
+        loadedModel->sourceAnimationChannelBoundCount =
+            importedModelData.sourceAnimationChannelBoundCount;
+        loadedModel->sourceAnimationChannelUnboundCount =
+            importedModelData.sourceAnimationChannelUnboundCount;
+        loadedModel->sourceBoneNameMatchedNodeCount =
+            importedModelData.sourceBoneNameMatchedNodeCount;
+        loadedModel->sourceBoneNameUnmatchedCount =
+            importedModelData.sourceBoneNameUnmatchedCount;
         loadedModel->sourceAnimationCount = importedModelData.sourceAnimationCount;
         loadedModel->sourceAnimationChannelCount =
             importedModelData.sourceAnimationChannelCount;
@@ -1012,6 +1028,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             false,
             static_cast<u32>(meshCount),
             static_cast<u32>(materialCount),
+            importedModelData.sourceNodeCount,
+            importedModelData.sourceBoneNodeCount,
+            importedModelData.sourceAnimationChannelBoundCount,
+            importedModelData.sourceAnimationChannelUnboundCount,
+            importedModelData.sourceBoneNameMatchedNodeCount,
+            importedModelData.sourceBoneNameUnmatchedCount,
             importedModelData.sourceAnimationCount,
             importedModelData.sourceAnimationChannelCount,
             importedModelData.sourceAnimationPositionKeyCount,

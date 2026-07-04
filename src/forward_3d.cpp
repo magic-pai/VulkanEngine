@@ -2368,6 +2368,16 @@ int main() {
     sceneDiagnostics.runtimeImportCacheHit = defaultModelLoad.cacheHit ? 1u : 0u;
     sceneDiagnostics.runtimeImportMeshCount = defaultModelLoad.meshCount;
     sceneDiagnostics.runtimeImportMaterialCount = defaultModelLoad.materialCount;
+    sceneDiagnostics.runtimeImportNodeCount = defaultModelLoad.sourceNodeCount;
+    sceneDiagnostics.runtimeImportBoneNodeCount = defaultModelLoad.sourceBoneNodeCount;
+    sceneDiagnostics.runtimeImportAnimationChannelBoundCount =
+        defaultModelLoad.sourceAnimationChannelBoundCount;
+    sceneDiagnostics.runtimeImportAnimationChannelUnboundCount =
+        defaultModelLoad.sourceAnimationChannelUnboundCount;
+    sceneDiagnostics.runtimeImportBoneNameMatchedNodeCount =
+        defaultModelLoad.sourceBoneNameMatchedNodeCount;
+    sceneDiagnostics.runtimeImportBoneNameUnmatchedCount =
+        defaultModelLoad.sourceBoneNameUnmatchedCount;
     sceneDiagnostics.runtimeImportAnimationCount = defaultModelLoad.sourceAnimationCount;
     sceneDiagnostics.runtimeImportAnimationChannelCount =
         defaultModelLoad.sourceAnimationChannelCount;

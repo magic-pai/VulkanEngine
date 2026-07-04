@@ -142,14 +142,30 @@ struct ImportedAnimationClip3D {
     std::vector<ImportedAnimationChannel3D> channels;
 };
 
+struct ImportedNode3D {
+    std::string name;
+    i32 parentIndex = -1;
+    glm::mat4 localTransform{ 1.0f };
+    u32 meshReferenceCount = 0;
+    bool boneReferenced = false;
+    bool animationChannelTarget = false;
+};
+
 struct ImportedModel3D {
     std::filesystem::path sourcePath;
     std::vector<ImportedMesh3D> meshes;
     std::vector<ImportedMaterial3D> materials;
     std::vector<ImportedAnimationClip3D> animations;
+    std::vector<ImportedNode3D> nodes;
     std::vector<ImportMessage> messages;
     u32 sourceMeshCount = 0;
     u32 sourceMaterialCount = 0;
+    u32 sourceNodeCount = 0;
+    u32 sourceBoneNodeCount = 0;
+    u32 sourceAnimationChannelBoundCount = 0;
+    u32 sourceAnimationChannelUnboundCount = 0;
+    u32 sourceBoneNameMatchedNodeCount = 0;
+    u32 sourceBoneNameUnmatchedCount = 0;
     u32 sourceAnimationCount = 0;
     u32 sourceAnimationChannelCount = 0;
     u32 sourceAnimationPositionKeyCount = 0;

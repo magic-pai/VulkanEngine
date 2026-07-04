@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
+#include <unordered_set>
 
 #include <glm/gtc/matrix_inverse.hpp>
 
@@ -718,6 +719,133 @@ void PopulateModelAnimations(ImportedModel3D& model, const aiScene* scene) {
     }
 }
 
+std::unordered_set<std::string> CollectSourceBoneNames(const aiScene* scene) {
+    SE_ASSERT(scene != nullptr, "Assimp scene must not be null");
+
+    std::unordered_set<std::string> names;
+    for (u32 meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
+        const aiMesh* mesh = scene->mMeshes[meshIndex];
+        if (mesh == nullptr) {
+            continue;
+        }
+
+        for (u32 boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex) {
+            const aiBone* bone = mesh->mBones[boneIndex];
+            if (bone == nullptr || bone->mName.length == 0) {
+                continue;
+            }
+
+            names.insert(ToString(bone->mName));
+        }
+    }
+
+    return names;
+}
+
+std::unordered_set<std::string> CollectAnimationChannelNames(
+    const ImportedModel3D& model
+) {
+    std::unordered_set<std::string> names;
+    for (const ImportedAnimationClip3D& clip : model.animations) {
+        for (const ImportedAnimationChannel3D& channel : clip.channels) {
+            if (!channel.nodeName.empty()) {
+                names.insert(channel.nodeName);
+            }
+        }
+    }
+
+    return names;
+}
+
+void AppendImportedNode(
+    ImportedModel3D& model,
+    const aiNode* node,
+    i32 parentIndex,
+    const std::unordered_set<std::string>& boneNames,
+    const std::unordered_set<std::string>& animationChannelNames
+) {
+    SE_ASSERT(node != nullptr, "Assimp node must not be null");
+
+    const std::string nodeName = node->mName.C_Str();
+    ImportedNode3D importedNode;
+    importedNode.name = nodeName;
+    importedNode.parentIndex = parentIndex;
+    importedNode.localTransform = ToMat4(node->mTransformation);
+    importedNode.meshReferenceCount = node->mNumMeshes;
+    importedNode.boneReferenced = boneNames.find(nodeName) != boneNames.end();
+    importedNode.animationChannelTarget =
+        animationChannelNames.find(nodeName) != animationChannelNames.end();
+
+    const i32 nodeIndex = static_cast<i32>(model.nodes.size());
+    model.nodes.push_back(std::move(importedNode));
+
+    for (u32 childIndex = 0; childIndex < node->mNumChildren; ++childIndex) {
+        if (node->mChildren[childIndex] != nullptr) {
+            AppendImportedNode(
+                model,
+                node->mChildren[childIndex],
+                nodeIndex,
+                boneNames,
+                animationChannelNames
+            );
+        }
+    }
+}
+
+void PopulateModelNodeHierarchy(ImportedModel3D& model, const aiScene* scene) {
+    SE_ASSERT(scene != nullptr, "Assimp scene must not be null");
+    SE_ASSERT(scene->mRootNode != nullptr, "Assimp root node must not be null");
+
+    model.nodes.clear();
+    model.sourceNodeCount = 0;
+    model.sourceBoneNodeCount = 0;
+    model.sourceAnimationChannelBoundCount = 0;
+    model.sourceAnimationChannelUnboundCount = 0;
+    model.sourceBoneNameMatchedNodeCount = 0;
+    model.sourceBoneNameUnmatchedCount = 0;
+
+    const std::unordered_set<std::string> boneNames =
+        CollectSourceBoneNames(scene);
+    const std::unordered_set<std::string> animationChannelNames =
+        CollectAnimationChannelNames(model);
+    AppendImportedNode(
+        model,
+        scene->mRootNode,
+        -1,
+        boneNames,
+        animationChannelNames
+    );
+
+    std::unordered_set<std::string> nodeNames;
+    nodeNames.reserve(model.nodes.size());
+    for (const ImportedNode3D& node : model.nodes) {
+        nodeNames.insert(node.name);
+        if (node.boneReferenced) {
+            ++model.sourceBoneNodeCount;
+        }
+    }
+
+    for (const ImportedAnimationClip3D& clip : model.animations) {
+        for (const ImportedAnimationChannel3D& channel : clip.channels) {
+            if (nodeNames.find(channel.nodeName) != nodeNames.end()) {
+                ++model.sourceAnimationChannelBoundCount;
+            } else {
+                ++model.sourceAnimationChannelUnboundCount;
+            }
+        }
+    }
+
+    for (const std::string& boneName : boneNames) {
+        if (nodeNames.find(boneName) != nodeNames.end()) {
+            ++model.sourceBoneNameMatchedNodeCount;
+        } else {
+            ++model.sourceBoneNameUnmatchedCount;
+        }
+    }
+
+    model.sourceNodeCount = static_cast<u32>(model.nodes.size());
+}
+
 void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
     SE_ASSERT(source != nullptr, "Assimp mesh must not be null");
     if (source->mNumBones == 0 || source->mNumVertices == 0) {
@@ -996,6 +1124,7 @@ ImportedModel3D ModelImporter::LoadModel3D(
     model.boundsMax = glm::vec3(std::numeric_limits<f32>::lowest());
     PopulateModelSourceDiagnostics(model, scene);
     PopulateModelAnimations(model, scene);
+    PopulateModelNodeHierarchy(model, scene);
 
     model.materials.reserve(scene->mNumMaterials > 0 ? scene->mNumMaterials : 1);
     for (u32 materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex) {

@@ -718,7 +718,7 @@ sample.
 3. QA contract.
    - Extend `imported-skinned-diagnostic` to assert the clip/channel/key counts
      from `assets/models/skinned_probe.dae`.
-   - Keep rigid imported lanes at zero for the new fields.
+   - Keep rigid imported lanes at zero for the new animation fields.
    - Keep DLSS quality expected-blocked because there is still no animation
      sampling, pose evaluation, or skinned velocity output.
 
@@ -742,6 +742,64 @@ Verification on 2026-07-05:
 This creates the animation source-data carrier for future pose sampling. The
 remaining work is node hierarchy binding, animation sampling, current/previous
 bone palette storage, skinned vertex output, and skinned velocity output.
+
+## Slice 4.28 Execution Plan
+
+Slice 4.28 binds the imported animation and bone carriers to source nodes. The
+goal is still diagnostic readiness, not visible skinned rendering: future pose
+sampling needs to know which imported node an animation channel targets and
+which imported nodes are referenced by bones before it can build current and
+previous bone palettes.
+
+1. Imported node hierarchy carrier.
+   - Preserve source node name, parent index, local transform, and mesh
+     reference count in `ImportedModel3D`.
+   - Mark nodes that are referenced by imported bones.
+   - Mark nodes that are targeted by imported animation channels.
+
+2. Runtime diagnostics.
+   - Aggregate node count, bone-node count, animation-channel bound/unbound
+     counts, and bone-name-to-node matched/unmatched counts.
+   - Carry those values through runtime load results, cache entries, benchmark
+     scene diagnostics, CSV output, and quick QA metrics.
+
+3. QA contract.
+   - Extend `imported-skinned-diagnostic` to assert the binding counts from
+     `assets/models/skinned_probe.dae`.
+   - Keep rigid imported lanes at their real node counts, with zero bone and
+     animation-channel binding fields.
+   - Keep DLSS quality expected-blocked because there is still no pose
+     evaluation, bone-palette storage, skinned vertex output, or skinned
+     velocity output.
+
+## Slice 4.28 Execution Evidence
+
+Slice 4.28 is implemented and verified. `ImportedModel3D` now stores imported
+nodes with parent/local-transform data, mesh-reference counts, bone-reference
+markers, and animation-channel target markers. Runtime import diagnostics now
+include node hierarchy and channel/bone binding counters.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passed before the baseline-only update.
+- JSON baseline parsing, PowerShell script parsing, and `git diff --check`
+  pass; `git diff --check` only reports the repo's normal CRLF warnings.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as a benchmark-only focused run.
+- CSV shape: `806/806` columns.
+- Runtime import binding diagnostics:
+  `node/boneNode/channelBound/channelUnbound/boneMatched/boneUnmatched=4/2/1/0/2/0`.
+- Direct benchmark CSV probes, without screenshot QA, confirm the rigid
+  imported baselines report node counts `2` for `demo_crystal.obj` and `4` for
+  `articulated_links.obj`, with zero bone/channel binding fields.
+- Full runtime import diagnostics:
+  `requested/loaded/cache/mesh/material/node/boneNode/chBound/chUnbound/boneMatched/boneUnmatched/animation/channels/posKeys/rotKeys/scaleKeys/keys/maxChannelKeys/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/4/2/1/0/2/0/1/1/2/2/2/6/6/1/2/3/5/2/1`.
+- DLSS quality remains expected-blocked:
+  `qualityGate=1/0/4`, masks `255/251/4`.
+
+This closes the node-binding diagnostic gap for the skinned probe. The next
+skinned quality work is animation sampling, current/previous bone palette
+storage, skinned vertex output, and skinned velocity output.
 
 ## Slice 4.4 Execution Plan
 
