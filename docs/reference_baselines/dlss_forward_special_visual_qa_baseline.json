@@ -46,6 +46,8 @@
       "forwardResidualDraws": "79",
       "forwardResidualSharedLightListDraws": "79",
       "forwardResidualVelocityDraws": "79",
+      "dlssMaskForwardResidualDraws": "79",
+      "dlssMaskWeightedTranslucencyDraws": "0",
       "weightedTranslucencyDraws": "0"
     }
   },
@@ -58,17 +60,19 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T22:59:20+08:00",
-    "dlssColumns": "775/775",
+    "capturedAt": "2026-07-04T23:30:25+08:00",
+    "dlssColumns": "780/780",
     "hybridForwardSpecialDraws": 79,
     "forwardResidualDraws": 79,
     "forwardResidualSharedLightListDraws": 79,
     "forwardResidualVelocityDraws": 79,
+    "dlssMaskForwardResidualDraws": 79,
+    "dlssMaskWeightedTranslucencyDraws": 0,
     "forwardSpecialMaterialCount": 1,
     "weightedTranslucencyDraws": 0,
     "qualityMasks": "255/255/0",
-    "comparisonChangedPixels": 195,
-    "comparisonMeanDelta": 0.9197,
+    "comparisonChangedPixels": 220,
+    "comparisonMeanDelta": 0.9937,
     "comparisonMaxDelta": 564
   }
 }

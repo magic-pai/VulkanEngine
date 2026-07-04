@@ -55,6 +55,7 @@
       "gbufferDraws": "242",
       "forwardResidualDraws": "0",
       "weightedTranslucencyDraws": "0",
+      "dlssMaskDraws": "0",
       "specularTextureMaterials": "1",
       "uvTransformMaterials": "1",
       "doubleSidedMaterials": "1",
@@ -74,11 +75,12 @@
     "centralDifferentPixelsMin": 1024
   },
   "baselineSource": {
-    "capturedAt": "2026-07-04T22:59:20+08:00",
-    "dlssColumns": "775/775",
+    "capturedAt": "2026-07-04T23:30:25+08:00",
+    "dlssColumns": "780/780",
     "gbufferDraws": 242,
     "forwardResidualDraws": 0,
     "weightedTranslucencyDraws": 0,
+    "dlssMaskDraws": 0,
     "qualityMasks": "255/255/0",
     "materialCounters": {
       "specularTextureMaterials": 1,
@@ -90,8 +92,8 @@
       "volumeMaterials": 1,
       "texturedMaterials": 3
     },
-    "comparisonChangedPixels": 236,
-    "comparisonMeanDelta": 0.9979,
+    "comparisonChangedPixels": 257,
+    "comparisonMeanDelta": 0.9374,
     "comparisonMaxDelta": 564
   }
 }

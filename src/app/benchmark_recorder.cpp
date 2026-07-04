@@ -845,6 +845,11 @@ void BenchmarkRecorder::RecordFrame(
         << binds.weightedTranslucencyVelocityDraws << ','
         << binds.weightedTranslucencyVelocityMaterialBinds << ','
         << binds.weightedTranslucencyVelocityMeshBinds << ','
+        << binds.dlssMaskDraws << ','
+        << binds.dlssMaskWeightedTranslucencyDraws << ','
+        << binds.dlssMaskForwardResidualDraws << ','
+        << binds.dlssMaskMaterialBinds << ','
+        << binds.dlssMaskMeshBinds << ','
         << binds.forwardResidualAlphaReferenceEnabled << ','
         << binds.forwardResidualDraws << ','
         << binds.forwardResidualFrameBinds << ','
@@ -1439,6 +1444,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_velocity_draws,"
         << "weighted_translucency_velocity_material_binds,"
         << "weighted_translucency_velocity_mesh_binds,"
+        << "dlss_mask_draws,"
+        << "dlss_mask_weighted_translucency_draws,"
+        << "dlss_mask_forward_residual_draws,"
+        << "dlss_mask_material_binds,"
+        << "dlss_mask_mesh_binds,"
         << "forward_residual_alpha_reference_enabled,"
         << "forward_residual_draws,forward_residual_frame_binds,"
         << "forward_residual_shared_light_list_draws,"

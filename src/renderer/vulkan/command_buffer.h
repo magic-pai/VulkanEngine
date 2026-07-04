@@ -8,6 +8,8 @@ class VulkanCommandPool;
 class VulkanDepthBuffer;
 class VulkanDescriptorSets;
 class VulkanDevice;
+class VulkanDlssMaskFramebuffer;
+class VulkanDlssMaskRenderPass;
 class VulkanFramebuffer;
 class VulkanForwardResidualVelocityFramebuffer;
 class VulkanForwardResidualVelocityRenderPass;
@@ -148,6 +150,12 @@ public:
         const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline = nullptr,
         std::span<const RenderCommand> forwardResidualVelocityRenderCommands = {},
         std::span<const RenderCommand> weightedTranslucencyVelocityRenderCommands = {},
+        const VulkanDlssMaskRenderPass* dlssMaskRenderPass = nullptr,
+        const VulkanDlssMaskFramebuffer* dlssMaskFramebuffer = nullptr,
+        const VulkanGraphicsPipeline* dlssMaskGraphicsPipeline = nullptr,
+        const VulkanGraphicsPipeline* doubleSidedDlssMaskGraphicsPipeline = nullptr,
+        std::span<const RenderCommand> dlssMaskWeightedTranslucencyRenderCommands = {},
+        std::span<const RenderCommand> dlssMaskForwardResidualRenderCommands = {},
         const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass = nullptr,
         const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer = nullptr,
         const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline = nullptr,

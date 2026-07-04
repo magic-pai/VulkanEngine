@@ -717,6 +717,10 @@ if ($wboitDlssRow.weighted_translucency_draws -ne $wboitBaselineManifest.expecte
     $wboitDlssRow.weighted_translucency_velocity_draws -ne $wboitBaselineManifest.expected.dlssPresent.weightedTranslucencyVelocityDraws) {
     throw "WBOIT DLSS draw/resolve count mismatch"
 }
+if ($wboitDlssRow.dlss_mask_weighted_translucency_draws -ne $wboitBaselineManifest.expected.dlssPresent.dlssMaskWeightedTranslucencyDraws -or
+    $wboitDlssRow.dlss_mask_forward_residual_draws -ne $wboitBaselineManifest.expected.dlssPresent.dlssMaskForwardResidualDraws) {
+    throw "WBOIT DLSS mask draw count mismatch"
+}
 if ($wboitDlssRow.forward_residual_draws -ne $wboitBaselineManifest.expected.dlssPresent.forwardResidualDraws) {
     throw "WBOIT DLSS unexpectedly used forward residual draws"
 }
@@ -751,6 +755,10 @@ if ($forwardSpecialDlssRow.frame_material_forward_special_count -ne $forwardSpec
     $forwardSpecialDlssRow.forward_residual_velocity_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.forwardResidualVelocityDraws) {
     throw "Forward-special DLSS draw/material count mismatch"
 }
+if ($forwardSpecialDlssRow.dlss_mask_forward_residual_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.dlssMaskForwardResidualDraws -or
+    $forwardSpecialDlssRow.dlss_mask_weighted_translucency_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.dlssMaskWeightedTranslucencyDraws) {
+    throw "Forward-special DLSS mask draw count mismatch"
+}
 if ($forwardSpecialDlssRow.weighted_translucency_draws -ne $forwardSpecialBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
     throw "Forward-special DLSS unexpectedly used WBOIT draws"
 }
@@ -782,6 +790,9 @@ if ($materialStressDlssRow.gbuffer_draws -ne $materialStressBaselineManifest.exp
     $materialStressDlssRow.forward_residual_draws -ne $materialStressBaselineManifest.expected.dlssPresent.forwardResidualDraws -or
     $materialStressDlssRow.weighted_translucency_draws -ne $materialStressBaselineManifest.expected.dlssPresent.weightedTranslucencyDraws) {
     throw "Material-stress DLSS draw route mismatch"
+}
+if ($materialStressDlssRow.dlss_mask_draws -ne $materialStressBaselineManifest.expected.dlssPresent.dlssMaskDraws) {
+    throw "Material-stress DLSS unexpectedly rendered DLSS mask geometry"
 }
 if ($materialStressDlssRow.temporal_upscaler_dlss_quality_gate_ready -ne "1" -or
     $materialStressDlssRow.temporal_upscaler_dlss_quality_gate_fallback_reason -ne "0") {
@@ -1094,6 +1105,7 @@ $summary = [pscustomobject]@{
         qualityMasks = $wboitDlssQualityMasks
         qualityInputs = $wboitDlssQualityInputs
         weightedTranslucency = "$($wboitDlssRow.weighted_translucency_draws)/$($wboitDlssRow.weighted_translucency_resolve_draws)/$($wboitDlssRow.weighted_translucency_velocity_draws)/$($wboitDlssRow.forward_residual_draws)"
+        dlssMasks = "$($wboitDlssRow.dlss_mask_draws)/$($wboitDlssRow.dlss_mask_weighted_translucency_draws)/$($wboitDlssRow.dlss_mask_forward_residual_draws)"
         imageStats = $wboitDlssImageStats
     }
     forwardSpecialNative = [pscustomobject]@{
@@ -1117,6 +1129,7 @@ $summary = [pscustomobject]@{
         qualityMasks = $forwardSpecialDlssQualityMasks
         qualityInputs = $forwardSpecialDlssQualityInputs
         forwardResidual = "$($forwardSpecialDlssRow.hybrid_forward_special_draws)/$($forwardSpecialDlssRow.forward_residual_draws)/$($forwardSpecialDlssRow.forward_residual_shared_light_list_draws)/$($forwardSpecialDlssRow.frame_material_forward_special_count)"
+        dlssMasks = "$($forwardSpecialDlssRow.dlss_mask_draws)/$($forwardSpecialDlssRow.dlss_mask_weighted_translucency_draws)/$($forwardSpecialDlssRow.dlss_mask_forward_residual_draws)"
         imageStats = $forwardSpecialDlssImageStats
     }
     materialStressNative = [pscustomobject]@{
@@ -1141,6 +1154,7 @@ $summary = [pscustomobject]@{
         qualityMasks = $materialStressDlssQualityMasks
         qualityInputs = $materialStressDlssQualityInputs
         drawRoute = "$($materialStressDlssRow.gbuffer_draws)/$($materialStressDlssRow.forward_residual_draws)/$($materialStressDlssRow.weighted_translucency_draws)"
+        dlssMasks = "$($materialStressDlssRow.dlss_mask_draws)/$($materialStressDlssRow.dlss_mask_weighted_translucency_draws)/$($materialStressDlssRow.dlss_mask_forward_residual_draws)"
         materialCounters = "specTex=$($materialStressDlssRow.frame_material_specular_texture_count),uv=$($materialStressDlssRow.frame_material_uv_transform_count),double=$($materialStressDlssRow.frame_material_double_sided_count),clearcoatTex=$($materialStressDlssRow.frame_material_clearcoat_texture_count),clearcoatRoughTex=$($materialStressDlssRow.frame_material_clearcoat_roughness_texture_count),transTex=$($materialStressDlssRow.frame_material_transmission_texture_count),volume=$($materialStressDlssRow.frame_material_volume_count)"
         imageStats = $materialStressDlssImageStats
     }

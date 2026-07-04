@@ -61,6 +61,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/gbuffer_3d.vert
     ${SHADER_SOURCE_DIR}/gbuffer_3d.frag
     ${SHADER_SOURCE_DIR}/forward_velocity_3d.frag
+    ${SHADER_SOURCE_DIR}/dlss_mask_3d.frag
     ${SHADER_SOURCE_DIR}/deferred_lighting.vert
     ${SHADER_SOURCE_DIR}/deferred_lighting.frag
     ${SHADER_SOURCE_DIR}/hdr_composite.vert

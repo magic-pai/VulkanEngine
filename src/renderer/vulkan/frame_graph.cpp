@@ -1936,7 +1936,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PerFrame,
             "DlssBiasCurrentColorMask",
             VulkanFormatName(inputs.dlssBiasCurrentColorMaskFormat),
-            "sampled, transfer-cleared neutral bias-current-color mask",
+            inputs.dlssMaskPreUpscaleEnabled
+                ? "color attachment, sampled, reactive bias-current-color mask"
+                : "sampled, transfer-cleared neutral bias-current-color mask",
             sceneExtentScale
         );
         AppendResource(
@@ -1945,7 +1947,9 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             RenderGraphResourceLifetime::PerFrame,
             "DlssTransparencyMask",
             VulkanFormatName(inputs.dlssTransparencyMaskFormat),
-            "sampled, transfer-cleared neutral transparency mask",
+            inputs.dlssMaskPreUpscaleEnabled
+                ? "color attachment, sampled, transparency mask"
+                : "sampled, transfer-cleared neutral transparency mask",
             sceneExtentScale
         );
     }
@@ -2290,6 +2294,18 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
     if (inputs.temporalUpscalerPluginRequested ||
         inputs.temporalUpscaleEnabled) {
+        if (inputs.dlssMaskPreUpscaleEnabled) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::TemporalUpscale,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Graphics,
+                "DlssMaskPreUpscale",
+                "SceneDepth, TemporalFrameState",
+                "DlssBiasCurrentColorMask, DlssTransparencyMask",
+                "Writes non-neutral DLSS reactive and transparency masks for pre-upscale transparent/residual geometry."
+            );
+        }
         AppendPass(
             plan,
             RenderFramePassKind::TemporalUpscale,

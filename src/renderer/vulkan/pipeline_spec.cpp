@@ -70,6 +70,25 @@ PipelineSpec PipelineSpec::ForwardResidualVelocity3D(
     return spec;
 }
 
+PipelineSpec PipelineSpec::DlssMask3D(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DefaultForward3D(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.supportsInstancing = false;
+    spec.instancedVertexShaderPath.clear();
+    spec.depthWriteEnabled = false;
+    spec.alphaBlendEnabled = false;
+    spec.colorAttachmentCount = 2;
+    spec.colorBlendModes[0] = ColorBlendMode::Disabled;
+    spec.colorBlendModes[1] = ColorBlendMode::Disabled;
+    spec.dynamicViewportScissor = true;
+    return spec;
+}
+
 PipelineSpec PipelineSpec::WeightedTranslucency3D(
     std::string vertexShaderPath,
     std::string fragmentShaderPath

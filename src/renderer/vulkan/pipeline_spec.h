@@ -54,6 +54,10 @@ struct PipelineSpec {
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );
+    static PipelineSpec DlssMask3D(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
     static PipelineSpec WeightedTranslucency3D(
         std::string vertexShaderPath,
         std::string fragmentShaderPath

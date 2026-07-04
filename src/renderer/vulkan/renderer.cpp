@@ -3096,6 +3096,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_ForwardResidualVelocityGraphicsPipeline.reset();
     m_DoubleSidedForwardResidualVelocityGraphicsPipeline.reset();
+    m_DlssMaskGraphicsPipeline.reset();
+    m_DoubleSidedDlssMaskGraphicsPipeline.reset();
     m_DepthPrefillGraphicsPipeline.reset();
     m_DoubleSidedDepthPrefillGraphicsPipeline.reset();
     m_WeightedTranslucencyGraphicsPipeline.reset();
@@ -3115,6 +3117,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_GBufferRenderPass.reset();
     m_ForwardResidualVelocityFramebuffer.reset();
     m_ForwardResidualVelocityRenderPass.reset();
+    m_DlssMaskFramebuffer.reset();
+    m_DlssMaskRenderPass.reset();
     m_WeightedTranslucencyFramebuffer.reset();
     m_WeightedTranslucencyRenderPass.reset();
     m_HdrFramebuffer.reset();
@@ -4326,6 +4330,13 @@ void VulkanRenderer::DrawFrame() {
             m_SceneRenderTargets != nullptr
                 ? m_SceneRenderTargets->DlssTransparencyMaskFormat()
                 : VK_FORMAT_UNDEFINED,
+            has3DMainPass &&
+                frameStats.temporal.temporalUpscaleEnabled > 0 &&
+                (!weightedTranslucencyCommands.empty() ||
+                    !forwardResidualCommands.empty()) &&
+                m_DlssMaskRenderPass != nullptr &&
+                m_DlssMaskFramebuffer != nullptr &&
+                m_DlssMaskGraphicsPipeline != nullptr,
             frameStats.temporal.dynamicResolutionRequested > 0,
             frameStats.temporal.dynamicResolutionEnabled > 0,
             frameStats.temporal.taauRequested > 0,
@@ -4491,6 +4502,22 @@ void VulkanRenderer::DrawFrame() {
             ? std::span<const RenderCommand>(
                 weightedTranslucencyVelocityCommands.data(),
                 weightedTranslucencyVelocityCommands.size()
+            )
+            : std::span<const RenderCommand>{},
+        m_DlssMaskRenderPass.get(),
+        m_DlssMaskFramebuffer.get(),
+        has3DMainPass ? m_DlssMaskGraphicsPipeline.get() : nullptr,
+        has3DMainPass ? m_DoubleSidedDlssMaskGraphicsPipeline.get() : nullptr,
+        has3DMainPass
+            ? std::span<const RenderCommand>(
+                weightedTranslucencyCommands.data(),
+                weightedTranslucencyCommands.size()
+            )
+            : std::span<const RenderCommand>{},
+        has3DMainPass
+            ? std::span<const RenderCommand>(
+                forwardResidualCommands.data(),
+                forwardResidualCommands.size()
             )
             : std::span<const RenderCommand>{},
         m_WeightedTranslucencyRenderPass.get(),
@@ -4976,6 +5003,11 @@ void VulkanRenderer::CreateSwapchainResources() {
             m_Device,
             *m_SceneRenderTargets
         );
+    m_DlssMaskRenderPass =
+        std::make_unique<VulkanDlssMaskRenderPass>(
+            m_Device,
+            *m_SceneRenderTargets
+        );
     m_HdrFramebuffer = std::make_unique<VulkanHdrFramebuffer>(
         m_Device,
         *m_HdrRenderPass,
@@ -5006,6 +5038,12 @@ void VulkanRenderer::CreateSwapchainResources() {
         std::make_unique<VulkanForwardResidualVelocityFramebuffer>(
             m_Device,
             *m_ForwardResidualVelocityRenderPass,
+            *m_SceneRenderTargets
+        );
+    m_DlssMaskFramebuffer =
+        std::make_unique<VulkanDlssMaskFramebuffer>(
+            m_Device,
+            *m_DlssMaskRenderPass,
             *m_SceneRenderTargets
         );
     m_ShadowMap = std::make_unique<VulkanShadowMap>(
@@ -5203,6 +5241,13 @@ void VulkanRenderer::CreateSwapchainResources() {
                 gBufferVertexShaderPath,
                 forwardVelocityFragmentShaderPath
             );
+        const std::string dlssMaskFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/dlss_mask_3d.frag.spv";
+        const PipelineSpec dlssMaskSpec =
+            PipelineSpec::DlssMask3D(
+                gBufferVertexShaderPath,
+                dlssMaskFragmentShaderPath
+            );
         m_ForwardResidualVelocityGraphicsPipeline =
             std::make_unique<VulkanGraphicsPipeline>(
                 m_Device,
@@ -5220,6 +5265,24 @@ void VulkanRenderer::CreateSwapchainResources() {
                 m_ForwardResidualVelocityRenderPass->Handle(),
                 *m_Swapchain,
                 PipelineSpec::DoubleSided(forwardResidualVelocitySpec)
+            );
+        m_DlssMaskGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_DlssMaskRenderPass->Handle(),
+                *m_Swapchain,
+                dlssMaskSpec
+            );
+        m_DoubleSidedDlssMaskGraphicsPipeline =
+            std::make_unique<VulkanGraphicsPipeline>(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_DlssMaskRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(dlssMaskSpec)
             );
         m_ForwardResidualHdrGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
@@ -5261,6 +5324,8 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_DoubleSidedWeightedTranslucencyGraphicsPipeline.reset();
         m_ForwardResidualVelocityGraphicsPipeline.reset();
         m_DoubleSidedForwardResidualVelocityGraphicsPipeline.reset();
+        m_DlssMaskGraphicsPipeline.reset();
+        m_DoubleSidedDlssMaskGraphicsPipeline.reset();
         m_ForwardResidualHdrGraphicsPipeline.reset();
         m_DoubleSidedForwardResidualHdrGraphicsPipeline.reset();
         m_ForwardResidualGraphicsPipeline.reset();
@@ -5541,6 +5606,12 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_ForwardResidualVelocityGraphicsPipeline != nullptr) {
         m_ForwardResidualVelocityGraphicsPipeline->Release();
     }
+    if (m_DoubleSidedDlssMaskGraphicsPipeline != nullptr) {
+        m_DoubleSidedDlssMaskGraphicsPipeline->Release();
+    }
+    if (m_DlssMaskGraphicsPipeline != nullptr) {
+        m_DlssMaskGraphicsPipeline->Release();
+    }
     if (m_DoubleSidedForwardResidualHdrGraphicsPipeline != nullptr) {
         m_DoubleSidedForwardResidualHdrGraphicsPipeline->Release();
     }
@@ -5597,6 +5668,12 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_ForwardResidualVelocityRenderPass != nullptr) {
         m_ForwardResidualVelocityRenderPass->Release();
+    }
+    if (m_DlssMaskFramebuffer != nullptr) {
+        m_DlssMaskFramebuffer->Release();
+    }
+    if (m_DlssMaskRenderPass != nullptr) {
+        m_DlssMaskRenderPass->Release();
     }
     if (m_HdrFramebuffer != nullptr) {
         m_HdrFramebuffer->Release();
@@ -5833,6 +5910,13 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneRenderTargets
         );
     }
+    if (m_DlssMaskRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_DlssMaskRenderPass->Recreate(
+            m_Device,
+            *m_SceneRenderTargets
+        );
+    }
     if (m_HdrFramebuffer != nullptr &&
         m_HdrRenderPass != nullptr &&
         m_SceneRenderTargets != nullptr) {
@@ -5884,6 +5968,15 @@ void VulkanRenderer::RecreateSwapchain() {
         m_ForwardResidualVelocityFramebuffer->Recreate(
             m_Device,
             *m_ForwardResidualVelocityRenderPass,
+            *m_SceneRenderTargets
+        );
+    }
+    if (m_DlssMaskFramebuffer != nullptr &&
+        m_DlssMaskRenderPass != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_DlssMaskFramebuffer->Recreate(
+            m_Device,
+            *m_DlssMaskRenderPass,
             *m_SceneRenderTargets
         );
     }
@@ -6075,6 +6168,13 @@ void VulkanRenderer::RecreateSwapchain() {
                 gBufferVertexShaderPath,
                 forwardVelocityFragmentShaderPath
             );
+        const std::string dlssMaskFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/dlss_mask_3d.frag.spv";
+        const PipelineSpec dlssMaskSpec =
+            PipelineSpec::DlssMask3D(
+                gBufferVertexShaderPath,
+                dlssMaskFragmentShaderPath
+            );
         if (m_ForwardResidualVelocityGraphicsPipeline != nullptr &&
             m_ForwardResidualVelocityRenderPass != nullptr) {
             m_ForwardResidualVelocityGraphicsPipeline->Recreate(
@@ -6095,6 +6195,28 @@ void VulkanRenderer::RecreateSwapchain() {
                 m_ForwardResidualVelocityRenderPass->Handle(),
                 *m_Swapchain,
                 PipelineSpec::DoubleSided(forwardResidualVelocitySpec)
+            );
+        }
+        if (m_DlssMaskGraphicsPipeline != nullptr &&
+            m_DlssMaskRenderPass != nullptr) {
+            m_DlssMaskGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_DlssMaskRenderPass->Handle(),
+                *m_Swapchain,
+                dlssMaskSpec
+            );
+        }
+        if (m_DoubleSidedDlssMaskGraphicsPipeline != nullptr &&
+            m_DlssMaskRenderPass != nullptr) {
+            m_DoubleSidedDlssMaskGraphicsPipeline->Recreate(
+                m_Device,
+                *m_DescriptorSetLayout,
+                *m_MaterialDescriptorSetLayout,
+                m_DlssMaskRenderPass->Handle(),
+                *m_Swapchain,
+                PipelineSpec::DoubleSided(dlssMaskSpec)
             );
         }
         if (m_ForwardResidualHdrGraphicsPipeline != nullptr &&

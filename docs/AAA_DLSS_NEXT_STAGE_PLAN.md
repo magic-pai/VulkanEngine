@@ -1038,3 +1038,38 @@ after the evaluate contract is stable.
   imported-model and skinned velocity, non-neutral reactive/transparency mask
   authoring, larger scene references, temporal stability captures, and default
   presentation policy remain open.
+
+## Slice 4.13 Execution Evidence
+
+- Replaced the previous neutral-only DLSS mask path for residual/transparent
+  controlled scenes with a real pre-upscale mask draw. `VulkanSceneRenderTargets`
+  now creates `DlssBiasCurrentColorMask` and `DlssTransparencyMask` with color
+  attachment usage, and the new `VulkanDlssMaskRenderPass` /
+  `VulkanDlssMaskFramebuffer` pair writes both `R8_UNORM` mask resources before
+  DLSS evaluate.
+- Added `dlss_mask_3d.frag` and `PipelineSpec::DlssMask3D`. The shader reuses
+  the 3D material id, UV transform, base-color alpha, opacity texture, alpha
+  cutoff, and transmission/volume hint to write non-zero reactive and
+  transparency mask values for visible WBOIT/forward-residual geometry. Fully
+  transparent pixels are discarded instead of biasing DLSS history.
+- Command recording now runs `DlssMaskPreUpscale` before `TemporalUpscalerEvaluate`
+  when WBOIT or forward-residual commands are present. If no mask geometry is
+  present, the old neutral transfer-clear path remains as the fallback. CSV
+  records `dlss_mask_draws`, route-specific WBOIT/forward-residual mask draws,
+  and mask material/mesh binds.
+- Full visual QA passes after the new mask path:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1 -SkipBuild`.
+  The run reports matching `780/780` CSV columns and 0 frame-graph validation
+  issues across opaque, WBOIT, forward-special, and material-stress pairs.
+  WBOIT DLSS reports `dlssMasks=79/79/0`, forward-special reports
+  `79/0/79`, and material-stress remains `0/0/0`, proving masks are drawn only
+  for the residual/transparent routes covered by this slice.
+- Latest visual comparison evidence: opaque changed 3492 sampled pixels with
+  mean RGB delta `23.2862`, WBOIT changed 259 with mean `0.9752`,
+  forward-special changed 220 with mean `0.9937`, and material-stress changed
+  257 with mean `0.9374`; every max delta remains at or below `579`.
+- This removes the neutral-mask-only limitation for the controlled WBOIT and
+  forward-special DLSS routes. Remaining production work is mask policy depth:
+  authored/material-specific mask tuning for particles, water, emissive,
+  refraction, animated imported/skinned content, and larger moving-scene
+  temporal evidence.

@@ -393,6 +393,7 @@ struct CurrentVulkanFrameGraphInputs {
     bool dlssMaskInputsAllocated = false;
     VkFormat dlssBiasCurrentColorMaskFormat = VK_FORMAT_UNDEFINED;
     VkFormat dlssTransparencyMaskFormat = VK_FORMAT_UNDEFINED;
+    bool dlssMaskPreUpscaleEnabled = false;
     bool dynamicResolutionRequested = false;
     bool dynamicResolutionEnabled = false;
     bool taauRequested = false;

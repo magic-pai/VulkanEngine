@@ -869,6 +869,7 @@ void RecordTemporalUpscalerEvaluate(
     const FrameTemporalUpscaleState& temporalUpscaleState,
     bool temporalUpscaleOutputInitialized,
     bool dlssMaskInputsInitialized,
+    bool dlssMaskInputsPrepared,
     TemporalUpscalerEvaluateStatus& evaluateStatus
 ) {
     evaluateStatus = TemporalUpscalerEvaluateStatus{};
@@ -912,16 +913,18 @@ void RecordTemporalUpscalerEvaluate(
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
     );
-    PrepareDlssMaskInput(
-        commandBuffer,
-        renderTargets.DlssBiasCurrentColorMaskImage(imageIndex),
-        dlssMaskInputsInitialized
-    );
-    PrepareDlssMaskInput(
-        commandBuffer,
-        renderTargets.DlssTransparencyMaskImage(imageIndex),
-        dlssMaskInputsInitialized
-    );
+    if (!dlssMaskInputsPrepared) {
+        PrepareDlssMaskInput(
+            commandBuffer,
+            renderTargets.DlssBiasCurrentColorMaskImage(imageIndex),
+            dlssMaskInputsInitialized
+        );
+        PrepareDlssMaskInput(
+            commandBuffer,
+            renderTargets.DlssTransparencyMaskImage(imageIndex),
+            dlssMaskInputsInitialized
+        );
+    }
     TransitionColorImage(
         commandBuffer,
         renderTargets.TemporalUpscaleOutputImage(imageIndex),
@@ -1481,6 +1484,12 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* doubleSidedForwardResidualVelocityGraphicsPipeline,
     std::span<const RenderCommand> forwardResidualVelocityRenderCommands,
     std::span<const RenderCommand> weightedTranslucencyVelocityRenderCommands,
+    const VulkanDlssMaskRenderPass* dlssMaskRenderPass,
+    const VulkanDlssMaskFramebuffer* dlssMaskFramebuffer,
+    const VulkanGraphicsPipeline* dlssMaskGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedDlssMaskGraphicsPipeline,
+    std::span<const RenderCommand> dlssMaskWeightedTranslucencyRenderCommands,
+    std::span<const RenderCommand> dlssMaskForwardResidualRenderCommands,
     const VulkanWeightedTranslucencyRenderPass* weightedTranslucencyRenderPass,
     const VulkanWeightedTranslucencyFramebuffer* weightedTranslucencyFramebuffer,
     const VulkanGraphicsPipeline* weightedTranslucencyGraphicsPipeline,
@@ -1570,6 +1579,12 @@ void VulkanCommandBuffer::Record(
         SE_ASSERT(
             forwardResidualVelocityFramebuffer->Count() == m_CommandBuffers.size(),
             "Forward residual velocity framebuffer count must match command buffer count"
+        );
+    }
+    if (dlssMaskFramebuffer != nullptr) {
+        SE_ASSERT(
+            dlssMaskFramebuffer->Count() == m_CommandBuffers.size(),
+            "DLSS mask framebuffer count must match command buffer count"
         );
     }
     SE_ASSERT(
@@ -1999,11 +2014,11 @@ void VulkanCommandBuffer::Record(
         }
 
         if (!weightedTranslucencyVelocityRenderCommands.empty()) {
-            u32 velocityMaterialBinds = 0;
-            u32 velocityMeshBinds = 0;
-            u32 velocityPushConstantUpdates = 0;
-            u64 velocityPushConstantBytes = 0;
-            const u32 velocityDraws = DrawForwardResidualCommands(
+            u32 weightedVelocityMaterialBinds = 0;
+            u32 weightedVelocityMeshBinds = 0;
+            u32 weightedVelocityPushConstantUpdates = 0;
+            u64 weightedVelocityPushConstantBytes = 0;
+            const u32 weightedVelocityDraws = DrawForwardResidualCommands(
                 commandBuffer,
                 forwardResidualVelocityGraphicsPipeline,
                 doubleSidedForwardResidualVelocityGraphicsPipeline,
@@ -2013,17 +2028,17 @@ void VulkanCommandBuffer::Record(
                 weightedTranslucencyVelocityRenderCommands,
                 forwardResidualVelocityFramebuffer->Extent(),
                 imageIndex,
-                velocityMaterialBinds,
-                velocityMeshBinds,
-                velocityPushConstantUpdates,
-                velocityPushConstantBytes
+                weightedVelocityMaterialBinds,
+                weightedVelocityMeshBinds,
+                weightedVelocityPushConstantUpdates,
+                weightedVelocityPushConstantBytes
             );
             if (bindStats != nullptr) {
-                bindStats->weightedTranslucencyVelocityDraws += velocityDraws;
-                bindStats->weightedTranslucencyVelocityMaterialBinds += velocityMaterialBinds;
-                bindStats->weightedTranslucencyVelocityMeshBinds += velocityMeshBinds;
-                bindStats->pushConstantUpdates += velocityPushConstantUpdates;
-                bindStats->pushConstantBytes += velocityPushConstantBytes;
+                bindStats->weightedTranslucencyVelocityDraws += weightedVelocityDraws;
+                bindStats->weightedTranslucencyVelocityMaterialBinds += weightedVelocityMaterialBinds;
+                bindStats->weightedTranslucencyVelocityMeshBinds += weightedVelocityMeshBinds;
+                bindStats->pushConstantUpdates += weightedVelocityPushConstantUpdates;
+                bindStats->pushConstantBytes += weightedVelocityPushConstantBytes;
             }
         }
 
@@ -2463,6 +2478,84 @@ void VulkanCommandBuffer::Record(
         }
     }
 
+    bool dlssMaskInputsPreparedForEvaluate = false;
+    if (dlssMaskRenderPass != nullptr &&
+        dlssMaskFramebuffer != nullptr &&
+        dlssMaskGraphicsPipeline != nullptr &&
+        temporalUpscaleState != nullptr &&
+        temporalUpscaleState->temporalUpscaleEnabled &&
+        temporalUpscaleState->upscalerPluginAvailable &&
+        (!dlssMaskWeightedTranslucencyRenderCommands.empty() ||
+            !dlssMaskForwardResidualRenderCommands.empty())) {
+        std::array<VkClearValue, 2> maskClearValues{};
+        maskClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+        maskClearValues[1].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+
+        VkRenderPassBeginInfo maskPassInfo{};
+        maskPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        maskPassInfo.renderPass = dlssMaskRenderPass->Handle();
+        maskPassInfo.framebuffer = dlssMaskFramebuffer->Handle(imageIndex);
+        maskPassInfo.renderArea.offset = { 0, 0 };
+        maskPassInfo.renderArea.extent = dlssMaskFramebuffer->Extent();
+        maskPassInfo.clearValueCount = static_cast<u32>(maskClearValues.size());
+        maskPassInfo.pClearValues = maskClearValues.data();
+
+        vkCmdBeginRenderPass(
+            commandBuffer,
+            &maskPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+        SetViewportAndScissor(commandBuffer, { 0, 0 }, dlssMaskFramebuffer->Extent());
+
+        u32 maskMaterialBinds = 0;
+        u32 maskMeshBinds = 0;
+        u32 maskPushConstantUpdates = 0;
+        u64 maskPushConstantBytes = 0;
+        const u32 weightedMaskDraws = DrawForwardResidualCommands(
+            commandBuffer,
+            dlssMaskGraphicsPipeline,
+            doubleSidedDlssMaskGraphicsPipeline,
+            descriptorSets,
+            materialDescriptorSets,
+            frameMaterials,
+            dlssMaskWeightedTranslucencyRenderCommands,
+            dlssMaskFramebuffer->Extent(),
+            imageIndex,
+            maskMaterialBinds,
+            maskMeshBinds,
+            maskPushConstantUpdates,
+            maskPushConstantBytes
+        );
+        const u32 forwardResidualMaskDraws = DrawForwardResidualCommands(
+            commandBuffer,
+            dlssMaskGraphicsPipeline,
+            doubleSidedDlssMaskGraphicsPipeline,
+            descriptorSets,
+            materialDescriptorSets,
+            frameMaterials,
+            dlssMaskForwardResidualRenderCommands,
+            dlssMaskFramebuffer->Extent(),
+            imageIndex,
+            maskMaterialBinds,
+            maskMeshBinds,
+            maskPushConstantUpdates,
+            maskPushConstantBytes
+        );
+
+        vkCmdEndRenderPass(commandBuffer);
+        dlssMaskInputsPreparedForEvaluate = true;
+
+        if (bindStats != nullptr) {
+            bindStats->dlssMaskDraws += weightedMaskDraws + forwardResidualMaskDraws;
+            bindStats->dlssMaskWeightedTranslucencyDraws += weightedMaskDraws;
+            bindStats->dlssMaskForwardResidualDraws += forwardResidualMaskDraws;
+            bindStats->dlssMaskMaterialBinds += maskMaterialBinds;
+            bindStats->dlssMaskMeshBinds += maskMeshBinds;
+            bindStats->pushConstantUpdates += maskPushConstantUpdates;
+            bindStats->pushConstantBytes += maskPushConstantBytes;
+        }
+    }
+
     if (sceneRenderTargets != nullptr &&
         temporalState != nullptr &&
         temporalUpscaleState != nullptr &&
@@ -2476,6 +2569,7 @@ void VulkanCommandBuffer::Record(
             *temporalUpscaleState,
             temporalUpscaleOutputInitialized,
             dlssMaskInputsInitialized,
+            dlssMaskInputsPreparedForEvaluate,
             *temporalUpscalerEvaluateStatus
         );
     } else if (temporalUpscalerEvaluateStatus != nullptr) {
