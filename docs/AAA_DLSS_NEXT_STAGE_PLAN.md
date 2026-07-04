@@ -102,14 +102,50 @@ machines or incomplete packages.
 
 ## Next Slice To Execute Now
 
-Implement Slice 4.2: DLSS visual QA and quality hardening. Slice 4.1 now routes
-`TemporalUpscaleOutput` into the visible post/present path under an explicit
-gate after current-frame DLSS evaluate reports output ready. The next slice
-should add renderer-owned screenshots/reference captures, compare native HDR
-composite vs DLSS-present output, and start quality gates for object motion
-vectors, reactive/transparency masks, and post-ordering policy. Do not expand
-into Frame Generation, Ray Reconstruction, Streamline interposition, or default
-presentation changes yet.
+Implement Slice 4.3: DLSS quality-input hardening. Slice 4.2 now provides a
+repeatable visual QA runner that captures native deferred HDR and DLSS-present
+screenshots, verifies their CSV diagnostics, and records image-difference
+metrics. The next slice should gate production-quality DLSS usage on stronger
+temporal inputs: object motion-vector readiness, reactive/transparency mask
+placeholders, exposure/post-ordering policy, and reference baseline thresholds.
+Do not expand into Frame Generation, Ray Reconstruction, Streamline
+interposition, or default presentation changes yet.
+
+## Slice 4.2 Execution Plan
+
+Slice 4.2 should add repeatable visual evidence for the experimental DLSS
+present route before any production image-quality claim. The first pass should
+prefer scriptable renderer-owned captures over manual screenshots, while keeping
+runtime DLSS integration unchanged.
+
+1. Visual QA runner.
+   - Add a script that runs `SelfEngineForward3D` in deterministic benchmark
+     mode for both native deferred HDR and DLSS-present configurations.
+   - Produce paired CSV files and paired screenshots under
+     `out/reference_captures/dlss_visual_qa/`.
+   - Reuse the existing Win32 window-capture approach from the render-smoke
+     tooling so the renderer does not need Vulkan readback changes in this
+     slice.
+
+2. CSV assertions.
+   - Require both runs to produce matching CSV header/data column counts and 0
+     frame-graph validation issues.
+   - Require the native run to keep temporal-upscale post source inactive.
+   - Require the DLSS-present run to report evaluate output ready and post
+     source requested/active/fallback `1/1/0`.
+
+3. Screenshot assertions.
+   - Verify each screenshot has non-background variation in the central render
+     region so blank or minimized captures fail.
+   - Compare native and DLSS-present screenshots with simple RGB aggregate
+     metrics. This is a sanity check that the route renders a visible image, not
+     a production IQ threshold.
+
+4. Documentation and guardrails.
+   - Record paths, CSV key results, and image-difference metrics in the DLSS
+     plan and main AAA rendering plan.
+   - Keep object motion vectors, reactive/transparency masks, exposure policy
+     refinement, and real visual-diff baselines as follow-up work.
 
 ## Slice 4.1 Execution Plan
 
@@ -507,3 +543,42 @@ after the evaluate contract is stable.
   screenshots/reference captures, object motion vectors, reactive/transparency
   masks, exposure policy refinement, and visual-diff evidence remain follow-up
   work before any production IQ claim.
+
+## Slice 4.2 Execution Evidence
+
+- Added `scripts/Test-DlssVisualQa.ps1`, a repeatable visual QA runner for the
+  experimental DLSS-present route. The script builds `SelfEngineForward3D` by
+  default, runs paired native deferred-HDR and DLSS-present benchmark captures,
+  launches both configurations for Win32 window screenshots, checks logs for
+  validation/error/shader diagnostics, verifies CSV post-source state, checks
+  screenshots for nonblank central-region variation, compares the two images,
+  and writes `out/reference_captures/dlss_visual_qa/summary.json`.
+- The native benchmark uses deferred HDR at `SE_RENDER_SCALE=0.75` with render
+  scale applied, TAA enabled, and temporal jitter prepared. It keeps
+  temporal-upscale post source inactive. The DLSS-present benchmark uses the
+  same render-scale/TAA setup plus `SE_UPSCALER_PLUGIN=dlss` and
+  `SE_DLSS_PRESENT=1`.
+- Full verification command:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-DlssVisualQa.ps1`.
+  It rebuilds `SelfEngineForward3D` successfully and reports `DLSS visual QA
+  passed`.
+- Generated evidence:
+  - `out/reference_captures/dlss_visual_qa/native_deferred_hdr.csv`
+  - `out/reference_captures/dlss_visual_qa/dlss_present.csv`
+  - `out/reference_captures/dlss_visual_qa/native_deferred_hdr.png`
+  - `out/reference_captures/dlss_visual_qa/dlss_present.png`
+  - `out/reference_captures/dlss_visual_qa/summary.json`
+- CSV evidence: both native and DLSS-present rows report matching 755-column
+  header/data rows and 0 frame-graph validation issues. Native reports
+  post-source `0/0/1`; DLSS-present reports evaluate/output `1/1` and
+  post-source `1/1/0`.
+- Screenshot evidence: both captures are `1038x614`, both report 8060 sampled
+  central pixels with 8060 pixels differing from the sampled background, and the
+  paired image comparison samples 14352 pixels with 3419 changed pixels, mean
+  RGB delta `29.4288`, and max delta `583`.
+- This is the first automated visual QA proof that the DLSS-present route
+  renders a visible, nonblank image distinct from the native deferred-HDR
+  capture. It is still a sanity/diagnostic comparison rather than a production
+  image-quality baseline. Object motion vectors, reactive/transparency masks,
+  exposure policy refinement, stable camera/reference baselines, and stricter
+  visual-diff thresholds remain follow-up work.
