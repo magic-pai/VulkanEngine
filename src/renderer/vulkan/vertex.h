@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <algorithm>
 #include <cstddef>
 
 #define GLM_FORCE_RADIANS
@@ -52,6 +53,12 @@ struct Vertex3D {
     std::array<f32, 3> color;
     std::array<f32, 2> texCoord;
     std::array<f32, 4> tangent{ 1.0f, 0.0f, 0.0f, 1.0f };
+    std::array<u32, 4> boneIndices{ 0u, 0u, 0u, 0u };
+    std::array<f32, 4> boneWeights{ 0.0f, 0.0f, 0.0f, 0.0f };
+
+    static constexpr u32 BoneIndicesLocation = 5;
+    static constexpr u32 BoneWeightsLocation = 6;
+    static constexpr u32 InstanceModelLocationBase = 5;
 
     static VkVertexInputBindingDescription BindingDescription() {
         VkVertexInputBindingDescription bindingDescription{};
@@ -92,6 +99,28 @@ struct Vertex3D {
 
         return attributeDescriptions;
     }
+
+    static std::array<VkVertexInputAttributeDescription, 7> SkinnedAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions{};
+        const auto baseAttributes = AttributeDescriptions();
+        std::copy(
+            baseAttributes.begin(),
+            baseAttributes.end(),
+            attributeDescriptions.begin()
+        );
+
+        attributeDescriptions[5].binding = 0;
+        attributeDescriptions[5].location = BoneIndicesLocation;
+        attributeDescriptions[5].format = VK_FORMAT_R32G32B32A32_UINT;
+        attributeDescriptions[5].offset = offsetof(Vertex3D, boneIndices);
+
+        attributeDescriptions[6].binding = 0;
+        attributeDescriptions[6].location = BoneWeightsLocation;
+        attributeDescriptions[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributeDescriptions[6].offset = offsetof(Vertex3D, boneWeights);
+
+        return attributeDescriptions;
+    }
 };
 
 struct Instance3D {
@@ -111,7 +140,8 @@ struct Instance3D {
 
         for (u32 index = 0; index < static_cast<u32>(attributeDescriptions.size()); ++index) {
             attributeDescriptions[index].binding = 1;
-            attributeDescriptions[index].location = 5 + index;
+            attributeDescriptions[index].location =
+                Vertex3D::InstanceModelLocationBase + index;
             attributeDescriptions[index].format = VK_FORMAT_R32G32B32A32_SFLOAT;
             attributeDescriptions[index].offset =
                 offsetof(Instance3D, model) + sizeof(glm::vec4) * index;

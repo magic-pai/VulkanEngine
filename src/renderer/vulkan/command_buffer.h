@@ -168,6 +168,8 @@ public:
         const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline = nullptr,
         const VulkanDescriptorSets* gBufferDescriptorSets = nullptr,
         std::span<const RenderCommand> gBufferRenderCommands = {},
+        VkDescriptorSet gBufferBonePaletteFallbackDescriptorSet = VK_NULL_HANDLE,
+        u32 gBufferBonePaletteFallbackDescriptorReady = 0,
         const VulkanComputePipeline* lightTileCullComputePipeline = nullptr,
         const VulkanDescriptorSets* lightTileCullDescriptorSets = nullptr,
         u32 lightTileCullGroupCountX = 0,

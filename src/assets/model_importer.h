@@ -197,6 +197,11 @@ struct ImportedModel3D {
     u32 sourceSkinnedVertexCount = 0;
     u32 sourceBoneInfluenceCount = 0;
     u32 sourceMaxBoneInfluencesPerVertex = 0;
+    u32 sourceSkinnedVertexAttributeCount = 0;
+    u32 sourceBoneAttributeInfluenceCount = 0;
+    u32 sourceMaxBoneAttributeInfluencesPerVertex = 0;
+    u32 sourceBoneInfluenceOverflowCount = 0;
+    u32 sourceSkinnedVertexAttributeReady = 0;
     bool skinnedAnimationUnsupported = false;
     glm::vec3 boundsMin{ -0.5f };
     glm::vec3 boundsMax{ 0.5f };

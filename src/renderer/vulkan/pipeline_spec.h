@@ -7,6 +7,7 @@ namespace se {
 enum class VertexLayout {
     Vertex2D,
     Vertex3D,
+    Vertex3DSkinned,
     Vertex3DInstanced,
     FullscreenTriangle
 };

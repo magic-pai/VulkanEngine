@@ -2471,6 +2471,16 @@ int main() {
         defaultModelLoad.sourceBoneInfluenceCount;
     sceneDiagnostics.runtimeImportMaxBoneInfluencesPerVertex =
         defaultModelLoad.sourceMaxBoneInfluencesPerVertex;
+    sceneDiagnostics.runtimeImportSkinnedVertexAttributeCount =
+        defaultModelLoad.sourceSkinnedVertexAttributeCount;
+    sceneDiagnostics.runtimeImportBoneAttributeInfluenceCount =
+        defaultModelLoad.sourceBoneAttributeInfluenceCount;
+    sceneDiagnostics.runtimeImportMaxBoneAttributeInfluencesPerVertex =
+        defaultModelLoad.sourceMaxBoneAttributeInfluencesPerVertex;
+    sceneDiagnostics.runtimeImportBoneInfluenceOverflowCount =
+        defaultModelLoad.sourceBoneInfluenceOverflowCount;
+    sceneDiagnostics.runtimeImportSkinnedVertexAttributeReady =
+        defaultModelLoad.sourceSkinnedVertexAttributeReady;
     sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
         defaultModelLoad.skinnedAnimationUnsupported;
     se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);

@@ -1,5 +1,7 @@
 #include "app/benchmark_recorder.h"
 
+#include "renderer/vulkan/vertex.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -46,6 +48,57 @@ void WriteGpuValue(std::ofstream& csv, bool available, f32 value) {
     if (available) {
         csv << value;
     }
+}
+
+struct SkinnedVertexAttributeDiagnostics {
+    u32 strideBytes = 0;
+    u32 boneIndicesLocation = 0;
+    u32 boneWeightsLocation = 0;
+    u32 boneIndicesOffset = 0;
+    u32 boneWeightsOffset = 0;
+    u32 pathReady = 0;
+};
+
+SkinnedVertexAttributeDiagnostics GetSkinnedVertexAttributeDiagnostics() {
+    const auto binding = Vertex3D::BindingDescription();
+    const auto attributes = Vertex3D::SkinnedAttributeDescriptions();
+
+    auto findAttribute = [&](u32 location) -> const VkVertexInputAttributeDescription* {
+        for (const VkVertexInputAttributeDescription& attribute : attributes) {
+            if (attribute.location == location) {
+                return &attribute;
+            }
+        }
+        return nullptr;
+    };
+
+    const VkVertexInputAttributeDescription* boneIndices =
+        findAttribute(Vertex3D::BoneIndicesLocation);
+    const VkVertexInputAttributeDescription* boneWeights =
+        findAttribute(Vertex3D::BoneWeightsLocation);
+
+    SkinnedVertexAttributeDiagnostics diagnostics{};
+    diagnostics.strideBytes = binding.stride;
+    diagnostics.boneIndicesLocation = Vertex3D::BoneIndicesLocation;
+    diagnostics.boneWeightsLocation = Vertex3D::BoneWeightsLocation;
+    diagnostics.boneIndicesOffset =
+        static_cast<u32>(offsetof(Vertex3D, boneIndices));
+    diagnostics.boneWeightsOffset =
+        static_cast<u32>(offsetof(Vertex3D, boneWeights));
+    diagnostics.pathReady =
+        boneIndices != nullptr &&
+        boneWeights != nullptr &&
+        binding.stride == sizeof(Vertex3D) &&
+        boneIndices->binding == 0u &&
+        boneIndices->format == VK_FORMAT_R32G32B32A32_UINT &&
+        boneIndices->offset == diagnostics.boneIndicesOffset &&
+        boneWeights->binding == 0u &&
+        boneWeights->format == VK_FORMAT_R32G32B32A32_SFLOAT &&
+        boneWeights->offset == diagnostics.boneWeightsOffset
+            ? 1u
+            : 0u;
+
+    return diagnostics;
 }
 
 }
@@ -137,6 +190,8 @@ void BenchmarkRecorder::RecordFrame(
     const RendererTemporalStats& temporal = stats.temporal;
     const BenchmarkSceneDiagnostics& sceneDiagnostics =
         GetBenchmarkSceneDiagnostics();
+    const SkinnedVertexAttributeDiagnostics skinnedVertexAttributes =
+        GetSkinnedVertexAttributeDiagnostics();
 
     m_Csv << m_CapturedFrames << ','
         << renderedFrameIndex << ','
@@ -261,6 +316,17 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportSkinnedVertexCount << ','
         << sceneDiagnostics.runtimeImportBoneInfluenceCount << ','
         << sceneDiagnostics.runtimeImportMaxBoneInfluencesPerVertex << ','
+        << sceneDiagnostics.runtimeImportSkinnedVertexAttributeCount << ','
+        << sceneDiagnostics.runtimeImportBoneAttributeInfluenceCount << ','
+        << sceneDiagnostics.runtimeImportMaxBoneAttributeInfluencesPerVertex << ','
+        << sceneDiagnostics.runtimeImportBoneInfluenceOverflowCount << ','
+        << sceneDiagnostics.runtimeImportSkinnedVertexAttributeReady << ','
+        << skinnedVertexAttributes.strideBytes << ','
+        << skinnedVertexAttributes.boneIndicesLocation << ','
+        << skinnedVertexAttributes.boneWeightsLocation << ','
+        << skinnedVertexAttributes.boneIndicesOffset << ','
+        << skinnedVertexAttributes.boneWeightsOffset << ','
+        << skinnedVertexAttributes.pathReady << ','
         << sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported << ','
         << cpu.totalFrameMs << ','
         << cpu.waitAcquireMs << ','
@@ -408,6 +474,10 @@ void BenchmarkRecorder::RecordFrame(
         << bonePaletteDraw.descriptorBinding << ','
         << bonePaletteDraw.descriptorRangeBytes << ','
         << bonePaletteDraw.descriptorPathReady << ','
+        << bonePaletteDraw.shaderConsumerCommandCount << ','
+        << bonePaletteDraw.shaderConsumerReadyCommandCount << ','
+        << bonePaletteDraw.shaderConsumerFallbackDescriptorReady << ','
+        << bonePaletteDraw.shaderConsumerPathReady << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -822,6 +892,8 @@ void BenchmarkRecorder::RecordFrame(
         << binds.mainBonePaletteDescriptorBinds << ','
         << binds.gBufferBonePaletteDescriptorBinds << ','
         << binds.bonePaletteDescriptorBinds << ','
+        << binds.gBufferBonePaletteFallbackDescriptorBinds << ','
+        << binds.bonePaletteFallbackDescriptorBinds << ','
         << binds.deferredLightingDraws << ','
         << binds.deferredLightingFrameBinds << ','
         << binds.deferredLightingGBufferBinds << ','
@@ -1112,6 +1184,17 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_skinned_vertex_count,"
         << "runtime_import_bone_influence_count,"
         << "runtime_import_max_bone_influences_per_vertex,"
+        << "runtime_import_skinned_vertex_attribute_count,"
+        << "runtime_import_bone_attribute_influence_count,"
+        << "runtime_import_max_bone_attribute_influences_per_vertex,"
+        << "runtime_import_bone_influence_overflow_count,"
+        << "runtime_import_skinned_vertex_attribute_ready,"
+        << "renderer_skinned_vertex_attribute_stride_bytes,"
+        << "renderer_skinned_vertex_attribute_bone_indices_location,"
+        << "renderer_skinned_vertex_attribute_bone_weights_location,"
+        << "renderer_skinned_vertex_attribute_bone_indices_offset,"
+        << "renderer_skinned_vertex_attribute_bone_weights_offset,"
+        << "renderer_skinned_vertex_attribute_path_ready,"
         << "runtime_import_skinned_animation_unsupported,"
         << "cpu_total_ms,cpu_wait_acquire_ms,cpu_imgui_ms,cpu_picking_ms,"
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"
@@ -1180,6 +1263,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "bone_palette_draw_descriptor_binding,"
         << "bone_palette_draw_descriptor_range_bytes,"
         << "bone_palette_draw_descriptor_path_ready,"
+        << "bone_palette_shader_consumer_command_count,"
+        << "bone_palette_shader_consumer_ready_command_count,"
+        << "bone_palette_shader_consumer_fallback_descriptor_ready,"
+        << "bone_palette_shader_consumer_path_ready,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
@@ -1525,6 +1612,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
         << "main_bone_palette_descriptor_binds,gbuffer_bone_palette_descriptor_binds,"
         << "bone_palette_descriptor_binds,"
+        << "gbuffer_bone_palette_fallback_descriptor_binds,"
+        << "bone_palette_fallback_descriptor_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"
         << "hdr_composite_draws,hdr_composite_frame_binds,hdr_composite_texture_binds,"

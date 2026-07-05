@@ -1,6 +1,7 @@
 #include "renderer/vulkan/renderer.h"
 
 #include "renderer/vulkan/ibl_generator.h"
+#include "renderer/vulkan/buffer.h"
 #include "renderer/vulkan/command_buffer.h"
 #include "renderer/vulkan/command_pool.h"
 #include "renderer/vulkan/compute_pipeline.h"
@@ -55,6 +56,8 @@
 #include <limits>
 #include <optional>
 #include <memory>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -91,6 +94,128 @@ FrameLightConstants FrameLightSet::Constants() const {
     );
     return constants;
 }
+
+class VulkanBonePaletteFallbackDescriptorSet {
+public:
+    VulkanBonePaletteFallbackDescriptorSet(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice
+    ) : m_Device(device.Handle()) {
+        Create(device, physicalDevice);
+    }
+
+    ~VulkanBonePaletteFallbackDescriptorSet() {
+        Release();
+    }
+
+    SE_DISABLE_COPY(VulkanBonePaletteFallbackDescriptorSet);
+    SE_DISABLE_MOVE(VulkanBonePaletteFallbackDescriptorSet);
+
+    VkDescriptorSet Handle() const { return m_Set; }
+    u32 Ready() const { return m_Ready; }
+
+private:
+    void Create(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice
+    ) {
+        const std::array<glm::mat4, 2> identityPalette{
+            glm::mat4{ 1.0f },
+            glm::mat4{ 1.0f }
+        };
+        const VkDeviceSize bufferSize =
+            static_cast<VkDeviceSize>(sizeof(glm::mat4) * identityPalette.size());
+        m_Buffer = std::make_unique<VulkanBuffer>(
+            device,
+            physicalDevice,
+            bufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        m_Buffer->Upload(std::as_bytes(std::span<const glm::mat4>(identityPalette)));
+
+        VkDescriptorSetLayoutBinding paletteBinding =
+            BonePaletteDescriptorSetLayoutBinding();
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &paletteBinding;
+        if (vkCreateDescriptorSetLayout(
+                m_Device,
+                &layoutInfo,
+                nullptr,
+                &m_Layout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create fallback bone palette descriptor layout");
+        }
+
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize.descriptorCount = 1;
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = 1;
+        if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_Pool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create fallback bone palette descriptor pool");
+        }
+
+        VkDescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocateInfo.descriptorPool = m_Pool;
+        allocateInfo.descriptorSetCount = 1;
+        allocateInfo.pSetLayouts = &m_Layout;
+        if (vkAllocateDescriptorSets(m_Device, &allocateInfo, &m_Set) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate fallback bone palette descriptor set");
+        }
+
+        VkDescriptorBufferInfo descriptorInfo{};
+        descriptorInfo.buffer = m_Buffer->Handle();
+        descriptorInfo.offset = 0;
+        descriptorInfo.range = m_Buffer->Size();
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_Set;
+        write.dstBinding = paletteBinding.binding;
+        write.dstArrayElement = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo = &descriptorInfo;
+        vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
+
+        m_Ready =
+            m_Set != VK_NULL_HANDLE &&
+            m_Buffer->Handle() != VK_NULL_HANDLE &&
+            m_Buffer->Size() >= bufferSize
+                ? 1u
+                : 0u;
+    }
+
+    void Release() {
+        m_Set = VK_NULL_HANDLE;
+        if (m_Pool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(m_Device, m_Pool, nullptr);
+            m_Pool = VK_NULL_HANDLE;
+        }
+        if (m_Layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_Device, m_Layout, nullptr);
+            m_Layout = VK_NULL_HANDLE;
+        }
+        m_Buffer.reset();
+        m_Ready = 0;
+    }
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanBuffer> m_Buffer;
+    VkDescriptorSetLayout m_Layout = VK_NULL_HANDLE;
+    VkDescriptorPool m_Pool = VK_NULL_HANDLE;
+    VkDescriptorSet m_Set = VK_NULL_HANDLE;
+    u32 m_Ready = 0;
+};
 
 namespace {
 
@@ -348,7 +473,8 @@ RendererDrawStats DrawStatsForQueues(
 }
 
 RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
-    std::span<const RenderCommand> mainCommands
+    std::span<const RenderCommand> mainCommands,
+    bool fallbackDescriptorReady
 ) {
     RendererBonePaletteDrawStats stats{};
     std::unordered_set<std::string> seenResources;
@@ -409,6 +535,12 @@ RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
         stats.descriptorRangeBytes > 0u
             ? 1u
             : 0u;
+    stats.shaderConsumerCommandCount = stats.descriptorCommandCount;
+    stats.shaderConsumerReadyCommandCount = stats.descriptorReadyCommandCount;
+    stats.shaderConsumerFallbackDescriptorReady =
+        fallbackDescriptorReady ? 1u : 0u;
+    stats.shaderConsumerPathReady =
+        stats.descriptorPathReady != 0u && fallbackDescriptorReady ? 1u : 0u;
 
     return stats;
 }
@@ -3233,6 +3365,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_ProbeGridBuffer.reset();
     m_DirectionalShadowCascadeBuffer.reset();
     m_LocalShadowBuffer.reset();
+    m_BonePaletteFallbackDescriptorSet.reset();
     m_UniformBuffer.reset();
     m_MaterialDescriptorSetLayout.reset();
     m_DescriptorSetLayout.reset();
@@ -3613,7 +3746,11 @@ void VulkanRenderer::DrawFrame() {
         overlayCommands,
         shadowCommands
     );
-    frameStats.bonePaletteDraw = BonePaletteDrawStatsFor(mainCommands);
+    frameStats.bonePaletteDraw = BonePaletteDrawStatsFor(
+        mainCommands,
+        m_BonePaletteFallbackDescriptorSet != nullptr &&
+            m_BonePaletteFallbackDescriptorSet->Ready() != 0u
+    );
     frameStats.shadowCascades = ShadowCascadeStatsFor(directionalShadowCascades);
     frameStats.shadowCascades.pcfKernelRadius =
         std::clamp<u32>(m_ShadowSettings.pcfKernelRadius, 0u, 2u);
@@ -4620,6 +4757,12 @@ void VulkanRenderer::DrawFrame() {
         has3DMainPass ? m_DoubleSidedGBufferGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DescriptorSets.get() : nullptr,
         has3DMainPass ? std::span<const RenderCommand>(gBufferCommands.data(), gBufferCommands.size()) : std::span<const RenderCommand>{},
+        has3DMainPass && m_BonePaletteFallbackDescriptorSet != nullptr
+            ? m_BonePaletteFallbackDescriptorSet->Handle()
+            : VK_NULL_HANDLE,
+        has3DMainPass && m_BonePaletteFallbackDescriptorSet != nullptr
+            ? m_BonePaletteFallbackDescriptorSet->Ready()
+            : 0u,
         recordLightTileCullCompute ? m_LightTileCullComputePipeline.get() : nullptr,
         recordLightTileCullCompute ? m_DescriptorSets.get() : nullptr,
         lightTileCullGroupCountX,
@@ -5005,6 +5148,11 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         m_Swapchain->Images().size()
     );
+    m_BonePaletteFallbackDescriptorSet =
+        std::make_unique<VulkanBonePaletteFallbackDescriptorSet>(
+            m_Device,
+            m_PhysicalDevice
+        );
     GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
         m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
         m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler);

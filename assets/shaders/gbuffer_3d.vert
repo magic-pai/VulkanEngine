@@ -5,6 +5,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inColor;
 layout(location = 3) in vec2 inTexCoord;
 layout(location = 4) in vec4 inTangent;
+layout(location = 5) in uvec4 inBoneIndices;
+layout(location = 6) in vec4 inBoneWeights;
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragNormal;
@@ -13,6 +15,7 @@ layout(location = 3) out vec3 fragWorldPosition;
 layout(location = 4) out vec4 fragTangent;
 layout(location = 5) out vec4 fragCurrentClip;
 layout(location = 6) out vec4 fragPreviousClip;
+layout(location = 7) out float fragBonePaletteDiagnostic;
 
 layout(set = 0, binding = 0) uniform FrameData {
     mat4 view;
@@ -68,10 +71,29 @@ layout(push_constant) uniform ObjectPushConstants {
     vec4 cameraDirection;
 } objectData;
 
+layout(set = 2, binding = 0, std430) readonly buffer BonePaletteData {
+    mat4 bonePalette[];
+} bonePaletteData;
+
 void main() {
     mat3 modelLinear = mat3(objectData.model);
     mat3 normalMatrix = mat3(transpose(inverse(objectData.model)));
     vec4 worldPosition = objectData.model * vec4(inPosition, 1.0);
+    mat4 diagnosticBonePalette = bonePaletteData.bonePalette[0];
+    float boneWeightDiagnostic = dot(inBoneWeights, vec4(1.0));
+    float boneIndexDiagnostic = float(
+        inBoneIndices.x +
+        inBoneIndices.y +
+        inBoneIndices.z +
+        inBoneIndices.w
+    ) * 0.000001;
+    fragBonePaletteDiagnostic = clamp(
+        abs(diagnosticBonePalette[0][0]) +
+            boneWeightDiagnostic +
+            boneIndexDiagnostic,
+        0.0,
+        1.0
+    );
     fragColor = inColor;
     fragNormal = normalize(normalMatrix * inNormal);
     fragTexCoord = inTexCoord;

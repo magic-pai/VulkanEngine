@@ -571,6 +571,8 @@ glm::vec2 ReadTexCoord(const aiMesh* mesh, u32 channel, u32 vertexIndex) {
     return ToVec2(mesh->mTextureCoords[channel][vertexIndex]);
 }
 
+constexpr u32 kMaxVertexBoneAttributes = 4;
+
 u32 PrimaryUvChannel(const ImportedMaterial3D& material) {
     const ImportedTexture3D* primaryTexture = material.FindPrimaryTexture();
     if (primaryTexture == nullptr || primaryTexture->uvChannel < 0) {
@@ -1227,6 +1229,113 @@ void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
     }
 }
 
+void PackMeshSkinningVertexAttributes(ImportedMesh3D& mesh) {
+    const std::size_t vertexCount =
+        std::min(mesh.mesh.vertices.size(), mesh.vertexBoneInfluences.size());
+    for (std::size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+        std::vector<ImportedMesh3D::BoneInfluence>& influences =
+            mesh.vertexBoneInfluences[vertexIndex];
+        influences.erase(
+            std::remove_if(
+                influences.begin(),
+                influences.end(),
+                [](const ImportedMesh3D::BoneInfluence& influence) {
+                    return influence.weight <= 0.0f;
+                }
+            ),
+            influences.end()
+        );
+        if (influences.empty()) {
+            continue;
+        }
+
+        std::stable_sort(
+            influences.begin(),
+            influences.end(),
+            [](const ImportedMesh3D::BoneInfluence& left,
+               const ImportedMesh3D::BoneInfluence& right) {
+                return left.weight > right.weight;
+            }
+        );
+
+        Vertex3D& vertex = mesh.mesh.vertices[vertexIndex];
+        vertex.boneIndices = { 0u, 0u, 0u, 0u };
+        vertex.boneWeights = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+        f32 totalWeight = 0.0f;
+        const std::size_t packedCount =
+            std::min<std::size_t>(influences.size(), kMaxVertexBoneAttributes);
+        for (std::size_t slot = 0; slot < packedCount; ++slot) {
+            totalWeight += std::max(influences[slot].weight, 0.0f);
+        }
+        if (totalWeight <= 0.000001f) {
+            continue;
+        }
+
+        for (std::size_t slot = 0; slot < packedCount; ++slot) {
+            vertex.boneIndices[slot] = influences[slot].boneIndex;
+            vertex.boneWeights[slot] =
+                std::max(influences[slot].weight, 0.0f) / totalWeight;
+        }
+    }
+}
+
+void PopulateModelSkinnedVertexAttributeDiagnostics(ImportedModel3D& model) {
+    model.sourceSkinnedVertexAttributeCount = 0;
+    model.sourceBoneAttributeInfluenceCount = 0;
+    model.sourceMaxBoneAttributeInfluencesPerVertex = 0;
+    model.sourceBoneInfluenceOverflowCount = 0;
+    model.sourceSkinnedVertexAttributeReady = 0;
+
+    for (const ImportedMesh3D& mesh : model.meshes) {
+        for (std::size_t vertexIndex = 0;
+             vertexIndex < mesh.mesh.vertices.size();
+             ++vertexIndex) {
+            const Vertex3D& vertex = mesh.mesh.vertices[vertexIndex];
+            u32 packedInfluenceCount = 0;
+            f32 packedWeightSum = 0.0f;
+            for (u32 slot = 0; slot < kMaxVertexBoneAttributes; ++slot) {
+                if (vertex.boneWeights[slot] <= 0.0f) {
+                    continue;
+                }
+                ++packedInfluenceCount;
+                packedWeightSum += vertex.boneWeights[slot];
+            }
+            if (packedInfluenceCount == 0u) {
+                continue;
+            }
+
+            ++model.sourceSkinnedVertexAttributeCount;
+            model.sourceBoneAttributeInfluenceCount += packedInfluenceCount;
+            model.sourceMaxBoneAttributeInfluencesPerVertex =
+                std::max(
+                    model.sourceMaxBoneAttributeInfluencesPerVertex,
+                    packedInfluenceCount
+                );
+            if (vertexIndex < mesh.vertexBoneInfluences.size() &&
+                mesh.vertexBoneInfluences[vertexIndex].size() >
+                    kMaxVertexBoneAttributes) {
+                model.sourceBoneInfluenceOverflowCount +=
+                    static_cast<u32>(
+                        mesh.vertexBoneInfluences[vertexIndex].size() -
+                        kMaxVertexBoneAttributes
+                    );
+            }
+            if (std::abs(packedWeightSum - 1.0f) > 0.001f) {
+                model.sourceSkinnedVertexAttributeReady = 0;
+                return;
+            }
+        }
+    }
+
+    model.sourceSkinnedVertexAttributeReady =
+        model.sourceSkinnedVertexCount > 0u &&
+        model.sourceSkinnedVertexAttributeCount == model.sourceSkinnedVertexCount &&
+        model.sourceBoneAttributeInfluenceCount > 0u
+            ? 1u
+            : 0u;
+}
+
 ImportedMesh3D ConvertMeshInstance(
     const aiMesh* source,
     const ImportedModel3D& model,
@@ -1281,6 +1390,7 @@ ImportedMesh3D ConvertMeshInstance(
     }
 
     PopulateMeshSkinning(mesh, source);
+    PackMeshSkinningVertexAttributes(mesh);
 
     return mesh;
 }
@@ -1492,6 +1602,7 @@ ImportedModel3D ModelImporter::LoadModel3D(
     if (model.meshes.empty()) {
         throw std::runtime_error("No triangle mesh data found in model: " + PathToUtf8(path));
     }
+    PopulateModelSkinnedVertexAttributeDiagnostics(model);
     PopulateModelAnimationPoseDiagnostics(model);
 
     if (model.skinnedAnimationUnsupported) {

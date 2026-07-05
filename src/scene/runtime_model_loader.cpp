@@ -793,6 +793,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourceSkinnedVertexCount,
                 cached.sourceBoneInfluenceCount,
                 cached.sourceMaxBoneInfluencesPerVertex,
+                cached.sourceSkinnedVertexAttributeCount,
+                cached.sourceBoneAttributeInfluenceCount,
+                cached.sourceMaxBoneAttributeInfluencesPerVertex,
+                cached.sourceBoneInfluenceOverflowCount,
+                cached.sourceSkinnedVertexAttributeReady,
                 cached.skinnedAnimationUnsupported};
         }
 
@@ -1423,6 +1428,16 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         loadedModel->sourceBoneInfluenceCount = importedModelData.sourceBoneInfluenceCount;
         loadedModel->sourceMaxBoneInfluencesPerVertex =
             importedModelData.sourceMaxBoneInfluencesPerVertex;
+        loadedModel->sourceSkinnedVertexAttributeCount =
+            importedModelData.sourceSkinnedVertexAttributeCount;
+        loadedModel->sourceBoneAttributeInfluenceCount =
+            importedModelData.sourceBoneAttributeInfluenceCount;
+        loadedModel->sourceMaxBoneAttributeInfluencesPerVertex =
+            importedModelData.sourceMaxBoneAttributeInfluencesPerVertex;
+        loadedModel->sourceBoneInfluenceOverflowCount =
+            importedModelData.sourceBoneInfluenceOverflowCount;
+        loadedModel->sourceSkinnedVertexAttributeReady =
+            importedModelData.sourceSkinnedVertexAttributeReady;
         loadedModel->skinnedAnimationUnsupported =
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u;
         const u32 runtimePoseCarrierBonePaletteEntryCount =
@@ -1561,6 +1576,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceSkinnedVertexCount,
             importedModelData.sourceBoneInfluenceCount,
             importedModelData.sourceMaxBoneInfluencesPerVertex,
+            importedModelData.sourceSkinnedVertexAttributeCount,
+            importedModelData.sourceBoneAttributeInfluenceCount,
+            importedModelData.sourceMaxBoneAttributeInfluencesPerVertex,
+            importedModelData.sourceBoneInfluenceOverflowCount,
+            importedModelData.sourceSkinnedVertexAttributeReady,
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u
         };
     } catch (const std::exception& error) {

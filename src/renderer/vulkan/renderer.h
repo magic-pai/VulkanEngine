@@ -69,6 +69,7 @@ class VulkanBloomDescriptorSets;
 class VulkanBloomFramebuffer;
 class VulkanBloomPyramid;
 class VulkanBloomRenderPass;
+class VulkanBonePaletteFallbackDescriptorSet;
 class VulkanColorGradingLut;
 class VulkanLightBuffer;
 class VulkanLightTileDiagnosticsBuffer;
@@ -642,6 +643,7 @@ private:
     std::unique_ptr<VulkanProbeGridBuffer> m_ProbeGridBuffer;
     std::unique_ptr<VulkanDirectionalShadowCascadeBuffer> m_DirectionalShadowCascadeBuffer;
     std::unique_ptr<VulkanLocalShadowBuffer> m_LocalShadowBuffer;
+    std::unique_ptr<VulkanBonePaletteFallbackDescriptorSet> m_BonePaletteFallbackDescriptorSet;
     std::unique_ptr<VulkanSceneRenderTargets> m_SceneRenderTargets;
     std::unique_ptr<VulkanBloomPyramid> m_BloomPyramid;
     std::unique_ptr<VulkanColorGradingLut> m_ColorGradingLut;

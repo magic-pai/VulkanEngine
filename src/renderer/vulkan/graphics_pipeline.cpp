@@ -29,7 +29,7 @@ VkPipelineShaderStageCreateInfo CreateShaderStageInfo(
 struct VertexInputDescription {
     std::array<VkVertexInputBindingDescription, 2> bindingDescriptions{};
     u32 bindingCount = 0;
-    std::array<VkVertexInputAttributeDescription, 9> attributeDescriptions{};
+    std::array<VkVertexInputAttributeDescription, 11> attributeDescriptions{};
     u32 attributeCount = 0;
 };
 
@@ -47,6 +47,14 @@ VertexInputDescription CreateVertexInputDescription(VertexLayout layout) {
     }
     case VertexLayout::Vertex3D: {
         const auto attributes = Vertex3D::AttributeDescriptions();
+        description.bindingDescriptions[0] = Vertex3D::BindingDescription();
+        description.bindingCount = 1;
+        description.attributeCount = static_cast<u32>(attributes.size());
+        std::copy(attributes.begin(), attributes.end(), description.attributeDescriptions.begin());
+        return description;
+    }
+    case VertexLayout::Vertex3DSkinned: {
+        const auto attributes = Vertex3D::SkinnedAttributeDescriptions();
         description.bindingDescriptions[0] = Vertex3D::BindingDescription();
         description.bindingCount = 1;
         description.attributeCount = static_cast<u32>(attributes.size());

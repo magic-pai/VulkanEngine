@@ -71,6 +71,11 @@ struct RuntimeModelLoadResult {
     u32 sourceSkinnedVertexCount = 0;
     u32 sourceBoneInfluenceCount = 0;
     u32 sourceMaxBoneInfluencesPerVertex = 0;
+    u32 sourceSkinnedVertexAttributeCount = 0;
+    u32 sourceBoneAttributeInfluenceCount = 0;
+    u32 sourceMaxBoneAttributeInfluencesPerVertex = 0;
+    u32 sourceBoneInfluenceOverflowCount = 0;
+    u32 sourceSkinnedVertexAttributeReady = 0;
     u32 skinnedAnimationUnsupported = 0;
 };
 
@@ -147,6 +152,11 @@ private:
         u32 sourceSkinnedVertexCount = 0;
         u32 sourceBoneInfluenceCount = 0;
         u32 sourceMaxBoneInfluencesPerVertex = 0;
+        u32 sourceSkinnedVertexAttributeCount = 0;
+        u32 sourceBoneAttributeInfluenceCount = 0;
+        u32 sourceMaxBoneAttributeInfluencesPerVertex = 0;
+        u32 sourceBoneInfluenceOverflowCount = 0;
+        u32 sourceSkinnedVertexAttributeReady = 0;
         u32 skinnedAnimationUnsupported = 0;
     };
 

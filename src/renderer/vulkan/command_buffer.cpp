@@ -277,6 +277,36 @@ bool BindBonePaletteIfNeeded(
     return true;
 }
 
+bool BindBonePaletteFallbackIfNeeded(
+    VkCommandBuffer commandBuffer,
+    const VulkanGraphicsPipeline& graphicsPipeline,
+    VkDescriptorSet fallbackDescriptorSet,
+    u32 fallbackDescriptorReady,
+    DrawStateCache& state
+) {
+    if (fallbackDescriptorSet == VK_NULL_HANDLE || fallbackDescriptorReady == 0u) {
+        return false;
+    }
+
+    if (state.bonePaletteDescriptorSet == fallbackDescriptorSet) {
+        return false;
+    }
+
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        graphicsPipeline.Layout(),
+        kBonePaletteDescriptorSetIndex,
+        1,
+        &fallbackDescriptorSet,
+        0,
+        nullptr
+    );
+    state.bonePaletteDescriptorSet = fallbackDescriptorSet;
+
+    return true;
+}
+
 void DrawRenderCommand(
     VkCommandBuffer commandBuffer,
     const VulkanGraphicsPipeline& graphicsPipeline,
@@ -1552,6 +1582,8 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* doubleSidedGBufferGraphicsPipeline,
     const VulkanDescriptorSets* gBufferDescriptorSets,
     std::span<const RenderCommand> gBufferRenderCommands,
+    VkDescriptorSet gBufferBonePaletteFallbackDescriptorSet,
+    u32 gBufferBonePaletteFallbackDescriptorReady,
     const VulkanComputePipeline* lightTileCullComputePipeline,
     const VulkanDescriptorSets* lightTileCullDescriptorSets,
     u32 lightTileCullGroupCountX,
@@ -1969,6 +2001,7 @@ void VulkanCommandBuffer::Record(
             u32 gBufferMaterialBinds = 0;
             u32 gBufferMeshBinds = 0;
             u32 gBufferBonePaletteDescriptorBinds = 0;
+            u32 gBufferBonePaletteFallbackDescriptorBinds = 0;
             u32 gBufferPushConstantUpdates = 0;
             u64 gBufferPushConstantBytes = 0;
             for (const RenderCommand& renderCommand : gBufferRenderCommands) {
@@ -1982,6 +2015,19 @@ void VulkanCommandBuffer::Record(
                 const u32 materialId = frameMaterials != nullptr
                     ? frameMaterials->IdFor(renderCommand.material)
                     : 0;
+                const bool realBonePaletteDescriptorReady =
+                    renderCommand.bonePaletteDescriptorSet != VK_NULL_HANDLE &&
+                    renderCommand.bonePaletteDescriptorSetReady != 0u;
+                if (!realBonePaletteDescriptorReady &&
+                    BindBonePaletteFallbackIfNeeded(
+                        commandBuffer,
+                        activeGBufferPipeline,
+                        gBufferBonePaletteFallbackDescriptorSet,
+                        gBufferBonePaletteFallbackDescriptorReady,
+                        gBufferState
+                    )) {
+                    ++gBufferBonePaletteFallbackDescriptorBinds;
+                }
 
                 DrawRenderCommand(
                     commandBuffer,
@@ -2008,6 +2054,10 @@ void VulkanCommandBuffer::Record(
                     gBufferBonePaletteDescriptorBinds;
                 bindStats->bonePaletteDescriptorBinds +=
                     gBufferBonePaletteDescriptorBinds;
+                bindStats->gBufferBonePaletteFallbackDescriptorBinds +=
+                    gBufferBonePaletteFallbackDescriptorBinds;
+                bindStats->bonePaletteFallbackDescriptorBinds +=
+                    gBufferBonePaletteFallbackDescriptorBinds;
                 bindStats->pushConstantUpdates += gBufferPushConstantUpdates;
                 bindStats->pushConstantBytes += gBufferPushConstantBytes;
             }

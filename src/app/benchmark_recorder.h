@@ -93,6 +93,11 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportSkinnedVertexCount = 0;
     u32 runtimeImportBoneInfluenceCount = 0;
     u32 runtimeImportMaxBoneInfluencesPerVertex = 0;
+    u32 runtimeImportSkinnedVertexAttributeCount = 0;
+    u32 runtimeImportBoneAttributeInfluenceCount = 0;
+    u32 runtimeImportMaxBoneAttributeInfluencesPerVertex = 0;
+    u32 runtimeImportBoneInfluenceOverflowCount = 0;
+    u32 runtimeImportSkinnedVertexAttributeReady = 0;
     u32 runtimeImportSkinnedAnimationUnsupported = 0;
 };
 

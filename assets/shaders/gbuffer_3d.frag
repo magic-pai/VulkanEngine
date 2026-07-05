@@ -7,6 +7,7 @@ layout(location = 3) in vec3 fragWorldPosition;
 layout(location = 4) in vec4 fragTangent;
 layout(location = 5) in vec4 fragCurrentClip;
 layout(location = 6) in vec4 fragPreviousClip;
+layout(location = 7) in float fragBonePaletteDiagnostic;
 
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormalRoughness;
@@ -232,8 +233,10 @@ void main() {
     vec2 currentUv = currentNdc * 0.5 + 0.5;
     vec2 previousUv = previousNdc * 0.5 + 0.5;
     outVelocity = currentUv - previousUv;
+    float bonePaletteDiagnosticAux =
+        clamp(fragBonePaletteDiagnostic, 0.0, 1.0) * 0.000001;
     outMaterialAux = vec2(
-        hasClearcoatRoughnessTexture ? clearcoatRoughness : 0.0,
+        max(hasClearcoatRoughnessTexture ? clearcoatRoughness : 0.0, bonePaletteDiagnosticAux),
         hasTransmissionTexture ? transmission : 0.0
     );
 }

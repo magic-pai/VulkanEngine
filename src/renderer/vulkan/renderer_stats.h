@@ -236,6 +236,10 @@ struct RendererBonePaletteDrawStats {
     u32 descriptorBinding = 0;
     u32 descriptorRangeBytes = 0;
     u32 descriptorPathReady = 0;
+    u32 shaderConsumerCommandCount = 0;
+    u32 shaderConsumerReadyCommandCount = 0;
+    u32 shaderConsumerFallbackDescriptorReady = 0;
+    u32 shaderConsumerPathReady = 0;
 };
 
 struct RendererReflectionProbeStats {
@@ -401,6 +405,8 @@ struct RendererBindStats {
     u32 mainBonePaletteDescriptorBinds = 0;
     u32 gBufferBonePaletteDescriptorBinds = 0;
     u32 bonePaletteDescriptorBinds = 0;
+    u32 gBufferBonePaletteFallbackDescriptorBinds = 0;
+    u32 bonePaletteFallbackDescriptorBinds = 0;
     u32 deferredLightingDraws = 0;
     u32 deferredLightingFrameBinds = 0;
     u32 deferredLightingGBufferBinds = 0;

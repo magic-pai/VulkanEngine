@@ -1200,6 +1200,164 @@ GBuffer route. The next skinned quality work is shader consumption of the bound
 palette descriptor, then shader skinning or skinned vertex output,
 previous-skinned state, and skinned velocity output.
 
+## Slice 4.36 Execution Plan
+
+Slice 4.36 proves that the GBuffer shader actually consumes the bound
+bone-palette descriptor without yet implementing real shader skinning. Slice
+4.35 made descriptor binding visible at draw time; this slice makes the shader
+contract non-optional and keeps non-skinned GBuffer draws valid through an
+identity fallback descriptor.
+
+1. Shader consumption.
+   - Declare a set-2/binding-0 storage-buffer bone-palette descriptor in
+     `gbuffer_3d.vert`.
+   - Read the first matrix and forward a tiny diagnostic value to the fragment
+     shader so the descriptor read cannot be optimized away.
+   - Keep the diagnostic visually harmless and separate from any production
+     skinning claim.
+
+2. GBuffer fallback descriptor.
+   - Add a renderer-owned identity bone-palette fallback descriptor set for
+     GBuffer commands that do not carry a real imported palette descriptor.
+   - Bind the fallback only when a draw lacks a real ready bone-palette
+     descriptor.
+   - Preserve real imported skinned descriptor binding for the diagnostic
+     skinned draw.
+
+3. Diagnostics and baseline.
+   - Expose shader-consumer command readiness and fallback-descriptor readiness
+     through renderer stats, CSV, quick visual-QA metrics, and the imported
+     skinned diagnostic baseline.
+   - Track fallback descriptor bind counts separately from real palette
+     descriptor bind counts so the skinned probe cannot pass by accidentally
+     using the fallback.
+
+4. Verification discipline.
+   - Use `_quick_build.bat` once for the C++ and shader changes.
+   - Use one direct 1-frame CSV probe while iterating.
+   - Use the focused `-SkipBuild -Suite imported-skinned-diagnostic` script once
+     as the commit gate.
+   - Do not rerun the full visual-QA matrix for this narrow diagnostic slice.
+
+5. Non-goals.
+   - Do not add bone indices or weights to the runtime vertex format.
+   - Do not implement shader skinning, skinned vertex output, previous-skinned
+     state, skinned velocity, or production DLSS/DLAA image quality.
+
+## Slice 4.36 Execution Evidence
+
+Slice 4.36 is implemented and verified. `gbuffer_3d.vert` now declares the
+set-2/binding-0 bone-palette storage buffer, reads `bonePalette[0]`, and passes
+a clamped diagnostic scalar to `gbuffer_3d.frag`. The fragment shader consumes
+that value through a tiny `outMaterialAux.x` contribution so the descriptor read
+is preserved without changing visible material behavior in practice.
+
+`VulkanRenderer` now owns a GBuffer-compatible identity fallback descriptor set
+with two identity matrices. `VulkanCommandBuffer::Record` receives that fallback
+and binds it only for GBuffer draws that lack a real ready bone-palette
+descriptor. The skinned diagnostic draw continues to bind the imported runtime
+palette descriptor, and fallback binds are counted separately.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes and recompiles `gbuffer_3d.vert` /
+  `gbuffer_3d.frag`.
+- Direct 1-frame CSV probe
+  `out\benchmarks\aaa_dlss_skinned_shader_consumer_probe.csv` reports
+  `859/859` CSV columns, descriptor path `1/1/1/1/2/0/256/1`,
+  shader-consumer readiness `1/1/1/1`, real descriptor binds `0/1/1`,
+  fallback descriptor binds `0/0`, and expected blocked DLSS quality gate
+  `1/0/4`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as the single focused script run. The focused CSV reports `859/859`
+  columns, descriptor path `1/1/1/1/2/0/256/1`, shader-consumer readiness
+  `1/1/1/1`, real descriptor binds `0/1/1`, fallback descriptor binds `0/0`,
+  quality gate `1/0/4`, and quality masks `255/251/4`.
+
+This closes shader-consumption readiness for the bound bone-palette descriptor
+on the skinned diagnostic GBuffer route. It still does not implement vertex
+bone indices/weights, real shader skinning, skinned vertex output,
+previous-skinned state, skinned velocity, or production DLSS/DLAA image quality.
+
+## Slice 4.37 Execution Plan
+
+Slice 4.37 moves the imported skinning data from importer-only influence lists
+into the runtime GPU vertex-input contract. Slice 4.36 proved the GBuffer
+shader can consume the palette descriptor; this slice proves the same GBuffer
+route can also receive per-vertex bone indices and weights without polluting
+unrelated forward, depth, shadow, or instanced pipelines.
+
+1. Skinned vertex attribute carrier.
+   - Extend `Vertex3D` with four bone indices and four bone weights, defaulting
+     to zero for rigid meshes.
+   - Pack each imported skinned vertex's strongest four Assimp influences into
+     those attributes and normalize the packed weights.
+   - Count packed skinned vertices, packed influence slots, max packed
+     influences per vertex, overflow influence count, and attribute readiness.
+
+2. Narrow Vulkan vertex layout.
+   - Keep ordinary `Vertex3D` pipelines on the existing 5-attribute input
+     layout.
+   - Add a skinned-aware `Vertex3DSkinned` layout for the GBuffer pipeline only,
+     with bone indices at location 5 and bone weights at location 6.
+   - Keep instanced forward model-matrix inputs at locations 5-8 so instancing
+     is not forced to reserve unused skinning attributes.
+
+3. Shader and diagnostics.
+   - Make `gbuffer_3d.vert` declare and consume the bone index/weight inputs as
+     part of its existing tiny diagnostic value.
+   - Add CSV and quick-metric fields for the runtime packed attributes and the
+     renderer vertex-input stride/location/offset readiness.
+   - Update the imported skinned diagnostic baseline to require the new fields.
+
+4. Verification discipline.
+   - Use `_quick_build.bat` for the C++/shader changes.
+   - Use one direct warmup+1-frame CSV probe to confirm new columns and values.
+   - Use the focused `-SkipBuild -Suite imported-skinned-diagnostic` script once
+     as the commit gate.
+   - Do not run the full visual-QA matrix for this narrow diagnostic slice.
+
+5. Non-goals.
+   - Do not apply the bone palette to vertex positions or normals yet.
+   - Do not implement previous-skinned state, skinned velocity, dynamic skinned
+     screenshot capture, or production DLSS/DLAA image quality.
+
+## Slice 4.37 Execution Evidence
+
+Slice 4.37 is implemented and verified. `Vertex3D` now carries four bone index
+slots and four normalized bone-weight slots. Runtime Assimp import packs the
+strongest four influences per skinned vertex, reports overflow separately, and
+leaves rigid meshes with zeroed skinning attributes.
+
+The Vulkan vertex-input contract is intentionally narrow: ordinary `Vertex3D`
+pipelines still expose the original five attributes, while GBuffer uses
+`VertexLayout::Vertex3DSkinned` so `gbuffer_3d.vert` receives bone indices at
+location 5 and bone weights at location 6. Instanced forward rendering keeps its
+model matrix inputs at locations 5-8, avoiding the validation warnings caused by
+feeding unused skinning attributes to non-skinned shaders.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes with `BUILD_EXIT=0`.
+- Direct warmup+1-frame CSV probe
+  `out\benchmarks\aaa_dlss_skinned_vertex_attribute_probe.csv` reports
+  `870/870` CSV columns, runtime packed attributes
+  `skinnedVertices/attribInfluences/maxAttribInfluences/overflow/ready=3/5/2/0/1`,
+  renderer vertex-input layout
+  `stride/indicesLocation/weightsLocation/indicesOffset/weightsOffset/ready=92/5/6/60/76/1`,
+  descriptor path `1/1/1/1/2/0/256/1`, shader-consumer readiness `1/1/1/1`,
+  real descriptor binds `0/1/1`, fallback descriptor binds `0/0`, and expected
+  blocked DLSS quality gate `1/0/4` with masks `255/251/4`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as the single focused script run. Its focused CSV reports the same
+  `870/870`, `3/5/2/0/1`, `92/5/6/60/76/1`, descriptor, shader-consumer, bind,
+  and expected-blocked quality-gate values.
+
+This closes runtime/GPU vertex-attribute carrier readiness for the skinned
+diagnostic GBuffer route. It still does not implement actual shader skinning,
+skinned vertex output, previous-skinned state, skinned velocity, or production
+DLSS/DLAA image quality.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming
