@@ -400,6 +400,14 @@ void BenchmarkRecorder::RecordFrame(
         << bonePaletteDraw.previousEntryCount << ','
         << bonePaletteDraw.changedEntryCount << ','
         << bonePaletteDraw.drawPathReady << ','
+        << bonePaletteDraw.descriptorCommandCount << ','
+        << bonePaletteDraw.descriptorReadyCommandCount << ','
+        << bonePaletteDraw.descriptorResourceCount << ','
+        << bonePaletteDraw.descriptorReadyResourceCount << ','
+        << bonePaletteDraw.descriptorSetIndex << ','
+        << bonePaletteDraw.descriptorBinding << ','
+        << bonePaletteDraw.descriptorRangeBytes << ','
+        << bonePaletteDraw.descriptorPathReady << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -811,6 +819,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.mainMeshBinds << ','
         << binds.gBufferMaterialBinds << ','
         << binds.gBufferMeshBinds << ','
+        << binds.mainBonePaletteDescriptorBinds << ','
+        << binds.gBufferBonePaletteDescriptorBinds << ','
+        << binds.bonePaletteDescriptorBinds << ','
         << binds.deferredLightingDraws << ','
         << binds.deferredLightingFrameBinds << ','
         << binds.deferredLightingGBufferBinds << ','
@@ -1161,6 +1172,14 @@ void BenchmarkRecorder::WriteHeader() {
         << "bone_palette_draw_current_entry_count,"
         << "bone_palette_draw_previous_entry_count,"
         << "bone_palette_draw_changed_entry_count,bone_palette_draw_path_ready,"
+        << "bone_palette_draw_descriptor_command_count,"
+        << "bone_palette_draw_descriptor_ready_command_count,"
+        << "bone_palette_draw_descriptor_resource_count,"
+        << "bone_palette_draw_descriptor_ready_resource_count,"
+        << "bone_palette_draw_descriptor_set_index,"
+        << "bone_palette_draw_descriptor_binding,"
+        << "bone_palette_draw_descriptor_range_bytes,"
+        << "bone_palette_draw_descriptor_path_ready,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
@@ -1504,6 +1523,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_dlss_quality_post_ordering_ready,"
         << "temporal_upscaler_dlss_quality_reference_baseline_ready,"
         << "main_material_binds,main_mesh_binds,gbuffer_material_binds,gbuffer_mesh_binds,"
+        << "main_bone_palette_descriptor_binds,gbuffer_bone_palette_descriptor_binds,"
+        << "bone_palette_descriptor_binds,"
         << "deferred_lighting_draws,deferred_lighting_frame_binds,deferred_lighting_gbuffer_binds,"
         << "deferred_pbr_debug_draws,deferred_pbr_debug_frame_binds,deferred_pbr_debug_gbuffer_binds,"
         << "hdr_composite_draws,hdr_composite_frame_binds,hdr_composite_texture_binds,"

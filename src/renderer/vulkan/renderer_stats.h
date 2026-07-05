@@ -228,6 +228,14 @@ struct RendererBonePaletteDrawStats {
     u32 previousEntryCount = 0;
     u32 changedEntryCount = 0;
     u32 drawPathReady = 0;
+    u32 descriptorCommandCount = 0;
+    u32 descriptorReadyCommandCount = 0;
+    u32 descriptorResourceCount = 0;
+    u32 descriptorReadyResourceCount = 0;
+    u32 descriptorSetIndex = 0;
+    u32 descriptorBinding = 0;
+    u32 descriptorRangeBytes = 0;
+    u32 descriptorPathReady = 0;
 };
 
 struct RendererReflectionProbeStats {
@@ -390,6 +398,9 @@ struct RendererBindStats {
     u32 mainMeshBinds = 0;
     u32 gBufferMaterialBinds = 0;
     u32 gBufferMeshBinds = 0;
+    u32 mainBonePaletteDescriptorBinds = 0;
+    u32 gBufferBonePaletteDescriptorBinds = 0;
+    u32 bonePaletteDescriptorBinds = 0;
     u32 deferredLightingDraws = 0;
     u32 deferredLightingFrameBinds = 0;
     u32 deferredLightingGBufferBinds = 0;

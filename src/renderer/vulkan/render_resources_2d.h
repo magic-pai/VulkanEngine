@@ -18,11 +18,24 @@ public:
         std::vector<glm::mat4> currentPalette;
         u32 changedEntryCount = 0;
         u32 ready = 0;
+        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+        u32 descriptorSetReady = 0;
+        u32 descriptorSetIndex = 0;
+        u32 descriptorBinding = 0;
+        u32 descriptorRangeBytes = 0;
     };
 
     void RegisterMesh(std::string id, const VulkanMesh& mesh);
     void RegisterMaterial(std::string id, VulkanMaterial& material);
     void RegisterBonePalette(std::string id, BonePaletteResource palette);
+    void UpdateBonePaletteDescriptor(
+        std::string_view id,
+        VkDescriptorSet descriptorSet,
+        u32 descriptorSetReady,
+        u32 descriptorSetIndex,
+        u32 descriptorBinding,
+        u32 descriptorRangeBytes
+    );
 
     const VulkanMesh& Mesh(std::string_view id) const;
     VulkanMaterial& Material(std::string_view id) const;

@@ -1130,6 +1130,76 @@ skinned quality work is actual draw-time descriptor binding and shader
 consumption, then shader skinning or skinned vertex output, previous-skinned
 state, and skinned velocity output.
 
+## Slice 4.35 Execution Plan
+
+Slice 4.35 promotes the imported bone-palette descriptor from diagnostic
+allocation/write readiness into draw-time binding readiness. The goal is to
+prove that a visible imported skinned GBuffer draw can bind the ready
+bone-palette storage-buffer descriptor through a graphics pipeline layout,
+without making shaders consume it yet.
+
+1. Pipeline-layout compatibility.
+   - Add a graphics-pipeline set-2 descriptor-set layout with one storage-buffer
+     binding for bone palettes.
+   - Keep the existing frame set 0 and material set 1 contracts unchanged.
+   - Use the same binding definition for runtime diagnostic descriptor
+     allocation so the set is compatible with draw pipelines.
+
+2. Renderer resource propagation.
+   - Extend `VulkanRenderResources2D::BonePaletteResource` with descriptor set
+     handle, set index, binding, range bytes, and readiness.
+   - Register those descriptor details for both first-load and cache-hit runtime
+     model paths.
+   - Carry the descriptor readiness through `RenderCommand`.
+
+3. Draw-time diagnostics.
+   - Bind the ready bone-palette descriptor set for palette-carrying GBuffer
+     draw commands.
+   - Report descriptor command/resource readiness, set/binding/range, and
+     actual main/GBuffer/total bind counts through renderer stats, CSV, quick
+     visual-QA metrics, and imported baselines.
+
+4. Verification discipline.
+   - Use `_quick_build.bat` once for the C++ change.
+   - Use one direct 1-frame CSV probe to confirm new descriptor/bind columns.
+   - Use the focused `-SkipBuild -Suite imported-skinned-diagnostic` script once
+     as the commit gate.
+   - Do not run the full visual-QA matrix for this slice.
+
+5. Non-goals.
+   - Do not add shader reads from the bone-palette descriptor.
+   - Do not implement shader skinning, skinned vertex output, previous-skinned
+     state, skinned velocity, or production DLSS/DLAA image quality.
+
+## Slice 4.35 Execution Evidence
+
+Slice 4.35 is implemented and verified. Graphics pipeline layouts now include a
+compatible set-2 bone-palette storage-buffer descriptor layout,
+`RuntimeModelLoader` registers the written runtime descriptor back onto the
+renderer bone-palette resource, `RenderQueue` carries the descriptor handle and
+readiness into `RenderCommand`, and command recording binds the ready descriptor
+for the skinned diagnostic GBuffer draw.
+
+Verification on 2026-07-05:
+
+- `_quick_build.bat` passes with only the existing MSVC runtime-library warning.
+- Direct 1-frame CSV probe for `assets/models/skinned_probe.dae` reports
+  `853/853` CSV columns, draw diagnostics `1/1/1/1/2/2/1/1`, descriptor path
+  `commands/readyCommands/resources/readyResources/set/binding/range/ready=1/1/1/1/2/0/256/1`,
+  and actual descriptor binds `main/gbuffer/total=0/1/1`.
+- `powershell -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -Suite imported-skinned-diagnostic`
+  passes as the single focused script run.
+- Focused CSV reports `853/853` columns, runtime descriptor
+  `setAllocated/setWritten/setReady/binding/rangeBytes=1/1/1/0/256`, draw
+  diagnostics `1/1/1/1/2/2/1/1`, descriptor path `1/1/1/1/2/0/256/1`, actual
+  descriptor binds `0/1/1`, and DLSS quality remains expected-blocked at
+  `qualityGate=1/0/4` with masks `255/251/4`.
+
+This closes draw-time descriptor binding readiness for the skinned diagnostic
+GBuffer route. The next skinned quality work is shader consumption of the bound
+palette descriptor, then shader skinning or skinned vertex output,
+previous-skinned state, and skinned velocity output.
+
 ## Slice 4.4 Execution Plan
 
 Slice 4.4 should remove the reactive/transparency mask blocker without claiming

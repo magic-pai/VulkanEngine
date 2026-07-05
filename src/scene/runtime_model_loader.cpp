@@ -4,6 +4,7 @@
 #include "renderer/vulkan/material_library.h"
 #include "renderer/vulkan/mesh_lod.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/render_resources_2d.h"
 #include "renderer/vulkan/upload_batch.h"
 
@@ -41,13 +42,9 @@ public:
             return;
         }
 
-        VkDescriptorSetLayoutBinding paletteBinding{};
-        paletteBinding.binding = m_Binding;
-        paletteBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        paletteBinding.descriptorCount = 1;
-        paletteBinding.stageFlags =
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-        paletteBinding.pImmutableSamplers = nullptr;
+        VkDescriptorSetLayoutBinding paletteBinding =
+            BonePaletteDescriptorSetLayoutBinding();
+        m_Binding = paletteBinding.binding;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -134,6 +131,7 @@ public:
     u32 Ready() const { return m_Ready; }
     u32 Binding() const { return m_Binding; }
     u32 RangeBytes() const { return m_RangeBytes; }
+    VkDescriptorSet Handle() const { return m_Set; }
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
@@ -711,6 +709,17 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                     cached.runtimePoseCarrierReady
                 );
             const std::string cachedBonePaletteResourceId = idPrefix + "_BonePalette";
+            if (rendererBonePalette.registered != 0u &&
+                cached.gpuBonePaletteDescriptorSet != nullptr) {
+                m_RenderResources.UpdateBonePaletteDescriptor(
+                    cachedBonePaletteResourceId,
+                    cached.gpuBonePaletteDescriptorSet->Handle(),
+                    cached.gpuBonePaletteDescriptorSet->Ready(),
+                    kBonePaletteDescriptorSetIndex,
+                    cached.gpuBonePaletteDescriptorSet->Binding(),
+                    cached.gpuBonePaletteDescriptorSet->RangeBytes()
+                );
+            }
 
             u32 partIdx = 0;
             for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
@@ -1484,6 +1493,17 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             gpuBonePaletteDescriptor.rangeBytes;
         loadedModel->gpuBonePaletteDescriptorSet =
             std::move(gpuBonePaletteDescriptor.descriptorSet);
+        if (rendererBonePalette.registered != 0u &&
+            loadedModel->gpuBonePaletteDescriptorSet != nullptr) {
+            m_RenderResources.UpdateBonePaletteDescriptor(
+                loadedModel->bonePaletteResourceId,
+                loadedModel->gpuBonePaletteDescriptorSet->Handle(),
+                loadedModel->gpuBonePaletteDescriptorSet->Ready(),
+                kBonePaletteDescriptorSetIndex,
+                loadedModel->gpuBonePaletteDescriptorSet->Binding(),
+                loadedModel->gpuBonePaletteDescriptorSet->RangeBytes()
+            );
+        }
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 

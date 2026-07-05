@@ -4,6 +4,18 @@
 
 namespace se {
 
+VkDescriptorSetLayoutBinding BonePaletteDescriptorSetLayoutBinding() {
+    VkDescriptorSetLayoutBinding paletteBinding{};
+    paletteBinding.binding = kBonePaletteDescriptorBinding;
+    paletteBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    paletteBinding.descriptorCount = 1;
+    paletteBinding.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    paletteBinding.pImmutableSamplers = nullptr;
+
+    return paletteBinding;
+}
+
 VulkanDescriptorSetLayout::VulkanDescriptorSetLayout(const VulkanDevice& device)
     : m_Device(device.Handle()) {
     CreateDescriptorSetLayout(device);

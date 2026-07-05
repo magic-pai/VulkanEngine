@@ -361,6 +361,13 @@ RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
         if (command.bonePaletteReady != 0u) {
             ++stats.readyCommandCount;
         }
+        if (command.bonePaletteDescriptorSet != VK_NULL_HANDLE) {
+            ++stats.descriptorCommandCount;
+        }
+        if (command.bonePaletteDescriptorSetReady != 0u &&
+            command.bonePaletteDescriptorSet != VK_NULL_HANDLE) {
+            ++stats.descriptorReadyCommandCount;
+        }
 
         if (!seenResources.insert(command.bonePaletteResourceId).second) {
             continue;
@@ -370,8 +377,18 @@ RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
         stats.currentEntryCount += command.bonePaletteCurrentEntryCount;
         stats.previousEntryCount += command.bonePalettePreviousEntryCount;
         stats.changedEntryCount += command.bonePaletteChangedEntryCount;
+        stats.descriptorRangeBytes += command.bonePaletteDescriptorRangeBytes;
         if (command.bonePaletteReady != 0u) {
             ++stats.readyResourceCount;
+        }
+        if (command.bonePaletteDescriptorSet != VK_NULL_HANDLE) {
+            ++stats.descriptorResourceCount;
+            stats.descriptorSetIndex = command.bonePaletteDescriptorSetIndex;
+            stats.descriptorBinding = command.bonePaletteDescriptorBinding;
+        }
+        if (command.bonePaletteDescriptorSetReady != 0u &&
+            command.bonePaletteDescriptorSet != VK_NULL_HANDLE) {
+            ++stats.descriptorReadyResourceCount;
         }
     }
 
@@ -382,6 +399,14 @@ RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
         stats.resourceCount == stats.readyResourceCount &&
         stats.currentEntryCount > 0u &&
         stats.currentEntryCount == stats.previousEntryCount
+            ? 1u
+            : 0u;
+    stats.descriptorPathReady =
+        stats.descriptorCommandCount > 0u &&
+        stats.descriptorCommandCount == stats.descriptorReadyCommandCount &&
+        stats.descriptorResourceCount > 0u &&
+        stats.descriptorResourceCount == stats.descriptorReadyResourceCount &&
+        stats.descriptorRangeBytes > 0u
             ? 1u
             : 0u;
 

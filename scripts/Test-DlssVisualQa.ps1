@@ -1531,6 +1531,17 @@ function New-QuickDlssPresentMetrics {
         bonePaletteDrawPreviousEntryCount = "$($Row.bone_palette_draw_previous_entry_count)"
         bonePaletteDrawChangedEntryCount = "$($Row.bone_palette_draw_changed_entry_count)"
         bonePaletteDrawPathReady = "$($Row.bone_palette_draw_path_ready)"
+        bonePaletteDrawDescriptorCommandCount = "$($Row.bone_palette_draw_descriptor_command_count)"
+        bonePaletteDrawDescriptorReadyCommandCount = "$($Row.bone_palette_draw_descriptor_ready_command_count)"
+        bonePaletteDrawDescriptorResourceCount = "$($Row.bone_palette_draw_descriptor_resource_count)"
+        bonePaletteDrawDescriptorReadyResourceCount = "$($Row.bone_palette_draw_descriptor_ready_resource_count)"
+        bonePaletteDrawDescriptorSetIndex = "$($Row.bone_palette_draw_descriptor_set_index)"
+        bonePaletteDrawDescriptorBinding = "$($Row.bone_palette_draw_descriptor_binding)"
+        bonePaletteDrawDescriptorRangeBytes = "$($Row.bone_palette_draw_descriptor_range_bytes)"
+        bonePaletteDrawDescriptorPathReady = "$($Row.bone_palette_draw_descriptor_path_ready)"
+        mainBonePaletteDescriptorBinds = "$($Row.main_bone_palette_descriptor_binds)"
+        gbufferBonePaletteDescriptorBinds = "$($Row.gbuffer_bone_palette_descriptor_binds)"
+        bonePaletteDescriptorBinds = "$($Row.bone_palette_descriptor_binds)"
         dlssExtents = "$($Row.temporal_upscaler_dlss_render_width)x$($Row.temporal_upscaler_dlss_render_height)->$($Row.temporal_upscaler_dlss_output_width)x$($Row.temporal_upscaler_dlss_output_height)"
     }
 }

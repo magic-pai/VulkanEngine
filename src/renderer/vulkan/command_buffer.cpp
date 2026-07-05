@@ -3,6 +3,7 @@
 #include "renderer/vulkan/command_pool.h"
 #include "renderer/vulkan/compute_pipeline.h"
 #include "renderer/vulkan/depth_buffer.h"
+#include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/frame_graph.h"
@@ -33,6 +34,7 @@ namespace {
 struct DrawStateCache {
     const VulkanMaterial* material = nullptr;
     const VulkanMesh* mesh = nullptr;
+    VkDescriptorSet bonePaletteDescriptorSet = VK_NULL_HANDLE;
 };
 
 bool IsDoubleSidedCommand(const RenderCommand& renderCommand) {
@@ -240,6 +242,41 @@ bool BindMeshIfNeeded(
     return true;
 }
 
+bool BindBonePaletteIfNeeded(
+    VkCommandBuffer commandBuffer,
+    const VulkanGraphicsPipeline& graphicsPipeline,
+    const RenderCommand& renderCommand,
+    DrawStateCache& state
+) {
+    if (renderCommand.bonePaletteDescriptorSet == VK_NULL_HANDLE ||
+        renderCommand.bonePaletteDescriptorSetReady == 0u) {
+        return false;
+    }
+    SE_ASSERT(
+        renderCommand.bonePaletteDescriptorSetIndex == kBonePaletteDescriptorSetIndex,
+        "Bone palette descriptor set index must match the graphics pipeline layout"
+    );
+
+    if (state.bonePaletteDescriptorSet == renderCommand.bonePaletteDescriptorSet) {
+        return false;
+    }
+
+    const VkDescriptorSet descriptorSet = renderCommand.bonePaletteDescriptorSet;
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        graphicsPipeline.Layout(),
+        renderCommand.bonePaletteDescriptorSetIndex,
+        1,
+        &descriptorSet,
+        0,
+        nullptr
+    );
+    state.bonePaletteDescriptorSet = renderCommand.bonePaletteDescriptorSet;
+
+    return true;
+}
+
 void DrawRenderCommand(
     VkCommandBuffer commandBuffer,
     const VulkanGraphicsPipeline& graphicsPipeline,
@@ -253,7 +290,8 @@ void DrawRenderCommand(
     u32& meshBindCount,
     u32& pushConstantUpdateCount,
     u64& pushConstantByteCount,
-    f32 hdrOutputFlag = 0.0f
+    f32 hdrOutputFlag = 0.0f,
+    u32* bonePaletteDescriptorBindCount = nullptr
 ) {
     SE_ASSERT(renderCommand.mesh != nullptr, "RenderCommand must reference a mesh");
     SE_ASSERT(renderCommand.material != nullptr, "RenderCommand must reference a material");
@@ -289,6 +327,15 @@ void DrawRenderCommand(
 
     if (BindMeshIfNeeded(commandBuffer, renderCommand, state)) {
         ++meshBindCount;
+    }
+    if (BindBonePaletteIfNeeded(
+            commandBuffer,
+            graphicsPipeline,
+            renderCommand,
+            state
+        ) &&
+        bonePaletteDescriptorBindCount != nullptr) {
+        ++(*bonePaletteDescriptorBindCount);
     }
     vkCmdDrawIndexed(commandBuffer, renderCommand.mesh->IndexCount(), 1, 0, 0, 0);
 }
@@ -1921,6 +1968,7 @@ void VulkanCommandBuffer::Record(
             };
             u32 gBufferMaterialBinds = 0;
             u32 gBufferMeshBinds = 0;
+            u32 gBufferBonePaletteDescriptorBinds = 0;
             u32 gBufferPushConstantUpdates = 0;
             u64 gBufferPushConstantBytes = 0;
             for (const RenderCommand& renderCommand : gBufferRenderCommands) {
@@ -1947,13 +1995,19 @@ void VulkanCommandBuffer::Record(
                     gBufferMaterialBinds,
                     gBufferMeshBinds,
                     gBufferPushConstantUpdates,
-                    gBufferPushConstantBytes
+                    gBufferPushConstantBytes,
+                    0.0f,
+                    &gBufferBonePaletteDescriptorBinds
                 );
             }
 
             if (bindStats != nullptr) {
                 bindStats->gBufferMaterialBinds += gBufferMaterialBinds;
                 bindStats->gBufferMeshBinds += gBufferMeshBinds;
+                bindStats->gBufferBonePaletteDescriptorBinds +=
+                    gBufferBonePaletteDescriptorBinds;
+                bindStats->bonePaletteDescriptorBinds +=
+                    gBufferBonePaletteDescriptorBinds;
                 bindStats->pushConstantUpdates += gBufferPushConstantUpdates;
                 bindStats->pushConstantBytes += gBufferPushConstantBytes;
             }
@@ -2738,6 +2792,7 @@ void VulkanCommandBuffer::Record(
     DrawStateCache mainState{};
     u32 mainMaterialBinds = 0;
     u32 mainMeshBinds = 0;
+    u32 mainBonePaletteDescriptorBinds = 0;
     u32 mainPushConstantUpdates = 0;
     u64 mainPushConstantBytes = 0;
     u32 mainInstancedDraws = 0;
@@ -3092,7 +3147,9 @@ void VulkanCommandBuffer::Record(
             mainMaterialBinds,
             mainMeshBinds,
             mainPushConstantUpdates,
-            mainPushConstantBytes
+            mainPushConstantBytes,
+            0.0f,
+            &mainBonePaletteDescriptorBinds
         );
         ++commandIndex;
         }
@@ -3100,6 +3157,8 @@ void VulkanCommandBuffer::Record(
     if (bindStats != nullptr) {
         bindStats->mainMaterialBinds += mainMaterialBinds;
         bindStats->mainMeshBinds += mainMeshBinds;
+        bindStats->mainBonePaletteDescriptorBinds += mainBonePaletteDescriptorBinds;
+        bindStats->bonePaletteDescriptorBinds += mainBonePaletteDescriptorBinds;
         bindStats->pushConstantUpdates += mainPushConstantUpdates;
         bindStats->pushConstantBytes += mainPushConstantBytes;
         bindStats->mainInstancedDraws += mainInstancedDraws;

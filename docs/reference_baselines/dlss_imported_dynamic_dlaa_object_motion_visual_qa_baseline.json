@@ -113,7 +113,18 @@
       "bonePaletteDrawCurrentEntryCount": "0",
       "bonePaletteDrawPreviousEntryCount": "0",
       "bonePaletteDrawChangedEntryCount": "0",
-      "bonePaletteDrawPathReady": "0"
+      "bonePaletteDrawPathReady": "0",
+      "bonePaletteDrawDescriptorCommandCount": "0",
+      "bonePaletteDrawDescriptorReadyCommandCount": "0",
+      "bonePaletteDrawDescriptorResourceCount": "0",
+      "bonePaletteDrawDescriptorReadyResourceCount": "0",
+      "bonePaletteDrawDescriptorSetIndex": "0",
+      "bonePaletteDrawDescriptorBinding": "0",
+      "bonePaletteDrawDescriptorRangeBytes": "0",
+      "bonePaletteDrawDescriptorPathReady": "0",
+      "mainBonePaletteDescriptorBinds": "0",
+      "gbufferBonePaletteDescriptorBinds": "0",
+      "bonePaletteDescriptorBinds": "0"
     }
   },
   "thresholds": {
@@ -129,7 +140,7 @@
   "baselineSource": {
     "capturedAt": "2026-07-05T04:15:24.0271604+08:00",
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
-    "dlssColumns": "842/842",
+    "dlssColumns": "853/853",
     "model": "assets/models/demo_crystal.obj",
     "qualityMode": 6,
     "recommendedPreset": 11,

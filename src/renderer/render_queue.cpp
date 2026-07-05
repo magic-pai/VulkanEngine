@@ -200,6 +200,11 @@ RenderCommand CommandForRenderable(
             static_cast<u32>(palette.previousPalette.size());
         command.bonePaletteChangedEntryCount = palette.changedEntryCount;
         command.bonePaletteReady = palette.ready;
+        command.bonePaletteDescriptorSet = palette.descriptorSet;
+        command.bonePaletteDescriptorSetReady = palette.descriptorSetReady;
+        command.bonePaletteDescriptorSetIndex = palette.descriptorSetIndex;
+        command.bonePaletteDescriptorBinding = palette.descriptorBinding;
+        command.bonePaletteDescriptorRangeBytes = palette.descriptorRangeBytes;
     }
 
     return command;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include "renderer/vulkan/vulkan_common.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -100,6 +101,11 @@ struct RenderCommand {
     u32 bonePalettePreviousEntryCount = 0;
     u32 bonePaletteChangedEntryCount = 0;
     u32 bonePaletteReady = 0;
+    VkDescriptorSet bonePaletteDescriptorSet = VK_NULL_HANDLE;
+    u32 bonePaletteDescriptorSetReady = 0;
+    u32 bonePaletteDescriptorSetIndex = 0;
+    u32 bonePaletteDescriptorBinding = 0;
+    u32 bonePaletteDescriptorRangeBytes = 0;
 };
 
 struct RenderInstanceBatch {

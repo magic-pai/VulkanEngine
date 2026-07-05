@@ -335,9 +335,27 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     dynamicState.dynamicStateCount = static_cast<u32>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
+    VkDescriptorSetLayout bonePaletteDescriptorSetLayout = VK_NULL_HANDLE;
+    const VkDescriptorSetLayoutBinding bonePaletteBinding =
+        BonePaletteDescriptorSetLayoutBinding();
+    VkDescriptorSetLayoutCreateInfo bonePaletteLayoutInfo{};
+    bonePaletteLayoutInfo.sType =
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    bonePaletteLayoutInfo.bindingCount = 1;
+    bonePaletteLayoutInfo.pBindings = &bonePaletteBinding;
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &bonePaletteLayoutInfo,
+            nullptr,
+            &bonePaletteDescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan bone palette descriptor set layout");
+    }
+
     const VkDescriptorSetLayout descriptorSetLayouts[] = {
         frameDescriptorSetLayout.Handle(),
-        materialDescriptorSetLayout.Handle()
+        materialDescriptorSetLayout.Handle(),
+        bonePaletteDescriptorSetLayout
     };
 
     VkPushConstantRange objectPushConstantRange{};
@@ -355,8 +373,10 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     pipelineLayoutInfo.pPushConstantRanges = &objectPushConstantRange;
 
     if (vkCreatePipelineLayout(device.Handle(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
+        vkDestroyDescriptorSetLayout(device.Handle(), bonePaletteDescriptorSetLayout, nullptr);
         throw std::runtime_error("Failed to create Vulkan pipeline layout");
     }
+    vkDestroyDescriptorSetLayout(device.Handle(), bonePaletteDescriptorSetLayout, nullptr);
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

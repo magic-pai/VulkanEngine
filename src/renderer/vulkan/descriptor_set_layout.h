@@ -6,6 +6,11 @@ namespace se {
 
 class VulkanDevice;
 
+constexpr u32 kBonePaletteDescriptorSetIndex = 2;
+constexpr u32 kBonePaletteDescriptorBinding = 0;
+
+VkDescriptorSetLayoutBinding BonePaletteDescriptorSetLayoutBinding();
+
 // Set 0: per-frame data shared by every draw call, such as camera matrices.
 class VulkanDescriptorSetLayout {
 public:

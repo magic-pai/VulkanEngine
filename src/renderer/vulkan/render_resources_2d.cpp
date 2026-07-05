@@ -65,6 +65,26 @@ void VulkanRenderResources2D::RegisterBonePalette(
     m_BonePaletteIndexById.emplace(std::move(id), index);
 }
 
+void VulkanRenderResources2D::UpdateBonePaletteDescriptor(
+    std::string_view id,
+    VkDescriptorSet descriptorSet,
+    u32 descriptorSetReady,
+    u32 descriptorSetIndex,
+    u32 descriptorBinding,
+    u32 descriptorRangeBytes
+) {
+    const auto found = m_BonePaletteIndexById.find(id);
+    SE_ASSERT(found != m_BonePaletteIndexById.end(), "Bone palette resource was not found");
+
+    BonePaletteResource& palette = m_BonePalettes[found->second].palette;
+    palette.descriptorSet = descriptorSet;
+    palette.descriptorSetReady =
+        descriptorSet != VK_NULL_HANDLE && descriptorSetReady != 0u ? 1u : 0u;
+    palette.descriptorSetIndex = descriptorSetIndex;
+    palette.descriptorBinding = descriptorBinding;
+    palette.descriptorRangeBytes = descriptorRangeBytes;
+}
+
 const VulkanMesh& VulkanRenderResources2D::Mesh(std::string_view id) const {
     const auto found = m_MeshIndexById.find(id);
     SE_ASSERT(found != m_MeshIndexById.end(), "2D mesh resource was not found");

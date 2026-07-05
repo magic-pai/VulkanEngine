@@ -114,13 +114,24 @@
       "bonePaletteDrawCurrentEntryCount": "2",
       "bonePaletteDrawPreviousEntryCount": "2",
       "bonePaletteDrawChangedEntryCount": "1",
-      "bonePaletteDrawPathReady": "1"
+      "bonePaletteDrawPathReady": "1",
+      "bonePaletteDrawDescriptorCommandCount": "1",
+      "bonePaletteDrawDescriptorReadyCommandCount": "1",
+      "bonePaletteDrawDescriptorResourceCount": "1",
+      "bonePaletteDrawDescriptorReadyResourceCount": "1",
+      "bonePaletteDrawDescriptorSetIndex": "2",
+      "bonePaletteDrawDescriptorBinding": "0",
+      "bonePaletteDrawDescriptorRangeBytes": "256",
+      "bonePaletteDrawDescriptorPathReady": "1",
+      "mainBonePaletteDescriptorBinds": "0",
+      "gbufferBonePaletteDescriptorBinds": "1",
+      "bonePaletteDescriptorBinds": "1"
     }
   },
   "baselineSource": {
     "capturedAt": "2026-07-05T06:32:34.0141480+08:00",
     "captureMode": "benchmark-only; no screenshot capture",
-    "dlssColumns": "842/842",
+    "dlssColumns": "853/853",
     "model": "assets/models/skinned_probe.dae",
     "qualityMode": 6,
     "recommendedPreset": 11,
@@ -139,6 +150,8 @@
     "drawRoute": "1/1/0/0",
     "materialCounters": "materials=1,textured=0,lights=4,local=3,rect=0",
     "runtimeImport": "requested/loaded/cache/mesh/material/node/boneNode/chBound/chUnbound/boneMatched/boneUnmatched/animation/channels/posKeys/rotKeys/scaleKeys/keys/maxChannelKeys/poseClip/poseChannel/poseNode/poseAnimatedNode/poseBonePalette/posePreviousBonePalette/poseChangedBonePalette/poseReady/runtimePoseBonePalette/runtimePosePreviousBonePalette/runtimePoseChangedBonePalette/runtimePoseReady/rendererPoseRegistered/rendererPoseBonePalette/rendererPosePreviousBonePalette/rendererPoseChangedBonePalette/rendererPoseReady/gpuPoseAllocated/gpuPoseUploaded/gpuPoseDescriptorReady/gpuPoseDescriptorSetAllocated/gpuPoseDescriptorSetWritten/gpuPoseDescriptorSetReady/gpuPoseDescriptorBinding/gpuPoseDescriptorRangeBytes/gpuPoseBytes/gpuPoseCurrent/gpuPosePrevious/meshWithBones/bones/skinnedVertices/influences/maxInfluences/unsupported=1/1/0/1/1/4/2/1/0/2/0/1/1/2/2/2/6/6/1/1/4/1/2/2/1/1/2/2/1/1/1/2/2/1/1/1/1/1/1/1/1/0/256/256/2/2/1/2/3/5/2/1",
-    "bonePaletteDraw": "commands/readyCommands/resources/readyResources/current/previous/changed/ready=1/1/1/1/2/2/1/1"
+    "bonePaletteDraw": "commands/readyCommands/resources/readyResources/current/previous/changed/ready=1/1/1/1/2/2/1/1",
+    "bonePaletteDescriptor": "commands/readyCommands/resources/readyResources/set/binding/range/ready=1/1/1/1/2/0/256/1",
+    "bonePaletteDescriptorBinds": "main/gbuffer/total=0/1/1"
   }
 }
