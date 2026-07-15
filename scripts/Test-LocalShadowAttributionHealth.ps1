@@ -1,7 +1,7 @@
 param(
     [string]$ExecutablePath = "build\Debug\SelfEngineLightingShowcase.exe",
     [string]$OutputDirectory = "out\local_shadow_attribution",
-    [string]$LightIndices = "0-7",
+    [string]$LightIndices = "0-10",
     [ValidateSet("low", "medium", "high", "ultra")]
     [string]$ShadowQuality = "high",
     [int]$WarmupFrames = 2,
@@ -365,6 +365,20 @@ function New-LightAttributionReport {
         -Expected "recorded > 0 or cacheHit > 0"
 
     $kindValue = if ($kind.present) { [int]$kind.max } else { -1 }
+    $expectedCeilingLight = switch ($LightIndex) {
+        0 { [pscustomobject]@{ kind = 1; requestedTiles = 6; name = "ceiling point" } }
+        1 { [pscustomobject]@{ kind = 2; requestedTiles = 1; name = "ceiling warm spot" } }
+        2 { [pscustomobject]@{ kind = 2; requestedTiles = 1; name = "ceiling cool spot" } }
+        default { $null }
+    }
+    if ($null -ne $expectedCeilingLight) {
+        Add-Check -Checks $checks -Area "ceiling fixtures" -Name "$($expectedCeilingLight.name) kind is preserved" `
+            -Status ($(if ($kindValue -eq $expectedCeilingLight.kind) { "pass" } else { "fail" })) `
+            -Actual $lightKindName -Expected $expectedCeilingLight.kind
+        Add-Check -Checks $checks -Area "ceiling fixtures" -Name "$($expectedCeilingLight.name) requests its full shadow footprint" `
+            -Status ($(if ($requested.present -and [double]$requested.max -eq $expectedCeilingLight.requestedTiles) { "pass" } else { "fail" })) `
+            -Actual $requested.max -Expected $expectedCeilingLight.requestedTiles
+    }
     if ($kindValue -eq 3) {
         Add-Check -Checks $checks -Area "rect" -Name "rect-light max sample tier is reported" `
             -Status ($(if ($rectMaxSamples.present -and [double]$rectMaxSamples.max -ge 2) { "pass" } else { "warn" })) `

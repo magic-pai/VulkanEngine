@@ -1466,3 +1466,33 @@ Validation:
 - Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `182 pass / 0 warn / 0 fail`.
 - Static and camera lanes reported six 4096 shadow passes, `0x3F` face coverage, camera-independent projection, and zero later shadow/upload delta; moving-light/object lanes recorded new passes during refresh; Lighting Showcase visual acceptance was natural and stable.
+
+## 2026-07-16 - Scene Light Labels Must Follow Frame-Light Packing
+
+Symptom:
+- Adding one ceiling point light and two ceiling spotlights to the Lighting Showcase made debug labels 8-10 appear to identify the new fixtures, while local-shadow attribution reported those frame slots as rect lights.
+
+False leads:
+- Treating the attribution output as a point/spot shadow-generation failure.
+- Assuming Scene3D creation order and renderer frame-light order are interchangeable.
+
+Cause:
+- `BuildFrameLightSet` packs all point lights first, then spots, then rects. The scene's optional labels were assigned in construction order, which had all pre-existing rect lights before the newly created point/spot lights.
+
+Control test:
+- Run `scripts\Test-LightingShowcaseCeilingLightsHealth.ps1 -SkipBuild -Strict`.
+- Run `scripts\Test-LocalShadowAttributionHealth.ps1 -LightIndices 0-2 -SkipBuild -Strict` and require point/spot/spot kinds with requested tiles `6/1/1`.
+
+Fix:
+- Label Lighting Showcase local lights with separate point, spot, and rect counters matching the frame packing convention.
+- Add a combined showcase health gate for the 1 point, 2 spot, and 8 rect lights, plus targeted kind/footprint assertions for frame slots 0-2.
+
+Prevention:
+- Any debug label, selector, or attribution key that crosses Scene3D and frame-light layers must use the renderer's canonical packed index, not source creation order.
+- When adding a light type to a stress scene, validate both combined atlas allocation and per-light producer identity.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-LightingShowcaseCeilingLightsHealth.ps1 -SkipBuild -Strict` passed `10 pass / 0 fail` with point/spot/rect/total `1/2/8/11`, shadow tiles `32/32/0`, and point/spot footprints `6/2`.
+- `Test-LocalShadowAttributionHealth.ps1 -SkipBuild -Strict` passed `170 pass / 0 warn / 0 fail` across slots 0-10; slots 0-2 report point/spot/spot with `6/1/1` assigned tiles.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `182 pass / 0 warn / 0 fail`; user accepted the Lighting Showcase visual result.

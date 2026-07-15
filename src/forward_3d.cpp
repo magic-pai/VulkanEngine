@@ -2094,7 +2094,14 @@ void BuildLightingShowcaseScene(
         EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_LIGHT_INDEX_LABELS_OFF");
     const bool showcaseLightIndexLabelsVisible =
         showcaseLightIndexLabelsOn && !showcaseLightIndexLabelsOff;
-    se::u32 nextLocalLightIndex = 0u;
+    // BuildFrameLightSet packs local lights by kind: points, then spots, then
+    // rects. Keep the optional debug labels on that same frame-light index.
+    constexpr se::u32 kShowcasePointLightCount = 1u;
+    constexpr se::u32 kShowcaseSpotLightCount = 2u;
+    se::u32 nextPointLightIndex = 0u;
+    se::u32 nextSpotLightIndex = kShowcasePointLightCount;
+    se::u32 nextRectLightIndex =
+        kShowcasePointLightCount + kShowcaseSpotLightCount;
 
     auto place = [](
         se::Renderable3D& renderable,
@@ -2311,7 +2318,7 @@ void BuildLightingShowcaseScene(
     ) {
         direction = glm::normalize(direction);
         if (!showcaseLocalLightsOff) {
-            const se::u32 localLightIndex = nextLocalLightIndex++;
+            const se::u32 localLightIndex = nextRectLightIndex++;
             scene.CreateRectLight(
                 name,
                 position,
@@ -2383,6 +2390,109 @@ void BuildLightingShowcaseScene(
                 drawOrder - 4
             );
         }
+    };
+
+    auto createCeilingPointLightFixture = [&](
+        const std::string& name,
+        glm::vec3 position,
+        se::f32 radius,
+        glm::vec3 color,
+        se::f32 intensity,
+        const char* diffuserMaterial,
+        se::i32 drawOrder,
+        glm::vec3 labelPosition
+    ) {
+        if (!showcaseLocalLightsOff) {
+            const se::u32 localLightIndex = nextPointLightIndex++;
+            scene.CreatePointLight(name, position, radius, color, intensity);
+            if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
+                AddLightIndexLabel(
+                    *lightIndexOverlayScene,
+                    name,
+                    localLightIndex,
+                    labelPosition,
+                    220 + static_cast<se::i32>(localLightIndex) * 3
+                );
+            }
+        }
+
+        createFixturePart(
+            name + " Fixture Housing",
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            position + glm::vec3{ 0.0f, 0.10f, 0.0f },
+            { 0.46f, 0.10f, 0.46f },
+            {},
+            drawOrder - 1
+        );
+        createFixturePart(
+            name + " Diffuser",
+            "Sphere",
+            diffuserMaterial,
+            position,
+            { 0.19f, 0.19f, 0.19f },
+            {},
+            drawOrder
+        );
+    };
+
+    auto createCeilingSpotLightFixture = [&](
+        const std::string& name,
+        glm::vec3 position,
+        glm::vec3 direction,
+        se::f32 radius,
+        glm::vec3 color,
+        se::f32 intensity,
+        se::f32 innerConeDegrees,
+        se::f32 outerConeDegrees,
+        const char* diffuserMaterial,
+        se::i32 drawOrder,
+        glm::vec3 labelPosition
+    ) {
+        direction = glm::normalize(direction);
+        if (!showcaseLocalLightsOff) {
+            const se::u32 localLightIndex = nextSpotLightIndex++;
+            scene.CreateSpotLight(
+                name,
+                position,
+                direction,
+                radius,
+                color,
+                intensity,
+                innerConeDegrees,
+                outerConeDegrees
+            );
+            if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
+                AddLightIndexLabel(
+                    *lightIndexOverlayScene,
+                    name,
+                    localLightIndex,
+                    labelPosition,
+                    220 + static_cast<se::i32>(localLightIndex) * 3
+                );
+            }
+        }
+
+        const glm::vec3 rotationDegrees =
+            RotationDegreesFromLocalPositiveYToDirection(direction);
+        createFixturePart(
+            name + " Fixture Housing",
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            position - direction * 0.055f,
+            { 0.42f, 0.14f, 0.42f },
+            rotationDegrees,
+            drawOrder - 1
+        );
+        createFixturePart(
+            name + " Cone Diffuser",
+            "Cone",
+            diffuserMaterial,
+            position + direction * 0.15f,
+            { 0.25f, 0.32f, 0.25f },
+            rotationDegrees,
+            drawOrder
+        );
     };
 
     const std::array<glm::vec3, 3> stripPositions{
@@ -2475,7 +2585,7 @@ void BuildLightingShowcaseScene(
         );
 
         if (!showcaseLocalLightsOff) {
-            const se::u32 practicalLightIndex = nextLocalLightIndex++;
+            const se::u32 practicalLightIndex = nextRectLightIndex++;
             scene.CreateRectLight(
                 "Showcase Practical Rect Light " + suffix,
                 stripPositions[index] + glm::vec3{ 0.0f, 0.0f, 0.14f },
@@ -2496,7 +2606,7 @@ void BuildLightingShowcaseScene(
                 );
             }
 
-            const se::u32 wallWashLightIndex = nextLocalLightIndex++;
+            const se::u32 wallWashLightIndex = nextRectLightIndex++;
             scene.CreateRectLight(
                 "Showcase Practical Wall Wash Light " + suffix,
                 wallWashPosition,
@@ -2560,6 +2670,42 @@ void BuildLightingShowcaseScene(
         1.08f,
         false,
         { 3.34f, 1.92f, 1.12f }
+    );
+    createCeilingPointLightFixture(
+        "Showcase Ceiling Warm Point",
+        { 0.0f, 2.70f, 1.58f },
+        5.2f,
+        { 1.0f, 0.78f, 0.56f },
+        1.18f,
+        "ShowcaseWarmKeyLightMaterial",
+        22,
+        { 0.0f, 2.34f, 1.58f }
+    );
+    createCeilingSpotLightFixture(
+        "Showcase Ceiling Warm Spot",
+        { -2.28f, 2.72f, 0.58f },
+        glm::normalize(glm::vec3{ 0.42f, -0.84f, -0.34f }),
+        6.2f,
+        { 1.0f, 0.64f, 0.38f },
+        2.75f,
+        15.0f,
+        30.0f,
+        "ShowcaseWarmKeyLightMaterial",
+        23,
+        { -2.28f, 2.30f, 0.58f }
+    );
+    createCeilingSpotLightFixture(
+        "Showcase Ceiling Cool Spot",
+        { 2.28f, 2.72f, 0.58f },
+        glm::normalize(glm::vec3{ -0.42f, -0.84f, -0.34f }),
+        6.2f,
+        { 0.42f, 0.66f, 1.0f },
+        2.85f,
+        15.0f,
+        30.0f,
+        "ShowcaseCoolRimLightMaterial",
+        24,
+        { 2.28f, 2.30f, 0.58f }
     );
     if (showcaseOverheadFillOn) {
         createFramedRectLightFixture(
