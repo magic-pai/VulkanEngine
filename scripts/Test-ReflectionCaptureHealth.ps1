@@ -265,19 +265,38 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_mip_generation_count",
         "reflection_probe_captured_scene_ggx_prefilter_dispatch_count",
         "reflection_probe_captured_scene_ggx_prefilter_sample_count",
+        "reflection_probe_captured_scene_diffuse_irradiance_dispatch_count",
+        "reflection_probe_captured_scene_diffuse_irradiance_sample_count",
+        "reflection_probe_captured_scene_diffuse_irradiance_face_size",
+        "reflection_probe_captured_scene_directional_shadow_requested",
+        "reflection_probe_captured_scene_directional_shadow_ready",
+        "reflection_probe_captured_scene_directional_shadow_pass_count",
+        "reflection_probe_captured_scene_directional_shadow_draw_count",
+        "reflection_probe_captured_scene_directional_shadow_caster_count",
+        "reflection_probe_captured_scene_directional_shadow_map_size",
+        "reflection_probe_captured_scene_directional_shadow_face_mask",
+        "reflection_probe_captured_scene_directional_shadow_camera_independent",
+        "reflection_probe_captured_scene_directional_shadow_local_tiles_suppressed",
+        "reflection_probe_captured_scene_directional_shadow_probe_scene_index",
         "reflection_probe_captured_scene_last_captured_face",
         "reflection_probe_captured_scene_rasterized_geometry",
         "reflection_probe_captured_scene_gpu_resources_allocated",
         "reflection_probe_captured_scene_gpu_capture_in_progress",
         "reflection_probe_captured_scene_mip_chain_ready",
         "reflection_probe_captured_scene_ggx_prefilter_ready",
+        "reflection_probe_captured_scene_diffuse_irradiance_ready",
         "reflection_probe_captured_scene_probe_scene_index",
         "reflection_probe_selected_captured_scene_map_matches_active_mask",
         "reflection_probe_selected_captured_scene_duplicate_active_view_mask",
+        "reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask",
+        "reflection_probe_selected_captured_scene_diffuse_irradiance_duplicate_active_view_mask",
         "reflection_probe_captured_scene_probe_resource_count",
         "reflection_probe_captured_scene_ready_probe_count",
         "reflection_probe_captured_scene_in_flight_probe_count",
         "reflection_probe_captured_scene_distinct_active_view_count",
+        "reflection_probe_captured_scene_diffuse_irradiance_ready_probe_count",
+        "reflection_probe_captured_scene_distinct_active_diffuse_irradiance_view_count",
+        "reflection_probe_selected_captured_scene_diffuse_irradiance_ready_mask",
         "reflection_probe_selected_capture_mip_count_0",
         "reflection_probe_selected_capture_mip_count_1",
         "reflection_probe_selected_capture_mip_count_2",
@@ -341,6 +360,49 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GPU GGX prefilter has a sample budget" `
         -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -ge 32) `
         -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -Expected ">= 32"
+    Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance completes" `
+        -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -Expected 1
+    Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance records one convolution dispatch" `
+        -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_dispatch_count"].max -gt 0) `
+        -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_dispatch_count"].max -Expected "> 0"
+    Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance has a sample budget" `
+        -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_sample_count"].max -ge 32) `
+        -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_sample_count"].max -Expected ">= 32"
+    Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance has a usable cubemap resolution" `
+        -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_face_size"].max -ge 16) `
+        -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_face_size"].max -Expected ">= 16"
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side directional shadow is requested" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_requested"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_requested"].max -Expected 1
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side directional shadow completes" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_ready"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_ready"].max -Expected 1
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "every cubemap face records a directional shadow pass" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].max -ge 6) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].max -Expected ">= 6"
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side directional shadow draws casters" `
+        -Passed (
+            $metrics["reflection_probe_captured_scene_directional_shadow_draw_count"].max -gt 0 -and
+            $metrics["reflection_probe_captured_scene_directional_shadow_caster_count"].max -gt 0
+        ) `
+        -Actual "draws=$($metrics['reflection_probe_captured_scene_directional_shadow_draw_count'].max),casters=$($metrics['reflection_probe_captured_scene_directional_shadow_caster_count'].max)" `
+        -Expected "both > 0"
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side directional shadow uses a full map" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_map_size"].max -ge 512) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_map_size"].max -Expected ">= 512"
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side directional shadow covers six faces" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_face_mask"].max -eq 63) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_face_mask"].max -Expected "0x3F"
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side shadow projection is camera independent" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_camera_independent"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_camera_independent"].max -Expected 1
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture suppresses camera local-shadow tiles" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_local_tiles_suppressed"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_local_tiles_suppressed"].max -Expected 1
+    Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side shadow keeps its producer identity" `
+        -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_probe_scene_index"].max -ge 0) `
+        -Actual $metrics["reflection_probe_captured_scene_directional_shadow_probe_scene_index"].max -Expected ">= 0"
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "GPU capture draws real scene geometry" `
         -Passed ($metrics["reflection_probe_captured_scene_capture_draw_count"].max -gt 0) `
         -Actual $metrics["reflection_probe_captured_scene_capture_draw_count"].max -Expected "> 0"
@@ -350,6 +412,9 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "mapping" -Name "sampled capture map matches its producer probe" `
         -Passed ($metrics["reflection_probe_selected_captured_scene_map_matches_active_mask"].max -gt 0) `
         -Actual $metrics["reflection_probe_selected_captured_scene_map_matches_active_mask"].max -Expected "non-zero mask"
+    Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "sampled diffuse irradiance map matches its producer probe" `
+        -Passed ($metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -gt 0) `
+        -Actual $metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -Expected "non-zero mask"
     $captureUploadEvidence = if ($Mode -eq "multi") {
         $metrics["reflection_probe_captured_scene_upload_count"].max
     } else {
@@ -370,6 +435,9 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "policy" -Name "initial refresh remains auditable" `
             -Passed (Test-AnyValue -Rows $rows -Name "reflection_probe_captured_scene_last_refresh_reason" -Expected 1) `
             -Actual $metrics["reflection_probe_captured_scene_last_refresh_reason"].last -Expected 1
+        Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "static capture reuses directional shadow data" `
+            -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -eq 0) `
+            -Actual $metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -Expected 0
     }
     "light" {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "light revision advances" `
@@ -384,6 +452,9 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "light dirty flag recorded" `
             -Passed (Test-AnyMask -Rows $rows -Name "reflection_probe_captured_scene_dirty_mask" -Mask 2) `
             -Actual $metrics["reflection_probe_captured_scene_dirty_mask"].max -Expected "mask 0x2"
+        Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "light refresh records new directional shadow passes" `
+            -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -Expected "> 0"
     }
     "object" {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "render revision advances" `
@@ -398,6 +469,9 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "render dirty flag recorded" `
             -Passed (Test-AnyMask -Rows $rows -Name "reflection_probe_captured_scene_dirty_mask" -Mask 4) `
             -Actual $metrics["reflection_probe_captured_scene_dirty_mask"].max -Expected "mask 0x4"
+        Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "object refresh records new directional shadow passes" `
+            -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -Expected "> 0"
     }
     "camera" {
         Add-BooleanCheck -Checks $checks -Area "invariance" -Name "camera orbit advances" `
@@ -416,6 +490,9 @@ function New-ReflectionCaptureReport {
             ) `
             -Actual "light=$($metrics['reflection_probe_captured_scene_light_revision'].delta),render=$($metrics['reflection_probe_captured_scene_render_revision'].delta)" `
             -Expected "0/0"
+        Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "camera motion does not redraw capture directional shadows" `
+            -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -eq 0) `
+            -Actual $metrics["reflection_probe_captured_scene_directional_shadow_pass_count"].delta -Expected 0
     }
     "multi" {
         Add-BooleanCheck -Checks $checks -Area "mapping" -Name "three captured probe resources allocate" `
@@ -430,6 +507,15 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "mapping" -Name "selected probes do not share active image views" `
             -Passed ($metrics["reflection_probe_selected_captured_scene_duplicate_active_view_mask"].max -eq 0) `
             -Actual $metrics["reflection_probe_selected_captured_scene_duplicate_active_view_mask"].max -Expected 0
+        Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "three captured probe irradiance maps become ready" `
+            -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_ready_probe_count"].max -ge 3) `
+            -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_ready_probe_count"].max -Expected ">= 3"
+        Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "active irradiance views remain probe-distinct" `
+            -Passed ($metrics["reflection_probe_captured_scene_distinct_active_diffuse_irradiance_view_count"].max -ge 3) `
+            -Actual $metrics["reflection_probe_captured_scene_distinct_active_diffuse_irradiance_view_count"].max -Expected ">= 3"
+        Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "selected probes do not share irradiance image views" `
+            -Passed ($metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_duplicate_active_view_mask"].max -eq 0) `
+            -Actual $metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_duplicate_active_view_mask"].max -Expected 0
         $selectedMipCounts = @(
             $metrics["reflection_probe_selected_capture_mip_count_0"].max,
             $metrics["reflection_probe_selected_capture_mip_count_1"].max,

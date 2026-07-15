@@ -136,6 +136,7 @@ layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
 layout(std430, set = 0, binding = 9) readonly buffer ProbeGridData { vec4 probes[]; } probeGrid;
 layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMaps[4];
+layout(set = 0, binding = 13) uniform samplerCube localReflectionProbeDiffuseIrradianceMaps[4];
 layout(set = 0, binding = 12) uniform sampler2D visibleSkyboxTexture;
 
 layout(set = 1, binding = 0) uniform sampler2D gBufferAlbedo;
@@ -592,19 +593,43 @@ vec3 SampleLocalReflectionProbeMap(int slotIndex, vec3 direction, float lod) {
     return textureLod(localReflectionProbeMaps[3], direction, lod).rgb;
 }
 
+vec3 SampleLocalReflectionProbeDiffuseIrradianceMap(int slotIndex, vec3 direction) {
+    if (slotIndex == 0) {
+        return texture(localReflectionProbeDiffuseIrradianceMaps[0], direction).rgb;
+    }
+    if (slotIndex == 1) {
+        return texture(localReflectionProbeDiffuseIrradianceMaps[1], direction).rgb;
+    }
+    if (slotIndex == 2) {
+        return texture(localReflectionProbeDiffuseIrradianceMaps[2], direction).rgb;
+    }
+    return texture(localReflectionProbeDiffuseIrradianceMaps[3], direction).rgb;
+}
+
 vec3 LocalReflectionProbeDiffuseRadianceAt(
     int probeIndex,
     vec3 normal,
     vec3 fallbackRadiance
 ) {
     int baseIndex = probeIndex * REFLECTION_PROBE_DIFFUSE_LOBE_COUNT;
+    vec3 n = dot(normal, normal) > 0.0001
+        ? normalize(normal)
+        : vec3(0.0, 1.0, 0.0);
+    if (frame.reflectionProbeMipControls[probeIndex].w > 0.5) {
+        int slotIndex = clamp(
+            int(frame.reflectionProbeColorArray[probeIndex].a + 0.5) - 1,
+            0,
+            MAX_REFLECTION_PROBES - 1
+        );
+        return max(
+            SampleLocalReflectionProbeDiffuseIrradianceMap(slotIndex, n),
+            vec3(0.0)
+        ) * max(frame.reflectionProbeColorArray[probeIndex].rgb, vec3(0.0));
+    }
     if (frame.reflectionProbeDiffuseLobes[baseIndex].a <= 0.5) {
         return fallbackRadiance;
     }
 
-    vec3 n = dot(normal, normal) > 0.0001
-        ? normalize(normal)
-        : vec3(0.0, 1.0, 0.0);
     vec3 irradiance = max(frame.reflectionProbeColorArray[probeIndex].rgb, vec3(0.0));
     irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 0].rgb * max(n.x, 0.0);
     irradiance += frame.reflectionProbeDiffuseLobes[baseIndex + 1].rgb * max(-n.x, 0.0);
@@ -1929,9 +1954,14 @@ bool SampleShadowCascadeVisibility(
         return false;
     }
 
-    vec2 tileOrigin = vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
-    vec2 atlasUv = tileOrigin + shadowUv * 0.5;
-    vec2 tileMax = tileOrigin + vec2(0.5);
+    bool singleShadowMap = shadowCascades.cascadeInfo.w < -0.5;
+    vec2 tileOrigin = singleShadowMap
+        ? vec2(0.0)
+        : vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
+    vec2 atlasUv = singleShadowMap
+        ? shadowUv
+        : tileOrigin + shadowUv * 0.5;
+    vec2 tileMax = singleShadowMap ? vec2(1.0) : tileOrigin + vec2(0.5);
     vec2 texelSize = 1.0 / vec2(textureSize(shadowSampler, 0));
     float pcfRadius = clamp(frame.shadowFiltering.x, 0.0, 3.0);
     float biasMin = max(frame.shadowControls.z, 0.0);

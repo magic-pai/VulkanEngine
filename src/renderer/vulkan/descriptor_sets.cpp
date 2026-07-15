@@ -115,7 +115,7 @@ void VulkanDescriptorSets::CreateDescriptorPool(
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[1].descriptorCount = static_cast<u32>(count * 8); // 8 storage bindings
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[2].descriptorCount = static_cast<u32>(count * 10);
+    poolSizes[2].descriptorCount = static_cast<u32>(count * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

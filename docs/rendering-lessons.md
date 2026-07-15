@@ -1436,3 +1436,33 @@ Validation:
 - Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
 - `Test-ReflectionCaptureHealth.ps1` passed `105 pass / 0 warn / 0 fail` across static, light motion, rigid motion, camera invariance, and three-probe identity lanes.
 - Each completed captured probe reports 9 mip levels, 8 GGX prefilter dispatches, and a 64-sample budget.
+
+## 2026-07-16 - Captured Probes Need Their Own Shadow Contract
+
+Symptom:
+- GPU-captured reflections contained direct light and geometry response but omitted directional occlusion because capture deliberately disabled all shadow sampling.
+
+False leads:
+- Reusing the main camera CSM atlas or the current local-light shadow tiles for the cubemap faces.
+- Treating a valid main-pass shadow map as valid capture input even though capture runs before the main-frame shadow passes are rebuilt.
+
+Cause:
+- Main CSM coverage is camera-relative and its resources are produced later in the frame. Local-shadow tiles are also camera-frame state, so either reuse produces stale or spatially unrelated capture shading.
+
+Control test:
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-ReflectionCaptureHealth.ps1 -OutputDirectory tmp\reflection_capture_directional_shadow_health -SkipBuild -Strict`.
+- Require a ready 32x32 diffuse irradiance cubemap and, for directional capture shadows, requested/ready state, six passes, a `0x3F` face mask, nonzero draws/casters, full map size, camera-independent projection, suppressed local tiles, and correct probe identity.
+
+Fix:
+- Convolve completed captured radiance into a 32x32, 64-sample cosine-weighted diffuse irradiance cubemap for each probe.
+- Build a single stable directional projection from the probe center and capture range, render it immediately before each face into a dedicated full-size shadow map, and bind a capture-only material descriptor set to sample it.
+- Use the reserved directional-cascade UBO channel to distinguish the standalone map from the main 2x2 CSM atlas, and clear the local-shadow buffer before capture shading.
+
+Prevention:
+- An offscreen capture pass must record every resource producer it samples; do not borrow camera-relative shadow data without an explicit spatial and frame-lifecycle contract.
+- For every probe face, audit both resource identity and producer state before relying on visual results.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `182 pass / 0 warn / 0 fail`.
+- Static and camera lanes reported six 4096 shadow passes, `0x3F` face coverage, camera-independent projection, and zero later shadow/upload delta; moving-light/object lanes recorded new passes during refresh; Lighting Showcase visual acceptance was natural and stable.

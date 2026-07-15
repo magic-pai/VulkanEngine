@@ -42,6 +42,8 @@ constexpr u32 kCapturedSceneMaxLightSamples = 16u;
 constexpr std::size_t kMaxCapturedSceneProbeResourceCount = 4u;
 constexpr VkFormat kGpuCapturedSceneFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr u32 kGpuCapturedSceneGgxSampleCount = 64u;
+constexpr u32 kGpuCapturedSceneDiffuseIrradianceFaceSize = 32u;
+constexpr u32 kGpuCapturedSceneDiffuseIrradianceSampleCount = 64u;
 
 u32 MipCountForExtent(u32 extent) {
     u32 mipCount = 1u;
@@ -2645,6 +2647,157 @@ void VulkanReflectionProbeResources::ReleaseGpuCapturedScenePrefilterResources()
     }
 }
 
+bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneDiffuseIrradianceResources(
+    const VulkanDevice& device
+) {
+    if (m_GpuCapturedSceneDiffuseIrradiancePipeline != VK_NULL_HANDLE &&
+        m_GpuCapturedSceneDiffuseIrradiancePipelineLayout != VK_NULL_HANDLE &&
+        m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout != VK_NULL_HANDLE &&
+        m_GpuCapturedSceneDiffuseIrradianceDescriptorPool != VK_NULL_HANDLE &&
+        m_GpuCapturedScenePrefilterSampler != VK_NULL_HANDLE) {
+        return true;
+    }
+
+    try {
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+        bindings[0].binding = 0u;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].descriptorCount = 1u;
+        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[1].binding = 1u;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[1].descriptorCount = 1u;
+        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<u32>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+        if (vkCreateDescriptorSetLayout(
+                device.Handle(),
+                &layoutInfo,
+                nullptr,
+                &m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create reflection capture diffuse irradiance descriptor layout"
+            );
+        }
+
+        std::array<VkDescriptorPoolSize, 2> poolSizes{};
+        poolSizes[0] = {
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            static_cast<u32>(kMaxCapturedSceneProbeResourceCount)
+        };
+        poolSizes[1] = {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            static_cast<u32>(kMaxCapturedSceneProbeResourceCount)
+        };
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+        poolInfo.maxSets = static_cast<u32>(kMaxCapturedSceneProbeResourceCount);
+        if (vkCreateDescriptorPool(
+                device.Handle(),
+                &poolInfo,
+                nullptr,
+                &m_GpuCapturedSceneDiffuseIrradianceDescriptorPool
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create reflection capture diffuse irradiance descriptor pool"
+            );
+        }
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0u;
+        pushRange.size = sizeof(u32) * 4u;
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1u;
+        pipelineLayoutInfo.pSetLayouts =
+            &m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1u;
+        pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+        if (vkCreatePipelineLayout(
+                device.Handle(),
+                &pipelineLayoutInfo,
+                nullptr,
+                &m_GpuCapturedSceneDiffuseIrradiancePipelineLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create reflection capture diffuse irradiance pipeline layout"
+            );
+        }
+
+        const VulkanShaderModule shader(
+            device,
+            std::string(SE_SHADER_DIR) +
+                "/reflection_probe_diffuse_irradiance.comp.spv"
+        );
+        VkPipelineShaderStageCreateInfo shaderStage{};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = shader.Handle();
+        shaderStage.pName = "main";
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStage;
+        pipelineInfo.layout = m_GpuCapturedSceneDiffuseIrradiancePipelineLayout;
+        if (vkCreateComputePipelines(
+                device.Handle(),
+                device.PipelineCacheHandle(),
+                1u,
+                &pipelineInfo,
+                nullptr,
+                &m_GpuCapturedSceneDiffuseIrradiancePipeline
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create reflection capture diffuse irradiance pipeline"
+            );
+        }
+    } catch (...) {
+        ReleaseGpuCapturedSceneDiffuseIrradianceResources();
+        return false;
+    }
+    return true;
+}
+
+void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneDiffuseIrradianceResources() {
+    if (m_GpuCapturedSceneDiffuseIrradiancePipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedSceneDiffuseIrradiancePipeline,
+            nullptr
+        );
+        m_GpuCapturedSceneDiffuseIrradiancePipeline = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedSceneDiffuseIrradiancePipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedSceneDiffuseIrradiancePipelineLayout,
+            nullptr
+        );
+        m_GpuCapturedSceneDiffuseIrradiancePipelineLayout = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedSceneDiffuseIrradianceDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedSceneDiffuseIrradianceDescriptorPool,
+            nullptr
+        );
+        m_GpuCapturedSceneDiffuseIrradianceDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout,
+            nullptr
+        );
+        m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
 bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
@@ -2676,8 +2829,11 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
         const u32 mipCount = MipCountForExtent(extent.width);
         const VkFormat depthFormat = VulkanDepthBuffer::FindDepthFormat(physicalDevice);
         m_GpuCapturedSceneDevice = device.Handle();
-        if (!EnsureGpuCapturedScenePrefilterResources(device)) {
-            throw std::runtime_error("Failed to prepare GPU reflection capture GGX prefilter");
+        if (!EnsureGpuCapturedScenePrefilterResources(device) ||
+            !EnsureGpuCapturedSceneDiffuseIrradianceResources(device)) {
+            throw std::runtime_error(
+                "Failed to prepare GPU reflection capture filtering resources"
+            );
         }
         if (m_GpuCapturedSceneRenderPass == VK_NULL_HANDLE) {
             m_GpuCapturedSceneRenderPass = CreateGpuCapturedSceneRenderPass(
@@ -2703,6 +2859,23 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
             VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
             VK_IMAGE_VIEW_TYPE_CUBE
         );
+        resource->targetDiffuseIrradianceImage = std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            VkExtent2D{
+                kGpuCapturedSceneDiffuseIrradianceFaceSize,
+                kGpuCapturedSceneDiffuseIrradianceFaceSize
+            },
+            kGpuCapturedSceneFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1u,
+            6u,
+            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            VK_IMAGE_VIEW_TYPE_CUBE
+        );
         resource->depthImage = std::make_unique<VulkanImage>(
             device,
             physicalDevice,
@@ -2716,6 +2889,11 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
         resource->prefilterSourceView = CreateGpuCapturedSceneCubeBaseView(
             device,
             resource->targetImage->Handle()
+        );
+        resource->diffuseIrradianceArrayView = CreateGpuCapturedSceneMipArrayView(
+            device,
+            resource->targetDiffuseIrradianceImage->Handle(),
+            0u
         );
         resource->prefilterMipViews.reserve(mipCount - 1u);
         for (u32 mip = 1u; mip < mipCount; ++mip) {
@@ -2778,6 +2956,51 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
                 nullptr
             );
         }
+        if (resource->diffuseIrradianceDescriptorSet == VK_NULL_HANDLE) {
+            VkDescriptorSetAllocateInfo allocateInfo{};
+            allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocateInfo.descriptorPool =
+                m_GpuCapturedSceneDiffuseIrradianceDescriptorPool;
+            allocateInfo.descriptorSetCount = 1u;
+            allocateInfo.pSetLayouts =
+                &m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout;
+            if (vkAllocateDescriptorSets(
+                    device.Handle(),
+                    &allocateInfo,
+                    &resource->diffuseIrradianceDescriptorSet
+                ) != VK_SUCCESS) {
+                throw std::runtime_error(
+                    "Failed to allocate reflection capture diffuse irradiance descriptor"
+                );
+            }
+        }
+        VkDescriptorImageInfo sourceInfo{};
+        sourceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        sourceInfo.imageView = resource->prefilterSourceView;
+        sourceInfo.sampler = m_GpuCapturedScenePrefilterSampler;
+        VkDescriptorImageInfo destinationInfo{};
+        destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        destinationInfo.imageView = resource->diffuseIrradianceArrayView;
+        std::array<VkWriteDescriptorSet, 2> diffuseWrites{};
+        diffuseWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        diffuseWrites[0].dstSet = resource->diffuseIrradianceDescriptorSet;
+        diffuseWrites[0].dstBinding = 0u;
+        diffuseWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        diffuseWrites[0].descriptorCount = 1u;
+        diffuseWrites[0].pImageInfo = &sourceInfo;
+        diffuseWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        diffuseWrites[1].dstSet = resource->diffuseIrradianceDescriptorSet;
+        diffuseWrites[1].dstBinding = 1u;
+        diffuseWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        diffuseWrites[1].descriptorCount = 1u;
+        diffuseWrites[1].pImageInfo = &destinationInfo;
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            static_cast<u32>(diffuseWrites.size()),
+            diffuseWrites.data(),
+            0u,
+            nullptr
+        );
         resource->faceViews.reserve(6u);
         resource->framebuffers.reserve(6u);
         for (u32 face = 0; face < 6u; ++face) {
@@ -2840,6 +3063,10 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
     audit.mipChainReady = resourceReady &&
         resource.activeBackend == CapturedSceneCaptureBackend::RasterizedGpu;
     audit.ggxPrefilterReady = audit.mipChainReady;
+    audit.diffuseIrradianceReady =
+        resource.activeDiffuseIrradianceImage != nullptr &&
+        resource.activeDiffuseIrradianceImage->View() != VK_NULL_HANDLE &&
+        audit.mipChainReady;
 
     if (!resourceReady ||
         resource.activeBackend != CapturedSceneCaptureBackend::RasterizedGpu) {
@@ -2913,6 +3140,20 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.ggxPrefilterDispatchCount = 0u;
     resource.audit.ggxPrefilterSampleCount = 0u;
     resource.audit.ggxPrefilterReady = false;
+    resource.audit.diffuseIrradianceDispatchCount = 0u;
+    resource.audit.diffuseIrradianceSampleCount = 0u;
+    resource.audit.diffuseIrradianceFaceSize = 0u;
+    resource.audit.diffuseIrradianceReady = false;
+    resource.audit.directionalShadowRequested = false;
+    resource.audit.directionalShadowReady = false;
+    resource.audit.directionalShadowPassCount = 0u;
+    resource.audit.directionalShadowDrawCount = 0u;
+    resource.audit.directionalShadowCasterCount = 0u;
+    resource.audit.directionalShadowMapSize = 0u;
+    resource.audit.directionalShadowFaceMask = 0u;
+    resource.audit.directionalShadowProbeSceneIndex = -1;
+    resource.audit.directionalShadowCameraIndependent = false;
+    resource.audit.directionalShadowLocalTilesSuppressed = false;
     resource.audit.rasterizedGeometry = true;
     resource.audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
 }
@@ -2970,6 +3211,25 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
             previousAudit.ggxPrefilterDispatchCount;
         audit.ggxPrefilterSampleCount = previousAudit.ggxPrefilterSampleCount;
         audit.ggxPrefilterReady = previousAudit.ggxPrefilterReady;
+        audit.diffuseIrradianceDispatchCount =
+            previousAudit.diffuseIrradianceDispatchCount;
+        audit.diffuseIrradianceSampleCount =
+            previousAudit.diffuseIrradianceSampleCount;
+        audit.diffuseIrradianceFaceSize = previousAudit.diffuseIrradianceFaceSize;
+        audit.diffuseIrradianceReady = previousAudit.diffuseIrradianceReady;
+        audit.directionalShadowRequested = previousAudit.directionalShadowRequested;
+        audit.directionalShadowReady = previousAudit.directionalShadowReady;
+        audit.directionalShadowPassCount = previousAudit.directionalShadowPassCount;
+        audit.directionalShadowDrawCount = previousAudit.directionalShadowDrawCount;
+        audit.directionalShadowCasterCount = previousAudit.directionalShadowCasterCount;
+        audit.directionalShadowMapSize = previousAudit.directionalShadowMapSize;
+        audit.directionalShadowFaceMask = previousAudit.directionalShadowFaceMask;
+        audit.directionalShadowProbeSceneIndex =
+            previousAudit.directionalShadowProbeSceneIndex;
+        audit.directionalShadowCameraIndependent =
+            previousAudit.directionalShadowCameraIndependent;
+        audit.directionalShadowLocalTilesSuppressed =
+            previousAudit.directionalShadowLocalTilesSuppressed;
         audit.lastCapturedFace = previousAudit.lastCapturedFace;
         audit.probeSceneIndex = probeSceneIndex;
         resource->audit = audit;
@@ -3134,6 +3394,129 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     );
 }
 
+void VulkanReflectionProbeResources::RecordGpuCapturedSceneDiffuseIrradiance(
+    i32 probeSceneIndex,
+    VkCommandBuffer commandBuffer
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || resource->targetImage == nullptr ||
+        resource->targetDiffuseIrradianceImage == nullptr ||
+        resource->diffuseIrradianceDescriptorSet == VK_NULL_HANDLE ||
+        commandBuffer == VK_NULL_HANDLE ||
+        m_GpuCapturedSceneDiffuseIrradiancePipeline == VK_NULL_HANDLE) {
+        return;
+    }
+
+    RecordImageBarrier(
+        commandBuffer,
+        resource->targetDiffuseIrradianceImage->Handle(),
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL,
+        0u,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u,
+        1u,
+        0u,
+        6u
+    );
+    vkCmdBindPipeline(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        m_GpuCapturedSceneDiffuseIrradiancePipeline
+    );
+    struct DiffuseIrradiancePushConstants {
+        u32 faceSize = kGpuCapturedSceneDiffuseIrradianceFaceSize;
+        u32 sampleCount = kGpuCapturedSceneDiffuseIrradianceSampleCount;
+        u32 reserved0 = 0u;
+        u32 reserved1 = 0u;
+    } constants;
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        m_GpuCapturedSceneDiffuseIrradiancePipelineLayout,
+        0u,
+        1u,
+        &resource->diffuseIrradianceDescriptorSet,
+        0u,
+        nullptr
+    );
+    vkCmdPushConstants(
+        commandBuffer,
+        m_GpuCapturedSceneDiffuseIrradiancePipelineLayout,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0u,
+        sizeof(DiffuseIrradiancePushConstants),
+        &constants
+    );
+    vkCmdDispatch(
+        commandBuffer,
+        (constants.faceSize + 7u) / 8u,
+        (constants.faceSize + 7u) / 8u,
+        6u
+    );
+    RecordImageBarrier(
+        commandBuffer,
+        resource->targetDiffuseIrradianceImage->Handle(),
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u,
+        1u,
+        0u,
+        6u
+    );
+}
+
+void VulkanReflectionProbeResources::RecordGpuCapturedSceneDirectionalShadow(
+    i32 probeSceneIndex,
+    u32 face,
+    u32 mapSize,
+    u32 drawCount,
+    u32 casterCount,
+    bool requested,
+    bool ready,
+    bool cameraIndependent,
+    bool localTilesSuppressed
+) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || !resource->captureInProgress ||
+        face != resource->nextFace || face >= 6u) {
+        return;
+    }
+
+    CapturedSceneCaptureAudit& audit = resource->audit;
+    audit.directionalShadowRequested =
+        audit.directionalShadowRequested || requested;
+    audit.directionalShadowPassCount += ready ? 1u : 0u;
+    audit.directionalShadowDrawCount += drawCount;
+    audit.directionalShadowCasterCount += casterCount;
+    audit.directionalShadowMapSize = std::max(
+        audit.directionalShadowMapSize,
+        mapSize
+    );
+    audit.directionalShadowFaceMask |= ready ? (1u << face) : 0u;
+    audit.directionalShadowProbeSceneIndex = probeSceneIndex;
+    audit.directionalShadowCameraIndependent =
+        audit.directionalShadowCameraIndependent || cameraIndependent;
+    audit.directionalShadowLocalTilesSuppressed =
+        audit.directionalShadowLocalTilesSuppressed || localTilesSuppressed;
+    audit.directionalShadowReady = audit.directionalShadowRequested &&
+        audit.directionalShadowFaceMask == 0x3fu &&
+        audit.directionalShadowPassCount >= 6u &&
+        audit.directionalShadowDrawCount > 0u &&
+        audit.directionalShadowCameraIndependent &&
+        audit.directionalShadowLocalTilesSuppressed;
+}
+
 void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     i32 probeSceneIndex,
     u32 face,
@@ -3165,6 +3548,8 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
 
     ReleaseGpuCapturedSceneAttachments(*resource);
     resource->activeImage = std::move(resource->targetImage);
+    resource->activeDiffuseIrradianceImage =
+        std::move(resource->targetDiffuseIrradianceImage);
     resource->depthImage.reset();
     resource->captureInProgress = false;
     resource->nextFace = 0u;
@@ -3190,6 +3575,14 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
             : 0u;
     resource->audit.ggxPrefilterSampleCount = kGpuCapturedSceneGgxSampleCount;
     resource->audit.ggxPrefilterReady = true;
+    resource->audit.diffuseIrradianceDispatchCount = 1u;
+    resource->audit.diffuseIrradianceSampleCount =
+        kGpuCapturedSceneDiffuseIrradianceSampleCount;
+    resource->audit.diffuseIrradianceFaceSize =
+        kGpuCapturedSceneDiffuseIrradianceFaceSize;
+    resource->audit.diffuseIrradianceReady =
+        resource->activeDiffuseIrradianceImage != nullptr &&
+        resource->activeDiffuseIrradianceImage->View() != VK_NULL_HANDLE;
     resource->audit.probeSceneIndex = probeSceneIndex;
     resource->audit.facesRendered = 6u;
     resource->audit.facesPending = 0u;
@@ -3240,6 +3633,14 @@ void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneAttachments(
         }
     }
     resource.prefilterMipViews.clear();
+    if (resource.diffuseIrradianceArrayView != VK_NULL_HANDLE) {
+        vkDestroyImageView(
+            m_GpuCapturedSceneDevice,
+            resource.diffuseIrradianceArrayView,
+            nullptr
+        );
+        resource.diffuseIrradianceArrayView = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneResources(
@@ -3248,6 +3649,7 @@ void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneResources(
     ReleaseGpuCapturedSceneAttachments(resource);
     resource.depthImage.reset();
     resource.targetImage.reset();
+    resource.targetDiffuseIrradianceImage.reset();
 }
 
 void VulkanReflectionProbeResources::Release() {
@@ -3255,8 +3657,10 @@ void VulkanReflectionProbeResources::Release() {
         (void)sceneIndex;
         ReleaseGpuCapturedSceneResources(resource);
         resource.activeImage.reset();
+        resource.activeDiffuseIrradianceImage.reset();
     }
     m_CapturedSceneProbeResources.clear();
+    ReleaseGpuCapturedSceneDiffuseIrradianceResources();
     ReleaseGpuCapturedScenePrefilterResources();
     if (m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(m_GpuCapturedSceneDevice, m_GpuCapturedSceneRenderPass, nullptr);
@@ -3363,6 +3767,43 @@ bool VulkanReflectionProbeResources::CapturedSceneDescriptorMatchesProbe(
         FindCapturedSceneProbeResource(probeSceneIndex);
     return resource != nullptr && CapturedSceneReady(probeSceneIndex, sampler) &&
         descriptorView == resource->activeImage->View();
+}
+
+bool VulkanReflectionProbeResources::CapturedSceneDiffuseIrradianceReady(
+    i32 probeSceneIndex,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr &&
+        resource->activeDiffuseIrradianceImage != nullptr &&
+        resource->activeDiffuseIrradianceImage->View() != VK_NULL_HANDLE &&
+        sampler != VK_NULL_HANDLE;
+}
+
+VkImageView
+VulkanReflectionProbeResources::CapturedSceneDiffuseIrradianceDescriptorViewFor(
+    i32 probeSceneIndex,
+    VkImageView fallbackView,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return CapturedSceneDiffuseIrradianceReady(probeSceneIndex, sampler)
+        ? resource->activeDiffuseIrradianceImage->View()
+        : fallbackView;
+}
+
+bool VulkanReflectionProbeResources::CapturedSceneDiffuseIrradianceDescriptorMatchesProbe(
+    i32 probeSceneIndex,
+    VkImageView descriptorView,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr &&
+        CapturedSceneDiffuseIrradianceReady(probeSceneIndex, sampler) &&
+        descriptorView == resource->activeDiffuseIrradianceImage->View();
 }
 
 VkImageView VulkanReflectionProbeResources::BuiltInView() const {
@@ -3750,6 +4191,34 @@ u32 VulkanReflectionProbeResources::CapturedSceneDistinctActiveViewCount(
     for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
         if (CapturedSceneReady(sceneIndex, sampler)) {
             views.push_back(resource.activeImage->View());
+        }
+    }
+    std::sort(views.begin(), views.end());
+    return static_cast<u32>(std::unique(views.begin(), views.end()) - views.begin());
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneDiffuseIrradianceReadyProbeCount(
+    VkSampler sampler
+) const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)resource;
+        if (CapturedSceneDiffuseIrradianceReady(sceneIndex, sampler)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32
+VulkanReflectionProbeResources::CapturedSceneDistinctActiveDiffuseIrradianceViewCount(
+    VkSampler sampler
+) const {
+    std::vector<VkImageView> views;
+    views.reserve(m_CapturedSceneProbeResources.size());
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        if (CapturedSceneDiffuseIrradianceReady(sceneIndex, sampler)) {
+            views.push_back(resource.activeDiffuseIrradianceImage->View());
         }
     }
     std::sort(views.begin(), views.end());

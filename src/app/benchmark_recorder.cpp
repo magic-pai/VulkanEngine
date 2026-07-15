@@ -582,19 +582,37 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneMipGenerationCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
+        << reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount << ','
+        << reflectionProbe.capturedSceneDiffuseIrradianceSampleCount << ','
+        << reflectionProbe.capturedSceneDiffuseIrradianceFaceSize << ','
+        << reflectionProbe.capturedSceneDirectionalShadowRequested << ','
+        << reflectionProbe.capturedSceneDirectionalShadowReady << ','
+        << reflectionProbe.capturedSceneDirectionalShadowPassCount << ','
+        << reflectionProbe.capturedSceneDirectionalShadowDrawCount << ','
+        << reflectionProbe.capturedSceneDirectionalShadowCasterCount << ','
+        << reflectionProbe.capturedSceneDirectionalShadowMapSize << ','
+        << reflectionProbe.capturedSceneDirectionalShadowFaceMask << ','
+        << reflectionProbe.capturedSceneDirectionalShadowCameraIndependent << ','
+        << reflectionProbe.capturedSceneDirectionalShadowLocalTilesSuppressed << ','
+        << reflectionProbe.capturedSceneDirectionalShadowProbeSceneIndex << ','
         << reflectionProbe.capturedSceneLastCapturedFace << ','
         << reflectionProbe.capturedSceneRasterizedGeometry << ','
         << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
         << reflectionProbe.capturedSceneGpuCaptureInProgress << ','
         << reflectionProbe.capturedSceneMipChainReady << ','
         << reflectionProbe.capturedSceneGgxPrefilterReady << ','
+        << reflectionProbe.capturedSceneDiffuseIrradianceReady << ','
         << reflectionProbe.capturedSceneProbeSceneIndex << ','
         << reflectionProbe.selectedCapturedSceneMapMatchesActiveMask << ','
         << reflectionProbe.selectedCapturedSceneDuplicateActiveViewMask << ','
+        << reflectionProbe.selectedCapturedSceneDiffuseIrradianceMapMatchesActiveMask << ','
+        << reflectionProbe.selectedCapturedSceneDiffuseIrradianceDuplicateActiveViewMask << ','
         << reflectionProbe.capturedSceneProbeResourceCount << ','
         << reflectionProbe.capturedSceneReadyProbeCount << ','
         << reflectionProbe.capturedSceneInFlightProbeCount << ','
         << reflectionProbe.capturedSceneDistinctActiveViewCount << ','
+        << reflectionProbe.capturedSceneDiffuseIrradianceReadyProbeCount << ','
+        << reflectionProbe.capturedSceneDistinctActiveDiffuseIrradianceViewCount << ','
         << reflectionProbe.capturedSceneUploadCount << ','
         << reflectionProbe.capturedSceneRefreshCheckCount << ','
         << reflectionProbe.capturedSceneRefreshPerformed << ','
@@ -642,6 +660,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.authoredCubemapDiffuseLobesApplied << ','
         << reflectionProbe.authoredCubemapDiffuseLobeCount << ','
         << reflectionProbe.selectedDiffuseLobeReadyMask << ','
+        << reflectionProbe.selectedCapturedSceneDiffuseIrradianceReadyMask << ','
         << reflectionProbe.authoredCubemapDiffuseLobeEnergy << ','
         << reflectionProbe.selectedCaptureSlots[0] << ','
         << reflectionProbe.selectedCaptureSlots[1] << ','
@@ -1544,19 +1563,37 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_mip_generation_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
+        << "reflection_probe_captured_scene_diffuse_irradiance_dispatch_count,"
+        << "reflection_probe_captured_scene_diffuse_irradiance_sample_count,"
+        << "reflection_probe_captured_scene_diffuse_irradiance_face_size,"
+        << "reflection_probe_captured_scene_directional_shadow_requested,"
+        << "reflection_probe_captured_scene_directional_shadow_ready,"
+        << "reflection_probe_captured_scene_directional_shadow_pass_count,"
+        << "reflection_probe_captured_scene_directional_shadow_draw_count,"
+        << "reflection_probe_captured_scene_directional_shadow_caster_count,"
+        << "reflection_probe_captured_scene_directional_shadow_map_size,"
+        << "reflection_probe_captured_scene_directional_shadow_face_mask,"
+        << "reflection_probe_captured_scene_directional_shadow_camera_independent,"
+        << "reflection_probe_captured_scene_directional_shadow_local_tiles_suppressed,"
+        << "reflection_probe_captured_scene_directional_shadow_probe_scene_index,"
         << "reflection_probe_captured_scene_last_captured_face,"
         << "reflection_probe_captured_scene_rasterized_geometry,"
         << "reflection_probe_captured_scene_gpu_resources_allocated,"
         << "reflection_probe_captured_scene_gpu_capture_in_progress,"
         << "reflection_probe_captured_scene_mip_chain_ready,"
         << "reflection_probe_captured_scene_ggx_prefilter_ready,"
+        << "reflection_probe_captured_scene_diffuse_irradiance_ready,"
         << "reflection_probe_captured_scene_probe_scene_index,"
         << "reflection_probe_selected_captured_scene_map_matches_active_mask,"
         << "reflection_probe_selected_captured_scene_duplicate_active_view_mask,"
+        << "reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask,"
+        << "reflection_probe_selected_captured_scene_diffuse_irradiance_duplicate_active_view_mask,"
         << "reflection_probe_captured_scene_probe_resource_count,"
         << "reflection_probe_captured_scene_ready_probe_count,"
         << "reflection_probe_captured_scene_in_flight_probe_count,"
         << "reflection_probe_captured_scene_distinct_active_view_count,"
+        << "reflection_probe_captured_scene_diffuse_irradiance_ready_probe_count,"
+        << "reflection_probe_captured_scene_distinct_active_diffuse_irradiance_view_count,"
         << "reflection_probe_captured_scene_upload_count,"
         << "reflection_probe_captured_scene_refresh_check_count,"
         << "reflection_probe_captured_scene_refresh_performed,"
@@ -1604,6 +1641,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_authored_cubemap_diffuse_lobes_applied,"
         << "reflection_probe_authored_cubemap_diffuse_lobe_count,"
         << "reflection_probe_selected_diffuse_lobe_ready_mask,"
+        << "reflection_probe_selected_captured_scene_diffuse_irradiance_ready_mask,"
         << "reflection_probe_authored_cubemap_diffuse_lobe_energy,"
         << "reflection_probe_selected_capture_slot_0,"
         << "reflection_probe_selected_capture_slot_1,"

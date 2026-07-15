@@ -1,0 +1,92 @@
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform samplerCube capturedRadiance;
+layout(rgba16f, set = 0, binding = 1) uniform writeonly image2DArray diffuseIrradiance;
+
+layout(push_constant) uniform DiffuseIrradianceConstants {
+    uint faceSize;
+    uint sampleCount;
+    uint reserved0;
+    uint reserved1;
+} constants;
+
+const float PI = 3.14159265359;
+
+float RadicalInverseVdC(uint bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+vec2 Hammersley(uint index, uint count) {
+    return vec2(float(index) / float(max(count, 1u)), RadicalInverseVdC(index));
+}
+
+vec3 CubemapDirection(uint face, vec2 uv) {
+    vec3 direction;
+    if (face == 0u) {
+        direction = vec3(1.0, -uv.y, -uv.x);
+    } else if (face == 1u) {
+        direction = vec3(-1.0, -uv.y, uv.x);
+    } else if (face == 2u) {
+        direction = vec3(uv.x, 1.0, uv.y);
+    } else if (face == 3u) {
+        direction = vec3(uv.x, -1.0, -uv.y);
+    } else if (face == 4u) {
+        direction = vec3(uv.x, -uv.y, 1.0);
+    } else {
+        direction = vec3(-uv.x, -uv.y, -1.0);
+    }
+    return normalize(direction);
+}
+
+mat3 TangentFrame(vec3 normal) {
+    vec3 up = abs(normal.y) < 0.999
+        ? vec3(0.0, 1.0, 0.0)
+        : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    return mat3(tangent, cross(normal, tangent), normal);
+}
+
+void main() {
+    uvec3 coordinate = gl_GlobalInvocationID;
+    if (coordinate.x >= constants.faceSize ||
+        coordinate.y >= constants.faceSize ||
+        coordinate.z >= 6u) {
+        return;
+    }
+
+    vec2 uv = ((vec2(coordinate.xy) + 0.5) / float(constants.faceSize)) * 2.0 - 1.0;
+    vec3 normal = CubemapDirection(coordinate.z, uv);
+    mat3 tangentFrame = TangentFrame(normal);
+    vec3 irradiance = vec3(0.0);
+    uint sampleCount = max(constants.sampleCount, 1u);
+    for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex) {
+        vec2 xi = Hammersley(sampleIndex, sampleCount);
+        float phi = 2.0 * PI * xi.x;
+        float cosTheta = sqrt(max(1.0 - xi.y, 0.0));
+        float sinTheta = sqrt(max(xi.y, 0.0));
+        vec3 localDirection = vec3(
+            cos(phi) * sinTheta,
+            sin(phi) * sinTheta,
+            cosTheta
+        );
+        irradiance += textureLod(
+            capturedRadiance,
+            tangentFrame * localDirection,
+            0.0
+        ).rgb;
+    }
+
+    irradiance *= PI / float(sampleCount);
+    imageStore(
+        diffuseIrradiance,
+        ivec3(coordinate),
+        vec4(max(irradiance, vec3(0.0)), 1.0)
+    );
+}

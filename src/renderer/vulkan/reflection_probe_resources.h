@@ -156,6 +156,15 @@ struct CapturedSceneCaptureAudit {
     u32 mipGenerationCount = 0;
     u32 ggxPrefilterDispatchCount = 0;
     u32 ggxPrefilterSampleCount = 0;
+    u32 diffuseIrradianceDispatchCount = 0;
+    u32 diffuseIrradianceSampleCount = 0;
+    u32 diffuseIrradianceFaceSize = 0;
+    u32 directionalShadowPassCount = 0;
+    u32 directionalShadowDrawCount = 0;
+    u32 directionalShadowCasterCount = 0;
+    u32 directionalShadowMapSize = 0;
+    u32 directionalShadowFaceMask = 0;
+    i32 directionalShadowProbeSceneIndex = -1;
     u32 lastCapturedFace = 0;
     bool resourceReady = false;
     bool refreshRequested = false;
@@ -165,6 +174,11 @@ struct CapturedSceneCaptureAudit {
     bool gpuCaptureInProgress = false;
     bool mipChainReady = false;
     bool ggxPrefilterReady = false;
+    bool diffuseIrradianceReady = false;
+    bool directionalShadowRequested = false;
+    bool directionalShadowReady = false;
+    bool directionalShadowCameraIndependent = false;
+    bool directionalShadowLocalTilesSuppressed = false;
 };
 
 class VulkanReflectionProbeResources {
@@ -210,6 +224,21 @@ public:
         i32 probeSceneIndex,
         VkCommandBuffer commandBuffer
     ) const;
+    void RecordGpuCapturedSceneDiffuseIrradiance(
+        i32 probeSceneIndex,
+        VkCommandBuffer commandBuffer
+    ) const;
+    void RecordGpuCapturedSceneDirectionalShadow(
+        i32 probeSceneIndex,
+        u32 face,
+        u32 mapSize,
+        u32 drawCount,
+        u32 casterCount,
+        bool requested,
+        bool ready,
+        bool cameraIndependent,
+        bool localTilesSuppressed
+    );
     void CompleteGpuCapturedSceneFace(
         i32 probeSceneIndex,
         u32 face,
@@ -238,6 +267,20 @@ public:
         VkSampler sampler
     ) const;
     bool CapturedSceneDescriptorMatchesProbe(
+        i32 probeSceneIndex,
+        VkImageView descriptorView,
+        VkSampler sampler
+    ) const;
+    bool CapturedSceneDiffuseIrradianceReady(
+        i32 probeSceneIndex,
+        VkSampler sampler
+    ) const;
+    VkImageView CapturedSceneDiffuseIrradianceDescriptorViewFor(
+        i32 probeSceneIndex,
+        VkImageView fallbackView,
+        VkSampler sampler
+    ) const;
+    bool CapturedSceneDiffuseIrradianceDescriptorMatchesProbe(
         i32 probeSceneIndex,
         VkImageView descriptorView,
         VkSampler sampler
@@ -295,6 +338,10 @@ public:
     u32 CapturedSceneReadyProbeCount(VkSampler sampler) const;
     u32 CapturedSceneInFlightProbeCount() const;
     u32 CapturedSceneDistinctActiveViewCount(VkSampler sampler) const;
+    u32 CapturedSceneDiffuseIrradianceReadyProbeCount(VkSampler sampler) const;
+    u32 CapturedSceneDistinctActiveDiffuseIrradianceViewCount(
+        VkSampler sampler
+    ) const;
 
     void SetDescriptorSetsBound(u32 count);
     u32 DescriptorSetsBound() const;
@@ -303,12 +350,16 @@ private:
     struct CapturedSceneProbeResource {
         std::unique_ptr<VulkanImage> activeImage;
         std::unique_ptr<VulkanImage> targetImage;
+        std::unique_ptr<VulkanImage> activeDiffuseIrradianceImage;
+        std::unique_ptr<VulkanImage> targetDiffuseIrradianceImage;
         std::unique_ptr<VulkanImage> depthImage;
         std::vector<VkImageView> faceViews;
         std::vector<VkFramebuffer> framebuffers;
         VkImageView prefilterSourceView = VK_NULL_HANDLE;
         std::vector<VkImageView> prefilterMipViews;
         std::vector<VkDescriptorSet> prefilterDescriptorSets;
+        VkImageView diffuseIrradianceArrayView = VK_NULL_HANDLE;
+        VkDescriptorSet diffuseIrradianceDescriptorSet = VK_NULL_HANDLE;
         CapturedSceneRefreshRequest refreshRequest{};
         CapturedSceneCaptureBackend activeBackend = CapturedSceneCaptureBackend::None;
         u32 signature = 0;
@@ -337,6 +388,10 @@ private:
     void ReleaseGpuCapturedSceneResources(CapturedSceneProbeResource& resource);
     bool EnsureGpuCapturedScenePrefilterResources(const VulkanDevice& device);
     void ReleaseGpuCapturedScenePrefilterResources();
+    bool EnsureGpuCapturedSceneDiffuseIrradianceResources(
+        const VulkanDevice& device
+    );
+    void ReleaseGpuCapturedSceneDiffuseIrradianceResources();
     void BeginGpuCapturedSceneRefresh(
         CapturedSceneProbeResource& resource,
         const CapturedSceneRefreshRequest& refreshRequest
@@ -378,6 +433,13 @@ private:
     VkDescriptorPool m_GpuCapturedScenePrefilterDescriptorPool = VK_NULL_HANDLE;
     VkPipelineLayout m_GpuCapturedScenePrefilterPipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_GpuCapturedScenePrefilterPipeline = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_GpuCapturedSceneDiffuseIrradianceDescriptorSetLayout =
+        VK_NULL_HANDLE;
+    VkDescriptorPool m_GpuCapturedSceneDiffuseIrradianceDescriptorPool =
+        VK_NULL_HANDLE;
+    VkPipelineLayout m_GpuCapturedSceneDiffuseIrradiancePipelineLayout =
+        VK_NULL_HANDLE;
+    VkPipeline m_GpuCapturedSceneDiffuseIrradiancePipeline = VK_NULL_HANDLE;
     std::unordered_map<i32, CapturedSceneProbeResource> m_CapturedSceneProbeResources;
     i32 m_LastCapturedSceneProbeSceneIndex = -1;
     CapturedSceneCaptureAudit m_EmptyCapturedSceneAudit{};

@@ -2,6 +2,8 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <glm/mat4x4.hpp>
+
 namespace se {
 
 class VulkanCommandPool;
@@ -80,6 +82,16 @@ struct ReflectionCaptureDrawStats {
     u64 pushConstantByteCount = 0;
 };
 
+struct ReflectionCaptureDirectionalShadowDrawStats {
+    u32 passCount = 0;
+    u32 drawCount = 0;
+    u32 meshBindCount = 0;
+    u32 bonePaletteDescriptorBindCount = 0;
+    u32 bonePaletteFallbackDescriptorBindCount = 0;
+    u32 pushConstantUpdateCount = 0;
+    u64 pushConstantByteCount = 0;
+};
+
 // Shared forward-material path for a one-face reflection probe capture pass.
 ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
     VkCommandBuffer commandBuffer,
@@ -91,6 +103,23 @@ ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
     std::span<const RenderCommand> renderCommands,
     const VkExtent2D& extent,
     std::size_t imageIndex
+);
+
+// Records one full-size directional depth map for an offscreen reflection
+// capture. It deliberately does not use the main camera's CSM atlas.
+ReflectionCaptureDirectionalShadowDrawStats
+RecordReflectionCaptureDirectionalShadow(
+    VkCommandBuffer commandBuffer,
+    const VulkanShadowRenderPass& shadowRenderPass,
+    const VulkanGraphicsPipeline& shadowGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedShadowGraphicsPipeline,
+    const VulkanShadowFramebuffer& shadowFramebuffer,
+    const VulkanDescriptorSets& shadowDescriptorSets,
+    std::span<const RenderCommand> shadowRenderCommands,
+    std::size_t imageIndex,
+    const glm::mat4& lightViewProjection,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady
 );
 
 class VulkanCommandBuffer {

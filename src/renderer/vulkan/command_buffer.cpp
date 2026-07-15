@@ -1749,6 +1749,64 @@ ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
     return stats;
 }
 
+ReflectionCaptureDirectionalShadowDrawStats
+RecordReflectionCaptureDirectionalShadow(
+    VkCommandBuffer commandBuffer,
+    const VulkanShadowRenderPass& shadowRenderPass,
+    const VulkanGraphicsPipeline& shadowGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedShadowGraphicsPipeline,
+    const VulkanShadowFramebuffer& shadowFramebuffer,
+    const VulkanDescriptorSets& shadowDescriptorSets,
+    std::span<const RenderCommand> shadowRenderCommands,
+    std::size_t imageIndex,
+    const glm::mat4& lightViewProjection,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady
+) {
+    ReflectionCaptureDirectionalShadowDrawStats stats{};
+    if (shadowRenderCommands.empty()) {
+        return stats;
+    }
+
+    VkClearValue clearValue{};
+    clearValue.depthStencil = { 1.0f, 0u };
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = shadowRenderPass.Handle();
+    renderPassInfo.framebuffer = shadowFramebuffer.Handle(imageIndex);
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = shadowFramebuffer.Extent();
+    renderPassInfo.clearValueCount = 1u;
+    renderPassInfo.pClearValues = &clearValue;
+    vkCmdBeginRenderPass(
+        commandBuffer,
+        &renderPassInfo,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+    DrawShadowCommands(
+        commandBuffer,
+        shadowGraphicsPipeline,
+        doubleSidedShadowGraphicsPipeline,
+        shadowDescriptorSets,
+        shadowRenderCommands,
+        imageIndex,
+        lightViewProjection,
+        bonePaletteFallbackDescriptorSet,
+        bonePaletteFallbackDescriptorReady,
+        { 0, 0 },
+        shadowFramebuffer.Extent(),
+        stats.meshBindCount,
+        stats.bonePaletteDescriptorBindCount,
+        stats.bonePaletteFallbackDescriptorBindCount,
+        stats.pushConstantUpdateCount,
+        stats.pushConstantByteCount
+    );
+    vkCmdEndRenderPass(commandBuffer);
+    stats.passCount = 1u;
+    stats.drawCount = static_cast<u32>(shadowRenderCommands.size());
+    return stats;
+}
+
 VulkanCommandBuffer::VulkanCommandBuffer(
     const VulkanDevice& device,
     const VulkanCommandPool& commandPool,

@@ -2841,6 +2841,35 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedCapturedSceneDuplicateActiveViewMask
     );
     ImGui::Text(
+        "Captured diffuse irradiance: %s, dispatches %u, samples %u, face %u",
+        stats.reflectionProbe.capturedSceneDiffuseIrradianceReady ? "ready" : "pending",
+        stats.reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount,
+        stats.reflectionProbe.capturedSceneDiffuseIrradianceSampleCount,
+        stats.reflectionProbe.capturedSceneDiffuseIrradianceFaceSize
+    );
+    ImGui::Text(
+        "Captured diffuse mapping: ready %u, distinct %u, match 0x%X, duplicate 0x%X",
+        stats.reflectionProbe.capturedSceneDiffuseIrradianceReadyProbeCount,
+        stats.reflectionProbe.capturedSceneDistinctActiveDiffuseIrradianceViewCount,
+        stats.reflectionProbe
+            .selectedCapturedSceneDiffuseIrradianceMapMatchesActiveMask,
+        stats.reflectionProbe
+            .selectedCapturedSceneDiffuseIrradianceDuplicateActiveViewMask
+    );
+    ImGui::Text(
+        "Captured directional shadow: requested/ready %u/%u, pass/draw/casters %u/%u/%u, map %u, faces 0x%X, probe %d, camera independent %u, local tiles suppressed %u",
+        stats.reflectionProbe.capturedSceneDirectionalShadowRequested,
+        stats.reflectionProbe.capturedSceneDirectionalShadowReady,
+        stats.reflectionProbe.capturedSceneDirectionalShadowPassCount,
+        stats.reflectionProbe.capturedSceneDirectionalShadowDrawCount,
+        stats.reflectionProbe.capturedSceneDirectionalShadowCasterCount,
+        stats.reflectionProbe.capturedSceneDirectionalShadowMapSize,
+        stats.reflectionProbe.capturedSceneDirectionalShadowFaceMask,
+        stats.reflectionProbe.capturedSceneDirectionalShadowProbeSceneIndex,
+        stats.reflectionProbe.capturedSceneDirectionalShadowCameraIndependent,
+        stats.reflectionProbe.capturedSceneDirectionalShadowLocalTilesSuppressed
+    );
+    ImGui::Text(
         "Reflection probe sampled mips: [%u %u %u %u]",
         stats.reflectionProbe.selectedCaptureMipCounts[0],
         stats.reflectionProbe.selectedCaptureMipCounts[1],

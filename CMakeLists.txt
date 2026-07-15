@@ -74,6 +74,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/auto_exposure_histogram.comp
     ${SHADER_SOURCE_DIR}/light_tile_cull.comp
     ${SHADER_SOURCE_DIR}/light_cluster_cull.comp
+    ${SHADER_SOURCE_DIR}/reflection_probe_diffuse_irradiance.comp
     ${SHADER_SOURCE_DIR}/reflection_probe_prefilter.comp
     ${SHADER_SOURCE_DIR}/depth_prefill_3d.vert
     ${SHADER_SOURCE_DIR}/shadow_depth.vert

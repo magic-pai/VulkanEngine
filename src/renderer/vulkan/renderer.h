@@ -254,6 +254,8 @@ struct FrameReflectionProbeSet {
         selectedRefreshPolicies{};
     std::array<bool, kMaxFrameReflectionProbes> selectedCapturedScenePlaceholderReady{};
     std::array<bool, kMaxFrameReflectionProbes> selectedCapturedSceneInvalidated{};
+    std::array<bool, kMaxFrameReflectionProbes>
+        selectedCapturedSceneDiffuseIrradianceReady{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCaptureMipCounts{};
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetSpecified{};
@@ -285,6 +287,8 @@ struct FrameReflectionProbeSet {
     u32 selectedAuthoredAssetMissingMask = 0;
     u32 selectedDiffuseIrradianceLobesReadyCount = 0;
     u32 selectedDiffuseIrradianceLobesReadyMask = 0;
+    u32 selectedCapturedSceneDiffuseIrradianceReadyCount = 0;
+    u32 selectedCapturedSceneDiffuseIrradianceReadyMask = 0;
     u32 selectedDiffuseIrradianceLobeCount = 0;
     u32 selectedProbeMask = 0;
     u32 selectedBoxProjectionMask = 0;
@@ -363,6 +367,9 @@ struct DirectionalShadowCascadeSet {
     u32 configuredCount = 0;
     u32 activeCount = 0;
     bool stableSnappingEnabled = false;
+    // Capture-side shadows use a full standalone depth map instead of the main
+    // camera's 2x2 CSM atlas.
+    bool singleMapSampling = false;
     f32 splitLambda = 0.0f;
     f32 maxDistance = 0.0f;
     f32 nearDepth = 0.0f;
@@ -657,6 +664,11 @@ private:
         const FrameMatrices* matrices,
         bool shadowSamplingEnabled
     ) const;
+    DirectionalShadowCascadeSet BuildReflectionCaptureDirectionalShadow(
+        std::span<const RenderCommand> shadowCommands,
+        const FrameLightSet& lights,
+        const RendererReflectionProbe& probe
+    ) const;
     LocalShadowTileSet BuildLocalShadowTiles(
         const FrameLightSet& lights,
         std::span<const RenderCommand> shadowCommands,
@@ -723,6 +735,8 @@ private:
     std::unique_ptr<VulkanDescriptorSets> m_DescriptorSets;
     std::unique_ptr<VulkanDescriptorSets> m_OverlayDescriptorSets;
     std::unique_ptr<VulkanMaterialDescriptorSets> m_MaterialDescriptorSets;
+    std::unique_ptr<VulkanMaterialDescriptorSets>
+        m_ReflectionCaptureMaterialDescriptorSets;
     std::unique_ptr<VulkanGBufferDescriptorSets> m_GBufferDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;

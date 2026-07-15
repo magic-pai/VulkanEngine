@@ -87,7 +87,8 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 temporalRejectionControls{ 0.0f };
     // x: skybox enabled, y: intensity, z: visible LOD, w: 1 pre-temporal, 2 hybrid post-stable sky.
     alignas(16) glm::vec4 environmentControls{ 0.0f, 1.0f, 0.0f, 0.0f };
-    // x: maximum valid local-probe LOD, y: mip count, z: prefilter readiness, w: reserved.
+    // x: maximum valid local-probe LOD, y: mip count, z: prefilter readiness,
+    // w: captured-scene diffuse irradiance map readiness.
     alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes>
         reflectionProbeMipControls{};
 };
