@@ -406,7 +406,7 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
 
     if (vkCreateGraphicsPipelines(
             device.Handle(),
-            VK_NULL_HANDLE,
+            device.PipelineCacheHandle(),
             1,
             &pipelineInfo,
             nullptr,

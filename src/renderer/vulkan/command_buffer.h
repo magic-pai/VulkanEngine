@@ -63,6 +63,36 @@ struct TemporalUpscalePostSourceStatus {
         TemporalUpscalePostSourceFallbackReason::Disabled;
 };
 
+enum class TemporalHistoryColorCopySource : u32 {
+    HdrSceneColor = 0,
+    TaaResolvedColor = 1
+};
+
+class VulkanDescriptorSets;
+class VulkanGraphicsPipeline;
+class VulkanMaterialDescriptorSets;
+
+struct ReflectionCaptureDrawStats {
+    u32 drawCount = 0;
+    u32 materialBindCount = 0;
+    u32 meshBindCount = 0;
+    u32 pushConstantUpdateCount = 0;
+    u64 pushConstantByteCount = 0;
+};
+
+// Shared forward-material path for a one-face reflection probe capture pass.
+ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
+    VkCommandBuffer commandBuffer,
+    const VulkanGraphicsPipeline& graphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedGraphicsPipeline,
+    const VulkanDescriptorSets& descriptorSets,
+    const VulkanMaterialDescriptorSets& materialDescriptorSets,
+    const FrameMaterialSet& frameMaterials,
+    std::span<const RenderCommand> renderCommands,
+    const VkExtent2D& extent,
+    std::size_t imageIndex
+);
+
 class VulkanCommandBuffer {
 public:
     VulkanCommandBuffer(
@@ -101,6 +131,8 @@ public:
         const DirectionalShadowCascadeSet* directionalShadowCascades = nullptr,
         const VulkanShadowFramebuffer* localShadowFramebuffer = nullptr,
         const LocalShadowTileSet* localShadowTiles = nullptr,
+        std::span<const std::span<const RenderCommand>> directionalShadowCascadeRenderCommands = {},
+        std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands = {},
         bool skipCachedLocalShadowTiles = false,
         const VulkanHdrRenderPass* hdrRenderPass = nullptr,
         const VulkanHdrFramebuffer* hdrFramebuffer = nullptr,
@@ -129,6 +161,10 @@ public:
         bool sharpeningDebugView = false,
         bool temporalHistoryColorInitialized = false,
         bool recordTemporalHistoryColorCopy = false,
+        TemporalHistoryColorCopySource temporalHistoryColorCopySource =
+            TemporalHistoryColorCopySource::HdrSceneColor,
+        const VulkanHdrFramebuffer* taaResolveFramebuffer = nullptr,
+        const VulkanGraphicsPipeline* taaResolvePipeline = nullptr,
         const FrameTemporalState* temporalState = nullptr,
         const FrameTemporalUpscaleState* temporalUpscaleState = nullptr,
         bool temporalUpscaleOutputInitialized = false,

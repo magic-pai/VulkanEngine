@@ -58,6 +58,7 @@ public:
     VulkanMaterial& Get(std::string_view name);
     const VulkanMaterial& Get(std::string_view name) const;
     VulkanTextureCache& TextureCache();
+    f32 TextureMipLodBias() const;
     bool Contains(std::string_view name) const;
     std::size_t Count() const;
 
@@ -73,6 +74,7 @@ private:
     const VulkanDevice& m_Device;
     const VulkanPhysicalDevice& m_PhysicalDevice;
     const VulkanCommandPool& m_CommandPool;
+    f32 m_TextureMipLodBias = 0.0f;
     std::vector<MaterialEntry> m_Materials;
     VulkanTextureCache m_TextureCache;
 };

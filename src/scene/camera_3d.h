@@ -83,6 +83,7 @@ private:
     bool m_LookDragging = false;
     bool m_FreeLookActive = false;
     bool m_CursorCaptured = false;
+    bool m_FreeLookMovementArmed = false;
     std::array<f64, 2> m_PreviousOrbitCursor{};
     std::array<f64, 2> m_PreviousLookCursor{};
 };

@@ -21,6 +21,8 @@ public:
     static MeshData3D CreateCube();
     static MeshData3D CreatePlane();
     static MeshData3D CreateGrid(u32 halfLineCount = 10, f32 spacing = 0.5f, f32 lineWidth = 0.012f);
+    static MeshData3D CreateUvSphere(u32 slices = 32, u32 stacks = 16);
+    static MeshData3D CreateCone(u32 segments = 48);
 };
 
 }

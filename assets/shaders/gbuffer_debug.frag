@@ -37,6 +37,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
     vec4 reflectionProbeDiffuseLobes[24];
 } frame;
 
@@ -138,12 +139,34 @@ vec3 ReconstructWorldPosition(vec2 uv, float depth) {
     return (frame.invView * viewPosition).xyz;
 }
 
+ivec2 DebugTexelCoord(sampler2D source, vec2 uv) {
+    ivec2 size = textureSize(source, 0);
+    vec2 scaled = clamp(uv, vec2(0.0), vec2(0.999999)) * vec2(size);
+    return clamp(ivec2(scaled), ivec2(0), size - ivec2(1));
+}
+
+vec2 DebugTexelCenterUv(sampler2D source, ivec2 texelCoord) {
+    ivec2 size = textureSize(source, 0);
+    return (vec2(texelCoord) + vec2(0.5)) / vec2(size);
+}
+
+vec3 DepthDebugColor(float depth) {
+    float contrastDepth = pow(clamp((1.0 - depth) * 96.0, 0.0, 1.0), 0.35);
+    vec3 farColor = vec3(0.00, 0.82, 1.00);
+    vec3 nearColor = vec3(1.00, 0.96, 0.12);
+    return mix(farColor, nearColor, contrastDepth);
+}
+
 int ActiveShadowCascadeCount() {
     return clamp(
         int(shadowCascades.cascadeInfo.x + 0.5),
         0,
         MAX_DIRECTIONAL_SHADOW_CASCADES
     );
+}
+
+bool DirectionalShadowReceiveEnabled() {
+    return shadowCascades.cascadeInfo.y > 0.5;
 }
 
 int SelectShadowCascade(vec3 worldPosition, out float viewDepth) {
@@ -179,6 +202,38 @@ vec3 ShadowCascadePalette(int cascadeIndex) {
     return vec3(1.00, 0.22, 0.55);
 }
 
+int ProjectShadowCascade(
+    vec3 worldPosition,
+    int cascadeIndex,
+    out vec2 shadowUv,
+    out float currentDepth
+) {
+    shadowUv = vec2(0.0);
+    currentDepth = 1.0;
+    if (cascadeIndex < 0 || cascadeIndex >= ActiveShadowCascadeCount()) {
+        return 1;
+    }
+
+    vec4 lightSpacePosition =
+        shadowCascades.viewProjections[cascadeIndex] * vec4(worldPosition, 1.0);
+    if (abs(lightSpacePosition.w) <= 0.000001) {
+        return 2;
+    }
+
+    vec3 projectionCoords = lightSpacePosition.xyz / lightSpacePosition.w;
+    shadowUv = projectionCoords.xy * 0.5 + 0.5;
+    currentDepth = projectionCoords.z;
+    if (shadowUv.x < 0.0 || shadowUv.x > 1.0 ||
+        shadowUv.y < 0.0 || shadowUv.y > 1.0) {
+        return 3;
+    }
+    if (currentDepth < 0.0 || currentDepth > 1.0) {
+        return 4;
+    }
+
+    return 0;
+}
+
 vec3 ShadowCascadeDebugColor(vec3 worldPosition) {
     float viewDepth = 0.0;
     int cascadeIndex = SelectShadowCascade(worldPosition, viewDepth);
@@ -186,17 +241,9 @@ vec3 ShadowCascadeDebugColor(vec3 worldPosition) {
         return vec3(1.0, 0.1, 0.1);
     }
 
-    vec4 lightSpacePosition =
-        shadowCascades.viewProjections[cascadeIndex] * vec4(worldPosition, 1.0);
-    if (abs(lightSpacePosition.w) <= 0.000001) {
-        return vec3(0.04);
-    }
-
-    vec3 projectionCoords = lightSpacePosition.xyz / lightSpacePosition.w;
-    vec2 shadowUv = projectionCoords.xy * 0.5 + 0.5;
-    if (shadowUv.x < 0.0 || shadowUv.x > 1.0 ||
-        shadowUv.y < 0.0 || shadowUv.y > 1.0 ||
-        projectionCoords.z < 0.0 || projectionCoords.z > 1.0) {
+    vec2 shadowUv = vec2(0.0);
+    float currentDepth = 1.0;
+    if (ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth) != 0) {
         return vec3(0.08, 0.08, 0.10);
     }
 
@@ -235,25 +282,55 @@ vec3 ShadowCascadeDebugColor(vec3 worldPosition) {
     return clamp(color, vec3(0.0), vec3(1.0));
 }
 
-float SampleShadowCascadeVisibility(
+vec3 ShadowCascadeAtlasDebugColor(vec2 uv) {
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    if (activeCascadeCount <= 0) {
+        return vec3(0.12, 0.02, 0.04);
+    }
+
+    vec2 grid = uv * vec2(2.0);
+    ivec2 tileCoord = ivec2(floor(grid));
+    if (tileCoord.x < 0 || tileCoord.y < 0 || tileCoord.x >= 2 || tileCoord.y >= 2) {
+        return vec3(0.015, 0.015, 0.02);
+    }
+
+    int cascadeIndex = tileCoord.y * 2 + tileCoord.x;
+    vec2 tileUv = fract(grid);
+    float atlasDepth = texture(shadowSampler, uv).r;
+    vec3 depthColor = mix(
+        vec3(0.018, 0.022, 0.030),
+        vec3(0.92, 0.94, 0.98),
+        clamp(1.0 - atlasDepth, 0.0, 1.0)
+    );
+
+    if (cascadeIndex >= activeCascadeCount) {
+        return mix(vec3(0.012, 0.015, 0.020), depthColor, 0.12);
+    }
+
+    vec3 color = mix(depthColor, ShadowCascadePalette(cascadeIndex), 0.34);
+    float gridLine = step(tileUv.x, 0.018) +
+        step(tileUv.y, 0.018) +
+        step(0.982, tileUv.x) +
+        step(0.982, tileUv.y);
+    if (gridLine > 0.0) {
+        color = mix(color, vec3(1.0), 0.70);
+    }
+
+    return clamp(color, vec3(0.0), vec3(1.0));
+}
+
+bool SampleShadowCascadeVisibility(
     vec3 worldPosition,
     vec3 normal,
     vec3 lightDir,
-    int cascadeIndex
+    int cascadeIndex,
+    out float visibility
 ) {
-    vec4 lightSpacePosition =
-        shadowCascades.viewProjections[cascadeIndex] * vec4(worldPosition, 1.0);
-    if (abs(lightSpacePosition.w) <= 0.000001) {
-        return 1.0;
-    }
-
-    vec3 projectionCoords = lightSpacePosition.xyz / lightSpacePosition.w;
-    vec2 shadowUv = projectionCoords.xy * 0.5 + 0.5;
-    float currentDepth = projectionCoords.z;
-    if (shadowUv.x < 0.0 || shadowUv.x > 1.0 ||
-        shadowUv.y < 0.0 || shadowUv.y > 1.0 ||
-        currentDepth < 0.0 || currentDepth > 1.0) {
-        return 1.0;
+    visibility = 1.0;
+    vec2 shadowUv = vec2(0.0);
+    float currentDepth = 1.0;
+    if (ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth) != 0) {
+        return false;
     }
 
     vec2 tileOrigin = vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
@@ -322,7 +399,53 @@ float SampleShadowCascadeVisibility(
     }
 
     float occlusion = shadow / max(float(sampleCount), 1.0);
-    return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    visibility = 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    return true;
+}
+
+bool ResolveShadowCascadeVisibility(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int preferredCascadeIndex,
+    int activeCascadeCount,
+    out float visibility
+) {
+    visibility = 1.0;
+    if (SampleShadowCascadeVisibility(
+            worldPosition,
+            normal,
+            lightDir,
+            preferredCascadeIndex,
+            visibility)) {
+        return true;
+    }
+
+    for (int offset = 1; offset < MAX_DIRECTIONAL_SHADOW_CASCADES; ++offset) {
+        int lowerIndex = preferredCascadeIndex - offset;
+        if (lowerIndex >= 0 &&
+            SampleShadowCascadeVisibility(
+                worldPosition,
+                normal,
+                lightDir,
+                lowerIndex,
+                visibility)) {
+            return true;
+        }
+
+        int upperIndex = preferredCascadeIndex + offset;
+        if (upperIndex < activeCascadeCount &&
+            SampleShadowCascadeVisibility(
+                worldPosition,
+                normal,
+                lightDir,
+                upperIndex,
+                visibility)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 float ApplyShadowDistanceFade(
@@ -350,7 +473,9 @@ float ApplyShadowDistanceFade(
 }
 
 float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
-    if (frame.shadowControls.x < 0.5 || frame.shadowControls.y <= 0.001) {
+    if (frame.shadowControls.x < 0.5 ||
+        frame.shadowControls.y <= 0.001 ||
+        !DirectionalShadowReceiveEnabled()) {
         return 1.0;
     }
 
@@ -360,13 +485,19 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
         return 1.0;
     }
 
-    float visibility = SampleShadowCascadeVisibility(
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    float visibility = 1.0;
+    bool visibilityValid = ResolveShadowCascadeVisibility(
         worldPosition,
         normal,
         lightDir,
-        cascadeIndex
+        cascadeIndex,
+        activeCascadeCount,
+        visibility
     );
-    int activeCascadeCount = ActiveShadowCascadeCount();
+    if (!visibilityValid) {
+        return 1.0;
+    }
     if (cascadeIndex + 1 >= activeCascadeCount) {
         return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
     }
@@ -386,24 +517,106 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
         return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
     }
 
-    float nextVisibility = SampleShadowCascadeVisibility(
+    float nextVisibility = visibility;
+    if (SampleShadowCascadeVisibility(
         worldPosition,
         normal,
         lightDir,
-        cascadeIndex + 1
-    );
-    visibility = mix(visibility, nextVisibility, blendFactor);
+        cascadeIndex + 1,
+        nextVisibility)) {
+        visibility = mix(visibility, nextVisibility, blendFactor);
+    }
     return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
+}
+
+vec3 ShadowCascadeReceiverDebugColor(vec3 worldPosition, vec3 normal, vec3 lightDir) {
+    if (frame.shadowControls.x < 0.5 ||
+        frame.shadowControls.y <= 0.001 ||
+        !DirectionalShadowReceiveEnabled()) {
+        return vec3(0.55, 0.04, 0.06);
+    }
+
+    float viewDepth = 0.0;
+    int cascadeIndex = SelectShadowCascade(worldPosition, viewDepth);
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    if (cascadeIndex < 0 || activeCascadeCount <= 0) {
+        return vec3(0.95, 0.05, 0.12);
+    }
+
+    vec2 shadowUv = vec2(0.0);
+    float currentDepth = 1.0;
+    int projectionStatus =
+        ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth);
+    float primaryVisibility = 1.0;
+    bool primaryValid = projectionStatus == 0 &&
+        SampleShadowCascadeVisibility(
+            worldPosition,
+            normal,
+            lightDir,
+            cascadeIndex,
+            primaryVisibility
+        );
+
+    float resolvedVisibility = primaryVisibility;
+    bool resolvedValid = primaryValid;
+    if (!resolvedValid) {
+        resolvedValid = ResolveShadowCascadeVisibility(
+            worldPosition,
+            normal,
+            lightDir,
+            cascadeIndex,
+            activeCascadeCount,
+            resolvedVisibility
+        );
+    }
+
+    if (!resolvedValid) {
+        if (projectionStatus == 2) {
+            return vec3(1.0, 0.84, 0.08);
+        }
+        if (projectionStatus == 3) {
+            return vec3(0.95, 0.08, 1.0);
+        }
+        if (projectionStatus == 4) {
+            return vec3(0.05, 0.95, 1.0);
+        }
+        return vec3(1.0, 0.02, 0.08);
+    }
+
+    vec3 cascadeColor = ShadowCascadePalette(cascadeIndex);
+    vec3 shadowed = vec3(0.025, 0.045, 0.080);
+    vec3 lit = mix(vec3(0.86, 0.92, 1.0), cascadeColor, 0.58);
+    vec3 color = mix(shadowed, lit, smoothstep(0.0, 1.0, resolvedVisibility));
+    if (!primaryValid) {
+        color = mix(color, vec3(1.0, 0.48, 0.06), 0.62);
+    }
+
+    float edgeDistance = min(
+        min(shadowUv.x, 1.0 - shadowUv.x),
+        min(shadowUv.y, 1.0 - shadowUv.y)
+    );
+    if (projectionStatus == 0 && edgeDistance < 0.018) {
+        color = mix(color, vec3(1.0), 0.55);
+    }
+
+    return clamp(color, vec3(0.0), vec3(1.0));
 }
 
 void main() {
     int view = int(objectData.materialControls.x + 0.5);
-    vec4 albedo = texture(gBufferAlbedo, fragUv);
-    vec4 normalRoughness = texture(gBufferNormalRoughness, fragUv);
-    vec4 material = texture(gBufferMaterial, fragUv);
-    vec4 emissive = texture(gBufferEmissive, fragUv);
-    vec2 velocity = texture(gBufferVelocity, fragUv).rg;
-    float depth = texture(sceneDepth, fragUv).r;
+    ivec2 albedoTexel = DebugTexelCoord(gBufferAlbedo, fragUv);
+    ivec2 normalTexel = DebugTexelCoord(gBufferNormalRoughness, fragUv);
+    ivec2 materialTexel = DebugTexelCoord(gBufferMaterial, fragUv);
+    ivec2 emissiveTexel = DebugTexelCoord(gBufferEmissive, fragUv);
+    ivec2 velocityTexel = DebugTexelCoord(gBufferVelocity, fragUv);
+    ivec2 depthTexel = DebugTexelCoord(sceneDepth, fragUv);
+    vec2 depthUv = DebugTexelCenterUv(sceneDepth, depthTexel);
+    vec4 albedo = texelFetch(gBufferAlbedo, albedoTexel, 0);
+    vec4 normalRoughness = texelFetch(gBufferNormalRoughness, normalTexel, 0);
+    vec4 material = texelFetch(gBufferMaterial, materialTexel, 0);
+    vec4 emissive = texelFetch(gBufferEmissive, emissiveTexel, 0);
+    vec2 velocity = texelFetch(gBufferVelocity, velocityTexel, 0).rg;
+    float depth = texelFetch(sceneDepth, depthTexel, 0).r;
 
     if (view == 0) {
         outColor = vec4(albedo.rgb, 1.0);
@@ -424,8 +637,9 @@ void main() {
             outColor = vec4(Turbo(fract(materialId * 0.173)), 1.0);
         }
     } else if (view == 5) {
-        float visualDepth = depth >= 0.999999 ? 0.0 : 1.0 - depth;
-        outColor = vec4(Turbo(visualDepth), 1.0);
+        outColor = depth >= 0.999999
+            ? vec4(0.0, 0.0, 0.0, 1.0)
+            : vec4(DepthDebugColor(depth), 1.0);
     } else if (view == 6) {
         outColor = vec4(emissive.rgb, 1.0);
     } else if (view == 7) {
@@ -443,7 +657,7 @@ void main() {
         }
         vec3 lightDir = normalize(-lightDirection);
         vec3 normal = normalize(normalRoughness.xyz * 2.0 - 1.0);
-        vec3 worldPosition = ReconstructWorldPosition(fragUv, depth);
+        vec3 worldPosition = ReconstructWorldPosition(depthUv, depth);
         outColor = vec4(vec3(ShadowVisibility(worldPosition, normal, lightDir)), 1.0);
     } else if (view == 9) {
         if (depth >= 0.999999 || albedo.a <= 0.001) {
@@ -451,8 +665,31 @@ void main() {
             return;
         }
 
-        vec3 worldPosition = ReconstructWorldPosition(fragUv, depth);
+        vec3 worldPosition = ReconstructWorldPosition(depthUv, depth);
         outColor = vec4(ShadowCascadeDebugColor(worldPosition), 1.0);
+    } else if (view == 10) {
+        outColor = vec4(ShadowCascadeAtlasDebugColor(fragUv), 1.0);
+    } else if (view == 12) {
+        if (depth >= 0.999999 || albedo.a <= 0.001) {
+            outColor = vec4(vec3(0.015, 0.018, 0.024), 1.0);
+            return;
+        }
+
+        vec3 lightDirection = frame.directionalLight.xyz;
+        if (dot(lightDirection, lightDirection) < 0.0001) {
+            lightDirection = vec3(-0.45, -0.82, -0.35);
+        }
+        vec3 lightDir = normalize(-lightDirection);
+        vec3 normal = normalize(normalRoughness.xyz * 2.0 - 1.0);
+        vec3 worldPosition = ReconstructWorldPosition(depthUv, depth);
+        outColor = vec4(
+            ShadowCascadeReceiverDebugColor(worldPosition, normal, lightDir),
+            1.0
+        );
+    } else if (view == 11) {
+        float occlusion = clamp(material.g, 0.0, 1.0);
+        float highContrast = smoothstep(0.86, 1.0, occlusion);
+        outColor = vec4(vec3(highContrast), 1.0);
     } else {
         outColor = vec4(albedo.rgb, 1.0);
     }

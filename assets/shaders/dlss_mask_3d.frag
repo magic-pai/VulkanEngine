@@ -7,6 +7,7 @@ layout(location = 3) in vec3 fragWorldPosition;
 layout(location = 4) in vec4 fragTangent;
 layout(location = 5) in vec4 fragCurrentClip;
 layout(location = 6) in vec4 fragPreviousClip;
+layout(location = 7) in float fragBonePaletteDiagnostic;
 
 layout(location = 0) out float outBiasCurrentColorMask;
 layout(location = 1) out float outTransparencyMask;
@@ -109,7 +110,7 @@ void main() {
     vec4 pbrFactors = hasMaterialRecord ? materialRecord.pbrFactors : vec4(1.0, 1.0, 0.0, 0.0);
     float alphaMode = pbrFactors.z;
     float alphaCutoff = clamp(pbrFactors.w, 0.0, 1.0);
-    if (HasTextureFlag(textureFlags, 64.0)) {
+    if (HasTextureFlag(textureFlags, 64.0) && alphaMode > 0.5) {
         materialAlpha *= clamp(texture(opacitySampler, materialUv).r, 0.0, 1.0);
     }
     if (alphaMode > 0.5 && alphaMode < 1.5 && materialAlpha < alphaCutoff) {
@@ -123,6 +124,7 @@ void main() {
     float transparencyMask = clamp(max(materialAlpha, transmissionHint), 0.0, 1.0);
     float reactiveMask = clamp(max(materialAlpha * 0.75, transmissionHint), 0.0, 1.0);
 
-    outBiasCurrentColorMask = reactiveMask;
-    outTransparencyMask = transparencyMask;
+    const float diagnosticNoop = fragBonePaletteDiagnostic * 0.0;
+    outBiasCurrentColorMask = reactiveMask + diagnosticNoop;
+    outTransparencyMask = transparencyMask + diagnosticNoop;
 }

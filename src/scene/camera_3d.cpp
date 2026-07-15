@@ -198,6 +198,12 @@ void Camera3D::UpdateOrbit(Window& window, bool inputBlocked) {
 void Camera3D::UpdateFreeLook(Window& window, bool inputBlocked, f32 deltaSeconds) {
     const bool rightMouseDown = window.IsRightMouseDown() && !inputBlocked;
     const std::array<f64, 2> cursor = window.CursorPosition();
+    const bool forwardDown = window.IsKeyDown(GLFW_KEY_W);
+    const bool backwardDown = window.IsKeyDown(GLFW_KEY_S);
+    const bool leftDown = window.IsKeyDown(GLFW_KEY_A);
+    const bool rightDown = window.IsKeyDown(GLFW_KEY_D);
+    const bool movementKeyDown =
+        forwardDown || backwardDown || leftDown || rightDown;
 
     if (!rightMouseDown) {
         if (m_CursorCaptured) {
@@ -205,6 +211,7 @@ void Camera3D::UpdateFreeLook(Window& window, bool inputBlocked, f32 deltaSecond
             m_CursorCaptured = false;
         }
         m_LookDragging = false;
+        m_FreeLookMovementArmed = false;
         m_PreviousLookCursor = cursor;
         return;
     }
@@ -212,6 +219,17 @@ void Camera3D::UpdateFreeLook(Window& window, bool inputBlocked, f32 deltaSecond
     if (!m_CursorCaptured) {
         window.SetCursorCaptured(true);
         m_CursorCaptured = true;
+        m_FreeLookMovementArmed = !movementKeyDown;
+        m_PreviousLookCursor = window.CursorPosition();
+        return;
+    }
+
+    if (!m_FreeLookMovementArmed) {
+        if (!movementKeyDown) {
+            m_FreeLookMovementArmed = true;
+        }
+        m_PreviousLookCursor = cursor;
+        return;
     }
 
     if (!m_LookDragging) {
@@ -240,16 +258,16 @@ void Camera3D::UpdateFreeLook(Window& window, bool inputBlocked, f32 deltaSecond
     );
     glm::vec3 movement{ 0.0f };
 
-    if (window.IsKeyDown(GLFW_KEY_W)) {
+    if (forwardDown) {
         movement += m_Forward;
     }
-    if (window.IsKeyDown(GLFW_KEY_S)) {
+    if (backwardDown) {
         movement -= m_Forward;
     }
-    if (window.IsKeyDown(GLFW_KEY_A)) {
+    if (leftDown) {
         movement -= right;
     }
-    if (window.IsKeyDown(GLFW_KEY_D)) {
+    if (rightDown) {
         movement += right;
     }
 

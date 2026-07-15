@@ -65,7 +65,8 @@ enum class TemporalUpscalerEvaluateFallbackReason : u32 {
     VulkanResourcesUnavailable = 3,
     ParametersUnavailable = 4,
     FeatureCreateFailed = 5,
-    EvaluateFailed = 6
+    EvaluateFailed = 6,
+    FeatureCreateWarmup = 7
 };
 
 enum class TemporalUpscalerFeatureRecreationReason : u32 {
@@ -74,7 +75,8 @@ enum class TemporalUpscalerFeatureRecreationReason : u32 {
     InputExtentChanged = 2,
     OutputExtentChanged = 3,
     QualityModeChanged = 4,
-    CreateFlagsChanged = 5
+    CreateFlagsChanged = 5,
+    PresetChanged = 6
 };
 
 struct TemporalUpscalerProbeRequest {
@@ -114,6 +116,8 @@ struct TemporalUpscalerRuntimeRequest {
     VkExtent2D displayExtent{};
     TemporalUpscalerDlssQualityMode dlssQualityMode =
         TemporalUpscalerDlssQualityMode::Quality;
+    TemporalUpscalerDlssPreset dlssPreset =
+        TemporalUpscalerDlssPreset::Default;
     std::filesystem::path applicationDataPath;
 };
 
@@ -153,6 +157,13 @@ struct TemporalUpscalerRuntimeStatus {
     std::string deviceExtensionRequirements;
     std::string deviceExtensionMissingAvailable;
     std::string deviceExtensionMissingEnabled;
+    u32 runtimeFlavor = 0;
+    u32 runtimePathOverridden = 0;
+    u32 runtimePathFound = 0;
+    std::string runtimePath;
+    u32 runtimeDllFound = 0;
+    u32 runtimeDllSizeBytes = 0;
+    u32 runtimeDllHash = 0;
     u32 superResolutionSupported = 0;
     u32 needsUpdatedDriver = 0;
     u32 minDriverVersionMajor = 0;
@@ -195,6 +206,8 @@ struct TemporalUpscalerEvaluateRequest {
     VkExtent2D outputExtent{};
     TemporalUpscalerDlssQualityMode dlssQualityMode =
         TemporalUpscalerDlssQualityMode::Quality;
+    TemporalUpscalerDlssPreset dlssPreset =
+        TemporalUpscalerDlssPreset::Default;
     u32 reset = 0;
     f32 jitterOffsetX = 0.0f;
     f32 jitterOffsetY = 0.0f;
@@ -226,6 +239,27 @@ struct TemporalUpscalerEvaluateStatus {
     u32 outputWidth = 0;
     u32 outputHeight = 0;
     u32 createFlags = 0;
+    u32 createFlagIsHdr = 0;
+    u32 createFlagMvLowRes = 0;
+    u32 createFlagMvJittered = 0;
+    u32 createFlagDepthInverted = 0;
+    u32 createFlagAutoExposure = 0;
+    u32 inputColorFormat = 0;
+    u32 inputDepthFormat = 0;
+    u32 inputMotionVectorFormat = 0;
+    u32 inputColorWidth = 0;
+    u32 inputColorHeight = 0;
+    u32 inputDepthWidth = 0;
+    u32 inputDepthHeight = 0;
+    u32 inputMotionVectorWidth = 0;
+    u32 inputMotionVectorHeight = 0;
+    u32 inputDepthAspectMask = 0;
+    u32 inputMotionVectorAspectMask = 0;
+    u32 inputDepthMatchesRenderExtent = 0;
+    u32 inputMotionVectorMatchesRenderExtent = 0;
+    u32 motionVectorScalePixelSpace = 0;
+    u32 motionVectorScaleUnitSpace = 0;
+    u32 motionVectorScaleMatchesRenderExtent = 0;
     u32 reset = 0;
     f32 jitterOffsetX = 0.0f;
     f32 jitterOffsetY = 0.0f;
@@ -242,6 +276,10 @@ TemporalUpscalerDlssQualityMode TemporalUpscalerDlssQualityModeFromName(
     const std::string& name
 );
 
+TemporalUpscalerDlssPreset TemporalUpscalerDlssPresetFromName(
+    const std::string& name
+);
+
 TemporalUpscalerPackageStatus ProbeTemporalUpscalerPackage(
     const TemporalUpscalerProbeRequest& request
 );
@@ -254,6 +292,7 @@ TemporalUpscalerEvaluateStatus EvaluateTemporalUpscaler(
     const TemporalUpscalerEvaluateRequest& request
 );
 
+void ResetTemporalUpscalerFeatureCache();
 void ShutdownTemporalUpscalerRuntime(VkDevice device);
 
 }

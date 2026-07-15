@@ -5,6 +5,15 @@
 namespace se {
 
 inline constexpr std::size_t kMaxDirectionalShadowCascades = 4;
+inline constexpr f32 kForward3DShadowCascadeMaxDistance = 60.0f;
+
+struct VulkanLocalShadowFilterSettings {
+    f32 biasMin = 0.0009f;
+    f32 biasSlope = 0.0024f;
+    f32 pcfRadius = 1.0f;
+    u32 pcfKernelRadius = 1;
+    f32 pcssStrength = 0.0f;
+};
 
 enum class VulkanShadowQuality : int {
     Off = 0,
@@ -18,25 +27,35 @@ struct VulkanShadowSettings {
     VulkanShadowQuality quality = VulkanShadowQuality::Medium;
     bool enabled = true;
     bool cascadesEnabled = true;
+    bool directionalShadowReceiveEnabled = true;
     bool stableCascades = true;
     f32 strength = 0.95f;
     f32 ambientStrength = 0.42f;
-    f32 biasMin = 0.00045f;
-    f32 biasSlope = 0.0012f;
-    f32 pcfRadius = 1.0f;
+    f32 biasMin = 0.0009f;
+    f32 biasSlope = 0.0024f;
+    f32 pcfRadius = 1.1f;
     u32 pcfKernelRadius = 1;
     f32 pcssStrength = 0.0f;
     f32 localBiasMin = 0.0009f;
     f32 localBiasSlope = 0.0024f;
-    f32 localPcfRadius = 1.0f;
+    f32 localPcfRadius = 1.25f;
     u32 localPcfKernelRadius = 1;
-    f32 localPcssStrength = 0.0f;
-    f32 localFaceBlendStrength = 0.35f;
+    f32 localPcssStrength = 0.08f;
+    f32 localFaceBlendStrength = 0.50f;
+    VulkanLocalShadowFilterSettings pointLocalShadowFilter{};
+    VulkanLocalShadowFilterSettings spotLocalShadowFilter{};
+    VulkanLocalShadowFilterSettings rectLocalShadowFilter{};
+    f32 rectLightShadowBiasScale = 8.0f;
+    u32 rectLightShadowSampleTiles = 4;
+    bool pointLightShadowEnabled = true;
+    bool spotLightShadowEnabled = true;
+    bool rectLightShadowEnabled = true;
+    i32 debugLocalShadowLightIndex = -1;
     f32 contactShadowStrength = 0.35f;
     f32 contactShadowLength = 0.18f;
     f32 contactShadowThickness = 0.08f;
     u32 contactShadowSteps = 4;
-    f32 contactShadowJitterStrength = 0.35f;
+    f32 contactShadowJitterStrength = 0.12f;
     f32 contactShadowEdgeFadePixels = 18.0f;
     f32 ssaoStrength = 0.45f;
     f32 ssaoRadius = 1.2f;
@@ -50,7 +69,11 @@ struct VulkanShadowSettings {
     f32 reflectionProbeDiffuseIntensity = 1.0f;
     f32 reflectionProbeSpecularIntensity = 1.0f;
     f32 reflectionProbeHorizonBlend = 0.22f;
+    bool globalIblCubemapEnabled = false;
     bool reflectionProbeCubemapEnabled = true;
+    bool skyboxEnabled = false;
+    f32 skyboxIntensity = 1.0f;
+    f32 skyboxBlur = 0.0f;
     bool localReflectionProbeEnabled = false;
     f32 localReflectionProbeCenterX = 0.0f;
     f32 localReflectionProbeCenterY = 1.2f;
@@ -73,12 +96,25 @@ struct VulkanShadowSettings {
     f32 heightFogColorG = 0.68f;
     f32 heightFogColorB = 0.76f;
     f32 cascadeSplitLambda = 0.68f;
-    f32 cascadeMaxDistance = 250.0f;
+    f32 cascadeMaxDistance = 180.0f;
     f32 cascadeBlendRatio = 0.08f;
     f32 cascadeFadeRatio = 0.12f;
     u32 mapSize = 2048;
     u32 cascadeCount = 3;
 };
+
+inline void SyncLocalShadowKindFiltersToShared(VulkanShadowSettings& settings) {
+    const VulkanLocalShadowFilterSettings shared{
+        settings.localBiasMin,
+        settings.localBiasSlope,
+        settings.localPcfRadius,
+        settings.localPcfKernelRadius,
+        settings.localPcssStrength
+    };
+    settings.pointLocalShadowFilter = shared;
+    settings.spotLocalShadowFilter = shared;
+    settings.rectLocalShadowFilter = shared;
+}
 
 inline void ApplyShadowQualityPreset(
     VulkanShadowSettings& settings,
@@ -90,6 +126,7 @@ inline void ApplyShadowQualityPreset(
     case VulkanShadowQuality::Off:
         settings.enabled = false;
         settings.cascadesEnabled = false;
+        settings.directionalShadowReceiveEnabled = false;
         settings.strength = 0.0f;
         settings.ambientStrength = 0.0f;
         settings.pcfRadius = 0.0f;
@@ -101,6 +138,7 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfKernelRadius = 0;
         settings.localPcssStrength = 0.0f;
         settings.localFaceBlendStrength = 0.0f;
+        settings.rectLightShadowSampleTiles = 2u;
         settings.contactShadowStrength = 0.0f;
         settings.contactShadowLength = 0.0f;
         settings.contactShadowThickness = 0.0f;
@@ -125,28 +163,33 @@ inline void ApplyShadowQualityPreset(
     case VulkanShadowQuality::Low:
         settings.enabled = true;
         settings.cascadesEnabled = false;
-        settings.strength = 0.72f;
-        settings.ambientStrength = 0.25f;
-        settings.pcfRadius = 0.0f;
-        settings.pcfKernelRadius = 0;
+        settings.directionalShadowReceiveEnabled = true;
+        settings.stableCascades = true;
+        settings.strength = 0.82f;
+        settings.ambientStrength = 0.34f;
+        settings.biasMin = 0.0012f;
+        settings.biasSlope = 0.0034f;
+        settings.pcfRadius = 0.75f;
+        settings.pcfKernelRadius = 1;
         settings.pcssStrength = 0.0f;
-        settings.localBiasMin = 0.0011f;
-        settings.localBiasSlope = 0.0028f;
-        settings.localPcfRadius = 0.0f;
-        settings.localPcfKernelRadius = 0;
+        settings.localBiasMin = 0.0013f;
+        settings.localBiasSlope = 0.0032f;
+        settings.localPcfRadius = 0.75f;
+        settings.localPcfKernelRadius = 1;
         settings.localPcssStrength = 0.0f;
-        settings.localFaceBlendStrength = 0.0f;
-        settings.contactShadowStrength = 0.0f;
-        settings.contactShadowLength = 0.0f;
-        settings.contactShadowThickness = 0.0f;
-        settings.contactShadowSteps = 0;
-        settings.contactShadowJitterStrength = 0.0f;
-        settings.contactShadowEdgeFadePixels = 0.0f;
-        settings.ssaoStrength = 0.22f;
-        settings.ssaoRadius = 0.75f;
+        settings.localFaceBlendStrength = 0.25f;
+        settings.rectLightShadowSampleTiles = 2u;
+        settings.contactShadowStrength = 0.12f;
+        settings.contactShadowLength = 0.12f;
+        settings.contactShadowThickness = 0.08f;
+        settings.contactShadowSteps = 2;
+        settings.contactShadowJitterStrength = 0.08f;
+        settings.contactShadowEdgeFadePixels = 16.0f;
+        settings.ssaoStrength = 0.25f;
+        settings.ssaoRadius = 0.85f;
         settings.ssaoBias = 0.05f;
         settings.ssaoSampleCount = 4;
-        settings.ssrStrength = 0.35f;
+        settings.ssrStrength = 0.25f;
         settings.ssrRayLength = 10.0f;
         settings.ssrThickness = 0.12f;
         settings.ssrStepCount = 8;
@@ -160,22 +203,27 @@ inline void ApplyShadowQualityPreset(
     case VulkanShadowQuality::Medium:
         settings.enabled = true;
         settings.cascadesEnabled = true;
+        settings.directionalShadowReceiveEnabled = true;
+        settings.stableCascades = true;
         settings.strength = 0.95f;
         settings.ambientStrength = 0.42f;
-        settings.pcfRadius = 1.0f;
+        settings.biasMin = 0.0009f;
+        settings.biasSlope = 0.0024f;
+        settings.pcfRadius = 1.1f;
         settings.pcfKernelRadius = 1;
         settings.pcssStrength = 0.0f;
         settings.localBiasMin = 0.0009f;
         settings.localBiasSlope = 0.0024f;
-        settings.localPcfRadius = 1.0f;
+        settings.localPcfRadius = 1.25f;
         settings.localPcfKernelRadius = 1;
-        settings.localPcssStrength = 0.0f;
-        settings.localFaceBlendStrength = 0.35f;
+        settings.localPcssStrength = 0.08f;
+        settings.localFaceBlendStrength = 0.50f;
+        settings.rectLightShadowSampleTiles = 2u;
         settings.contactShadowStrength = 0.35f;
         settings.contactShadowLength = 0.18f;
         settings.contactShadowThickness = 0.08f;
         settings.contactShadowSteps = 4;
-        settings.contactShadowJitterStrength = 0.35f;
+        settings.contactShadowJitterStrength = 0.12f;
         settings.contactShadowEdgeFadePixels = 18.0f;
         settings.ssaoStrength = 0.45f;
         settings.ssaoRadius = 1.2f;
@@ -187,7 +235,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrStepCount = 12;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
-        settings.cascadeMaxDistance = 250.0f;
+        settings.cascadeMaxDistance = 180.0f;
         settings.cascadeBlendRatio = 0.08f;
         settings.cascadeFadeRatio = 0.12f;
         settings.mapSize = 2048;
@@ -195,22 +243,27 @@ inline void ApplyShadowQualityPreset(
     case VulkanShadowQuality::High:
         settings.enabled = true;
         settings.cascadesEnabled = true;
+        settings.directionalShadowReceiveEnabled = true;
+        settings.stableCascades = true;
         settings.strength = 1.0f;
         settings.ambientStrength = 0.50f;
+        settings.biasMin = 0.00075f;
+        settings.biasSlope = 0.0020f;
         settings.pcfRadius = 1.8f;
         settings.pcfKernelRadius = 2;
         settings.pcssStrength = 0.35f;
         settings.localBiasMin = 0.00075f;
         settings.localBiasSlope = 0.0020f;
-        settings.localPcfRadius = 1.6f;
+        settings.localPcfRadius = 1.8f;
         settings.localPcfKernelRadius = 2;
-        settings.localPcssStrength = 0.30f;
-        settings.localFaceBlendStrength = 0.55f;
+        settings.localPcssStrength = 0.22f;
+        settings.localFaceBlendStrength = 0.65f;
+        settings.rectLightShadowSampleTiles = 4u;
         settings.contactShadowStrength = 0.48f;
         settings.contactShadowLength = 0.28f;
         settings.contactShadowThickness = 0.12f;
         settings.contactShadowSteps = 6;
-        settings.contactShadowJitterStrength = 0.55f;
+        settings.contactShadowJitterStrength = 0.18f;
         settings.contactShadowEdgeFadePixels = 24.0f;
         settings.ssaoStrength = 0.58f;
         settings.ssaoRadius = 1.7f;
@@ -222,7 +275,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrStepCount = 18;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
-        settings.cascadeMaxDistance = 500.0f;
+        settings.cascadeMaxDistance = 300.0f;
         settings.cascadeBlendRatio = 0.10f;
         settings.cascadeFadeRatio = 0.10f;
         settings.mapSize = 4096;
@@ -230,39 +283,127 @@ inline void ApplyShadowQualityPreset(
     case VulkanShadowQuality::Ultra:
         settings.enabled = true;
         settings.cascadesEnabled = true;
+        settings.directionalShadowReceiveEnabled = true;
+        settings.stableCascades = true;
         settings.strength = 1.0f;
-        settings.ambientStrength = 0.58f;
-        settings.pcfRadius = 2.6f;
+        settings.ambientStrength = 0.54f;
+        settings.biasMin = 0.00065f;
+        settings.biasSlope = 0.0018f;
+        settings.pcfRadius = 2.2f;
         settings.pcfKernelRadius = 2;
-        settings.pcssStrength = 0.55f;
+        settings.pcssStrength = 0.45f;
         settings.localBiasMin = 0.00065f;
         settings.localBiasSlope = 0.0018f;
-        settings.localPcfRadius = 2.2f;
+        settings.localPcfRadius = 2.4f;
         settings.localPcfKernelRadius = 2;
-        settings.localPcssStrength = 0.45f;
-        settings.localFaceBlendStrength = 0.75f;
-        settings.contactShadowStrength = 0.60f;
-        settings.contactShadowLength = 0.36f;
+        settings.localPcssStrength = 0.32f;
+        settings.localFaceBlendStrength = 0.80f;
+        settings.rectLightShadowSampleTiles = 4u;
+        settings.contactShadowStrength = 0.56f;
+        settings.contactShadowLength = 0.34f;
         settings.contactShadowThickness = 0.16f;
         settings.contactShadowSteps = 8;
-        settings.contactShadowJitterStrength = 0.75f;
+        settings.contactShadowJitterStrength = 0.20f;
         settings.contactShadowEdgeFadePixels = 30.0f;
-        settings.ssaoStrength = 0.68f;
-        settings.ssaoRadius = 2.1f;
+        settings.ssaoStrength = 0.64f;
+        settings.ssaoRadius = 2.0f;
         settings.ssaoBias = 0.02f;
         settings.ssaoSampleCount = 16;
-        settings.ssrStrength = 0.82f;
-        settings.ssrRayLength = 42.0f;
+        settings.ssrStrength = 0.78f;
+        settings.ssrRayLength = 36.0f;
         settings.ssrThickness = 0.05f;
-        settings.ssrStepCount = 24;
+        settings.ssrStepCount = 22;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
-        settings.cascadeMaxDistance = 1000.0f;
+        settings.cascadeMaxDistance = 360.0f;
         settings.cascadeBlendRatio = 0.12f;
         settings.cascadeFadeRatio = 0.08f;
         settings.mapSize = 4096;
         break;
     }
+
+    SyncLocalShadowKindFiltersToShared(settings);
+}
+
+inline void ApplyForward3DShadowProductionOverrides(VulkanShadowSettings& settings) {
+    if (!settings.enabled || settings.quality == VulkanShadowQuality::Off) {
+        return;
+    }
+
+    settings.stableCascades = true;
+    switch (settings.quality) {
+    case VulkanShadowQuality::Low:
+        settings.cascadesEnabled = false;
+        settings.cascadeCount = 1u;
+        settings.cascadeMaxDistance = 45.0f;
+        settings.biasMin = 0.0028f;
+        settings.biasSlope = 0.0074f;
+        settings.pcfRadius = 0.75f;
+        settings.pcfKernelRadius = 1u;
+        settings.pcssStrength = 0.0f;
+        settings.localPcfRadius = 0.75f;
+        settings.localPcfKernelRadius = 1u;
+        settings.localPcssStrength = 0.0f;
+        settings.localFaceBlendStrength = 0.35f;
+        settings.contactShadowStrength = 0.16f;
+        settings.contactShadowSteps = 2u;
+        settings.contactShadowJitterStrength = 0.08f;
+        break;
+    case VulkanShadowQuality::Medium:
+        settings.cascadesEnabled = true;
+        settings.cascadeCount = 3u;
+        settings.cascadeMaxDistance = 55.0f;
+        settings.biasMin = 0.0024f;
+        settings.biasSlope = 0.0068f;
+        settings.pcfRadius = 1.1f;
+        settings.pcfKernelRadius = 1u;
+        settings.pcssStrength = 0.0f;
+        settings.localPcfRadius = 1.4f;
+        settings.localPcfKernelRadius = 1u;
+        settings.localPcssStrength = 0.08f;
+        settings.localFaceBlendStrength = 0.60f;
+        settings.contactShadowJitterStrength = 0.12f;
+        break;
+    case VulkanShadowQuality::High:
+        settings.cascadesEnabled = true;
+        settings.cascadeCount = 4u;
+        settings.cascadeMaxDistance = kForward3DShadowCascadeMaxDistance;
+        settings.biasMin = 0.0022f;
+        settings.biasSlope = 0.0064f;
+        settings.pcfRadius = 1.8f;
+        settings.pcfKernelRadius = 2u;
+        settings.pcssStrength = 0.35f;
+        settings.localPcfRadius = 1.4f;
+        settings.localPcfKernelRadius = 2u;
+        settings.localPcssStrength = 0.0f;
+        settings.localFaceBlendStrength = 0.85f;
+        settings.contactShadowJitterStrength = 0.18f;
+        break;
+    case VulkanShadowQuality::Ultra:
+        settings.cascadesEnabled = true;
+        settings.cascadeCount = 4u;
+        settings.cascadeMaxDistance = 75.0f;
+        settings.biasMin = 0.0020f;
+        settings.biasSlope = 0.0060f;
+        settings.pcfRadius = 2.2f;
+        settings.pcfKernelRadius = 2u;
+        settings.pcssStrength = 0.45f;
+        settings.localPcfRadius = 2.8f;
+        settings.localPcfKernelRadius = 2u;
+        settings.localPcssStrength = 0.38f;
+        settings.localFaceBlendStrength = 0.92f;
+        settings.contactShadowSteps = 8u;
+        settings.contactShadowJitterStrength = 0.20f;
+        break;
+    case VulkanShadowQuality::Off:
+        break;
+    }
+    SyncLocalShadowKindFiltersToShared(settings);
+}
+
+inline void ApplyForward3DProductionShadowPreset(VulkanShadowSettings& settings) {
+    ApplyShadowQualityPreset(settings, VulkanShadowQuality::High);
+    ApplyForward3DShadowProductionOverrides(settings);
 }
 
 inline void ResetShadowSettings(VulkanShadowSettings& settings) {

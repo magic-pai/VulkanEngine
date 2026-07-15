@@ -1,0 +1,6 @@
+[submodule "thirdParty/fsr2"]
+	path = thirdParty/fsr2
+	url = https://github.com/GPUOpen-Effects/FidelityFX-FSR2.git
+[submodule "thirdParty/nvidia_dlss"]
+	path = thirdParty/nvidia_dlss
+	url = https://github.com/NVIDIA/DLSS.git

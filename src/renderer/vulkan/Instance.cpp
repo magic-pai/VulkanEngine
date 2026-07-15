@@ -3,7 +3,11 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <iostream>
+#include <string>
+#include <string_view>
 
 namespace se {
 
@@ -19,6 +23,96 @@ namespace {
         "VK_LAYER_KHRONOS_validation"
     };
 
+    std::string ReadEnvironmentValue(const char* name) {
+#if defined(_MSC_VER)
+        char* buffer = nullptr;
+        size_t size = 0;
+        if (_dupenv_s(&buffer, &size, name) != 0 || buffer == nullptr) {
+            return {};
+        }
+
+        std::string value{buffer};
+        std::free(buffer);
+        return value;
+#else
+        const char* value = std::getenv(name);
+        return value ? std::string{value} : std::string{};
+#endif
+    }
+
+    bool IsTruthyEnvironmentFlag(const char* name) {
+        const std::string value = ReadEnvironmentValue(name);
+        return value == "1" ||
+            value == "true" ||
+            value == "TRUE" ||
+            value == "on" ||
+            value == "ON";
+    }
+
+    bool ContainsText(std::string_view text, std::string_view needle) {
+        return text.find(needle) != std::string_view::npos;
+    }
+
+    std::string ExtractBetween(
+        std::string_view text,
+        std::string_view begin,
+        std::string_view end,
+        size_t startOffset = 0
+    ) {
+        const size_t beginPos = text.find(begin, startOffset);
+        if (beginPos == std::string_view::npos) {
+            return {};
+        }
+
+        const size_t valueBegin = beginPos + begin.size();
+        const size_t endPos = text.find(end, valueBegin);
+        if (endPos == std::string_view::npos) {
+            return {};
+        }
+
+        return std::string{text.substr(valueBegin, endPos - valueBegin)};
+    }
+
+    bool IsKnownNgxInternalDlssLayoutWarning(std::string_view message) {
+        return ContainsText(message, "vkQueueSubmit()") &&
+            ContainsText(message, "expects VkImage ") &&
+            ContainsText(message, "[nv.ngx.dlss.") &&
+            ContainsText(message, "VK_IMAGE_LAYOUT_GENERAL--instead") &&
+            ContainsText(message, "VK_IMAGE_LAYOUT_UNDEFINED") &&
+            ContainsText(message, "VUID-vkCmdDraw-None-09600");
+    }
+
+    bool SuppressKnownNgxInternalDlssLayoutWarning(std::string_view message) {
+        if (!IsTruthyEnvironmentFlag(
+                "SE_VK_SUPPRESS_KNOWN_NGX_INTERNAL_DLSS_LAYOUT"
+            )) {
+            return false;
+        }
+        if (!IsKnownNgxInternalDlssLayoutWarning(message)) {
+            return false;
+        }
+
+        const size_t imagePrefix = message.find("expects VkImage ");
+        const std::string image =
+            imagePrefix == std::string_view::npos ?
+                std::string{} :
+                ExtractBetween(message, "VkImage ", "[", imagePrefix);
+        const size_t resourceBegin =
+            imagePrefix == std::string_view::npos ?
+                std::string_view::npos :
+                message.find("[nv.ngx.dlss.", imagePrefix);
+        const std::string resource =
+            resourceBegin == std::string_view::npos ?
+                std::string{} :
+                ExtractBetween(message, "[", "]", resourceBegin);
+        std::cout << "SelfEngineVkSuppressedNgxInternalLayout"
+                  << " image=" << (image.empty() ? "unknown" : image)
+                  << " resource=" << (resource.empty() ? "unknown" : resource)
+                  << " policy=SE_VK_SUPPRESS_KNOWN_NGX_INTERNAL_DLSS_LAYOUT"
+                  << std::endl;
+        return true;
+    }
+
     VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -29,7 +123,15 @@ namespace {
         (void)messageType;
         (void)userData;
 
-        std::cerr << "[Vulkan Validation] " << callbackData->pMessage << std::endl;
+        const std::string_view message =
+            callbackData && callbackData->pMessage ?
+                std::string_view{callbackData->pMessage} :
+                std::string_view{};
+        if (SuppressKnownNgxInternalDlssLayoutWarning(message)) {
+            return VK_FALSE;
+        }
+
+        std::cerr << "[Vulkan Validation] " << message << std::endl;
         return VK_FALSE;
     }
 

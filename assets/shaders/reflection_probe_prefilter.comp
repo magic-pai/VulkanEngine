@@ -1,0 +1,80 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform samplerCube sourceCubemap;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2DArray destinationMip;
+
+layout(push_constant) uniform PrefilterParams {
+    float roughness;
+    uint mipExtent;
+    uint sampleCount;
+    uint reserved;
+} params;
+
+const float PI = 3.14159265359;
+
+float RadicalInverseVdc(uint bits) {
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return float(bits) * 2.3283064365386963e-10;
+}
+
+vec2 Hammersley(uint index, uint count) {
+    return vec2(float(index) / float(max(count, 1u)), RadicalInverseVdc(index));
+}
+
+vec3 ImportanceSampleGgx(vec2 xi, float roughness, vec3 normal) {
+    float a = roughness * roughness;
+    float phi = 2.0 * PI * xi.x;
+    float cosTheta = sqrt((1.0 - xi.y) / max(1.0 + (a * a - 1.0) * xi.y, 0.0001));
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    vec3 halfVector = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return normalize(tangent * halfVector.x + bitangent * halfVector.y + normal * halfVector.z);
+}
+
+vec3 DirectionForFaceTexel(uint face, vec2 uv) {
+    vec2 st = uv * 2.0 - 1.0;
+    if (face == 0u) return normalize(vec3(1.0, -st.y, -st.x));
+    if (face == 1u) return normalize(vec3(-1.0, -st.y, st.x));
+    if (face == 2u) return normalize(vec3(st.x, 1.0, st.y));
+    if (face == 3u) return normalize(vec3(st.x, -1.0, -st.y));
+    if (face == 4u) return normalize(vec3(st.x, -st.y, 1.0));
+    return normalize(vec3(-st.x, -st.y, -1.0));
+}
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    if (id.x >= params.mipExtent || id.y >= params.mipExtent || id.z >= 6u) {
+        return;
+    }
+
+    vec2 uv = (vec2(id.xy) + vec2(0.5)) / float(params.mipExtent);
+    vec3 normal = DirectionForFaceTexel(id.z, uv);
+    vec3 view = normal;
+    vec3 filtered = vec3(0.0);
+    float totalWeight = 0.0;
+    for (uint sampleIndex = 0u; sampleIndex < params.sampleCount; ++sampleIndex) {
+        vec3 halfVector = ImportanceSampleGgx(
+            Hammersley(sampleIndex, params.sampleCount),
+            params.roughness,
+            normal
+        );
+        vec3 light = normalize(2.0 * dot(view, halfVector) * halfVector - view);
+        float nDotL = max(dot(normal, light), 0.0);
+        if (nDotL > 0.0) {
+            filtered += textureLod(sourceCubemap, light, 0.0).rgb * nDotL;
+            totalWeight += nDotL;
+        }
+    }
+    vec3 radiance = totalWeight > 0.0001
+        ? filtered / totalWeight
+        : textureLod(sourceCubemap, normal, 0.0).rgb;
+    imageStore(destinationMip, ivec3(id), vec4(max(radiance, vec3(0.0)), 1.0));
+}

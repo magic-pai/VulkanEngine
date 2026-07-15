@@ -36,6 +36,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
 } frame;
 
 struct LocalLightRecord {
@@ -127,6 +128,9 @@ TileBounds ProjectLightToTileBounds(
     if (!bounds.valid) {
         return bounds;
     }
+    if (light.directionType.w >= 1.5) {
+        return bounds;
+    }
 
     vec3 center = light.positionRadius.xyz;
     float radius = max(light.positionRadius.w, 0.001);
@@ -145,12 +149,21 @@ TileBounds ProjectLightToTileBounds(
         projectedAny,
         touchesClipBoundary
     );
-    IncludeProjectedPoint(center + vec3(radius, 0.0, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
-    IncludeProjectedPoint(center + vec3(-radius, 0.0, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
-    IncludeProjectedPoint(center + vec3(0.0, radius, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
-    IncludeProjectedPoint(center + vec3(0.0, -radius, 0.0), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
-    IncludeProjectedPoint(center + vec3(0.0, 0.0, radius), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
-    IncludeProjectedPoint(center + vec3(0.0, 0.0, -radius), viewProjection, extent, minPixel, maxPixel, projectedAny, touchesClipBoundary);
+    for (int xSign = -1; xSign <= 1; xSign += 2) {
+        for (int ySign = -1; ySign <= 1; ySign += 2) {
+            for (int zSign = -1; zSign <= 1; zSign += 2) {
+                IncludeProjectedPoint(
+                    center + vec3(float(xSign), float(ySign), float(zSign)) * radius,
+                    viewProjection,
+                    extent,
+                    minPixel,
+                    maxPixel,
+                    projectedAny,
+                    touchesClipBoundary
+                );
+            }
+        }
+    }
 
     if (!projectedAny || touchesClipBoundary) {
         return bounds;
@@ -170,6 +183,8 @@ TileBounds ProjectLightToTileBounds(
     uvec2 maxTile = uvec2(floor(max(maxPixel - vec2(1.0), vec2(0.0)) / float(tileSize)));
     bounds.minTile = min(minTile, tileCounts - uvec2(1u));
     bounds.maxTile = min(maxTile, tileCounts - uvec2(1u));
+    bounds.minTile -= min(bounds.minTile, uvec2(1u));
+    bounds.maxTile = min(bounds.maxTile + uvec2(1u), tileCounts - uvec2(1u));
     bounds.valid = bounds.minTile.x <= bounds.maxTile.x &&
         bounds.minTile.y <= bounds.maxTile.y;
     bounds.fullScreen = false;

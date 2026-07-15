@@ -5,6 +5,8 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inColor;
 layout(location = 3) in vec2 inTexCoord;
 layout(location = 4) in vec4 inTangent;
+layout(location = 5) in uvec4 inBoneIndices;
+layout(location = 6) in vec4 inBoneWeights;
 
 layout(set = 0, binding = 0) uniform FrameData {
     mat4 view;
@@ -40,16 +42,40 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
     vec4 reflectionProbeDiffuseLobes[24];
 } frame;
 
 layout(push_constant) uniform ShadowPushConstants {
     mat4 model;
     mat4 lightViewProjection;
+    vec4 skinningControls;
 } shadowData;
 
+layout(set = 2, binding = 0, std430) readonly buffer BonePaletteData {
+    mat4 bonePalette[];
+} bonePaletteData;
+
+mat4 WeightedSkinMatrix(uint currentPaletteOffset, vec4 weights) {
+    return
+        bonePaletteData.bonePalette[currentPaletteOffset + inBoneIndices.x] * weights.x +
+        bonePaletteData.bonePalette[currentPaletteOffset + inBoneIndices.y] * weights.y +
+        bonePaletteData.bonePalette[currentPaletteOffset + inBoneIndices.z] * weights.z +
+        bonePaletteData.bonePalette[currentPaletteOffset + inBoneIndices.w] * weights.w;
+}
+
 void main() {
+    float boneWeightSum = dot(inBoneWeights, vec4(1.0));
+    uint currentPaletteOffset = uint(max(shadowData.skinningControls.x, 0.0) + 0.5);
+    bool skinningEnabled = boneWeightSum > 0.00001 && currentPaletteOffset > 0u;
+    vec4 normalizedBoneWeights = skinningEnabled
+        ? inBoneWeights / boneWeightSum
+        : vec4(1.0, 0.0, 0.0, 0.0);
+    mat4 skinMatrix = skinningEnabled
+        ? WeightedSkinMatrix(currentPaletteOffset, normalizedBoneWeights)
+        : mat4(1.0);
+    vec4 localPosition = skinMatrix * vec4(inPosition, 1.0);
     gl_Position = shadowData.lightViewProjection *
         shadowData.model *
-        vec4(inPosition, 1.0);
+        localPosition;
 }

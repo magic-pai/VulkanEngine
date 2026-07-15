@@ -123,7 +123,14 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
     localReflectionProbeMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     localReflectionProbeMapBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 12> bindings = {
+    VkDescriptorSetLayoutBinding visibleSkyboxTextureBinding{};
+    visibleSkyboxTextureBinding.binding = 12;
+    visibleSkyboxTextureBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    visibleSkyboxTextureBinding.descriptorCount = 1;
+    visibleSkyboxTextureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    visibleSkyboxTextureBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 13> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
@@ -135,7 +142,8 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         prefilteredMapBinding,
         probeGridBinding,
         autoExposureBinding,
-        localReflectionProbeMapBinding
+        localReflectionProbeMapBinding,
+        visibleSkyboxTextureBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

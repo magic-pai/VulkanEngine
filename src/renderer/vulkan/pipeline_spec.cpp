@@ -67,6 +67,7 @@ PipelineSpec PipelineSpec::ForwardResidualVelocity3D(
     spec.colorAttachmentCount = 1;
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     spec.dynamicViewportScissor = true;
+    spec.vertexLayout = VertexLayout::Vertex3DSkinned;
     return spec;
 }
 
@@ -86,6 +87,7 @@ PipelineSpec PipelineSpec::DlssMask3D(
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     spec.colorBlendModes[1] = ColorBlendMode::Disabled;
     spec.dynamicViewportScissor = true;
+    spec.vertexLayout = VertexLayout::Vertex3DSkinned;
     return spec;
 }
 
@@ -224,7 +226,7 @@ PipelineSpec PipelineSpec::GBufferDebug(
 PipelineSpec PipelineSpec::ShadowDepth(std::string vertexShaderPath, VkExtent2D extent) {
     PipelineSpec spec{};
     spec.vertexShaderPath = std::move(vertexShaderPath);
-    spec.vertexLayout = VertexLayout::Vertex3D;
+    spec.vertexLayout = VertexLayout::Vertex3DSkinned;
     spec.cullMode = VK_CULL_MODE_BACK_BIT;
     spec.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     spec.depthTestEnabled = true;

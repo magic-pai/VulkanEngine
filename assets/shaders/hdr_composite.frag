@@ -37,6 +37,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
     vec4 reflectionProbeDiffuseLobes[24];
     mat4 previousView;
     mat4 previousProj;
@@ -44,6 +45,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 temporalControls;
     vec4 temporalResolveControls;
     vec4 temporalRejectionControls;
+    vec4 environmentControls;
 } frame;
 
 layout(set = 0, binding = 10) readonly buffer AutoExposureState {
@@ -57,7 +59,10 @@ layout(set = 1, binding = 2) uniform sampler2D colorGradingLut;
 layout(set = 1, binding = 3) uniform sampler2D temporalHistoryColor;
 layout(set = 1, binding = 4) uniform sampler2D gBufferVelocity;
 layout(set = 1, binding = 5) uniform sampler2D sceneDepth;
+layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMaps[4];
+layout(set = 0, binding = 12) uniform sampler2D visibleSkyboxTexture;
 
+const float PI = 3.14159265359;
 const int DEBUG_VIEW_BLOOM = 37;
 const int DEBUG_VIEW_COLOR_GRADING = 38;
 const int DEBUG_VIEW_TONE_MAPPING = 39;
@@ -139,6 +144,113 @@ vec3 BloomContribution() {
     return max(texture(bloomTexture, fragUv).rgb, vec3(0.0)) * intensity;
 }
 
+vec3 ViewRayWorldDirection(vec2 uv) {
+    vec2 ndc = uv * 2.0 - 1.0;
+    if (frame.temporalControls.z > 0.5) {
+        ndc -= frame.temporalJitter.zw * 2.0;
+    }
+
+    vec4 clipPosition = vec4(ndc, 1.0, 1.0);
+    vec4 viewPosition = frame.invProj * clipPosition;
+    vec3 viewDirection = abs(viewPosition.w) > 0.000001
+        ? viewPosition.xyz / viewPosition.w
+        : viewPosition.xyz;
+    if (dot(viewDirection, viewDirection) <= 0.000001) {
+        viewDirection = vec3(0.0, 0.0, -1.0);
+    }
+    return normalize((frame.invView * vec4(normalize(viewDirection), 0.0)).xyz);
+}
+
+vec2 EquirectUv(vec3 direction) {
+    vec3 d = dot(direction, direction) > 0.000001
+        ? normalize(direction)
+        : vec3(1.0, 0.0, 0.0);
+    float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
+
+vec3 VisibleSkyboxTextureRadiance(vec3 direction) {
+    return max(textureLod(
+        visibleSkyboxTexture,
+        EquirectUv(direction),
+        clamp(frame.environmentControls.z, 0.0, 8.0)
+    ).rgb, vec3(0.0));
+}
+
+vec3 ProceduralSkyRadiance(vec3 direction) {
+    float up = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 skyTop = vec3(0.37, 0.50, 0.72);
+    vec3 skyHorizon = vec3(0.68, 0.71, 0.76);
+    vec3 ground = vec3(0.09, 0.085, 0.08);
+    vec3 base = mix(ground, skyTop, smoothstep(0.05, 1.0, up));
+    return mix(base, skyHorizon, 1.0 - abs(direction.y));
+}
+
+vec3 PostTemporalSkyboxRadiance(vec2 uv) {
+    if (frame.environmentControls.x <= 0.5 ||
+        frame.environmentControls.w < 1.5) {
+        return vec3(0.0);
+    }
+
+    vec3 direction = ViewRayWorldDirection(uv);
+    vec3 skyRadiance = VisibleSkyboxTextureRadiance(direction);
+    return skyRadiance * clamp(frame.environmentControls.y, 0.0, 4.0);
+}
+
+bool IsPureSkyNeighborhood(vec2 uv) {
+    vec2 texelSize = 1.0 / vec2(max(textureSize(sceneDepth, 0), ivec2(1)));
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            vec2 sampleUv = clamp(
+                uv + vec2(float(x), float(y)) * texelSize,
+                vec2(0.0),
+                vec2(1.0)
+            );
+            if (texture(sceneDepth, sampleUv).r < 0.999999) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// The LUT is stored as a 2D strip; fetch texels manually to avoid filtering across blue slices.
+vec3 FetchColorGradingLut(ivec3 coord, int lutSize) {
+    coord = clamp(coord, ivec3(0), ivec3(lutSize - 1));
+    return texelFetch(
+        colorGradingLut,
+        ivec2(coord.b * lutSize + coord.r, coord.g),
+        0
+    ).rgb;
+}
+
+vec3 SampleColorGradingLut(vec3 color, float lutSizeFloat) {
+    int lutSize = max(int(lutSizeFloat + 0.5), 2);
+    int maxIndex = lutSize - 1;
+    vec3 lutCoord = clamp(color, vec3(0.0), vec3(1.0)) * float(maxIndex);
+    ivec3 lo = ivec3(floor(lutCoord));
+    ivec3 hi = min(lo + ivec3(1), ivec3(maxIndex));
+    vec3 blend = fract(lutCoord);
+
+    vec3 c000 = FetchColorGradingLut(ivec3(lo.r, lo.g, lo.b), lutSize);
+    vec3 c100 = FetchColorGradingLut(ivec3(hi.r, lo.g, lo.b), lutSize);
+    vec3 c010 = FetchColorGradingLut(ivec3(lo.r, hi.g, lo.b), lutSize);
+    vec3 c110 = FetchColorGradingLut(ivec3(hi.r, hi.g, lo.b), lutSize);
+    vec3 c001 = FetchColorGradingLut(ivec3(lo.r, lo.g, hi.b), lutSize);
+    vec3 c101 = FetchColorGradingLut(ivec3(hi.r, lo.g, hi.b), lutSize);
+    vec3 c011 = FetchColorGradingLut(ivec3(lo.r, hi.g, hi.b), lutSize);
+    vec3 c111 = FetchColorGradingLut(ivec3(hi.r, hi.g, hi.b), lutSize);
+
+    vec3 c00 = mix(c000, c100, blend.r);
+    vec3 c10 = mix(c010, c110, blend.r);
+    vec3 c01 = mix(c001, c101, blend.r);
+    vec3 c11 = mix(c011, c111, blend.r);
+    vec3 c0 = mix(c00, c10, blend.g);
+    vec3 c1 = mix(c01, c11, blend.g);
+    return mix(c0, c1, blend.b);
+}
+
 vec3 ApplyColorGrading(vec3 color) {
     float enabled = clamp(frame.colorGradingControls.x, 0.0, 1.0);
     if (enabled <= 0.0001) {
@@ -158,23 +270,7 @@ vec3 ApplyColorGrading(vec3 color) {
     float lutStrength = clamp(frame.colorGradingLutControls.x, 0.0, 1.0);
     float lutSize = max(frame.colorGradingLutControls.y, 2.0);
     if (lutStrength > 0.0001) {
-        vec3 lutCoord = clamp(graded, vec3(0.0), vec3(1.0)) * (lutSize - 1.0);
-        float blueSlice = floor(lutCoord.b);
-        float blueBlend = fract(lutCoord.b);
-        float stripWidth = lutSize * lutSize;
-        vec2 lutUv0 = vec2(
-            (blueSlice * lutSize + lutCoord.r + 0.5) / stripWidth,
-            (lutCoord.g + 0.5) / lutSize
-        );
-        vec2 lutUv1 = vec2(
-            (min(blueSlice + 1.0, lutSize - 1.0) * lutSize + lutCoord.r + 0.5) / stripWidth,
-            lutUv0.y
-        );
-        vec3 lutColor = mix(
-            texture(colorGradingLut, lutUv0).rgb,
-            texture(colorGradingLut, lutUv1).rgb,
-            blueBlend
-        );
+        vec3 lutColor = SampleColorGradingLut(graded, lutSize);
         graded = mix(graded, lutColor, lutStrength);
     }
 
@@ -211,7 +307,11 @@ void main() {
     float exposure = EffectiveExposure();
     vec3 currentHdrColor = texture(hdrSceneColor, fragUv).rgb;
     vec2 velocity = texture(gBufferVelocity, fragUv).rg;
-    vec2 historyUv = clamp(fragUv - velocity, vec2(0.0), vec2(1.0));
+    vec2 reprojectionVelocity = velocity;
+    if (frame.temporalControls.z > 0.5) {
+        reprojectionVelocity -= frame.temporalJitter.zw;
+    }
+    vec2 historyUv = clamp(fragUv - reprojectionVelocity, vec2(0.0), vec2(1.0));
     vec3 historyHdrColor = texture(temporalHistoryColor, historyUv).rgb;
     float taaEnabled = clamp(frame.temporalResolveControls.x, 0.0, 1.0);
     float historyWeight = clamp(frame.temporalResolveControls.y, 0.0, 0.95);
@@ -223,21 +323,38 @@ void main() {
     float neighborhoodClampEnabled = clamp(frame.temporalRejectionControls.w, 0.0, 1.0);
     float currentDepth = texture(sceneDepth, fragUv).r;
     float historyDepth = texture(sceneDepth, historyUv).r;
+    bool postTemporalSkyboxPixel =
+        currentDepth >= 0.999999 &&
+        frame.environmentControls.x > 0.5 &&
+        frame.environmentControls.w >= 1.5 &&
+        IsPureSkyNeighborhood(fragUv);
+    if (postTemporalSkyboxPixel) {
+        currentHdrColor = PostTemporalSkyboxRadiance(fragUv);
+        historyHdrColor = currentHdrColor;
+    }
     bool historyRejected = false;
     if (rejectionEnabled > 0.5) {
         historyRejected =
-            length(velocity) > velocityRejectThreshold ||
+            length(reprojectionVelocity) > velocityRejectThreshold ||
             abs(currentDepth - historyDepth) > depthRejectThreshold;
     }
+    historyRejected = historyRejected || postTemporalSkyboxPixel;
     if (neighborhoodClampEnabled > 0.5) {
         vec2 texelSize = 1.0 / vec2(max(textureSize(hdrSceneColor, 0), ivec2(1)));
-        vec3 c0 = texture(hdrSceneColor, fragUv).rgb;
-        vec3 c1 = texture(hdrSceneColor, clamp(fragUv + vec2(texelSize.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
-        vec3 c2 = texture(hdrSceneColor, clamp(fragUv - vec2(texelSize.x, 0.0), vec2(0.0), vec2(1.0))).rgb;
-        vec3 c3 = texture(hdrSceneColor, clamp(fragUv + vec2(0.0, texelSize.y), vec2(0.0), vec2(1.0))).rgb;
-        vec3 c4 = texture(hdrSceneColor, clamp(fragUv - vec2(0.0, texelSize.y), vec2(0.0), vec2(1.0))).rgb;
-        vec3 neighborhoodMin = min(c0, min(min(c1, c2), min(c3, c4)));
-        vec3 neighborhoodMax = max(c0, max(max(c1, c2), max(c3, c4)));
+        vec3 neighborhoodMin = vec3(65504.0);
+        vec3 neighborhoodMax = vec3(0.0);
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                vec2 sampleUv = clamp(
+                    fragUv + vec2(float(x), float(y)) * texelSize,
+                    vec2(0.0),
+                    vec2(1.0)
+                );
+                vec3 sampleColor = texture(hdrSceneColor, sampleUv).rgb;
+                neighborhoodMin = min(neighborhoodMin, sampleColor);
+                neighborhoodMax = max(neighborhoodMax, sampleColor);
+            }
+        }
         historyHdrColor = clamp(historyHdrColor, neighborhoodMin, neighborhoodMax);
     }
     vec3 resolvedHdrColor = currentHdrColor;
@@ -255,7 +372,7 @@ void main() {
         return;
     }
     if (debugView == DEBUG_VIEW_TAA_REPROJECTION) {
-        float velocityMagnitude = clamp(length(velocity) * 24.0, 0.0, 1.0);
+        float velocityMagnitude = clamp(length(reprojectionVelocity) * 24.0, 0.0, 1.0);
         outColor = vec4(historyUv, velocityMagnitude, 1.0);
         return;
     }

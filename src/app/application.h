@@ -44,10 +44,10 @@ public:
     VulkanRenderer* Renderer();
 
     void CreateRenderer();
+    void DestroyRenderer();
     void Run(UpdateCallback update);
 
 protected:
-    void DestroyRenderer();
     virtual Scene2D* Scene2DForRenderer();
     virtual Camera2D* Camera2DForRenderer();
 

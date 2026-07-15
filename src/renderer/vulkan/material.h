@@ -67,7 +67,8 @@ public:
         std::string albedoTexturePath,
         bool generateMipmaps = true,
         bool flipVertically = false,
-        VulkanUploadBatch* uploadBatch = nullptr
+        VulkanUploadBatch* uploadBatch = nullptr,
+        f32 samplerMipLodBias = 0.0f
     );
     VulkanMaterial(
         const VulkanDevice& device,
@@ -76,7 +77,8 @@ public:
         VulkanTexturePixels albedoTexturePixels,
         bool generateMipmaps = true,
         bool flipVertically = false,
-        VulkanUploadBatch* uploadBatch = nullptr
+        VulkanUploadBatch* uploadBatch = nullptr,
+        f32 samplerMipLodBias = 0.0f
     );
     VulkanMaterial(
         const VulkanDevice& device,
@@ -85,7 +87,8 @@ public:
         VulkanEncodedTextureBytes albedoTextureBytes,
         bool generateMipmaps = true,
         bool flipVertically = false,
-        VulkanUploadBatch* uploadBatch = nullptr
+        VulkanUploadBatch* uploadBatch = nullptr,
+        f32 samplerMipLodBias = 0.0f
     );
 
     ~VulkanMaterial() = default;
@@ -107,6 +110,11 @@ public:
     const VulkanSampler& Sampler() const;
     MaterialProperties& Properties();
     const MaterialProperties& Properties() const;
+    void RecreateSampler(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        f32 mipLodBias
+    );
 
     void SetColorMap(
         const VulkanDevice& device,
@@ -363,6 +371,9 @@ public:
         const VulkanCommandPool& commandPool,
         std::string cubemapDirectory
     );
+
+private:
+    u32 SamplerMipLevels() const;
 
 private:
     VulkanTexture2D m_AlbedoTexture;

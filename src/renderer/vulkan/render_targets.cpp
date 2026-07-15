@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string>
 
 namespace se {
 
@@ -47,6 +48,34 @@ std::vector<std::byte> BuildNeutralLutStrip(u32 size) {
     }
 
     return texels;
+}
+
+void NameImageForCapture(
+    VkDevice device,
+    const VulkanImage& image,
+    const char* prefix,
+    std::size_t index
+) {
+    if (prefix == nullptr || prefix[0] == '\0') {
+        return;
+    }
+
+    const std::string imageName =
+        std::string(prefix) + ".image[" + std::to_string(index) + "]";
+    const std::string viewName =
+        std::string(prefix) + ".view[" + std::to_string(index) + "]";
+    SetVulkanDebugObjectName(
+        device,
+        VK_OBJECT_TYPE_IMAGE,
+        image.Handle(),
+        imageName.c_str()
+    );
+    SetVulkanDebugObjectName(
+        device,
+        VK_OBJECT_TYPE_IMAGE_VIEW,
+        image.View(),
+        viewName.c_str()
+    );
 }
 
 } // namespace
@@ -685,6 +714,22 @@ VkImage VulkanSceneRenderTargets::HdrSceneColorImage(std::size_t index) const {
     return m_HdrSceneColorImages[index]->Handle();
 }
 
+VkImageView VulkanSceneRenderTargets::TemporalResolvedColorView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_TemporalResolvedColorImages.size(),
+        "Temporal resolved color index is out of range"
+    );
+    return m_TemporalResolvedColorImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::TemporalResolvedColorImage(std::size_t index) const {
+    SE_ASSERT(
+        index < m_TemporalResolvedColorImages.size(),
+        "Temporal resolved color index is out of range"
+    );
+    return m_TemporalResolvedColorImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::TemporalUpscaleOutputView(
     std::size_t index
 ) const {
@@ -832,6 +877,10 @@ VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
     return kHdrSceneColorFormat;
 }
 
+VkFormat VulkanSceneRenderTargets::TemporalResolvedColorFormat() const {
+    return kHdrSceneColorFormat;
+}
+
 VkFormat VulkanSceneRenderTargets::TemporalUpscaleOutputFormat() const {
     return kHdrSceneColorFormat;
 }
@@ -919,7 +968,21 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_HdrSceneColorImages
+        m_HdrSceneColorImages,
+        "SelfEngine.DLSS.InputColor"
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kHdrSceneColorFormat,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_TemporalResolvedColorImages,
+        "SelfEngine.Temporal.ResolvedColor"
     );
     CreateImageArrayForExtent(
         device,
@@ -932,7 +995,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_TemporalUpscaleOutputImages
+        m_TemporalUpscaleOutputImages,
+        "SelfEngine.DLSS.OutputColor"
     );
     CreateImageArray(
         device,
@@ -943,7 +1007,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_TemporalHistoryColorImages
+        m_TemporalHistoryColorImages,
+        "SelfEngine.Temporal.HistoryColor"
     );
     CreateImageArray(
         device,
@@ -954,7 +1019,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_DlssBiasCurrentColorMaskImages
+        m_DlssBiasCurrentColorMaskImages,
+        "SelfEngine.DLSS.BiasCurrentColorMask"
     );
     CreateImageArray(
         device,
@@ -965,7 +1031,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_DlssTransparencyMaskImages
+        m_DlssTransparencyMaskImages,
+        "SelfEngine.DLSS.TransparencyMask"
     );
     CreateImageArray(
         device,
@@ -998,7 +1065,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         VK_IMAGE_ASPECT_DEPTH_BIT,
-        m_SceneDepthImages
+        m_SceneDepthImages,
+        "SelfEngine.DLSS.InputDepth"
     );
     CreateImageArray(
         device,
@@ -1009,7 +1077,8 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_STORAGE_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
-        m_VelocityImages
+        m_VelocityImages,
+        "SelfEngine.DLSS.InputMotionVectors"
     );
     CreateImageArray(
         device,
@@ -1067,6 +1136,7 @@ void VulkanSceneRenderTargets::Recreate(
 
 void VulkanSceneRenderTargets::Release() {
     m_HdrSceneColorImages.clear();
+    m_TemporalResolvedColorImages.clear();
     m_TemporalUpscaleOutputImages.clear();
     m_DlssBiasCurrentColorMaskImages.clear();
     m_DlssTransparencyMaskImages.clear();
@@ -1091,7 +1161,8 @@ void VulkanSceneRenderTargets::CreateImageArray(
     VkFormat format,
     VkImageUsageFlags usage,
     VkImageAspectFlags aspectFlags,
-    std::vector<std::unique_ptr<VulkanImage>>& images
+    std::vector<std::unique_ptr<VulkanImage>>& images,
+    const char* debugNamePrefix
 ) const {
     images.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -1105,6 +1176,12 @@ void VulkanSceneRenderTargets::CreateImageArray(
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             aspectFlags
         ));
+        NameImageForCapture(
+            device.Handle(),
+            *images.back(),
+            debugNamePrefix,
+            index
+        );
     }
 }
 
@@ -1116,7 +1193,8 @@ void VulkanSceneRenderTargets::CreateImageArrayForExtent(
     VkFormat format,
     VkImageUsageFlags usage,
     VkImageAspectFlags aspectFlags,
-    std::vector<std::unique_ptr<VulkanImage>>& images
+    std::vector<std::unique_ptr<VulkanImage>>& images,
+    const char* debugNamePrefix
 ) const {
     images.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -1130,6 +1208,12 @@ void VulkanSceneRenderTargets::CreateImageArrayForExtent(
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             aspectFlags
         ));
+        NameImageForCapture(
+            device.Handle(),
+            *images.back(),
+            debugNamePrefix,
+            index
+        );
     }
 }
 
@@ -1423,9 +1507,10 @@ void VulkanColorGradingLut::CreateNeutralLut(
 VulkanHdrFramebuffer::VulkanHdrFramebuffer(
     const VulkanDevice& device,
     const VulkanHdrRenderPass& renderPass,
-    const VulkanSceneRenderTargets& renderTargets
+    const VulkanSceneRenderTargets& renderTargets,
+    bool useTemporalResolvedColor
 ) : m_Device(device.Handle()) {
-    CreateFramebuffers(device, renderPass, renderTargets);
+    CreateFramebuffers(device, renderPass, renderTargets, useTemporalResolvedColor);
 }
 
 VulkanHdrFramebuffer::~VulkanHdrFramebuffer() {
@@ -1448,24 +1533,29 @@ std::size_t VulkanHdrFramebuffer::Count() const {
 void VulkanHdrFramebuffer::Recreate(
     const VulkanDevice& device,
     const VulkanHdrRenderPass& renderPass,
-    const VulkanSceneRenderTargets& renderTargets
+    const VulkanSceneRenderTargets& renderTargets,
+    bool useTemporalResolvedColor
 ) {
     Release();
     m_Device = device.Handle();
-    CreateFramebuffers(device, renderPass, renderTargets);
+    CreateFramebuffers(device, renderPass, renderTargets, useTemporalResolvedColor);
 }
 
 void VulkanHdrFramebuffer::CreateFramebuffers(
     const VulkanDevice& device,
     const VulkanHdrRenderPass& renderPass,
-    const VulkanSceneRenderTargets& renderTargets
+    const VulkanSceneRenderTargets& renderTargets,
+    bool useTemporalResolvedColor
 ) {
     m_Extent = renderTargets.Extent();
     m_Framebuffers.resize(renderTargets.Count());
 
     for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        const VkImageView colorAttachment = useTemporalResolvedColor
+            ? renderTargets.TemporalResolvedColorView(index)
+            : renderTargets.HdrSceneColorView(index);
         const std::array<VkImageView, 2> attachments = {
-            renderTargets.HdrSceneColorView(index),
+            colorAttachment,
             renderTargets.SceneDepthView(index)
         };
 

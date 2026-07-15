@@ -130,6 +130,11 @@ void VulkanReflectionProbeFallbackFeature::WriteStats(
         std::clamp(settings.reflectionProbeSpecularIntensity, 0.0f, 4.0f);
     reflectionProbe.horizonBlend =
         std::clamp(settings.reflectionProbeHorizonBlend, 0.0f, 1.0f);
+    reflectionProbe.globalIblCubemapSamplingEnabled =
+        settings.reflectionProbeFallbackEnabled &&
+            settings.globalIblCubemapEnabled
+            ? 1u
+            : 0u;
     reflectionProbe.localEnabled =
         settings.reflectionProbeFallbackEnabled &&
             settings.localReflectionProbeEnabled

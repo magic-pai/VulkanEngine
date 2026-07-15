@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <string_view>
 #include <utility>
 
 namespace se {
@@ -48,6 +49,18 @@ void WriteGpuValue(std::ofstream& csv, bool available, f32 value) {
     if (available) {
         csv << value;
     }
+}
+
+void WriteCsvString(std::ofstream& csv, std::string_view value) {
+    csv << '"';
+    for (const char ch : value) {
+        if (ch == '"') {
+            csv << "\"\"";
+        } else {
+            csv << ch;
+        }
+    }
+    csv << '"';
 }
 
 struct SkinnedVertexAttributeDiagnostics {
@@ -321,6 +334,27 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportMaxBoneAttributeInfluencesPerVertex << ','
         << sceneDiagnostics.runtimeImportBoneInfluenceOverflowCount << ','
         << sceneDiagnostics.runtimeImportSkinnedVertexAttributeReady << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationSpaceReady << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationSpaceBlockerMask << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationRenderableBound << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationSupportReady << ','
+        << sceneDiagnostics.runtimeImportSkinnedAnimationSupportBlockerMask << ','
+        << sceneDiagnostics.runtimeImportAnimationDiagnosticPoseOnly << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackReady << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackCandidateModelCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackReadyModelCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackFrameCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackLoopWrapCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackPreviousPoseCollapsedCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackChangedBonePaletteEntryCount << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackRendererPaletteReady << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackGpuUploadReady << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackBlockerMask << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackClockMode << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackPreviousTimeTicks << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackCurrentTimeTicks << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackPreviousAbsoluteSeconds << ','
+        << sceneDiagnostics.runtimeImportAnimationPlaybackCurrentAbsoluteSeconds << ','
         << skinnedVertexAttributes.strideBytes << ','
         << skinnedVertexAttributes.boneIndicesLocation << ','
         << skinnedVertexAttributes.boneWeightsLocation << ','
@@ -328,6 +362,13 @@ void BenchmarkRecorder::RecordFrame(
         << skinnedVertexAttributes.boneWeightsOffset << ','
         << skinnedVertexAttributes.pathReady << ','
         << sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported << ','
+        << sceneDiagnostics.benchmarkCameraMotionTimeSeconds << ','
+        << sceneDiagnostics.benchmarkObjectMotionTimeSeconds << ','
+        << stats.renderDebug.forwardView << ','
+        << stats.renderDebug.deferredPbrDebugView << ','
+        << stats.renderDebug.usesDeferredHdrComposite << ','
+        << stats.renderDebug.temporalReconstructionBypassed << ','
+        << stats.renderDebug.lightingEnergyViewEnabled << ','
         << cpu.totalFrameMs << ','
         << cpu.waitAcquireMs << ','
         << cpu.imguiMs << ','
@@ -389,6 +430,8 @@ void BenchmarkRecorder::RecordFrame(
         << draw.mainInstancedInstances << ','
         << draw.mainInstanceBatchCacheHits << ','
         << draw.mainInstanceBatchCacheMisses << ','
+        << draw.mainSkinnedConservativeBounds << ','
+        << draw.shadowSkinnedConservativeBounds << ','
         << draw.mainVisible << ','
         << draw.mainCulled << ','
         << draw.overlayVisible << ','
@@ -403,6 +446,7 @@ void BenchmarkRecorder::RecordFrame(
         << shadowCascades.splitLambda << ','
         << shadowCascades.blendRatio << ','
         << shadowCascades.fadeRatio << ','
+        << shadowCascades.receiverGuardRatio << ','
         << shadowCascades.contactShadowStrength << ','
         << shadowCascades.contactShadowLength << ','
         << shadowCascades.contactShadowThickness << ','
@@ -420,6 +464,17 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.rayLength << ','
         << ssr.thickness << ','
         << ssr.stepCount << ','
+        << ibl.quality << ','
+        << ibl.requestedSource << ','
+        << ibl.actualSource << ','
+        << ibl.sourceFallbackReason << ','
+        << ibl.cachePolicy << ','
+        << ibl.cacheFallbackReason << ','
+        << ibl.cacheHit << ','
+        << ibl.runtimeGenerated << ','
+        << ibl.sourceAssetSpecified << ','
+        << ibl.sourceAssetFound << ','
+        << ibl.sourceSignature << ','
         << ibl.brdfLutAllocated << ','
         << ibl.brdfLutSize << ','
         << static_cast<int>(ibl.brdfLutFormat) << ','
@@ -478,10 +533,21 @@ void BenchmarkRecorder::RecordFrame(
         << bonePaletteDraw.shaderConsumerReadyCommandCount << ','
         << bonePaletteDraw.shaderConsumerFallbackDescriptorReady << ','
         << bonePaletteDraw.shaderConsumerPathReady << ','
+        << bonePaletteDraw.shaderSkinningCommandCount << ','
+        << bonePaletteDraw.shaderSkinningReadyCommandCount << ','
+        << bonePaletteDraw.shaderSkinningCurrentPaletteOffset << ','
+        << bonePaletteDraw.shaderSkinningCurrentEntryCount << ','
+        << bonePaletteDraw.shaderSkinningPathReady << ','
+        << bonePaletteDraw.shaderVelocityCommandCount << ','
+        << bonePaletteDraw.shaderVelocityReadyCommandCount << ','
+        << bonePaletteDraw.shaderVelocityPreviousPaletteOffset << ','
+        << bonePaletteDraw.shaderVelocityPreviousEntryCount << ','
+        << bonePaletteDraw.shaderVelocityPathReady << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
         << reflectionProbe.horizonBlend << ','
+        << reflectionProbe.globalIblCubemapSamplingEnabled << ','
         << reflectionProbe.sceneProbeCount << ','
         << reflectionProbe.activeProbeCount << ','
         << reflectionProbe.sceneEligibleProbeCount << ','
@@ -505,6 +571,42 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedScenePlaceholderReadyCount << ','
         << reflectionProbe.capturedSceneInvalidatedCount << ','
         << reflectionProbe.capturedSceneRefreshRequestedCount << ','
+        << reflectionProbe.capturedSceneCaptureBackend << ','
+        << reflectionProbe.capturedSceneFaceCount << ','
+        << reflectionProbe.capturedSceneFacesRendered << ','
+        << reflectionProbe.capturedSceneFacesPending << ','
+        << reflectionProbe.capturedSceneCapturePassCount << ','
+        << reflectionProbe.capturedSceneCaptureDrawCount << ','
+        << reflectionProbe.capturedSceneCaptureVisibleCount << ','
+        << reflectionProbe.capturedSceneCaptureCulledCount << ','
+        << reflectionProbe.capturedSceneMipGenerationCount << ','
+        << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
+        << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
+        << reflectionProbe.capturedSceneLastCapturedFace << ','
+        << reflectionProbe.capturedSceneRasterizedGeometry << ','
+        << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
+        << reflectionProbe.capturedSceneGpuCaptureInProgress << ','
+        << reflectionProbe.capturedSceneMipChainReady << ','
+        << reflectionProbe.capturedSceneGgxPrefilterReady << ','
+        << reflectionProbe.capturedSceneProbeSceneIndex << ','
+        << reflectionProbe.selectedCapturedSceneMapMatchesActiveMask << ','
+        << reflectionProbe.selectedCapturedSceneDuplicateActiveViewMask << ','
+        << reflectionProbe.capturedSceneProbeResourceCount << ','
+        << reflectionProbe.capturedSceneReadyProbeCount << ','
+        << reflectionProbe.capturedSceneInFlightProbeCount << ','
+        << reflectionProbe.capturedSceneDistinctActiveViewCount << ','
+        << reflectionProbe.capturedSceneUploadCount << ','
+        << reflectionProbe.capturedSceneRefreshCheckCount << ','
+        << reflectionProbe.capturedSceneRefreshPerformed << ','
+        << reflectionProbe.capturedSceneRefreshReason << ','
+        << reflectionProbe.capturedSceneLastRefreshReason << ','
+        << reflectionProbe.capturedSceneDirtyMask << ','
+        << reflectionProbe.capturedSceneActiveSignature << ','
+        << reflectionProbe.capturedSceneRequestedSignature << ','
+        << reflectionProbe.capturedSceneRadianceSignature << ','
+        << reflectionProbe.capturedSceneMembershipRevision << ','
+        << reflectionProbe.capturedSceneLightRevision << ','
+        << reflectionProbe.capturedSceneRenderRevision << ','
         << reflectionProbe.forcedRefreshRequested << ','
         << reflectionProbe.sceneDirtyRequested << ','
         << reflectionProbe.authoredCubemapLoadedCount << ','
@@ -569,6 +671,10 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedCapturedSceneInvalidated[1] << ','
         << reflectionProbe.selectedCapturedSceneInvalidated[2] << ','
         << reflectionProbe.selectedCapturedSceneInvalidated[3] << ','
+        << reflectionProbe.selectedCaptureMipCounts[0] << ','
+        << reflectionProbe.selectedCaptureMipCounts[1] << ','
+        << reflectionProbe.selectedCaptureMipCounts[2] << ','
+        << reflectionProbe.selectedCaptureMipCounts[3] << ','
         << reflectionProbe.selectedProbeIndex << ','
         << reflectionProbe.droppedProbeCount << ','
         << reflectionProbe.maxBlendWeight << ','
@@ -678,8 +784,10 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.shadowableLocalLights << ','
         << localShadowAtlas.pointLightCount << ','
         << localShadowAtlas.spotLightCount << ','
+        << localShadowAtlas.rectLightCount << ','
         << localShadowAtlas.pointFaceTiles << ','
         << localShadowAtlas.spotTiles << ','
+        << localShadowAtlas.rectTiles << ','
         << localShadowAtlas.requestedTiles << ','
         << localShadowAtlas.assignedTiles << ','
         << localShadowAtlas.droppedTiles << ','
@@ -690,12 +798,64 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.cacheHitTiles << ','
         << localShadowAtlas.cacheMissTiles << ','
         << localShadowAtlas.cacheSkippedTiles << ','
+        << localShadowAtlas.cacheColdTiles << ','
+        << localShadowAtlas.cacheTileLayoutChangedTiles << ','
+        << localShadowAtlas.cacheLightChangedTiles << ','
+        << localShadowAtlas.cacheCasterChangedTiles << ','
+        << localShadowAtlas.cacheDynamicSkinnedCasterTiles << ',';
+    WriteCsvString(m_Csv, localShadowAtlas.cacheReasonSummary);
+    m_Csv << ','
         << localShadowAtlas.biasMin << ','
         << localShadowAtlas.biasSlope << ','
         << localShadowAtlas.pcfRadius << ','
         << localShadowAtlas.pcfKernelRadius << ','
         << localShadowAtlas.pcssStrength << ','
         << localShadowAtlas.faceBlendStrength << ','
+        << localShadowAtlas.rectBiasScale << ','
+        << localShadowAtlas.pointBiasMin << ','
+        << localShadowAtlas.pointBiasSlope << ','
+        << localShadowAtlas.pointPcfRadius << ','
+        << localShadowAtlas.pointPcfKernelRadius << ','
+        << localShadowAtlas.pointPcssStrength << ','
+        << localShadowAtlas.spotBiasMin << ','
+        << localShadowAtlas.spotBiasSlope << ','
+        << localShadowAtlas.spotPcfRadius << ','
+        << localShadowAtlas.spotPcfKernelRadius << ','
+        << localShadowAtlas.spotPcssStrength << ','
+        << localShadowAtlas.rectBiasMin << ','
+        << localShadowAtlas.rectBiasSlope << ','
+        << localShadowAtlas.rectPcfRadius << ','
+        << localShadowAtlas.rectPcfKernelRadius << ','
+        << localShadowAtlas.rectPcssStrength << ','
+        << localShadowAtlas.rectShadowBaseSampleTiles << ','
+        << localShadowAtlas.rectShadowMaxSampleTiles << ','
+        << localShadowAtlas.rectShadowSamplePattern << ','
+        << localShadowAtlas.rectShadowExtraSampleTiles << ','
+        << localShadowAtlas.rectShadowBudgetLimitedSampleTiles << ','
+        << localShadowAtlas.pointShadowEnabled << ','
+        << localShadowAtlas.spotShadowEnabled << ','
+        << localShadowAtlas.rectShadowEnabled << ','
+        << localShadowAtlas.debugLightIndex << ','
+        << localShadowAtlas.attributionLightIndex << ','
+        << localShadowAtlas.attributionLightValid << ','
+        << localShadowAtlas.attributionLightKind << ','
+        << localShadowAtlas.attributionExpectedTiles << ','
+        << localShadowAtlas.attributionRequestedTiles << ','
+        << localShadowAtlas.attributionAssignedTiles << ','
+        << localShadowAtlas.attributionDroppedTiles << ','
+        << localShadowAtlas.attributionCacheHitTiles << ','
+        << localShadowAtlas.attributionCacheMissTiles << ','
+        << localShadowAtlas.attributionRecordedTilePasses << ','
+        << localShadowAtlas.attributionRecordedDraws << ','
+        << localShadowAtlas.attributionCandidateDraws << ','
+        << localShadowAtlas.attributionUniqueCasters << ','
+        << localShadowAtlas.attributionCasterSignature << ',';
+    WriteCsvString(m_Csv, localShadowAtlas.attributionTileCandidateDraws);
+    m_Csv << ',';
+    WriteCsvString(m_Csv, localShadowAtlas.attributionCasterSummary);
+    m_Csv << ','
+        << localShadowAtlas.attributionShadowEnabled << ','
+        << localShadowAtlas.attributionMatchesGenerationFilter << ','
         << weightedTranslucency.allocated << ','
         << weightedTranslucency.accumWidth << ','
         << weightedTranslucency.accumHeight << ','
@@ -710,6 +870,7 @@ void BenchmarkRecorder::RecordFrame(
         << weightedTranslucency.sharedLightListDraws << ','
         << weightedTranslucency.shadowReadyDraws << ','
         << weightedTranslucency.resolveDraws << ','
+        << temporal.antialiasingMode << ','
         << temporal.velocityTargetAllocated << ','
         << static_cast<int>(temporal.velocityFormat) << ','
         << temporal.velocityCameraMotionEnabled << ','
@@ -728,6 +889,12 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.jitterPixelsY << ','
         << temporal.jitterUvX << ','
         << temporal.jitterUvY << ','
+        << temporal.velocityJitteredHistoryPolicy << ','
+        << temporal.velocityPreviousJitterApplied << ','
+        << temporal.previousJitterPixelsX << ','
+        << temporal.previousJitterPixelsY << ','
+        << temporal.previousJitterUvX << ','
+        << temporal.previousJitterUvY << ','
         << temporal.taaResolveEnabled << ','
         << temporal.taaResolveConfigured << ','
         << temporal.taaResolveSuppressedForUpscaler << ','
@@ -831,6 +998,13 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerDeviceExtensionRequirements << ','
         << temporal.temporalUpscalerDeviceExtensionMissingAvailable << ','
         << temporal.temporalUpscalerDeviceExtensionMissingEnabled << ','
+        << temporal.temporalUpscalerRuntimeFlavor << ','
+        << temporal.temporalUpscalerRuntimePathOverridden << ','
+        << temporal.temporalUpscalerRuntimePathFound << ','
+        << temporal.temporalUpscalerRuntimePath << ','
+        << temporal.temporalUpscalerRuntimeDllFound << ','
+        << temporal.temporalUpscalerRuntimeDllSizeBytes << ','
+        << temporal.temporalUpscalerRuntimeDllHash << ','
         << temporal.temporalUpscalerDlssSuperResolutionSupported << ','
         << temporal.temporalUpscalerNeedsUpdatedDriver << ','
         << temporal.temporalUpscalerMinDriverVersionMajor << ','
@@ -865,6 +1039,27 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerDlssOutputWidth << ','
         << temporal.temporalUpscalerDlssOutputHeight << ','
         << temporal.temporalUpscalerDlssCreateFlags << ','
+        << temporal.temporalUpscalerDlssCreateFlagIsHdr << ','
+        << temporal.temporalUpscalerDlssCreateFlagMvLowRes << ','
+        << temporal.temporalUpscalerDlssCreateFlagMvJittered << ','
+        << temporal.temporalUpscalerDlssCreateFlagDepthInverted << ','
+        << temporal.temporalUpscalerDlssCreateFlagAutoExposure << ','
+        << temporal.temporalUpscalerDlssInputColorFormat << ','
+        << temporal.temporalUpscalerDlssInputDepthFormat << ','
+        << temporal.temporalUpscalerDlssInputMotionVectorFormat << ','
+        << temporal.temporalUpscalerDlssInputColorWidth << ','
+        << temporal.temporalUpscalerDlssInputColorHeight << ','
+        << temporal.temporalUpscalerDlssInputDepthWidth << ','
+        << temporal.temporalUpscalerDlssInputDepthHeight << ','
+        << temporal.temporalUpscalerDlssInputMotionVectorWidth << ','
+        << temporal.temporalUpscalerDlssInputMotionVectorHeight << ','
+        << temporal.temporalUpscalerDlssInputDepthAspectMask << ','
+        << temporal.temporalUpscalerDlssInputMotionVectorAspectMask << ','
+        << temporal.temporalUpscalerDlssInputDepthMatchesRenderExtent << ','
+        << temporal.temporalUpscalerDlssInputMotionVectorMatchesRenderExtent << ','
+        << temporal.temporalUpscalerDlssMotionVectorScalePixelSpace << ','
+        << temporal.temporalUpscalerDlssMotionVectorScaleUnitSpace << ','
+        << temporal.temporalUpscalerDlssMotionVectorScaleMatchesRenderExtent << ','
         << temporal.temporalUpscalerDlssReset << ','
         << temporal.temporalUpscalerDlssJitterOffsetX << ','
         << temporal.temporalUpscalerDlssJitterOffsetY << ','
@@ -880,6 +1075,7 @@ void BenchmarkRecorder::RecordFrame(
         << temporal.temporalUpscalerDlssQualityEvaluateOutputReady << ','
         << temporal.temporalUpscalerDlssQualityCameraMotionReady << ','
         << temporal.temporalUpscalerDlssQualityObjectMotionReady << ','
+        << temporal.temporalUpscalerDlssQualitySceneContentMotionSupported << ','
         << temporal.temporalUpscalerDlssQualityReactiveMaskReady << ','
         << temporal.temporalUpscalerDlssQualityTransparencyMaskReady << ','
         << temporal.temporalUpscalerDlssQualityExposurePolicyReady << ','
@@ -1064,6 +1260,7 @@ void BenchmarkRecorder::RecordFrame(
         << binds.frameMaterialVolumeCount << ','
         << binds.frameMaterialOpacityTextureCount << ','
         << binds.frameMaterialTexturedCount << ','
+        << binds.frameMaterialTextureMipLodBias << ','
         << binds.mainInstanceBufferUploads << ','
         << binds.mainInstanceBufferUploadSkips << ','
         << binds.pushConstantUpdates << ','
@@ -1189,6 +1386,27 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_max_bone_attribute_influences_per_vertex,"
         << "runtime_import_bone_influence_overflow_count,"
         << "runtime_import_skinned_vertex_attribute_ready,"
+        << "runtime_import_skinned_animation_space_ready,"
+        << "runtime_import_skinned_animation_space_blocker_mask,"
+        << "runtime_import_skinned_animation_renderable_bound,"
+        << "runtime_import_skinned_animation_support_ready,"
+        << "runtime_import_skinned_animation_support_blocker_mask,"
+        << "runtime_import_animation_diagnostic_pose_only,"
+        << "runtime_import_animation_playback_ready,"
+        << "runtime_import_animation_playback_candidate_model_count,"
+        << "runtime_import_animation_playback_ready_model_count,"
+        << "runtime_import_animation_playback_frame_count,"
+        << "runtime_import_animation_playback_loop_wrap_count,"
+        << "runtime_import_animation_playback_previous_pose_collapsed_count,"
+        << "runtime_import_animation_playback_changed_bone_palette_entry_count,"
+        << "runtime_import_animation_playback_renderer_palette_ready,"
+        << "runtime_import_animation_playback_gpu_upload_ready,"
+        << "runtime_import_animation_playback_blocker_mask,"
+        << "runtime_import_animation_playback_clock_mode,"
+        << "runtime_import_animation_playback_previous_time_ticks,"
+        << "runtime_import_animation_playback_current_time_ticks,"
+        << "runtime_import_animation_playback_previous_absolute_seconds,"
+        << "runtime_import_animation_playback_current_absolute_seconds,"
         << "renderer_skinned_vertex_attribute_stride_bytes,"
         << "renderer_skinned_vertex_attribute_bone_indices_location,"
         << "renderer_skinned_vertex_attribute_bone_weights_location,"
@@ -1196,6 +1414,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "renderer_skinned_vertex_attribute_bone_weights_offset,"
         << "renderer_skinned_vertex_attribute_path_ready,"
         << "runtime_import_skinned_animation_unsupported,"
+        << "benchmark_camera_motion_time_seconds,"
+        << "benchmark_object_motion_time_seconds,"
+        << "render_debug_forward_view,render_debug_deferred_pbr_view,"
+        << "render_debug_uses_deferred_hdr_composite,"
+        << "render_debug_temporal_reconstruction_bypassed,"
+        << "render_debug_lighting_energy_view_enabled,"
         << "cpu_total_ms,cpu_wait_acquire_ms,cpu_imgui_ms,cpu_picking_ms,"
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"
         << "gpu_available,gpu_total_recorded_ms,gpu_shadow_ms,gpu_main_ms,gpu_overlay_ms,gpu_imgui_ms,"
@@ -1222,17 +1446,24 @@ void BenchmarkRecorder::WriteHeader() {
         << "overlay_queue_cache_hits,overlay_queue_cache_misses,"
         << "main_instanced_draws,main_instanced_instances,"
         << "main_instance_batch_cache_hits,main_instance_batch_cache_misses,"
+        << "main_skinned_conservative_bounds,shadow_skinned_conservative_bounds,"
         << "main_visible,main_culled,overlay_visible,overlay_culled,shadow_visible,shadow_culled,"
         << "shadow_cascade_configured_count,shadow_cascade_active_count,"
         << "shadow_cascade_stable_snapping,shadow_pcf_kernel_radius,shadow_pcss_strength,"
         << "shadow_cascade_split_lambda,"
         << "shadow_cascade_blend_ratio,shadow_cascade_fade_ratio,"
+        << "shadow_cascade_receiver_guard,"
         << "shadow_contact_strength,shadow_contact_length,"
         << "shadow_contact_thickness,shadow_contact_steps,"
         << "shadow_contact_jitter_strength,shadow_contact_edge_fade_pixels,"
         << "ssao_enabled,ssao_strength,ssao_radius,ssao_bias,ssao_sample_count,"
         << "ssr_enabled,ssr_color_resolve_enabled,ssr_strength,"
         << "ssr_ray_length,ssr_thickness,ssr_step_count,"
+        << "ibl_quality,ibl_requested_source,ibl_actual_source,"
+        << "ibl_source_fallback_reason,ibl_cache_policy,"
+        << "ibl_cache_fallback_reason,ibl_cache_hit,ibl_runtime_generated,"
+        << "ibl_source_asset_specified,ibl_source_asset_found,"
+        << "ibl_source_signature,"
         << "ibl_brdf_lut_allocated,ibl_brdf_lut_size,ibl_brdf_lut_format,"
         << "ibl_irradiance_map_allocated,ibl_irradiance_face_size,"
         << "ibl_irradiance_format,ibl_prefiltered_map_allocated,"
@@ -1267,8 +1498,19 @@ void BenchmarkRecorder::WriteHeader() {
         << "bone_palette_shader_consumer_ready_command_count,"
         << "bone_palette_shader_consumer_fallback_descriptor_ready,"
         << "bone_palette_shader_consumer_path_ready,"
+        << "bone_palette_shader_skinning_command_count,"
+        << "bone_palette_shader_skinning_ready_command_count,"
+        << "bone_palette_shader_skinning_current_palette_offset,"
+        << "bone_palette_shader_skinning_current_entry_count,"
+        << "bone_palette_shader_skinning_path_ready,"
+        << "bone_palette_shader_velocity_command_count,"
+        << "bone_palette_shader_velocity_ready_command_count,"
+        << "bone_palette_shader_velocity_previous_palette_offset,"
+        << "bone_palette_shader_velocity_previous_entry_count,"
+        << "bone_palette_shader_velocity_path_ready,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
+        << "reflection_probe_global_ibl_cubemap_sampling_enabled,"
         << "reflection_probe_scene_probe_count,reflection_probe_active_probe_count,"
         << "reflection_probe_scene_eligible_probe_count,"
         << "reflection_probe_selected_probe_count,"
@@ -1291,6 +1533,42 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_placeholder_ready_count,"
         << "reflection_probe_captured_scene_invalidated_count,"
         << "reflection_probe_captured_scene_refresh_requested_count,"
+        << "reflection_probe_captured_scene_capture_backend,"
+        << "reflection_probe_captured_scene_face_count,"
+        << "reflection_probe_captured_scene_faces_rendered,"
+        << "reflection_probe_captured_scene_faces_pending,"
+        << "reflection_probe_captured_scene_capture_pass_count,"
+        << "reflection_probe_captured_scene_capture_draw_count,"
+        << "reflection_probe_captured_scene_capture_visible_count,"
+        << "reflection_probe_captured_scene_capture_culled_count,"
+        << "reflection_probe_captured_scene_mip_generation_count,"
+        << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
+        << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
+        << "reflection_probe_captured_scene_last_captured_face,"
+        << "reflection_probe_captured_scene_rasterized_geometry,"
+        << "reflection_probe_captured_scene_gpu_resources_allocated,"
+        << "reflection_probe_captured_scene_gpu_capture_in_progress,"
+        << "reflection_probe_captured_scene_mip_chain_ready,"
+        << "reflection_probe_captured_scene_ggx_prefilter_ready,"
+        << "reflection_probe_captured_scene_probe_scene_index,"
+        << "reflection_probe_selected_captured_scene_map_matches_active_mask,"
+        << "reflection_probe_selected_captured_scene_duplicate_active_view_mask,"
+        << "reflection_probe_captured_scene_probe_resource_count,"
+        << "reflection_probe_captured_scene_ready_probe_count,"
+        << "reflection_probe_captured_scene_in_flight_probe_count,"
+        << "reflection_probe_captured_scene_distinct_active_view_count,"
+        << "reflection_probe_captured_scene_upload_count,"
+        << "reflection_probe_captured_scene_refresh_check_count,"
+        << "reflection_probe_captured_scene_refresh_performed,"
+        << "reflection_probe_captured_scene_refresh_reason,"
+        << "reflection_probe_captured_scene_last_refresh_reason,"
+        << "reflection_probe_captured_scene_dirty_mask,"
+        << "reflection_probe_captured_scene_active_signature,"
+        << "reflection_probe_captured_scene_requested_signature,"
+        << "reflection_probe_captured_scene_radiance_signature,"
+        << "reflection_probe_captured_scene_membership_revision,"
+        << "reflection_probe_captured_scene_light_revision,"
+        << "reflection_probe_captured_scene_render_revision,"
         << "reflection_probe_forced_refresh_requested,"
         << "reflection_probe_scene_dirty_requested,"
         << "reflection_probe_authored_cubemap_loaded_count,"
@@ -1355,6 +1633,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_selected_captured_scene_invalidated_1,"
         << "reflection_probe_selected_captured_scene_invalidated_2,"
         << "reflection_probe_selected_captured_scene_invalidated_3,"
+        << "reflection_probe_selected_capture_mip_count_0,"
+        << "reflection_probe_selected_capture_mip_count_1,"
+        << "reflection_probe_selected_capture_mip_count_2,"
+        << "reflection_probe_selected_capture_mip_count_3,"
         << "reflection_probe_selected_probe_index,"
         << "reflection_probe_dropped_probe_count,"
         << "reflection_probe_max_blend_weight,"
@@ -1422,15 +1704,56 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_atlas_tile_columns,local_shadow_atlas_tile_rows,"
         << "local_shadow_atlas_capacity,local_shadow_shadowable_light_count,"
         << "local_shadow_point_light_count,local_shadow_spot_light_count,"
-        << "local_shadow_point_face_tiles,local_shadow_spot_tiles,"
+        << "local_shadow_rect_light_count,local_shadow_point_face_tiles,"
+        << "local_shadow_spot_tiles,local_shadow_rect_tiles,"
         << "local_shadow_requested_tiles,local_shadow_assigned_tiles,"
         << "local_shadow_dropped_tiles,local_shadow_recorded_tile_passes,"
         << "local_shadow_recorded_draws,local_shadow_recorded_mesh_binds,"
         << "local_shadow_cache_eligible_tiles,local_shadow_cache_hit_tiles,"
         << "local_shadow_cache_miss_tiles,local_shadow_cache_skipped_tiles,"
+        << "local_shadow_cache_cold_tiles,"
+        << "local_shadow_cache_tile_layout_changed_tiles,"
+        << "local_shadow_cache_light_changed_tiles,"
+        << "local_shadow_cache_caster_changed_tiles,"
+        << "local_shadow_cache_dynamic_skinned_caster_tiles,"
+        << "local_shadow_cache_reason_summary,"
         << "local_shadow_bias_min,local_shadow_bias_slope,"
         << "local_shadow_pcf_radius,local_shadow_pcf_kernel_radius,"
         << "local_shadow_pcss_strength,local_shadow_face_blend_strength,"
+        << "local_shadow_rect_bias_scale,"
+        << "local_shadow_point_bias_min,local_shadow_point_bias_slope,"
+        << "local_shadow_point_pcf_radius,local_shadow_point_pcf_kernel_radius,"
+        << "local_shadow_point_pcss_strength,"
+        << "local_shadow_spot_bias_min,local_shadow_spot_bias_slope,"
+        << "local_shadow_spot_pcf_radius,local_shadow_spot_pcf_kernel_radius,"
+        << "local_shadow_spot_pcss_strength,"
+        << "local_shadow_rect_bias_min,local_shadow_rect_bias_slope,"
+        << "local_shadow_rect_pcf_radius,local_shadow_rect_pcf_kernel_radius,"
+        << "local_shadow_rect_pcss_strength,"
+        << "local_shadow_rect_base_sample_tiles,"
+        << "local_shadow_rect_max_sample_tiles,"
+        << "local_shadow_rect_sample_pattern,"
+        << "local_shadow_rect_extra_sample_tiles,"
+        << "local_shadow_rect_budget_limited_sample_tiles,"
+        << "local_shadow_point_enabled,local_shadow_spot_enabled,"
+        << "local_shadow_rect_enabled,local_shadow_debug_light_index,"
+        << "local_shadow_attribution_light_index,local_shadow_attribution_light_valid,"
+        << "local_shadow_attribution_light_kind,"
+        << "local_shadow_attribution_expected_tiles,"
+        << "local_shadow_attribution_requested_tiles,"
+        << "local_shadow_attribution_assigned_tiles,"
+        << "local_shadow_attribution_dropped_tiles,"
+        << "local_shadow_attribution_cache_hit_tiles,"
+        << "local_shadow_attribution_cache_miss_tiles,"
+        << "local_shadow_attribution_recorded_tile_passes,"
+        << "local_shadow_attribution_recorded_draws,"
+        << "local_shadow_attribution_candidate_draws,"
+        << "local_shadow_attribution_unique_casters,"
+        << "local_shadow_attribution_caster_signature,"
+        << "local_shadow_attribution_tile_candidate_draws,"
+        << "local_shadow_attribution_caster_summary,"
+        << "local_shadow_attribution_shadow_enabled,"
+        << "local_shadow_attribution_matches_generation_filter,"
         << "weighted_translucency_allocated,"
         << "weighted_translucency_accum_width,weighted_translucency_accum_height,"
         << "weighted_translucency_revealage_width,weighted_translucency_revealage_height,"
@@ -1439,6 +1762,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "weighted_translucency_framebuffer_count,weighted_translucency_clear_passes,"
         << "weighted_translucency_draws,weighted_translucency_shared_light_list_draws,"
         << "weighted_translucency_shadow_ready_draws,weighted_translucency_resolve_draws,"
+        << "temporal_antialiasing_mode,"
         << "temporal_velocity_target_allocated,temporal_velocity_format,"
         << "temporal_velocity_camera_motion_enabled,"
         << "temporal_velocity_camera_motion_ready,"
@@ -1452,6 +1776,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_jitter_sequence_index,"
         << "temporal_jitter_pixels_x,temporal_jitter_pixels_y,"
         << "temporal_jitter_uv_x,temporal_jitter_uv_y,"
+        << "temporal_velocity_jittered_history_policy,"
+        << "temporal_velocity_previous_jitter_applied,"
+        << "temporal_previous_jitter_pixels_x,temporal_previous_jitter_pixels_y,"
+        << "temporal_previous_jitter_uv_x,temporal_previous_jitter_uv_y,"
         << "temporal_taa_resolve_enabled,"
         << "temporal_taa_resolve_configured,"
         << "temporal_taa_resolve_suppressed_for_upscaler,"
@@ -1555,6 +1883,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_device_extension_requirements,"
         << "temporal_upscaler_device_extension_missing_available,"
         << "temporal_upscaler_device_extension_missing_enabled,"
+        << "temporal_upscaler_runtime_flavor,"
+        << "temporal_upscaler_runtime_path_overridden,"
+        << "temporal_upscaler_runtime_path_found,"
+        << "temporal_upscaler_runtime_path,"
+        << "temporal_upscaler_runtime_dll_found,"
+        << "temporal_upscaler_runtime_dll_size_bytes,"
+        << "temporal_upscaler_runtime_dll_hash,"
         << "temporal_upscaler_dlss_super_resolution_supported,"
         << "temporal_upscaler_needs_updated_driver,"
         << "temporal_upscaler_min_driver_version_major,"
@@ -1589,6 +1924,27 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_dlss_output_width,"
         << "temporal_upscaler_dlss_output_height,"
         << "temporal_upscaler_dlss_create_flags,"
+        << "temporal_upscaler_dlss_create_flag_is_hdr,"
+        << "temporal_upscaler_dlss_create_flag_mv_low_res,"
+        << "temporal_upscaler_dlss_create_flag_mv_jittered,"
+        << "temporal_upscaler_dlss_create_flag_depth_inverted,"
+        << "temporal_upscaler_dlss_create_flag_auto_exposure,"
+        << "temporal_upscaler_dlss_input_color_format,"
+        << "temporal_upscaler_dlss_input_depth_format,"
+        << "temporal_upscaler_dlss_input_motion_vector_format,"
+        << "temporal_upscaler_dlss_input_color_width,"
+        << "temporal_upscaler_dlss_input_color_height,"
+        << "temporal_upscaler_dlss_input_depth_width,"
+        << "temporal_upscaler_dlss_input_depth_height,"
+        << "temporal_upscaler_dlss_input_motion_vector_width,"
+        << "temporal_upscaler_dlss_input_motion_vector_height,"
+        << "temporal_upscaler_dlss_input_depth_aspect_mask,"
+        << "temporal_upscaler_dlss_input_motion_vector_aspect_mask,"
+        << "temporal_upscaler_dlss_input_depth_matches_render_extent,"
+        << "temporal_upscaler_dlss_input_motion_vector_matches_render_extent,"
+        << "temporal_upscaler_dlss_motion_vector_scale_pixel_space,"
+        << "temporal_upscaler_dlss_motion_vector_scale_unit_space,"
+        << "temporal_upscaler_dlss_motion_vector_scale_matches_render_extent,"
         << "temporal_upscaler_dlss_reset,"
         << "temporal_upscaler_dlss_jitter_offset_x,"
         << "temporal_upscaler_dlss_jitter_offset_y,"
@@ -1604,6 +1960,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "temporal_upscaler_dlss_quality_evaluate_output_ready,"
         << "temporal_upscaler_dlss_quality_camera_motion_ready,"
         << "temporal_upscaler_dlss_quality_object_motion_ready,"
+        << "temporal_upscaler_dlss_quality_scene_content_motion_supported,"
         << "temporal_upscaler_dlss_quality_reactive_mask_ready,"
         << "temporal_upscaler_dlss_quality_transparency_mask_ready,"
         << "temporal_upscaler_dlss_quality_exposure_policy_ready,"
@@ -1721,7 +2078,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "frame_material_transmission_texture_count,"
         << "frame_material_volume_count,"
         << "frame_material_opacity_texture_count,"
-        << "frame_material_textured_count,"
+        << "frame_material_textured_count,frame_material_texture_mip_lod_bias,"
         << "main_instance_buffer_uploads,main_instance_buffer_upload_skips,"
         << "push_constant_updates,push_constant_bytes\n";
 }

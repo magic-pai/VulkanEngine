@@ -37,7 +37,16 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 autoExposureControls;
     vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
     vec4 reflectionProbeDiffuseLobes[24];
+    mat4 previousView;
+    mat4 previousProj;
+    vec4 temporalJitter;
+    vec4 temporalControls;
+    vec4 temporalResolveControls;
+    vec4 temporalRejectionControls;
+    vec4 environmentControls;
+    vec4 reflectionProbeMipControls[4];
 } frame;
 
 struct LocalLightRecord {
@@ -102,6 +111,10 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
     uvec4 atlasInfo2;
     vec4 filterControls;
     vec4 softShadowControls;
+    vec4 pointFilterControls;
+    vec4 spotFilterControls;
+    vec4 rectFilterControls;
+    vec4 kindSoftShadowControls;
     LocalShadowTileRecord tiles[64];
 } localShadows;
 
@@ -123,6 +136,7 @@ layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 layout(set = 0, binding = 8) uniform samplerCube prefilteredMap;
 layout(std430, set = 0, binding = 9) readonly buffer ProbeGridData { vec4 probes[]; } probeGrid;
 layout(set = 0, binding = 11) uniform samplerCube localReflectionProbeMaps[4];
+layout(set = 0, binding = 12) uniform sampler2D visibleSkyboxTexture;
 
 layout(set = 1, binding = 0) uniform sampler2D gBufferAlbedo;
 layout(set = 1, binding = 1) uniform sampler2D gBufferNormalRoughness;
@@ -148,6 +162,23 @@ const int REFLECTION_PROBE_DIFFUSE_LOBE_COUNT = 6;
 
 float InterleavedGradientNoise(vec2 pixel) {
     return fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+}
+
+vec2 EquirectUv(vec3 direction) {
+    vec3 d = dot(direction, direction) > 0.000001
+        ? normalize(direction)
+        : vec3(1.0, 0.0, 0.0);
+    float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
+
+vec3 VisibleSkyboxTextureRadiance(vec3 direction) {
+    return max(textureLod(
+        visibleSkyboxTexture,
+        EquirectUv(direction),
+        clamp(frame.environmentControls.z, 0.0, 8.0)
+    ).rgb, vec3(0.0));
 }
 
 bool HasTextureFlag(float flags, float bit) {
@@ -210,12 +241,27 @@ vec3 FresnelSchlick(float cosTheta, vec3 f0) {
     return f0 + (1.0 - f0) * Pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
 }
 
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 f0, float roughness) {
+    return f0 + (max(vec3(1.0 - roughness), f0) - f0) *
+        Pow5(clamp(1.0 - cosTheta, 0.0, 1.0));
+}
+
 vec2 SampleEnvironmentBrdf(float roughness, float nDotV) {
     return max(texture(brdfLut, vec2(
         clamp(nDotV, 0.0, 1.0),
         clamp(roughness, 0.0, 1.0)
     )).rg, vec2(0.0));
 }
+
+float IblSpecularStability(float roughness) {
+    float r = clamp(roughness, 0.0, 1.0);
+    return mix(0.48, 1.0, smoothstep(0.18, 0.72, r));
+}
+
+struct IblAmbientResult {
+    vec3 diffuse;
+    vec3 specular;
+};
 
 vec3 DirectPbrContribution(
     vec3 baseColor,
@@ -231,9 +277,20 @@ vec3 DirectPbrContribution(
     float clearcoatRoughness,
     out vec3 specularOut
 ) {
-    vec3 halfDir = normalize(lightDir + viewDir);
     float nDotL = max(dot(normal, lightDir), 0.0);
     float nDotV = max(dot(normal, viewDir), 0.0);
+    vec3 diffuseFallback = (1.0 - metallic) * baseColor / PI;
+    if (nDotL <= 0.000001 || nDotV <= 0.000001) {
+        specularOut = vec3(0.0);
+        return diffuseFallback * radiance * nDotL;
+    }
+    vec3 halfVector = lightDir + viewDir;
+    float halfLengthSquared = dot(halfVector, halfVector);
+    if (halfLengthSquared <= 0.00000001) {
+        specularOut = vec3(0.0);
+        return diffuseFallback * radiance * nDotL;
+    }
+    vec3 halfDir = halfVector * inversesqrt(halfLengthSquared);
     vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
     vec3 f0 = mix(dielectricF0, baseColor, metallic);
     vec3 fresnel = FresnelSchlick(max(dot(halfDir, viewDir), 0.0), f0);
@@ -278,6 +335,11 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     vec3 procedural =
         (base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness)) *
         intensity;
+    float cubemapSampling = clamp(frame.reflectionProbeBlendControls.z, 0.0, 1.0);
+    if (cubemapSampling <= 0.0001) {
+        return procedural * enabled;
+    }
+
     vec3 sampleDirection = dot(direction, direction) > 0.0001
         ? normalize(direction)
         : vec3(0.0, 1.0, 0.0);
@@ -292,7 +354,7 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
         ).rgb, vec3(0.0)) *
         specularIntensity;
     vec3 sampled = mix(sampledSpecular, sampledDiffuse, smoothstep(0.45, 1.0, roughness));
-    return mix(procedural, sampled, 0.65) * enabled;
+    return mix(procedural, sampled, 0.65 * cubemapSampling) * enabled;
 }
 
 bool ProbeGridAvailable() {
@@ -583,7 +645,7 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
 
     vec3 localBlend = vec3(0.0);
     float roughnessClamped = clamp(roughness, 0.0, 1.0);
-    float glossBoost = mix(1.18, 0.88, roughnessClamped);
+    float glossBoost = IblSpecularStability(roughnessClamped);
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
         float rawWeight = weights[probeIndex];
         if (probeIndex >= probeCount || rawWeight <= 0.0001) {
@@ -603,13 +665,19 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
         vec3 sampledRadiance = globalRadiance * localTint;
         if (color.a > 0.5) {
             int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
-            sampledRadiance =
+            float localCubemapWeight = 1.0 - smoothstep(0.88, 1.0, roughnessClamped);
+            vec3 cubemapRadiance =
                 max(SampleLocalReflectionProbeMap(
                     slotIndex,
                     sampleDirection,
-                    roughnessClamped * 4.0
+                    roughnessClamped * max(
+                        frame.reflectionProbeMipControls[probeIndex].x,
+                        0.0
+                    )
                 ), vec3(0.0)) *
                 localTint;
+            sampledRadiance =
+                mix(sampledRadiance, cubemapRadiance, localCubemapWeight);
         }
         vec3 diffuseRadiance = LocalReflectionProbeDiffuseRadianceAt(
             probeIndex,
@@ -628,6 +696,43 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
     }
 
     return mix(globalRadiance, localBlend, clamp(totalWeight, 0.0, 1.0));
+}
+
+IblAmbientResult BuildIblAmbient(
+    vec3 baseColor,
+    float roughness,
+    float metallic,
+    vec3 normal,
+    vec3 viewDir,
+    vec3 lightDir,
+    vec3 worldPosition,
+    vec3 f0,
+    float occlusion,
+    float diffuseScale,
+    float specularScale,
+    vec3 specularRadiance
+) {
+    IblAmbientResult result;
+    float nDotV = max(dot(normal, viewDir), 0.0);
+    vec3 diffuseEnv = EnvironmentRadiance(normal, lightDir, 1.0, worldPosition);
+    vec3 envFresnel = FresnelSchlickRoughness(nDotV, f0, roughness);
+    vec3 envDiffuse = (vec3(1.0) - envFresnel) * (1.0 - metallic);
+    vec2 envBrdf = SampleEnvironmentBrdf(roughness, nDotV);
+    vec3 envSpecularBrdf = max(f0 * envBrdf.x + envBrdf.y, vec3(0.0));
+
+    result.diffuse =
+        envDiffuse *
+        baseColor *
+        diffuseEnv *
+        max(diffuseScale, 0.0) *
+        occlusion;
+    result.specular =
+        specularRadiance *
+        envSpecularBrdf *
+        max(specularScale, 0.0) *
+        IblSpecularStability(roughness) *
+        occlusion;
+    return result;
 }
 
 vec3 ReflectionProbeDebugColor(
@@ -665,6 +770,86 @@ vec3 ReflectionProbeDebugColor(
         vec3(0.0),
         vec3(8.0)
     );
+}
+
+vec3 ReflectionProbeContrastDebugColor(
+    vec3 normal,
+    vec3 reflection,
+    vec3 lightDir,
+    float roughness,
+    vec3 worldPosition
+) {
+    vec3 probeColor =
+        ReflectionProbeDebugColor(normal, reflection, lightDir, roughness, worldPosition);
+    float luminance = dot(probeColor, vec3(0.2126, 0.7152, 0.0722));
+    float darkSignal = 1.0 - smoothstep(0.34, 0.92, luminance);
+    float localChange = clamp(
+        (abs(dFdx(luminance)) + abs(dFdy(luminance))) * 56.0,
+        0.0,
+        1.0
+    );
+    float signal = clamp(max(darkSignal, localChange), 0.0, 1.0);
+    return mix(vec3(1.0), vec3(0.0), signal);
+}
+
+vec3 AmbientComponentDebugColor(vec3 component, float gain) {
+    vec3 amplified = clamp(max(component, vec3(0.0)) * gain, vec3(0.0), vec3(1.0));
+    return pow(amplified, vec3(0.42));
+}
+
+float DebugLuminance(vec3 color) {
+    return max(dot(max(color, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722)), 0.0);
+}
+
+vec3 LightingEnergyBalanceDebugColor(
+    vec3 directDiffuse,
+    vec3 directSpecular,
+    vec3 ambientDiffuse,
+    vec3 ambientSpecular,
+    vec3 ambientProbe,
+    vec3 emissiveColor,
+    float shadowVisibility,
+    float localShadowVisibility,
+    float ssaoVisibility
+) {
+    float directDiffuseEnergy = DebugLuminance(directDiffuse);
+    float directSpecularEnergy = DebugLuminance(directSpecular) * 1.18;
+    float ambientDiffuseEnergy = DebugLuminance(ambientDiffuse);
+    float ambientSpecularEnergy = DebugLuminance(ambientSpecular) * 1.22;
+    float ambientProbeEnergy = DebugLuminance(ambientProbe) * 1.12;
+    float emissiveEnergy = DebugLuminance(emissiveColor) * 1.35;
+    float totalEnergy =
+        directDiffuseEnergy +
+        directSpecularEnergy +
+        ambientDiffuseEnergy +
+        ambientSpecularEnergy +
+        ambientProbeEnergy +
+        emissiveEnergy;
+
+    if (totalEnergy <= 0.00001) {
+        return vec3(0.025, 0.025, 0.032);
+    }
+
+    vec3 color =
+        vec3(1.00, 0.30, 0.08) * (directDiffuseEnergy / totalEnergy) +
+        vec3(1.00, 0.13, 0.74) * (directSpecularEnergy / totalEnergy) +
+        vec3(0.10, 0.36, 1.00) * (ambientDiffuseEnergy / totalEnergy) +
+        vec3(0.06, 0.88, 1.00) * (ambientSpecularEnergy / totalEnergy) +
+        vec3(0.18, 1.00, 0.36) * (ambientProbeEnergy / totalEnergy) +
+        vec3(1.00, 0.92, 0.18) * (emissiveEnergy / totalEnergy);
+
+    float signal = clamp(0.34 + sqrt(totalEnergy) * 0.92, 0.34, 1.0);
+    color *= signal;
+
+    float shadowSuppression = 1.0 - min(
+        clamp(shadowVisibility, 0.0, 1.0),
+        clamp(localShadowVisibility, 0.0, 1.0)
+    );
+    float ambientSuppression = 1.0 - clamp(ssaoVisibility, 0.0, 1.0);
+    float suppression = clamp(max(shadowSuppression, ambientSuppression) * 0.56, 0.0, 0.56);
+    color = mix(color, vec3(0.035, 0.025, 0.105), suppression);
+
+    return clamp(color, vec3(0.0), vec3(1.0));
 }
 
 vec3 LocalShadowAtlasDebugColor(vec2 uv) {
@@ -884,11 +1069,61 @@ bool LocalShadowFaceDebugColor(
     return foundPointShadow;
 }
 
+vec4 LocalShadowFilterControls(uint lightKind) {
+    if (lightKind == 0u) {
+        return localShadows.pointFilterControls;
+    }
+    if (lightKind == 1u) {
+        return localShadows.spotFilterControls;
+    }
+    if (lightKind == 2u) {
+        return localShadows.rectFilterControls;
+    }
+    return localShadows.filterControls;
+}
+
+float LocalShadowPcssStrength(uint lightKind) {
+    if (lightKind == 0u) {
+        return clamp(localShadows.kindSoftShadowControls.x, 0.0, 1.0);
+    }
+    if (lightKind == 1u) {
+        return clamp(localShadows.kindSoftShadowControls.y, 0.0, 1.0);
+    }
+    if (lightKind == 2u) {
+        return clamp(localShadows.kindSoftShadowControls.z, 0.0, 1.0);
+    }
+    return clamp(localShadows.softShadowControls.x, 0.0, 1.0);
+}
+
+float RectAreaShadowSoftness(LocalLightRecord localLight, vec3 worldPosition) {
+    vec3 rectNormal = localLight.directionType.xyz;
+    if (dot(rectNormal, rectNormal) < 0.0001) {
+        rectNormal = vec3(0.0, -1.0, 0.0);
+    }
+    rectNormal = normalize(rectNormal);
+
+    vec3 fromRect = worldPosition - localLight.positionRadius.xyz;
+    float receiverDistance = max(dot(fromRect, rectNormal), 0.001);
+    vec2 halfSize = max(localLight.parameters.zw * 0.5, vec2(0.001));
+    float areaRadius = max(length(halfSize), 0.001);
+    float angularSize = areaRadius / max(receiverDistance, 0.25);
+    float distanceFade = 1.0 - smoothstep(
+        localLight.positionRadius.w * 0.72,
+        localLight.positionRadius.w,
+        length(fromRect)
+    );
+    return clamp(smoothstep(0.08, 0.45, angularSize) * distanceFade, 0.0, 1.0);
+}
+
 float SampleLocalShadowTileVisibility(
     LocalShadowTileRecord tile,
     vec3 worldPosition,
     vec3 normal,
-    vec3 lightDir
+    vec3 lightDir,
+    vec4 filterControls,
+    float pcssStrength,
+    float biasScale,
+    float areaSoftness
 ) {
     int tileSize = int(localShadows.atlasInfo.y);
     int tileColumns = int(localShadows.atlasInfo.z);
@@ -923,21 +1158,35 @@ float SampleLocalShadowTileVisibility(
     vec2 atlasUv = tileOrigin + shadowUv * atlasTileScale;
     vec2 tileMax = tileOrigin + atlasTileScale;
     vec2 texelSize = 1.0 / vec2(textureSize(localShadowSampler, 0));
-    float biasMin = max(localShadows.filterControls.x, 0.0);
-    float biasSlope = max(localShadows.filterControls.y, 0.0);
+    float rectAreaSoftness = clamp(areaSoftness, 0.0, 1.0);
+    float shadowTileEdgeDistance = min(
+        min(shadowUv.x, 1.0 - shadowUv.x),
+        min(shadowUv.y, 1.0 - shadowUv.y)
+    );
+    float rectTileEdgeFade = mix(
+        1.0,
+        smoothstep(0.018, 0.14, shadowTileEdgeDistance),
+        rectAreaSoftness
+    );
+    float biasMin = max(filterControls.x, 0.0);
+    float biasSlope = max(filterControls.y, 0.0);
     float nDotL = clamp(dot(normal, lightDir), 0.0, 1.0);
-    float bias = max(biasSlope * (1.0 - nDotL), biasMin);
-    int kernelRadius = clamp(int(localShadows.filterControls.w + 0.5), 0, 2);
+    float bias = max(biasSlope * (1.0 - nDotL), biasMin) * max(biasScale, 0.0);
+    int kernelRadius = clamp(int(filterControls.w + 0.5), 0, 2);
     if (kernelRadius <= 0) {
         float closestDepth = texture(localShadowSampler, atlasUv).r;
         float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-        return 1.0 - shadow * clamp(frame.shadowControls.y, 0.0, 1.0);
+        float occlusion = shadow *
+            mix(1.0, 0.42, rectAreaSoftness) *
+            rectTileEdgeFade;
+        return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
     }
 
     float shadow = 0.0;
     int sampleCount = 0;
-    float filterRadius = max(localShadows.filterControls.z, 0.0);
-    float pcssStrength = clamp(localShadows.softShadowControls.x, 0.0, 1.0);
+    float filterRadius = max(filterControls.z, 0.0);
+    filterRadius *= 1.0 + rectAreaSoftness * 5.5;
+    pcssStrength = max(clamp(pcssStrength, 0.0, 1.0), rectAreaSoftness * 0.55);
     if (pcssStrength > 0.0001 && kernelRadius > 0) {
         float blockerDepthSum = 0.0;
         int blockerCount = 0;
@@ -988,6 +1237,7 @@ float SampleLocalShadowTileVisibility(
     }
 
     float occlusion = shadow / max(float(sampleCount), 1.0);
+    occlusion *= mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
     return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
 }
 
@@ -1018,8 +1268,43 @@ float LocalShadowVisibility(
         float seamRisk = PointShadowFaceSeamRisk(fromLight);
         float blendStrength = clamp(localShadows.softShadowControls.y, 0.0, 1.0);
         faceBlend = seamRisk * blendStrength;
-    } else if (lightKind != 1u) {
+    } else if (lightKind != 1u && lightKind != 2u) {
         return 1.0;
+    }
+    float shadowBiasScale =
+        lightKind == 2u ? max(localShadows.softShadowControls.z, 0.0) : 1.0;
+    vec4 filterControls = LocalShadowFilterControls(lightKind);
+    float pcssStrength = LocalShadowPcssStrength(lightKind);
+    float areaSoftness =
+        lightKind == 2u ? RectAreaShadowSoftness(localLight, worldPosition) : 0.0;
+    if (lightKind == 2u) {
+        float visibilitySum = 0.0;
+        int visibilityCount = 0;
+        for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
+            if (tileIndex >= assignedTileCount) {
+                break;
+            }
+            LocalShadowTileRecord rectTile = localShadows.tiles[tileIndex];
+            if (int(rectTile.tileInfo.y) != localLightIndex ||
+                rectTile.tileInfo.w != 2u) {
+                continue;
+            }
+            visibilitySum += SampleLocalShadowTileVisibility(
+                rectTile,
+                worldPosition,
+                normal,
+                lightDir,
+                filterControls,
+                pcssStrength,
+                shadowBiasScale,
+                areaSoftness
+            );
+            ++visibilityCount;
+        }
+        if (visibilityCount <= 0) {
+            return 1.0;
+        }
+        return visibilitySum / float(visibilityCount);
     }
 
     LocalShadowTileRecord primaryTile;
@@ -1031,7 +1316,11 @@ float LocalShadowVisibility(
         primaryTile,
         worldPosition,
         normal,
-        lightDir
+        lightDir,
+        filterControls,
+        pcssStrength,
+        shadowBiasScale,
+        areaSoftness
     );
     if (faceBlend <= 0.0001 || blendFace == targetFace) {
         return primaryVisibility;
@@ -1046,7 +1335,11 @@ float LocalShadowVisibility(
         secondaryTile,
         worldPosition,
         normal,
-        lightDir
+        lightDir,
+        filterControls,
+        pcssStrength,
+        shadowBiasScale,
+        areaSoftness
     );
     return mix(primaryVisibility, secondaryVisibility, clamp(faceBlend, 0.0, 1.0));
 }
@@ -1088,6 +1381,45 @@ vec3 ReconstructViewPosition(vec2 uv, float depth) {
         return vec3(0.0);
     }
     return viewPosition.xyz / viewPosition.w;
+}
+
+vec3 ViewRayWorldDirection(vec2 uv) {
+    vec2 ndc = uv * 2.0 - 1.0;
+    if (frame.temporalControls.z > 0.5) {
+        ndc -= frame.temporalJitter.zw * 2.0;
+    }
+    vec4 clipPosition = vec4(ndc, 1.0, 1.0);
+    vec4 viewPosition = frame.invProj * clipPosition;
+    vec3 viewDirection = abs(viewPosition.w) > 0.000001
+        ? viewPosition.xyz / viewPosition.w
+        : viewPosition.xyz;
+    if (dot(viewDirection, viewDirection) <= 0.000001) {
+        viewDirection = vec3(0.0, 0.0, -1.0);
+    }
+    return normalize((frame.invView * vec4(normalize(viewDirection), 0.0)).xyz);
+}
+
+vec3 SkyLightDirection() {
+    vec3 lightDirection = lights.directionalLight.xyz;
+    if (dot(lightDirection, lightDirection) < 0.0001) {
+        lightDirection = frame.directionalLight.xyz;
+    }
+    if (dot(lightDirection, lightDirection) < 0.0001) {
+        lightDirection = vec3(-0.45, -0.82, -0.35);
+    }
+    return normalize(-lightDirection);
+}
+
+vec3 VisibleSkyboxRadiance(vec2 uv) {
+    if (frame.environmentControls.x <= 0.5 ||
+        frame.environmentControls.w < 0.5) {
+        return vec3(0.0);
+    }
+
+    vec3 direction = ViewRayWorldDirection(uv);
+    vec3 skyRadiance = VisibleSkyboxTextureRadiance(direction);
+
+    return skyRadiance * clamp(frame.environmentControls.y, 0.0, 4.0);
 }
 
 float HeightFogFactor(vec3 worldPosition, vec3 cameraPosition) {
@@ -1352,36 +1684,21 @@ vec3 ScreenSpaceReflectionRadiance(
     return mix(fallbackRadiance, hitRadiance, trace.confidence);
 }
 
-float SampleShadowCascadeVisibility(
-    vec3 worldPosition,
-    vec3 normal,
-    vec3 lightDir,
-    int cascadeIndex
-);
-
-float ApplyShadowDistanceFade(
-    float visibility,
-    int cascadeIndex,
-    int activeCount,
-    float viewDepth
-);
-
-float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
-    if (frame.shadowControls.x < 0.5 || frame.shadowControls.y <= 0.001) {
-        return 1.0;
-    }
-
-    int activeCascadeCount = clamp(
+int ActiveShadowCascadeCount() {
+    return clamp(
         int(shadowCascades.cascadeInfo.x + 0.5),
         0,
         MAX_DIRECTIONAL_SHADOW_CASCADES
     );
+}
+
+int SelectShadowCascade(vec3 worldPosition, out float viewDepth) {
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    viewDepth = abs((frame.view * vec4(worldPosition, 1.0)).z);
     if (activeCascadeCount <= 0) {
-        return 1.0;
+        return -1;
     }
 
-    vec4 viewPosition = frame.view * vec4(worldPosition, 1.0);
-    float viewDepth = abs(viewPosition.z);
     int cascadeIndex = activeCascadeCount - 1;
     for (int candidateIndex = 0; candidateIndex < MAX_DIRECTIONAL_SHADOW_CASCADES; ++candidateIndex) {
         if (candidateIndex >= activeCascadeCount) {
@@ -1392,13 +1709,92 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
             break;
         }
     }
+    return cascadeIndex;
+}
 
-    float visibility = SampleShadowCascadeVisibility(
+int ProjectShadowCascade(
+    vec3 worldPosition,
+    int cascadeIndex,
+    out vec2 shadowUv,
+    out float currentDepth
+) {
+    shadowUv = vec2(0.0);
+    currentDepth = 1.0;
+    if (cascadeIndex < 0 || cascadeIndex >= ActiveShadowCascadeCount()) {
+        return 1;
+    }
+
+    vec4 lightSpacePosition = shadowCascades.viewProjections[cascadeIndex] *
+        vec4(worldPosition, 1.0);
+    if (abs(lightSpacePosition.w) <= 0.000001) {
+        return 2;
+    }
+
+    vec3 projectionCoords = lightSpacePosition.xyz / lightSpacePosition.w;
+    shadowUv = projectionCoords.xy * 0.5 + 0.5;
+    currentDepth = projectionCoords.z;
+    if (shadowUv.x < 0.0 || shadowUv.x > 1.0 ||
+        shadowUv.y < 0.0 || shadowUv.y > 1.0) {
+        return 3;
+    }
+    if (currentDepth < 0.0 || currentDepth > 1.0) {
+        return 4;
+    }
+
+    return 0;
+}
+
+bool SampleShadowCascadeVisibility(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int cascadeIndex,
+    out float visibility
+);
+
+bool ResolveShadowCascadeVisibility(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int preferredCascadeIndex,
+    int activeCascadeCount,
+    out float visibility
+);
+
+float ApplyShadowDistanceFade(
+    float visibility,
+    int cascadeIndex,
+    int activeCount,
+    float viewDepth
+);
+
+float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
+    if (frame.shadowControls.x < 0.5 ||
+        frame.shadowControls.y <= 0.001 ||
+        shadowCascades.cascadeInfo.y <= 0.5) {
+        return 1.0;
+    }
+
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    if (activeCascadeCount <= 0) {
+        return 1.0;
+    }
+
+    float viewDepth = 0.0;
+    int cascadeIndex = SelectShadowCascade(worldPosition, viewDepth);
+
+    float visibility = 1.0;
+    bool visibilityValid = ResolveShadowCascadeVisibility(
         worldPosition,
         normal,
         lightDir,
-        cascadeIndex
+        cascadeIndex,
+        activeCascadeCount,
+        visibility
     );
+    if (!visibilityValid) {
+        return 1.0;
+    }
     if (cascadeIndex + 1 >= activeCascadeCount) {
         return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
     }
@@ -1418,13 +1814,15 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
         return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
     }
 
-    float nextVisibility = SampleShadowCascadeVisibility(
+    float nextVisibility = visibility;
+    if (SampleShadowCascadeVisibility(
         worldPosition,
         normal,
         lightDir,
-        cascadeIndex + 1
-    );
-    visibility = mix(visibility, nextVisibility, blendFactor);
+        cascadeIndex + 1,
+        nextVisibility)) {
+        visibility = mix(visibility, nextVisibility, blendFactor);
+    }
     return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
 }
 
@@ -1460,11 +1858,12 @@ float ContactShadowVisibility(
         1.0,
         48.0
     );
-    vec4 lightClipA = frame.proj * (viewPosition + vec4(lightDir * rayLength, 0.0));
+    vec3 viewLightDir = normalize(mat3(frame.view) * lightDir);
+    vec4 lightClipA = frame.proj * (viewPosition + vec4(viewLightDir * rayLength, 0.0));
     vec2 rayDir = vec2(0.0);
     if (abs(lightClipA.w) > 0.000001) {
         vec2 lightUv = lightClipA.xy / lightClipA.w * 0.5 + 0.5;
-        rayDir = uv - lightUv;
+        rayDir = lightUv - uv;
     }
     if (dot(rayDir, rayDir) <= 0.000001) {
         rayDir = normalize(lightDir.xy + vec2(0.37, 0.19));
@@ -1516,25 +1915,18 @@ float ContactShadowVisibility(
     return 1.0 - clamp(occlusion * strength * grazingBoost, 0.0, 1.0);
 }
 
-float SampleShadowCascadeVisibility(
+bool SampleShadowCascadeVisibility(
     vec3 worldPosition,
     vec3 normal,
     vec3 lightDir,
-    int cascadeIndex
+    int cascadeIndex,
+    out float visibility
 ) {
-    vec4 lightSpacePosition = shadowCascades.viewProjections[cascadeIndex] *
-        vec4(worldPosition, 1.0);
-    if (abs(lightSpacePosition.w) <= 0.000001) {
-        return 1.0;
-    }
-
-    vec3 projectionCoords = lightSpacePosition.xyz / lightSpacePosition.w;
-    vec2 shadowUv = projectionCoords.xy * 0.5 + 0.5;
-    float currentDepth = projectionCoords.z;
-    if (shadowUv.x < 0.0 || shadowUv.x > 1.0 ||
-        shadowUv.y < 0.0 || shadowUv.y > 1.0 ||
-        currentDepth < 0.0 || currentDepth > 1.0) {
-        return 1.0;
+    visibility = 1.0;
+    vec2 shadowUv = vec2(0.0);
+    float currentDepth = 1.0;
+    if (ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth) != 0) {
+        return false;
     }
 
     vec2 tileOrigin = vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
@@ -1603,7 +1995,53 @@ float SampleShadowCascadeVisibility(
     }
 
     float occlusion = shadow / max(float(sampleCount), 1.0);
-    return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    visibility = 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    return true;
+}
+
+bool ResolveShadowCascadeVisibility(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int preferredCascadeIndex,
+    int activeCascadeCount,
+    out float visibility
+) {
+    visibility = 1.0;
+    if (SampleShadowCascadeVisibility(
+            worldPosition,
+            normal,
+            lightDir,
+            preferredCascadeIndex,
+            visibility)) {
+        return true;
+    }
+
+    for (int offset = 1; offset < MAX_DIRECTIONAL_SHADOW_CASCADES; ++offset) {
+        int lowerIndex = preferredCascadeIndex - offset;
+        if (lowerIndex >= 0 &&
+            SampleShadowCascadeVisibility(
+                worldPosition,
+                normal,
+                lightDir,
+                lowerIndex,
+                visibility)) {
+            return true;
+        }
+
+        int upperIndex = preferredCascadeIndex + offset;
+        if (upperIndex < activeCascadeCount &&
+            SampleShadowCascadeVisibility(
+                worldPosition,
+                normal,
+                lightDir,
+                upperIndex,
+                visibility)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 float ApplyShadowDistanceFade(
@@ -1788,6 +2226,7 @@ void AccumulateLocalLight(
 }
 
 void AccumulateRectAreaLight(
+    int localLightIndex,
     LocalLightRecord localLight,
     vec3 baseColor,
     float roughness,
@@ -1853,10 +2292,18 @@ void AccumulateRectAreaLight(
         }
 
         influence = max(influence, 1.0);
+        float shadowVisibility = LocalShadowVisibility(
+            localLightIndex,
+            localLight,
+            worldPosition,
+            normal,
+            localLightDir
+        );
         vec3 radiance =
             max(colorIntensity.rgb, vec3(0.0)) *
             colorIntensity.w *
             attenuation *
+            shadowVisibility *
             0.25;
         vec3 sampleSpecular = vec3(0.0);
         accumulatedDirect += DirectPbrContribution(
@@ -1867,13 +2314,67 @@ void AccumulateRectAreaLight(
             viewDir,
             localLightDir,
             radiance,
-            specularStrength,
+            0.0,
             specularColorFactor,
-            clearcoat,
-            clearcoatRoughness,
+            0.0,
+            1.0,
             sampleSpecular
         );
         accumulatedSpecular += sampleSpecular;
+    }
+
+    vec3 mirrorDir = reflect(-viewDir, normal);
+    float planeDenom = dot(mirrorDir, rectNormal);
+    if (abs(planeDenom) > 0.0001) {
+        float hitDistance = dot(positionRadius.xyz - worldPosition, rectNormal) / planeDenom;
+        if (hitDistance > 0.0 && hitDistance < radius) {
+            vec3 hitPosition = worldPosition + mirrorDir * hitDistance;
+            vec3 hitOffset = hitPosition - positionRadius.xyz;
+            vec2 hitLocal = vec2(dot(hitOffset, rectTangent), dot(hitOffset, rectBitangent));
+            vec2 normalizedHit = abs(hitLocal) / halfSize;
+            float outsideDistance = length(max(normalizedHit - vec2(1.0), vec2(0.0)));
+            float rectMask =
+                1.0 - smoothstep(0.0, mix(0.035, 0.72, clamp(roughness, 0.0, 1.0)), outsideDistance);
+            float facing = max(dot(normalize(worldPosition - hitPosition), rectNormal), 0.0);
+            float nDotL = max(dot(normal, mirrorDir), 0.0);
+            if (rectMask > 0.001 && facing > 0.001 && nDotL > 0.001) {
+                float normalizedDistance = clamp(hitDistance / radius, 0.0, 1.0);
+                float attenuation = pow(1.0 - normalizedDistance * normalizedDistance, 2.0);
+                float shadowVisibility = LocalShadowVisibility(
+                    localLightIndex,
+                    localLight,
+                    worldPosition,
+                    normal,
+                    mirrorDir
+                );
+                vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
+                vec3 f0 = mix(dielectricF0, baseColor, metallic);
+                vec3 fresnel = FresnelSchlick(max(dot(normal, viewDir), 0.0), f0);
+                vec3 coatFresnel =
+                    FresnelSchlick(max(dot(normal, viewDir), 0.0), vec3(0.04)) *
+                    clamp(clearcoat, 0.0, 1.0) *
+                    mix(1.0, 0.25, clamp(clearcoatRoughness, 0.0, 1.0));
+                float roughnessEnergy = mix(
+                    0.95,
+                    0.22,
+                    smoothstep(0.05, 0.85, clamp(roughness, 0.0, 1.0))
+                );
+                vec3 rectSpecular =
+                    max(colorIntensity.rgb, vec3(0.0)) *
+                    colorIntensity.w *
+                    attenuation *
+                    facing *
+                    nDotL *
+                    shadowVisibility *
+                    rectMask *
+                    max(specularStrength, 0.0) *
+                    roughnessEnergy *
+                    (fresnel + coatFresnel);
+                accumulatedDirect += rectSpecular;
+                accumulatedSpecular += rectSpecular;
+                influence = max(influence, 1.0);
+            }
+        }
     }
 
     if (influence > 0.5) {
@@ -1902,6 +2403,7 @@ void AccumulateFrameLocalLight(
 ) {
     if (localLight.directionType.w >= 1.5) {
         AccumulateRectAreaLight(
+            localLightIndex,
             localLight,
             baseColor,
             roughness,
@@ -1939,6 +2441,212 @@ void AccumulateFrameLocalLight(
     );
 }
 
+float LocalLightDebugCoverage(
+    LocalLightRecord localLight,
+    vec3 worldPosition,
+    vec3 normal,
+    out vec3 lightDir
+) {
+    lightDir = DirectionToLocalLight(localLight, worldPosition);
+    vec4 positionRadius = localLight.positionRadius;
+    vec4 colorIntensity = localLight.colorIntensity;
+    if (colorIntensity.w <= 0.0) {
+        return 0.0;
+    }
+
+    uint lightKind = uint(clamp(int(localLight.directionType.w + 0.5), 0, 3));
+    if (lightKind == 2u) {
+        vec3 rectNormal = localLight.directionType.xyz;
+        if (dot(rectNormal, rectNormal) < 0.0001) {
+            rectNormal = vec3(0.0, -1.0, 0.0);
+        }
+        rectNormal = normalize(rectNormal);
+        vec3 rectTangent = normalize(cross(abs(rectNormal.y) > 0.95 ?
+            vec3(1.0, 0.0, 0.0) :
+            vec3(0.0, 1.0, 0.0),
+            rectNormal
+        ));
+        vec3 rectBitangent = normalize(cross(rectNormal, rectTangent));
+        vec2 halfSize = max(localLight.parameters.zw * 0.5, vec2(0.001));
+        float radius = max(positionRadius.w, length(halfSize));
+        vec2 sampleSigns[4] = vec2[](
+            vec2(-0.57735, -0.57735),
+            vec2(0.57735, -0.57735),
+            vec2(-0.57735, 0.57735),
+            vec2(0.57735, 0.57735)
+        );
+
+        float bestCoverage = 0.0;
+        vec3 weightedLightDir = vec3(0.0);
+        for (int sampleIndex = 0; sampleIndex < 4; ++sampleIndex) {
+            vec3 samplePosition =
+                positionRadius.xyz +
+                rectTangent * halfSize.x * sampleSigns[sampleIndex].x +
+                rectBitangent * halfSize.y * sampleSigns[sampleIndex].y;
+            vec3 toLight = samplePosition - worldPosition;
+            float distanceToLight = length(toLight);
+            if (distanceToLight >= radius) {
+                continue;
+            }
+
+            vec3 sampleLightDir = toLight / max(distanceToLight, 0.001);
+            float normalizedDistance = clamp(distanceToLight / radius, 0.0, 1.0);
+            float attenuation = pow(1.0 - normalizedDistance * normalizedDistance, 2.0);
+            float emitterFacing = max(dot(normalize(worldPosition - samplePosition), rectNormal), 0.0);
+            float receiverFacing = max(dot(normal, sampleLightDir), 0.0);
+            float coverage = attenuation * emitterFacing * receiverFacing;
+            bestCoverage = max(bestCoverage, coverage);
+            weightedLightDir += sampleLightDir * coverage;
+        }
+
+        if (dot(weightedLightDir, weightedLightDir) > 0.000001) {
+            lightDir = normalize(weightedLightDir);
+        }
+        return clamp(bestCoverage, 0.0, 1.0);
+    }
+
+    vec3 toLight = positionRadius.xyz - worldPosition;
+    float distanceToLight = length(toLight);
+    float radius = max(positionRadius.w, 0.001);
+    if (distanceToLight >= radius) {
+        return 0.0;
+    }
+
+    lightDir = toLight / max(distanceToLight, 0.001);
+    float normalizedDistance = clamp(distanceToLight / radius, 0.0, 1.0);
+    float coverage = pow(1.0 - normalizedDistance * normalizedDistance, 2.0);
+    if (lightKind == 1u) {
+        vec3 spotDirection = localLight.directionType.xyz;
+        if (dot(spotDirection, spotDirection) < 0.0001) {
+            spotDirection = vec3(0.0, -1.0, 0.0);
+        }
+        spotDirection = normalize(spotDirection);
+        float innerCone = max(localLight.parameters.x, localLight.parameters.y);
+        float outerCone = min(localLight.parameters.x, localLight.parameters.y);
+        float coneWidth = max(innerCone - outerCone, 0.0001);
+        float coneCos = dot(normalize(worldPosition - positionRadius.xyz), spotDirection);
+        coverage *= clamp((coneCos - outerCone) / coneWidth, 0.0, 1.0);
+    }
+
+    coverage *= max(dot(normal, lightDir), 0.0);
+    return clamp(coverage, 0.0, 1.0);
+}
+
+bool LocalLightHasActiveShadowTile(int localLightIndex) {
+    int assignedTileCount = clamp(int(localShadows.atlasInfo.x), 0, MAX_LOCAL_SHADOW_TILES);
+    if (assignedTileCount <= 0 || localLightIndex < 0) {
+        return false;
+    }
+
+    for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
+        if (tileIndex >= assignedTileCount) {
+            break;
+        }
+
+        LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
+        if (int(tile.tileInfo.y) == localLightIndex) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+vec3 LocalLightDebugTint(LocalLightRecord localLight) {
+    vec3 tint = max(localLight.colorIntensity.rgb, vec3(0.04));
+    float peak = max(max(tint.r, tint.g), tint.b);
+    return tint / max(peak, 0.04);
+}
+
+bool SelectedLocalShadowDebugColor(
+    vec3 worldPosition,
+    vec3 normal,
+    out vec3 debugColor
+) {
+    int localLightCount = clamp(int(lights.lightCounts.z + 0.5), 0, MAX_LOCAL_LIGHTS);
+    if (localLightCount <= 0) {
+        debugColor = vec3(0.08, 0.02, 0.05);
+        return false;
+    }
+
+    int requestedLightIndex =
+        frame.debugControls.x < -0.5 ? -1 : int(floor(frame.debugControls.x + 0.5));
+    if (requestedLightIndex >= localLightCount) {
+        debugColor = vec3(0.26, 0.02, 0.34);
+        return false;
+    }
+
+    int selectedLightIndex = requestedLightIndex;
+    float selectedCoverage = 0.0;
+    vec3 selectedLightDir = vec3(0.0, 1.0, 0.0);
+    if (selectedLightIndex < 0) {
+        float bestWeightedCoverage = 0.0;
+        for (int localLightIndex = 0; localLightIndex < MAX_LOCAL_LIGHTS; ++localLightIndex) {
+            if (localLightIndex >= localLightCount) {
+                break;
+            }
+
+            vec3 candidateLightDir = vec3(0.0);
+            LocalLightRecord candidateLight = lights.localLights[localLightIndex];
+            float coverage = LocalLightDebugCoverage(
+                candidateLight,
+                worldPosition,
+                normal,
+                candidateLightDir
+            );
+            float weightedCoverage =
+                coverage *
+                max(candidateLight.colorIntensity.w, 0.0) *
+                max(max(candidateLight.colorIntensity.r, candidateLight.colorIntensity.g),
+                    candidateLight.colorIntensity.b);
+            if (weightedCoverage > bestWeightedCoverage) {
+                bestWeightedCoverage = weightedCoverage;
+                selectedCoverage = coverage;
+                selectedLightIndex = localLightIndex;
+                selectedLightDir = candidateLightDir;
+            }
+        }
+    } else {
+        LocalLightRecord selectedLight = lights.localLights[selectedLightIndex];
+        selectedCoverage = LocalLightDebugCoverage(
+            selectedLight,
+            worldPosition,
+            normal,
+            selectedLightDir
+        );
+    }
+
+    const vec3 noInfluence = vec3(0.015, 0.035, 0.085);
+    if (selectedLightIndex < 0 || selectedCoverage <= 0.001) {
+        debugColor = noInfluence;
+        return true;
+    }
+
+    LocalLightRecord selectedLight = lights.localLights[selectedLightIndex];
+    bool hasShadowTile = LocalLightHasActiveShadowTile(selectedLightIndex);
+    if (!hasShadowTile) {
+        vec3 noTile = vec3(0.08, 0.62, 0.86);
+        debugColor = mix(noInfluence, noTile, smoothstep(0.0, 0.65, selectedCoverage));
+        return true;
+    }
+
+    float visibility = clamp(LocalShadowVisibility(
+        selectedLightIndex,
+        selectedLight,
+        worldPosition,
+        normal,
+        selectedLightDir
+    ), 0.0, 1.0);
+    vec3 shadowed = vec3(0.32, 0.035, 0.018);
+    vec3 partial = vec3(0.96, 0.56, 0.12);
+    vec3 lit = mix(vec3(0.88, 0.94, 1.0), LocalLightDebugTint(selectedLight), 0.42);
+    vec3 visibilityColor = mix(shadowed, partial, smoothstep(0.0, 0.72, visibility));
+    visibilityColor = mix(visibilityColor, lit, smoothstep(0.55, 1.0, visibility));
+    float coverageWeight = clamp(0.22 + selectedCoverage * 0.78, 0.0, 1.0);
+    debugColor = mix(noInfluence, visibilityColor, coverageWeight);
+    return true;
+}
+
 void main() {
     vec4 albedo = texture(gBufferAlbedo, fragUv);
     vec4 normalRoughness = texture(gBufferNormalRoughness, fragUv);
@@ -1946,9 +2654,13 @@ void main() {
     vec4 emissive = texture(gBufferEmissive, fragUv);
     vec2 materialAux = texture(gBufferMaterialAux, fragUv).rg;
     float depth = texture(sceneDepth, fragUv).r;
+    int deferredDebugView = int(objectData.materialControls.w + 0.5);
 
     if (depth >= 0.999999 || albedo.a <= 0.001) {
-        outColor = vec4(0.0, 0.0, 0.0, 1.0);
+        vec3 background = deferredDebugView == 0
+            ? VisibleSkyboxRadiance(fragUv)
+            : vec3(0.0);
+        outColor = vec4(background, 1.0);
         return;
     }
 
@@ -2173,21 +2885,38 @@ void main() {
         ambientStrength,
         directIntensity
     );
-    float nDotV = max(dot(normal, viewDir), 0.0);
-    vec2 envBrdf = SampleEnvironmentBrdf(roughness, nDotV);
-    vec3 envSpecular = ssrReflection * (f0 * envBrdf.x + envBrdf.y);
-    vec3 ambient = (
-        baseColor * EnvironmentRadiance(normal, lightDir, 1.0, worldPosition) * 0.45 +
-        envSpecular * 0.36
-    ) * ambientStrength * occlusion;
+    IblAmbientResult iblAmbient = BuildIblAmbient(
+        baseColor,
+        roughness,
+        metallic,
+        normal,
+        viewDir,
+        lightDir,
+        worldPosition,
+        f0,
+        occlusion,
+        0.45 * ambientStrength,
+        0.36 * ambientStrength,
+        ssrReflection
+    );
+    vec3 ambientDiffuse = iblAmbient.diffuse;
+    vec3 ambientSpecular = iblAmbient.specular;
+    vec3 ambient = ambientDiffuse + ambientSpecular;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
-    ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
+    float ambientVisibility = mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
+    ambient *= ambientVisibility;
+    ambientDiffuse *= ambientVisibility;
+    ambientSpecular *= ambientVisibility;
     float ssaoVisibility = SsaoVisibility(fragUv, depth, normal);
     ambient *= ssaoVisibility;
-    ambient += SampleProbeGridIrradiance(worldPosition, normal) *
+    ambientDiffuse *= ssaoVisibility;
+    ambientSpecular *= ssaoVisibility;
+    vec3 ambientProbe =
+        SampleProbeGridIrradiance(worldPosition, normal) *
         baseColor *
         occlusion *
         (1.0 - metallic);
+    ambient += ambientProbe;
     vec3 ssrDebugColor = ScreenSpaceReflectionDebug(ssrTrace, roughness);
     if (transmission > 0.001) {
         vec3 volumeTransmittance = hasMaterialRecord ? VolumeTransmittance(materialRecord) : vec3(1.0);
@@ -2202,13 +2931,45 @@ void main() {
         ambient = mix(ambient, ambient * 0.88 + transmittedEnv, transmission);
     }
 
-    int deferredDebugView = int(objectData.materialControls.w + 0.5);
+    if (deferredDebugView == 22) {
+        float averageLocalShadowVisibility = localShadowVisibilityCount > 0.0
+            ? clamp(localShadowVisibilitySum / localShadowVisibilityCount, 0.0, 1.0)
+            : 1.0;
+        vec3 directDiffuse = max(direct - directSpecular, vec3(0.0));
+        outColor = vec4(
+            LightingEnergyBalanceDebugColor(
+                directDiffuse,
+                directSpecular,
+                ambientDiffuse,
+                ambientSpecular,
+                ambientProbe,
+                emissiveColor,
+                shadowVisibility,
+                averageLocalShadowVisibility,
+                ssaoVisibility
+            ),
+            1.0
+        );
+        return;
+    }
     if (deferredDebugView == 1) {
         outColor = vec4(direct, 1.0);
         return;
     }
     if (deferredDebugView == 2) {
         outColor = vec4(ambient, 1.0);
+        return;
+    }
+    if (deferredDebugView == 18) {
+        outColor = vec4(AmbientComponentDebugColor(ambientDiffuse, 24.0), 1.0);
+        return;
+    }
+    if (deferredDebugView == 19) {
+        outColor = vec4(AmbientComponentDebugColor(ambientSpecular, 64.0), 1.0);
+        return;
+    }
+    if (deferredDebugView == 20) {
+        outColor = vec4(AmbientComponentDebugColor(ambientProbe, 32.0), 1.0);
         return;
     }
     if (deferredDebugView == 3) {
@@ -2373,6 +3134,16 @@ void main() {
         outColor = vec4(visibilityColor, 1.0);
         return;
     }
+    if (deferredDebugView == 21) {
+        vec3 selectedShadowColor = vec3(0.0);
+        if (!SelectedLocalShadowDebugColor(worldPosition, normal, selectedShadowColor)) {
+            outColor = vec4(selectedShadowColor, 1.0);
+            return;
+        }
+
+        outColor = vec4(selectedShadowColor, 1.0);
+        return;
+    }
     if (deferredDebugView == 9) {
         vec3 blocked = vec3(0.02, 0.06, 0.10);
         vec3 partial = vec3(0.45, 0.72, 0.90);
@@ -2408,6 +3179,19 @@ void main() {
     if (deferredDebugView == 13) {
         outColor = vec4(
             ReflectionProbeDebugColor(normal, reflection, lightDir, roughness, worldPosition),
+            1.0
+        );
+        return;
+    }
+    if (deferredDebugView == 17) {
+        outColor = vec4(
+            ReflectionProbeContrastDebugColor(
+                normal,
+                reflection,
+                lightDir,
+                roughness,
+                worldPosition
+            ),
             1.0
         );
         return;

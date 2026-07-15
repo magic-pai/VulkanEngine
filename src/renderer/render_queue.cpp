@@ -21,6 +21,9 @@ namespace se {
 
 namespace {
 
+constexpr f32 kSkinnedBoundsPaddingRatio = 0.35f;
+constexpr f32 kSkinnedBoundsMinPadding = 0.25f;
+
 FrustumPlane NormalizedPlane(glm::vec4 plane) {
     const f32 normalLength = glm::length(glm::vec3(plane));
     if (normalLength <= 0.000001f) {
@@ -36,6 +39,22 @@ FrustumPlane NormalizedPlane(glm::vec4 plane) {
 void IncludePoint(glm::vec3 point, glm::vec3& boundsMin, glm::vec3& boundsMax) {
     boundsMin = glm::min(boundsMin, point);
     boundsMax = glm::max(boundsMax, point);
+}
+
+void PopulateAabbCorners(RenderBounds& bounds) {
+    u32 cornerIndex = 0;
+    for (u32 x = 0; x < 2; ++x) {
+        for (u32 y = 0; y < 2; ++y) {
+            for (u32 z = 0; z < 2; ++z) {
+                bounds.corners[cornerIndex] = glm::vec3{
+                    x == 0 ? bounds.min.x : bounds.max.x,
+                    y == 0 ? bounds.min.y : bounds.max.y,
+                    z == 0 ? bounds.min.z : bounds.max.z
+                };
+                ++cornerIndex;
+            }
+        }
+    }
 }
 
 u32 FloatBits(f32 value) {
@@ -94,6 +113,57 @@ RenderBounds TransformAabb(
 
     bounds.valid = true;
     return bounds;
+}
+
+bool CommandUsesSkinnedWorldBounds(const RenderCommand& command) {
+    return !command.bonePaletteResourceId.empty() &&
+        command.bonePaletteReady != 0u &&
+        command.bonePaletteCurrentEntryCount > 0u;
+}
+
+void ApplyConservativeSkinnedWorldBounds(RenderCommand& command) {
+    if (!CommandUsesSkinnedWorldBounds(command) ||
+        !command.worldBounds.valid ||
+        command.skinnedWorldBoundsConservative != 0u) {
+        return;
+    }
+
+    const glm::vec3 extent = glm::max(
+        command.worldBounds.max - command.worldBounds.min,
+        glm::vec3(0.0f)
+    );
+    const glm::vec3 padding = glm::max(
+        extent * kSkinnedBoundsPaddingRatio,
+        glm::vec3(kSkinnedBoundsMinPadding)
+    );
+    command.worldBounds.min -= padding;
+    command.worldBounds.max += padding;
+    PopulateAabbCorners(command.worldBounds);
+    command.skinnedWorldBoundsConservative = 1u;
+}
+
+bool HasSkinnedRenderable(
+    const VulkanRenderResources2D& renderResources,
+    std::span<Renderable3D* const> renderables
+) {
+    for (const Renderable3D* renderable : renderables) {
+        if (renderable == nullptr) {
+            continue;
+        }
+
+        const std::string_view resourceId = renderable->BonePaletteResourceId();
+        if (resourceId.empty() || !renderResources.ContainsBonePalette(resourceId)) {
+            continue;
+        }
+
+        const VulkanRenderResources2D::BonePaletteResource& palette =
+            renderResources.BonePalette(resourceId);
+        if (palette.ready != 0u && !palette.currentPalette.empty()) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 RenderMaterialPushConstants MaterialPushConstantsFor(const VulkanMaterial& material) {
@@ -171,6 +241,41 @@ RenderCommand CommandForRenderable(
     return command;
 }
 
+void RefreshBonePaletteCommandState(
+    const VulkanRenderResources2D& renderResources,
+    RenderCommand& command
+) {
+    command.bonePaletteCurrentEntryCount = 0;
+    command.bonePalettePreviousEntryCount = 0;
+    command.bonePaletteChangedEntryCount = 0;
+    command.bonePaletteReady = 0;
+    command.bonePaletteDescriptorSet = VK_NULL_HANDLE;
+    command.bonePaletteDescriptorSetReady = 0;
+    command.bonePaletteDescriptorSetIndex = 0;
+    command.bonePaletteDescriptorBinding = 0;
+    command.bonePaletteDescriptorRangeBytes = 0;
+
+    if (command.bonePaletteResourceId.empty() ||
+        !renderResources.ContainsBonePalette(command.bonePaletteResourceId)) {
+        return;
+    }
+
+    const VulkanRenderResources2D::BonePaletteResource& palette =
+        renderResources.BonePalette(command.bonePaletteResourceId);
+    command.bonePaletteCurrentEntryCount =
+        static_cast<u32>(palette.currentPalette.size());
+    command.bonePalettePreviousEntryCount =
+        static_cast<u32>(palette.previousPalette.size());
+    command.bonePaletteChangedEntryCount = palette.changedEntryCount;
+    command.bonePaletteReady = palette.ready;
+    command.bonePaletteDescriptorSet = palette.descriptorSet;
+    command.bonePaletteDescriptorSetReady = palette.descriptorSetReady;
+    command.bonePaletteDescriptorSetIndex = palette.descriptorSetIndex;
+    command.bonePaletteDescriptorBinding = palette.descriptorBinding;
+    command.bonePaletteDescriptorRangeBytes = palette.descriptorRangeBytes;
+    ApplyConservativeSkinnedWorldBounds(command);
+}
+
 RenderCommand CommandForRenderable(
     const VulkanRenderResources2D& renderResources,
     const VulkanMesh& mesh,
@@ -190,22 +295,11 @@ RenderCommand CommandForRenderable(
     command.worldBounds = worldBounds;
     command.castShadow = renderable.CastShadow();
     command.bonePaletteResourceId = std::string(renderable.BonePaletteResourceId());
-    if (!command.bonePaletteResourceId.empty() &&
-        renderResources.ContainsBonePalette(command.bonePaletteResourceId)) {
-        const VulkanRenderResources2D::BonePaletteResource& palette =
-            renderResources.BonePalette(command.bonePaletteResourceId);
-        command.bonePaletteCurrentEntryCount =
-            static_cast<u32>(palette.currentPalette.size());
-        command.bonePalettePreviousEntryCount =
-            static_cast<u32>(palette.previousPalette.size());
-        command.bonePaletteChangedEntryCount = palette.changedEntryCount;
-        command.bonePaletteReady = palette.ready;
-        command.bonePaletteDescriptorSet = palette.descriptorSet;
-        command.bonePaletteDescriptorSetReady = palette.descriptorSetReady;
-        command.bonePaletteDescriptorSetIndex = palette.descriptorSetIndex;
-        command.bonePaletteDescriptorBinding = palette.descriptorBinding;
-        command.bonePaletteDescriptorRangeBytes = palette.descriptorRangeBytes;
-    }
+#if !defined(NDEBUG)
+    command.debugRenderableIdentity = renderable.RenderIdentity();
+    command.debugRenderableName = renderable.Name();
+#endif
+    RefreshBonePaletteCommandState(renderResources, command);
 
     return command;
 }
@@ -327,7 +421,10 @@ void RenderQueue::BuildFromScene3D(
         renderables,
         options
     );
-    if (TryReuseScene3DQueue(sceneQueueSignature, options)) {
+    const bool sceneContainsSkinnedRenderable =
+        HasSkinnedRenderable(renderResources, renderables);
+    if (!sceneContainsSkinnedRenderable &&
+        TryReuseScene3DQueue(sceneQueueSignature, renderResources, options)) {
         return;
     }
     if (options.cacheStats != nullptr) {
@@ -354,7 +451,10 @@ void RenderQueue::BuildFromScene3D(
         bool visible = true;
         if (options.frustum != nullptr && command.worldBounds.valid) {
             ++visibilityCandidates;
-            if (TryCachedVisibility(*renderable, frustumSignature, visible)) {
+            const bool canReuseVisibility =
+                command.skinnedWorldBoundsConservative == 0u;
+            if (canReuseVisibility &&
+                TryCachedVisibility(*renderable, frustumSignature, visible)) {
                 if (options.cacheStats != nullptr) {
                     ++options.cacheStats->visibilityCacheHits;
                 }
@@ -363,7 +463,9 @@ void RenderQueue::BuildFromScene3D(
                     command.worldBounds.min,
                     command.worldBounds.max
                 );
-                StoreCachedVisibility(*renderable, frustumSignature, visible);
+                if (canReuseVisibility) {
+                    StoreCachedVisibility(*renderable, frustumSignature, visible);
+                }
                 if (options.cacheStats != nullptr) {
                     ++options.cacheStats->visibilityCacheMisses;
                 }
@@ -495,6 +597,7 @@ RenderCommand RenderQueue::CommandForRenderable3D(
             cached.command.worldBounds.valid) {
             RenderCommand command = cached.command;
             command.previousModel = command.model;
+            RefreshBonePaletteCommandState(renderResources, command);
             if (cacheStats != nullptr) {
                 ++cacheStats->commandCacheHits;
                 ++cacheStats->boundsCacheHits;
@@ -623,6 +726,7 @@ u64 RenderQueue::Scene3DQueueSignature(
 
 bool RenderQueue::TryReuseScene3DQueue(
     u64 signature,
+    const VulkanRenderResources2D& renderResources,
     RenderQueueBuildOptions options
 ) {
     if (!m_3DSceneCache.valid || m_3DSceneCache.signature != signature) {
@@ -636,7 +740,7 @@ bool RenderQueue::TryReuseScene3DQueue(
         command.previousModel = command.model;
     }
     m_NextSubmissionIndex = m_Commands.size();
-    Refresh3DMaterialPushConstants();
+    Refresh3DDynamicCommandState(renderResources);
 
     if (options.cullingStats != nullptr) {
         *options.cullingStats = m_3DSceneCache.cullingStats;
@@ -665,10 +769,13 @@ void RenderQueue::StoreScene3DQueue(
     m_3DSceneCache.valid = true;
 }
 
-void RenderQueue::Refresh3DMaterialPushConstants() {
+void RenderQueue::Refresh3DDynamicCommandState(
+    const VulkanRenderResources2D& renderResources
+) {
     for (RenderCommand& command : m_Commands) {
         SE_ASSERT(command.material != nullptr, "Cached 3D render command lost its material");
         command.materialPushConstants = MaterialPushConstantsFor(*command.material);
+        RefreshBonePaletteCommandState(renderResources, command);
     }
 }
 

@@ -15,7 +15,8 @@ VulkanMaterial::VulkanMaterial(
     std::string albedoTexturePath,
     bool generateMipmaps,
     bool flipVertically,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    f32 samplerMipLodBias
 ) : m_AlbedoTexture(
         device,
         physicalDevice,
@@ -29,7 +30,8 @@ VulkanMaterial::VulkanMaterial(
     m_Sampler(
         device,
         physicalDevice,
-        m_AlbedoTexture.MipLevels()
+        m_AlbedoTexture.MipLevels(),
+        samplerMipLodBias
     ) {
 }
 
@@ -40,7 +42,8 @@ VulkanMaterial::VulkanMaterial(
     VulkanTexturePixels albedoTexturePixels,
     bool generateMipmaps,
     bool flipVertically,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    f32 samplerMipLodBias
 ) : m_AlbedoTexture(
         device,
         physicalDevice,
@@ -54,7 +57,8 @@ VulkanMaterial::VulkanMaterial(
     m_Sampler(
         device,
         physicalDevice,
-        m_AlbedoTexture.MipLevels()
+        m_AlbedoTexture.MipLevels(),
+        samplerMipLodBias
     ) {
 }
 
@@ -65,7 +69,8 @@ VulkanMaterial::VulkanMaterial(
     VulkanEncodedTextureBytes albedoTextureBytes,
     bool generateMipmaps,
     bool flipVertically,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    f32 samplerMipLodBias
 ) : m_AlbedoTexture(
         device,
         physicalDevice,
@@ -79,7 +84,8 @@ VulkanMaterial::VulkanMaterial(
     m_Sampler(
         device,
         physicalDevice,
-        m_AlbedoTexture.MipLevels()
+        m_AlbedoTexture.MipLevels(),
+        samplerMipLodBias
     ) {
 }
 
@@ -173,6 +179,14 @@ MaterialProperties& VulkanMaterial::Properties() {
 
 const MaterialProperties& VulkanMaterial::Properties() const {
     return m_Properties;
+}
+
+void VulkanMaterial::RecreateSampler(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    f32 mipLodBias
+) {
+    m_Sampler.Recreate(device, physicalDevice, SamplerMipLevels(), mipLodBias);
 }
 
 void VulkanMaterial::SetColorMap(
@@ -760,7 +774,20 @@ void VulkanMaterial::SetSkyboxCubemap(
         commandPool,
         std::move(cubemapDirectory)
     );
-    m_Sampler.Recreate(device, physicalDevice, m_SkyboxCubemap->MipLevels());
+    m_Sampler.Recreate(
+        device,
+        physicalDevice,
+        SamplerMipLevels(),
+        m_Sampler.MipLodBias()
+    );
+}
+
+u32 VulkanMaterial::SamplerMipLevels() const {
+    if (m_SkyboxCubemap != nullptr) {
+        return m_SkyboxCubemap->MipLevels();
+    }
+
+    return m_AlbedoTexture.MipLevels();
 }
 
 }

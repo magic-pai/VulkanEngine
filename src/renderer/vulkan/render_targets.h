@@ -209,6 +209,8 @@ public:
 
     VkImageView HdrSceneColorView(std::size_t index) const;
     VkImage HdrSceneColorImage(std::size_t index) const;
+    VkImageView TemporalResolvedColorView(std::size_t index) const;
+    VkImage TemporalResolvedColorImage(std::size_t index) const;
     VkImageView TemporalUpscaleOutputView(std::size_t index) const;
     VkImage TemporalUpscaleOutputImage(std::size_t index) const;
     VkImageView DlssBiasCurrentColorMaskView(std::size_t index) const;
@@ -229,6 +231,7 @@ public:
     VkImageView GBufferEmissiveView(std::size_t index) const;
     VkImageView GBufferMaterialAuxView(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
+    VkFormat TemporalResolvedColorFormat() const;
     VkFormat TemporalUpscaleOutputFormat() const;
     VkFormat DlssBiasCurrentColorMaskFormat() const;
     VkFormat DlssTransparencyMaskFormat() const;
@@ -266,7 +269,7 @@ public:
     static constexpr VkFormat kGBufferAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
     static constexpr VkFormat kGBufferNormalRoughnessFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
-    static constexpr VkFormat kGBufferMaterialFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    static constexpr VkFormat kGBufferMaterialFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kGBufferEmissiveFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kGBufferMaterialAuxFormat =
@@ -280,7 +283,8 @@ private:
         VkFormat format,
         VkImageUsageFlags usage,
         VkImageAspectFlags aspectFlags,
-        std::vector<std::unique_ptr<VulkanImage>>& images
+        std::vector<std::unique_ptr<VulkanImage>>& images,
+        const char* debugNamePrefix = nullptr
     ) const;
     void CreateImageArrayForExtent(
         const VulkanDevice& device,
@@ -290,11 +294,13 @@ private:
         VkFormat format,
         VkImageUsageFlags usage,
         VkImageAspectFlags aspectFlags,
-        std::vector<std::unique_ptr<VulkanImage>>& images
+        std::vector<std::unique_ptr<VulkanImage>>& images,
+        const char* debugNamePrefix = nullptr
     ) const;
 
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_TemporalResolvedColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalUpscaleOutputImages;
     std::vector<std::unique_ptr<VulkanImage>> m_DlssBiasCurrentColorMaskImages;
     std::vector<std::unique_ptr<VulkanImage>> m_DlssTransparencyMaskImages;
@@ -438,7 +444,8 @@ public:
     VulkanHdrFramebuffer(
         const VulkanDevice& device,
         const VulkanHdrRenderPass& renderPass,
-        const VulkanSceneRenderTargets& renderTargets
+        const VulkanSceneRenderTargets& renderTargets,
+        bool useTemporalResolvedColor = false
     );
 
     ~VulkanHdrFramebuffer();
@@ -453,7 +460,8 @@ public:
     void Recreate(
         const VulkanDevice& device,
         const VulkanHdrRenderPass& renderPass,
-        const VulkanSceneRenderTargets& renderTargets
+        const VulkanSceneRenderTargets& renderTargets,
+        bool useTemporalResolvedColor = false
     );
     void Release();
 
@@ -461,7 +469,8 @@ private:
     void CreateFramebuffers(
         const VulkanDevice& device,
         const VulkanHdrRenderPass& renderPass,
-        const VulkanSceneRenderTargets& renderTargets
+        const VulkanSceneRenderTargets& renderTargets,
+        bool useTemporalResolvedColor
     );
 
 private:

@@ -17,8 +17,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <span>
@@ -27,6 +29,8 @@
 #include <vector>
 
 #include <cmath>
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -36,6 +40,10 @@
 
 #ifndef SE_ASSET_DIR
 #define SE_ASSET_DIR "assets"
+#endif
+
+#ifndef SE_FORCE_LIGHTING_SHOWCASE
+#define SE_FORCE_LIGHTING_SHOWCASE 0
 #endif
 
 namespace {
@@ -205,14 +213,17 @@ glm::vec3 SceneKeyLightDirection(const se::Camera3D& camera) {
 
 void ApplySceneDirectionalLight(
     se::Scene3D& scene,
-    const se::Camera3D& camera
+    const se::Camera3D& camera,
+    bool previewLighting = false
 ) {
     scene.SetPrimaryDirectionalLight(
-        "Camera Key Directional Light",
+        previewLighting
+            ? "Camera Preview Directional Light"
+            : "Camera Key Directional Light",
         SceneKeyLightDirection(camera),
-        0.78f,
-        0.22f,
-        0.24f
+        previewLighting ? 1.15f : 0.78f,
+        previewLighting ? 0.38f : 0.22f,
+        previewLighting ? 0.32f : 0.24f
     );
 }
 
@@ -221,6 +232,13 @@ std::string LowerAscii(std::string text) {
         return static_cast<char>(std::tolower(c));
     });
     return text;
+}
+
+bool UsesReferenceModelLighting(const std::filesystem::path& modelPath) {
+    const std::string filename = LowerAscii(modelPath.filename().string());
+    return filename == "demo_crystal.obj" ||
+        filename == "articulated_links.obj" ||
+        filename == "skinned_probe.dae";
 }
 
 glm::vec3 DirectionFromRotationDegrees(glm::vec3 rotationDegrees) {
@@ -247,6 +265,180 @@ glm::vec3 DirectionFromRotationDegrees(glm::vec3 rotationDegrees) {
     }
 
     return glm::normalize(direction);
+}
+
+glm::vec3 RotationDegreesFromLocalPositiveYToDirection(glm::vec3 direction) {
+    if (glm::dot(direction, direction) <= 0.0001f) {
+        return {};
+    }
+
+    direction = glm::normalize(direction);
+    const se::f32 zRadians = std::asin(std::clamp(-direction.x, -1.0f, 1.0f));
+    const se::f32 cosZ = std::cos(zRadians);
+    const se::f32 xRadians = std::abs(cosZ) > 0.0001f
+        ? std::atan2(direction.z, direction.y)
+        : 0.0f;
+
+    return {
+        glm::degrees(xRadians),
+        0.0f,
+        glm::degrees(zRadians)
+    };
+}
+
+void ConfigureLightGizmoRenderable(
+    se::Renderable3D& renderable,
+    glm::vec3 position,
+    glm::vec3 rotationDegrees,
+    glm::vec3 scale,
+    se::i32 drawOrder
+) {
+    renderable.Transform().SetPosition(position);
+    renderable.Transform().SetRotationDegrees(rotationDegrees);
+    renderable.Transform().SetScale(scale);
+    renderable.Transform().SetAnimateRotation(false);
+    renderable.SetDrawOrder(drawOrder);
+    renderable.SetPickable(false);
+    renderable.SetCastShadow(false);
+}
+
+constexpr se::u32 kLightIndexDigitTextureWidth = 96;
+constexpr se::u32 kLightIndexDigitTextureHeight = 144;
+
+se::f32 Smoothstep(se::f32 edge0, se::f32 edge1, se::f32 value) {
+    const se::f32 t = std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+std::string LightIndexDigitMaterialName(se::u32 digit) {
+    return "LightIndexDigit" + std::to_string(digit % 10u) + "Material";
+}
+
+std::vector<se::u8> CreateLightIndexDigitPixels(se::u32 digit) {
+    constexpr std::array<se::u8, 10> kDigitSegments{
+        0b01110111, // 0
+        0b00010010, // 1
+        0b01011101, // 2
+        0b01011011, // 3
+        0b00111010, // 4
+        0b01101011, // 5
+        0b01101111, // 6
+        0b01010010, // 7
+        0b01111111, // 8
+        0b01111011  // 9
+    };
+    struct SegmentRect {
+        se::u8 bit = 0;
+        glm::vec2 center{ 0.0f };
+        glm::vec2 halfSize{ 0.0f };
+    };
+    constexpr std::array<SegmentRect, 7> kSegments{{
+        { 6u, { 0.0f, 0.73f }, { 0.46f, 0.090f } },
+        { 5u, { -0.47f, 0.36f }, { 0.092f, 0.36f } },
+        { 4u, { 0.47f, 0.36f }, { 0.092f, 0.36f } },
+        { 3u, { 0.0f, 0.0f }, { 0.46f, 0.088f } },
+        { 2u, { -0.47f, -0.36f }, { 0.092f, 0.36f } },
+        { 1u, { 0.47f, -0.36f }, { 0.092f, 0.36f } },
+        { 0u, { 0.0f, -0.73f }, { 0.46f, 0.090f } }
+    }};
+
+    auto roundedBoxDistance = [](glm::vec2 point, glm::vec2 center, glm::vec2 halfSize) {
+        constexpr se::f32 kCornerRadius = 0.055f;
+        const glm::vec2 q =
+            glm::abs(point - center) - glm::max(halfSize - glm::vec2(kCornerRadius), glm::vec2(0.0f));
+        const se::f32 outside = glm::length(glm::max(q, glm::vec2(0.0f)));
+        const se::f32 inside = std::min(std::max(q.x, q.y), 0.0f);
+        return outside + inside - kCornerRadius;
+    };
+
+    std::vector<se::u8> pixels(
+        static_cast<std::size_t>(kLightIndexDigitTextureWidth) *
+            kLightIndexDigitTextureHeight * 4u,
+        0u
+    );
+    const se::u8 mask = kDigitSegments[digit % 10u];
+    for (se::u32 y = 0; y < kLightIndexDigitTextureHeight; ++y) {
+        for (se::u32 x = 0; x < kLightIndexDigitTextureWidth; ++x) {
+            const se::f32 nx =
+                (static_cast<se::f32>(x) + 0.5f) /
+                    static_cast<se::f32>(kLightIndexDigitTextureWidth) * 2.0f - 1.0f;
+            const se::f32 ny =
+                1.0f - (static_cast<se::f32>(y) + 0.5f) /
+                    static_cast<se::f32>(kLightIndexDigitTextureHeight) * 2.0f;
+            const glm::vec2 point{ nx, ny };
+            se::f32 coverage = 0.0f;
+            for (const SegmentRect& segment : kSegments) {
+                if ((mask & (1u << segment.bit)) == 0u) {
+                    continue;
+                }
+                const se::f32 distance =
+                    roundedBoxDistance(point, segment.center, segment.halfSize);
+                coverage = std::max(coverage, 1.0f - Smoothstep(-0.030f, 0.030f, distance));
+            }
+
+            const se::u8 alpha = static_cast<se::u8>(
+                std::clamp(std::round(coverage * 245.0f), 0.0f, 245.0f)
+            );
+            const std::size_t offset =
+                (static_cast<std::size_t>(y) * kLightIndexDigitTextureWidth + x) * 4u;
+            pixels[offset + 0u] = 238u;
+            pixels[offset + 1u] = 248u;
+            pixels[offset + 2u] = 255u;
+            pixels[offset + 3u] = alpha;
+        }
+    }
+
+    return pixels;
+}
+
+void AddLightIndexLabel(
+    se::Scene3D& scene,
+    std::string prefix,
+    se::u32 localLightIndex,
+    glm::vec3 center,
+    se::i32 drawOrder
+) {
+    const se::u32 tens = localLightIndex / 10u;
+    const se::u32 ones = localLightIndex % 10u;
+    const bool twoDigits = localLightIndex >= 10u;
+    const se::f32 digitStep = 0.185f;
+    const se::f32 labelWidth = twoDigits ? 0.48f : 0.29f;
+
+    se::Renderable3D& backplate = scene.CreateRenderable(
+        prefix + " Light Index Backplate " + std::to_string(localLightIndex),
+        "Cube",
+        "LightIndexLabelBackplateMaterial"
+    );
+    ConfigureLightGizmoRenderable(
+        backplate,
+        center + glm::vec3{ 0.0f, 0.0f, -0.018f },
+        {},
+        { labelWidth, 0.37f, 0.018f },
+        drawOrder
+    );
+
+    auto addDigit = [&](se::u32 digit, se::f32 xOffset, const std::string& tag) {
+        se::Renderable3D& piece = scene.CreateRenderable(
+            prefix + " Light Index " + std::to_string(localLightIndex) +
+                " " + tag + " Digit " + std::to_string(digit % 10u),
+            "Plane",
+            LightIndexDigitMaterialName(digit)
+        );
+        ConfigureLightGizmoRenderable(
+            piece,
+            center + glm::vec3{ xOffset, 0.0f, 0.014f },
+            { 90.0f, 0.0f, 0.0f },
+            { 0.155f, 1.0f, 0.255f },
+            drawOrder + 1
+        );
+    };
+
+    if (twoDigits) {
+        addDigit(tens, -digitStep * 0.5f, "Tens");
+        addDigit(ones, digitStep * 0.5f, "Ones");
+    } else {
+        addDigit(ones, 0.0f, "Ones");
+    }
 }
 
 glm::vec3 BridgeForwardDirection(
@@ -297,12 +489,103 @@ std::filesystem::path ExplicitUnrealBridgeManifestPath() {
     return path.empty() ? std::filesystem::path{} : std::filesystem::path(path);
 }
 
-bool BenchmarkGridSceneRequested() {
+bool Forward3DDebugDirectorySceneDefaultActive() {
+    if (!ReadEnvironmentString("SE_BENCHMARK_SCENE").empty()) {
+        return false;
+    }
+
+    const std::string overrideValue =
+        LowerAscii(ReadEnvironmentString("SE_FORWARD3D_DEBUG_DEFAULT_SCENE"));
+    if (!overrideValue.empty()) {
+        return overrideValue == "shadow" ||
+            overrideValue == "shadows" ||
+            overrideValue == "shadow-regression" ||
+            overrideValue == "shadow_regression" ||
+            overrideValue == "forward-shadow-regression" ||
+            overrideValue == "forward_shadow_regression";
+    }
+
+    std::error_code error;
+    const std::filesystem::path cwd = std::filesystem::current_path(error);
+    if (error) {
+        return false;
+    }
+
+    return LowerAscii(cwd.filename().string()) == "debug" &&
+        LowerAscii(cwd.parent_path().filename().string()) == "build";
+}
+
+std::string Forward3DDebugDirectorySceneOverrideName() {
+    const std::string overrideValue =
+        LowerAscii(ReadEnvironmentString("SE_FORWARD3D_DEBUG_DEFAULT_SCENE"));
+    if (overrideValue.empty()) {
+        return {};
+    }
+
+    if (overrideValue == "shadow" ||
+        overrideValue == "shadows" ||
+        overrideValue == "shadow-regression" ||
+        overrideValue == "shadow_regression" ||
+        overrideValue == "forward-shadow-regression" ||
+        overrideValue == "forward_shadow_regression") {
+        return "shadow-regression";
+    }
+
+    if (overrideValue == "lighting" ||
+        overrideValue == "showcase" ||
+        overrideValue == "lighting-showcase" ||
+        overrideValue == "lighting_showcase") {
+        return "lighting-showcase";
+    }
+
+    return {};
+}
+
+std::string Forward3DBenchmarkSceneName() {
     const std::string sceneName = ReadEnvironmentString("SE_BENCHMARK_SCENE");
+    if (!sceneName.empty()) {
+        return sceneName;
+    }
+
+    const std::string debugOverrideScene = Forward3DDebugDirectorySceneOverrideName();
+    if (!debugOverrideScene.empty()) {
+        return debugOverrideScene;
+    }
+
+    return Forward3DDebugDirectorySceneDefaultActive()
+        ? std::string("shadow-regression")
+        : std::string{};
+}
+
+bool BenchmarkGridSceneRequested() {
+    const std::string sceneName = Forward3DBenchmarkSceneName();
     return sceneName == "1" ||
         sceneName == "grid" ||
         sceneName == "forward-grid" ||
         sceneName == "ForwardGrid";
+}
+
+bool LightingShowcaseSceneRequested() {
+#if SE_FORCE_LIGHTING_SHOWCASE
+    return true;
+#else
+    const std::string sceneName = Forward3DBenchmarkSceneName();
+    return sceneName == "lighting-showcase" ||
+        sceneName == "lighting_showcase" ||
+        sceneName == "showcase" ||
+        sceneName == "lighting" ||
+        sceneName == "LightingShowcase";
+#endif
+}
+
+bool ShadowRegressionSceneRequested() {
+    const std::string sceneName = LowerAscii(Forward3DBenchmarkSceneName());
+    return sceneName == "shadow" ||
+        sceneName == "shadows" ||
+        sceneName == "shadow-regression" ||
+        sceneName == "shadow_regression" ||
+        sceneName == "forward-shadow-regression" ||
+        sceneName == "forward_shadow_regression";
 }
 
 bool BenchmarkTransparentMaterialRequested() {
@@ -415,6 +698,19 @@ se::ReflectionProbeRefreshPolicy DefaultReflectionProbeRefreshPolicy(
 
 std::string BenchmarkSceneReflectionProbeAuthoredAssetId() {
     return ReadEnvironmentString("SE_SCENE_REFLECTION_PROBE_AUTHORED_ASSET");
+}
+
+std::string LightingShowcaseReflectionProbeAssetId() {
+    std::string assetId =
+        ReadEnvironmentString("SE_SHOWCASE_REFLECTION_PROBE_ASSET");
+    if (assetId.empty()) {
+        assetId = ReadEnvironmentString("SE_LIGHTING_SHOWCASE_REFLECTION_PROBE_ASSET");
+    }
+    if (!assetId.empty()) {
+        return assetId;
+    }
+
+    return (std::filesystem::path(SE_ASSET_DIR) / "skybox" / "bk.jpg").string();
 }
 
 bool BenchmarkPartialLocalShadowCacheRequested() {
@@ -604,6 +900,50 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "YES";
 }
 
+bool ForwardShutdownTraceEnabled() {
+    return EnvironmentFlagEnabled("SE_SHUTDOWN_TRACE") ||
+        EnvironmentFlagEnabled("SE_FORWARD3D_SHUTDOWN_TRACE");
+}
+
+se::f64 ForwardShutdownElapsedMilliseconds(
+    std::chrono::steady_clock::time_point startTime
+) {
+    return std::chrono::duration<se::f64, std::milli>(
+        std::chrono::steady_clock::now() - startTime
+    ).count();
+}
+
+void TraceForwardShutdown(
+    const char* label,
+    std::chrono::steady_clock::time_point startTime
+) {
+    if (!ForwardShutdownTraceEnabled()) {
+        return;
+    }
+
+    std::cout << "[shutdown] forward3d " << label << " +"
+        << ForwardShutdownElapsedMilliseconds(startTime) << "ms"
+        << std::endl;
+}
+
+class ForwardShutdownScopeTrace {
+public:
+    ForwardShutdownScopeTrace(
+        const char* label,
+        std::chrono::steady_clock::time_point startTime
+    ) : m_Label(label),
+        m_StartTime(startTime) {
+    }
+
+    ~ForwardShutdownScopeTrace() {
+        TraceForwardShutdown(m_Label, m_StartTime);
+    }
+
+private:
+    const char* m_Label = "";
+    std::chrono::steady_clock::time_point m_StartTime;
+};
+
 bool EnvironmentFlagDisabled(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     return value == "0" ||
@@ -613,6 +953,282 @@ bool EnvironmentFlagDisabled(const char* name) {
         value == "OFF" ||
         value == "no" ||
         value == "NO";
+}
+
+bool ForwardFastProcessExitEnabled() {
+    if (EnvironmentFlagEnabled("SE_CLEAN_SHUTDOWN") ||
+        EnvironmentFlagEnabled("SE_VULKAN_CLEAN_SHUTDOWN")) {
+        return false;
+    }
+    if (EnvironmentFlagDisabled("SE_FAST_PROCESS_EXIT") ||
+        EnvironmentFlagDisabled("SE_FAST_EXIT")) {
+        return false;
+    }
+
+    return true;
+}
+
+bool Forward3DProductionShadowProfileRequested() {
+    const std::string value =
+        LowerAscii(ReadEnvironmentString("SE_FORWARD3D_SHADOW_PROFILE"));
+    if (value == "generic" ||
+        value == "legacy" ||
+        value == "raw" ||
+        value == "renderer" ||
+        value == "renderer-default") {
+        return false;
+    }
+
+    return true;
+}
+
+void SetEnvironmentDefault(const char* name, const char* value) {
+    if (!ReadEnvironmentString(name).empty()) {
+        return;
+    }
+
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 0);
+#endif
+}
+
+void SetTextureMipLodBiasEnvironmentDefault(const char* value) {
+    if (!ReadEnvironmentString("SE_TEXTURE_MIP_LOD_BIAS").empty() ||
+        !ReadEnvironmentString("SE_MATERIAL_TEXTURE_MIP_BIAS").empty() ||
+        !ReadEnvironmentString("SE_TEXTURE_MIP_BIAS").empty()) {
+        return;
+    }
+
+    SetEnvironmentDefault("SE_TEXTURE_MIP_LOD_BIAS", value);
+}
+
+void SetGlobalIblSourceEnvironmentDefault(const char* value) {
+    if (!ReadEnvironmentString("SE_GLOBAL_IBL_SOURCE").empty() ||
+        !ReadEnvironmentString("SE_IBL_SOURCE").empty()) {
+        return;
+    }
+
+    SetEnvironmentDefault("SE_GLOBAL_IBL_SOURCE", value);
+}
+
+void SetGlobalIblCachePolicyEnvironmentDefault(const char* value) {
+    if (!ReadEnvironmentString("SE_GLOBAL_IBL_CACHE_POLICY").empty() ||
+        !ReadEnvironmentString("SE_GLOBAL_IBL_CACHE").empty() ||
+        !ReadEnvironmentString("SE_IBL_CACHE_POLICY").empty() ||
+        !ReadEnvironmentString("SE_IBL_CACHE").empty()) {
+        return;
+    }
+
+    SetEnvironmentDefault("SE_GLOBAL_IBL_CACHE_POLICY", value);
+}
+
+void SetGlobalIblSourceAssetEnvironmentDefault(const std::string& value) {
+    if (!ReadEnvironmentString("SE_GLOBAL_IBL_ASSET").empty() ||
+        !ReadEnvironmentString("SE_GLOBAL_IBL_SOURCE_ASSET").empty() ||
+        !ReadEnvironmentString("SE_GLOBAL_IBL_SOURCE_PATH").empty() ||
+        !ReadEnvironmentString("SE_IBL_ASSET").empty()) {
+        return;
+    }
+
+    SetEnvironmentDefault("SE_GLOBAL_IBL_ASSET", value.c_str());
+}
+
+void ApplyLightingShowcaseIblEnvironmentDefaults() {
+    SetGlobalIblSourceEnvironmentDefault("authored-equirectangular");
+    SetGlobalIblCachePolicyEnvironmentDefault("prefer-offline");
+    SetGlobalIblSourceAssetEnvironmentDefault(
+        LightingShowcaseReflectionProbeAssetId()
+    );
+}
+
+bool DefaultSceneSkinnedFbxProductionRequested() {
+    if (EnvironmentFlagDisabled("SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION") ||
+        EnvironmentFlagDisabled("SE_DEFAULT_SCENE_SKINNED_FBX") ||
+        EnvironmentFlagDisabled("SE_DEFAULT_SCENE_BIND_SKINNED_FBX")) {
+        return false;
+    }
+
+    if (EnvironmentFlagEnabled("SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION") ||
+        EnvironmentFlagEnabled("SE_DEFAULT_SCENE_SKINNED_FBX") ||
+        EnvironmentFlagEnabled("SE_DEFAULT_SCENE_BIND_SKINNED_FBX")) {
+        return true;
+    }
+
+    return true;
+}
+
+se::RendererTemporalAntialiasingMode ForwardTemporalAntialiasingModeFromEnvironment() {
+    const std::string value = LowerAscii(ReadEnvironmentString("SE_FORWARD3D_AA_MODE"));
+    if (value.empty() || value == "default") {
+        return se::RendererTemporalAntialiasingMode::DlssSrPerformance;
+    }
+    if (value == "off" ||
+        value == "none" ||
+        value == "disabled" ||
+        value == "disable" ||
+        value == "0") {
+        return se::RendererTemporalAntialiasingMode::Off;
+    }
+    if (value == "taa" ||
+        value == "native-taa" ||
+        value == "native_taa" ||
+        value == "temporal-aa" ||
+        value == "temporal_aa") {
+        return se::RendererTemporalAntialiasingMode::NativeTaa;
+    }
+    if (value == "sr-quality" ||
+        value == "sr_quality" ||
+        value == "dlss-quality" ||
+        value == "dlss_quality" ||
+        value == "dlss-sr-quality" ||
+        value == "dlss_sr_quality") {
+        return se::RendererTemporalAntialiasingMode::DlssSrQuality;
+    }
+    if (value == "sr-balanced" ||
+        value == "sr_balanced" ||
+        value == "dlss-balanced" ||
+        value == "dlss_balanced" ||
+        value == "dlss-sr-balanced" ||
+        value == "dlss_sr_balanced") {
+        return se::RendererTemporalAntialiasingMode::DlssSrBalanced;
+    }
+    if (value == "sr-performance" ||
+        value == "sr_performance" ||
+        value == "dlss-performance" ||
+        value == "dlss_performance" ||
+        value == "dlss-sr-performance" ||
+        value == "dlss_sr_performance") {
+        return se::RendererTemporalAntialiasingMode::DlssSrPerformance;
+    }
+    if (value == "dlaa" ||
+        value == "dlss" ||
+        value == "dlss-dlaa" ||
+        value == "dlss_dlaa" ||
+        value == "dlss-dlaa-l" ||
+        value == "dlss_dlaa_l") {
+        return se::RendererTemporalAntialiasingMode::DlssDlaa;
+    }
+    if (value == "env" || value == "environment") {
+        return se::RendererTemporalAntialiasingMode::Environment;
+    }
+
+    return se::RendererTemporalAntialiasingMode::DlssSrPerformance;
+}
+
+bool ForwardTemporalAntialiasingModeIsDlss(
+    se::RendererTemporalAntialiasingMode mode
+) {
+    return mode == se::RendererTemporalAntialiasingMode::DlssDlaa ||
+        mode == se::RendererTemporalAntialiasingMode::DlssSrQuality ||
+        mode == se::RendererTemporalAntialiasingMode::DlssSrBalanced ||
+        mode == se::RendererTemporalAntialiasingMode::DlssSrPerformance;
+}
+
+void ApplyForwardTemporalAntialiasingEnvironmentDefaults(
+    se::RendererTemporalAntialiasingMode mode
+) {
+    // F6 can hot-switch from Native TAA into DLSS after Vulkan device creation.
+    // Request the optional DLSS Vulkan requirements up front, while leaving the
+    // per-mode temporal contracts below to the active AA mode.
+    SetEnvironmentDefault("SE_ENABLE_DLSS_VULKAN_EXTENSIONS", "1");
+    SetEnvironmentDefault("SE_UPSCALER_PLUGIN", "dlss");
+
+    if (!ForwardTemporalAntialiasingModeIsDlss(mode)) {
+        return;
+    }
+
+    switch (mode) {
+    case se::RendererTemporalAntialiasingMode::DlssSrQuality:
+        SetEnvironmentDefault("SE_DLSS_QUALITY", "quality");
+        SetEnvironmentDefault("SE_RENDER_SCALE", "0.666667");
+        SetTextureMipLodBiasEnvironmentDefault("-1.58496");
+        break;
+    case se::RendererTemporalAntialiasingMode::DlssSrBalanced:
+        SetEnvironmentDefault("SE_DLSS_QUALITY", "balanced");
+        SetEnvironmentDefault("SE_RENDER_SCALE", "0.58");
+        SetTextureMipLodBiasEnvironmentDefault("-1.78588");
+        break;
+    case se::RendererTemporalAntialiasingMode::DlssSrPerformance:
+        SetEnvironmentDefault("SE_DLSS_QUALITY", "performance");
+        SetEnvironmentDefault("SE_RENDER_SCALE", "0.5");
+        SetTextureMipLodBiasEnvironmentDefault("-2.0");
+        break;
+    case se::RendererTemporalAntialiasingMode::DlssDlaa:
+    default:
+        SetEnvironmentDefault("SE_DLSS_QUALITY", "dlaa");
+        SetEnvironmentDefault("SE_RENDER_SCALE", "1.0");
+        break;
+    }
+    SetEnvironmentDefault("SE_DLSS_PRESET", "l");
+    SetEnvironmentDefault("SE_DLSS_PRESENT", "1");
+    SetEnvironmentDefault("SE_DLSS_SHARPNESS", "0.0");
+    SetEnvironmentDefault("SE_TAA", "1");
+    SetEnvironmentDefault("SE_TEMPORAL_JITTER", "1");
+    SetEnvironmentDefault("SE_TAA_APPLY_JITTER", "1");
+    SetEnvironmentDefault("SE_RENDER_SCALE_APPLY", "1");
+    SetEnvironmentDefault("SE_TEMPORAL_VELOCITY_JITTER_POLICY", "jittered");
+}
+
+const char* TemporalAntialiasingModeName(
+    se::RendererTemporalAntialiasingMode mode
+) {
+    switch (mode) {
+    case se::RendererTemporalAntialiasingMode::NativeTaa:
+        return "Native TAA";
+    case se::RendererTemporalAntialiasingMode::DlssDlaa:
+        return "DLSS DLAA L";
+    case se::RendererTemporalAntialiasingMode::DlssSrQuality:
+        return "DLSS SR Quality 66.7%";
+    case se::RendererTemporalAntialiasingMode::DlssSrBalanced:
+        return "DLSS SR Balanced 58%";
+    case se::RendererTemporalAntialiasingMode::DlssSrPerformance:
+        return "DLSS SR Performance 50%";
+    case se::RendererTemporalAntialiasingMode::Off:
+        return "Off";
+    case se::RendererTemporalAntialiasingMode::Environment:
+    default:
+        return "Environment";
+    }
+}
+
+int ReadEnvironmentInt(
+    const char* primaryName,
+    const char* aliasName,
+    int fallback,
+    int minValue,
+    int maxValue
+) {
+    std::string value = ReadEnvironmentString(primaryName);
+    if (value.empty() && aliasName != nullptr) {
+        value = ReadEnvironmentString(aliasName);
+    }
+    if (value.empty()) {
+        return fallback;
+    }
+
+    return std::clamp(std::atoi(value.c_str()), minValue, maxValue);
+}
+
+int ForwardWindowWidth() {
+    return ReadEnvironmentInt(
+        "SE_WINDOW_WIDTH",
+        "SE_FORWARD3D_WINDOW_WIDTH",
+        1280,
+        320,
+        7680
+    );
+}
+
+int ForwardWindowHeight() {
+    return ReadEnvironmentInt(
+        "SE_WINDOW_HEIGHT",
+        "SE_FORWARD3D_WINDOW_HEIGHT",
+        720,
+        240,
+        4320
+    );
 }
 
 se::f32 ReadEnvironmentF32(const char* name, se::f32 fallback) {
@@ -1427,6 +2043,1134 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
     }
 }
 
+void BuildLightingShowcaseScene(
+    se::Scene3D& scene,
+    se::Scene3D* lightIndexOverlayScene = nullptr
+) {
+    const bool showcaseLocalLightsOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_LOCAL_LIGHTS_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_LOCAL_LIGHTS_OFF");
+    const bool showcaseSphereShadowCastersOn =
+        EnvironmentFlagEnabled("SE_SHOWCASE_SPHERE_SHADOW_CASTERS_ON") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_SPHERE_SHADOW_CASTERS_ON");
+    const bool showcaseSphereShadowCastersOff =
+        !showcaseSphereShadowCastersOn &&
+        (
+            EnvironmentFlagEnabled("SE_SHOWCASE_SPHERE_SHADOW_CASTERS_OFF") ||
+            EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_SPHERE_SHADOW_CASTERS_OFF")
+        );
+    const bool showcasePropShadowCastersOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_PROP_SHADOW_CASTERS_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_PROP_SHADOW_CASTERS_OFF");
+    const bool showcaseFloorShadowCasterOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_FLOOR_SHADOW_CASTER_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_FLOOR_SHADOW_CASTER_OFF");
+    const bool showcasePlainSpheres =
+        EnvironmentFlagEnabled("SE_SHOWCASE_PLAIN_SPHERES") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_PLAIN_SPHERES");
+    const bool showcaseReflectionProbesOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_REFLECTION_PROBES_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_REFLECTION_PROBES_OFF");
+    const bool showcaseCapturedReflectionProbesOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_CAPTURED_REFLECTION_PROBES_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_CAPTURED_REFLECTION_PROBES_OFF");
+    const bool showcaseAuthoredReflectionProbesOn =
+        EnvironmentFlagEnabled("SE_SHOWCASE_AUTHORED_REFLECTION_PROBES") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_AUTHORED_REFLECTION_PROBES");
+    const bool showcaseFrontBounceLightsOn =
+        EnvironmentFlagEnabled("SE_SHOWCASE_FRONT_BOUNCE_LIGHTS_ON") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_FRONT_BOUNCE_LIGHTS_ON");
+    const bool showcaseOverheadFillOn =
+        EnvironmentFlagEnabled("SE_SHOWCASE_OVERHEAD_FILL_ON") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_OVERHEAD_FILL_ON");
+    const bool showcaseLightIndexLabelsOn =
+        EnvironmentFlagEnabled("SE_LIGHT_INDEX_LABELS_ON") ||
+        EnvironmentFlagEnabled("SE_SHOWCASE_LIGHT_INDEX_LABELS_ON") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_LIGHT_INDEX_LABELS_ON") ||
+        EnvironmentFlagEnabled("SE_LOCAL_LIGHT_INDEX_LABELS_ON");
+    const bool showcaseLightIndexLabelsOff =
+        EnvironmentFlagEnabled("SE_LIGHT_INDEX_LABELS_OFF") ||
+        EnvironmentFlagEnabled("SE_SHOWCASE_LIGHT_INDEX_LABELS_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_LIGHT_INDEX_LABELS_OFF");
+    const bool showcaseLightIndexLabelsVisible =
+        showcaseLightIndexLabelsOn && !showcaseLightIndexLabelsOff;
+    se::u32 nextLocalLightIndex = 0u;
+
+    auto place = [](
+        se::Renderable3D& renderable,
+        glm::vec3 position,
+        glm::vec3 scale,
+        glm::vec3 rotationDegrees = glm::vec3(0.0f),
+        se::i32 drawOrder = 0
+    ) {
+        renderable.Transform().SetPosition(position);
+        renderable.Transform().SetScale(scale);
+        renderable.Transform().SetRotationDegrees(rotationDegrees);
+        renderable.Transform().SetAnimateRotation(false);
+        renderable.SetDrawOrder(drawOrder);
+    };
+
+    se::Renderable3D& floor = scene.CreateRenderable(
+        "Showcase Charcoal Floor",
+        "Plane",
+        "ShowcaseCharcoalMaterial"
+    );
+    place(floor, { 0.0f, -1.05f, 0.0f }, { 8.5f, 1.0f, 6.2f }, {}, -30);
+    floor.SetPickable(false);
+    if (showcaseFloorShadowCasterOff) {
+        floor.SetCastShadow(false);
+    }
+
+    se::Renderable3D& backWall = scene.CreateRenderable(
+        "Showcase Back Wall",
+        "Cube",
+        "ShowcaseBackdropMaterial"
+    );
+    place(backWall, { 0.0f, 1.05f, -2.35f }, { 8.5f, 4.2f, 0.16f }, {}, -25);
+    backWall.SetPickable(false);
+    backWall.SetCastShadow(false);
+
+    se::Renderable3D& leftWall = scene.CreateRenderable(
+        "Showcase Left Shadow Wall",
+        "Cube",
+        "ShowcaseBackdropMaterial"
+    );
+    place(leftWall, { -4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
+    leftWall.SetPickable(false);
+    leftWall.SetCastShadow(false);
+
+    se::Renderable3D& rightWall = scene.CreateRenderable(
+        "Showcase Right Shadow Wall",
+        "Cube",
+        "ShowcaseBackdropMaterial"
+    );
+    place(rightWall, { 4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
+    rightWall.SetPickable(false);
+    rightWall.SetCastShadow(false);
+
+    se::Renderable3D& ceiling = scene.CreateRenderable(
+        "Showcase Soft Ceiling",
+        "Cube",
+        "ShowcaseBackdropMaterial"
+    );
+    place(ceiling, { 0.0f, 2.95f, 0.0f }, { 8.5f, 0.12f, 5.0f }, {}, -23);
+    ceiling.SetPickable(false);
+    ceiling.SetCastShadow(false);
+
+    const std::array<glm::vec3, 3> pedestalPositions{
+        glm::vec3{ -2.15f, -0.8f, 0.15f },
+        glm::vec3{ 0.0f, -0.78f, -0.15f },
+        glm::vec3{ 2.15f, -0.8f, 0.15f }
+    };
+    for (std::size_t index = 0; index < pedestalPositions.size(); ++index) {
+        se::Renderable3D& pedestal = scene.CreateRenderable(
+            "Showcase Pedestal " + std::to_string(index),
+            "Cube",
+            index == 1 ? "ShowcaseWarmStoneMaterial" : "ShowcaseCharcoalMaterial"
+        );
+        place(
+            pedestal,
+            pedestalPositions[index],
+            { 1.36f, 0.48f, 1.2f },
+            { 0.0f, index == 1 ? 0.0f : (index == 0 ? -8.0f : 8.0f), 0.0f },
+            -10
+        );
+        if (showcasePropShadowCastersOff) {
+            pedestal.SetCastShadow(false);
+        }
+    }
+
+    se::Renderable3D& metalSphere = scene.CreateRenderable(
+        "Showcase Polished Metal Sphere",
+        "Sphere",
+        showcasePlainSpheres ? "ShowcaseWarmStoneMaterial" : "ShowcaseReflectionTestSilverMaterial"
+    );
+    place(metalSphere, { -2.15f, 0.18f, 0.15f }, { 1.18f, 1.18f, 1.18f });
+    if (showcaseSphereShadowCastersOff) {
+        metalSphere.SetCastShadow(false);
+    }
+
+    se::Renderable3D& ceramicSphere = scene.CreateRenderable(
+        "Showcase Cool Ceramic Sphere",
+        "Sphere",
+        showcasePlainSpheres ? "ShowcaseWarmStoneMaterial" : "ShowcaseCoolCeramicMaterial"
+    );
+    place(ceramicSphere, { 0.0f, 0.15f, -0.15f }, { 1.08f, 1.08f, 1.08f });
+    if (showcaseSphereShadowCastersOff) {
+        ceramicSphere.SetCastShadow(false);
+    }
+
+    se::Renderable3D& lacquerCube = scene.CreateRenderable(
+        "Showcase Gloss Black Cube",
+        "Cube",
+        "ShowcaseGlossBlackMaterial"
+    );
+    place(lacquerCube, { 2.15f, -0.02f, 0.15f }, { 0.95f, 0.95f, 0.95f }, { 0.0f, -24.0f, 0.0f });
+    if (showcasePropShadowCastersOff) {
+        lacquerCube.SetCastShadow(false);
+    }
+
+    se::Renderable3D& warmBlock = scene.CreateRenderable(
+        "Showcase Warm Rough Block",
+        "Cube",
+        "ShowcaseWarmStoneMaterial"
+    );
+    place(warmBlock, { -0.95f, -0.47f, -1.32f }, { 0.8f, 0.8f, 0.8f }, { 0.0f, 18.0f, 0.0f });
+    if (showcasePropShadowCastersOff) {
+        warmBlock.SetCastShadow(false);
+    }
+
+    se::Renderable3D& thinMetal = scene.CreateRenderable(
+        "Showcase Thin Metal Slab",
+        "Cube",
+        "ShowcaseBrushedMetalMaterial"
+    );
+    place(thinMetal, { 0.85f, -0.46f, -1.25f }, { 0.32f, 1.15f, 0.76f }, { 0.0f, -28.0f, 0.0f });
+    if (showcasePropShadowCastersOff) {
+        thinMetal.SetCastShadow(false);
+    }
+
+    const std::array<glm::vec3, 5> materialSamplePositions{
+        glm::vec3{ -1.9f, -0.72f, 2.12f },
+        glm::vec3{ -0.95f, -0.72f, 2.20f },
+        glm::vec3{ 0.0f, -0.72f, 2.24f },
+        glm::vec3{ 0.95f, -0.72f, 2.20f },
+        glm::vec3{ 1.9f, -0.72f, 2.12f }
+    };
+    const std::array<const char*, 5> materialSampleMaterials{
+        "ShowcaseReferenceChromeMaterial",
+        "ShowcaseReferenceSatinMetalMaterial",
+        "ShowcaseReferencePorcelainMaterial",
+        "ShowcaseReferenceGlossRedMaterial",
+        "ShowcaseReferenceMatteRubberMaterial"
+    };
+    for (std::size_t index = 0; index < materialSamplePositions.size(); ++index) {
+        const glm::vec3& samplePosition = materialSamplePositions[index];
+        se::Renderable3D& base = scene.CreateRenderable(
+            "Showcase Material Sample Base " + std::to_string(index),
+            "Cube",
+            "ShowcaseCharcoalMaterial"
+        );
+        place(base, { samplePosition.x, -1.0f, samplePosition.z }, { 0.66f, 0.12f, 0.46f }, {}, -12);
+        base.SetPickable(false);
+        if (showcasePropShadowCastersOff) {
+            base.SetCastShadow(false);
+        }
+
+        se::Renderable3D& sample = scene.CreateRenderable(
+            "Showcase Material Sample " + std::to_string(index),
+            "Sphere",
+            materialSampleMaterials[index]
+        );
+        place(sample, { samplePosition.x, -0.60f, samplePosition.z }, { 0.52f, 0.52f, 0.52f }, {}, -9);
+        sample.SetPickable(false);
+        if (showcaseSphereShadowCastersOff) {
+            sample.SetCastShadow(false);
+        }
+    }
+
+    auto createFixturePart = [&](
+        const std::string& name,
+        const char* meshName,
+        const char* materialName,
+        glm::vec3 position,
+        glm::vec3 scale,
+        glm::vec3 rotationDegrees,
+        se::i32 drawOrder
+    ) -> se::Renderable3D& {
+        se::Renderable3D& part = scene.CreateRenderable(
+            name,
+            meshName,
+            materialName
+        );
+        ConfigureLightGizmoRenderable(
+            part,
+            position,
+            rotationDegrees,
+            scale,
+            drawOrder
+        );
+        return part;
+    };
+
+    auto createFramedRectLightFixture = [&](
+        const std::string& name,
+        glm::vec3 position,
+        glm::vec3 direction,
+        se::f32 width,
+        se::f32 height,
+        se::f32 radius,
+        glm::vec3 color,
+        se::f32 intensity,
+        const char* materialName,
+        se::i32 drawOrder,
+        se::f32 visualWidth,
+        se::f32 visualHeight,
+        bool standingFixture,
+        glm::vec3 labelPosition
+    ) {
+        direction = glm::normalize(direction);
+        if (!showcaseLocalLightsOff) {
+            const se::u32 localLightIndex = nextLocalLightIndex++;
+            scene.CreateRectLight(
+                name,
+                position,
+                direction,
+                width,
+                height,
+                radius,
+                color,
+                intensity
+            );
+            if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
+                AddLightIndexLabel(
+                    *lightIndexOverlayScene,
+                    name,
+                    localLightIndex,
+                    labelPosition,
+                    220 + static_cast<se::i32>(localLightIndex) * 3
+                );
+            }
+        }
+
+        const glm::vec3 rotationDegrees =
+            RotationDegreesFromLocalPositiveYToDirection(direction);
+
+        createFixturePart(
+            name + " Fixture Housing",
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            position - direction * 0.045f,
+            { visualWidth + 0.22f, 0.08f, visualHeight + 0.22f },
+            rotationDegrees,
+            drawOrder - 2
+        );
+        createFixturePart(
+            name + " Diffuser",
+            "Cube",
+            materialName,
+            position + direction * 0.018f,
+            { visualWidth, 0.035f, visualHeight },
+            rotationDegrees,
+            drawOrder
+        );
+
+        if (standingFixture) {
+            constexpr se::f32 kFloorY = -1.05f;
+            const se::f32 poleHeight =
+                std::max(position.y - kFloorY - 0.24f, 0.36f);
+            const glm::vec3 polePosition{
+                position.x - direction.x * 0.12f,
+                kFloorY + poleHeight * 0.5f,
+                position.z - direction.z * 0.12f
+            };
+            createFixturePart(
+                name + " Fixture Stand",
+                "Cube",
+                "ShowcaseLampFixtureMaterial",
+                polePosition,
+                { 0.07f, poleHeight, 0.07f },
+                {},
+                drawOrder - 3
+            );
+            createFixturePart(
+                name + " Fixture Base",
+                "Cube",
+                "ShowcaseLampFixtureMaterial",
+                { polePosition.x, kFloorY + 0.035f, polePosition.z },
+                { 0.58f, 0.07f, 0.44f },
+                {},
+                drawOrder - 4
+            );
+        }
+    };
+
+    const std::array<glm::vec3, 3> stripPositions{
+        glm::vec3{ -2.75f, 1.45f, -2.18f },
+        glm::vec3{ 0.0f, 1.72f, -2.18f },
+        glm::vec3{ 2.75f, 1.45f, -2.18f }
+    };
+    for (std::size_t index = 0; index < stripPositions.size(); ++index) {
+        const std::string suffix = std::to_string(index);
+        const char* stripMaterialName =
+            index == 1
+                ? "ShowcaseEmissiveMaterial"
+                : "ShowcaseCoolStripLightMaterial";
+        const glm::vec3 lightColor =
+            index == 1
+                ? glm::vec3{ 1.0f, 0.82f, 0.55f }
+                : glm::vec3{ 0.88f, 0.78f, 1.0f };
+        const glm::vec3 practicalDirection =
+            glm::normalize(glm::vec3{ 0.0f, -0.20f, 1.0f });
+        const glm::vec3 wallWashDirection{ 0.0f, 0.0f, -1.0f };
+        const glm::vec3 wallWashPosition =
+            stripPositions[index] + glm::vec3{ 0.0f, 0.0f, -0.055f };
+        const glm::vec3 wallWashRotation =
+            RotationDegreesFromLocalPositiveYToDirection(wallWashDirection);
+
+        createFixturePart(
+            "Showcase Wall Wash Diffuser " + suffix,
+            "Cube",
+            stripMaterialName,
+            wallWashPosition,
+            { 0.86f, 0.028f, 1.92f },
+            wallWashRotation,
+            -8
+        );
+        createFixturePart(
+            "Showcase Wall Wash Frame " + suffix,
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            wallWashPosition + glm::vec3{ 0.0f, 0.0f, -0.018f },
+            { 1.02f, 0.035f, 2.08f },
+            wallWashRotation,
+            -9
+        );
+
+        se::Renderable3D& backplate = scene.CreateRenderable(
+            "Showcase Wall Strip Backplate " + suffix,
+            "Cube",
+            "ShowcaseLampFixtureMaterial"
+        );
+        place(
+            backplate,
+            stripPositions[index] + glm::vec3{ 0.0f, 0.0f, -0.018f },
+            { 0.27f, 1.76f, 0.06f },
+            {},
+            -6
+        );
+        backplate.SetCastShadow(false);
+
+        se::Renderable3D& strip = scene.CreateRenderable(
+            "Showcase Wall Diffuser Strip " + suffix,
+            "Cube",
+            stripMaterialName
+        );
+        place(
+            strip,
+            stripPositions[index] + glm::vec3{ 0.0f, 0.0f, 0.035f },
+            { 0.08f, 1.38f, 0.04f },
+            {},
+            -4
+        );
+        strip.SetCastShadow(false);
+
+        createFixturePart(
+            "Showcase Wall Strip Top Cap " + suffix,
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            stripPositions[index] + glm::vec3{ 0.0f, 0.78f, 0.0f },
+            { 0.28f, 0.06f, 0.08f },
+            {},
+            -5
+        );
+        createFixturePart(
+            "Showcase Wall Strip Bottom Cap " + suffix,
+            "Cube",
+            "ShowcaseLampFixtureMaterial",
+            stripPositions[index] + glm::vec3{ 0.0f, -0.78f, 0.0f },
+            { 0.28f, 0.06f, 0.08f },
+            {},
+            -5
+        );
+
+        if (!showcaseLocalLightsOff) {
+            const se::u32 practicalLightIndex = nextLocalLightIndex++;
+            scene.CreateRectLight(
+                "Showcase Practical Rect Light " + suffix,
+                stripPositions[index] + glm::vec3{ 0.0f, 0.0f, 0.14f },
+                practicalDirection,
+                0.95f,
+                2.05f,
+                6.8f,
+                lightColor,
+                index == 1 ? 8.8f : 7.4f
+            );
+            if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
+                AddLightIndexLabel(
+                    *lightIndexOverlayScene,
+                    "Showcase Practical Rect Light " + suffix,
+                    practicalLightIndex,
+                    stripPositions[index] + glm::vec3{ 0.32f, 0.93f, 0.24f },
+                    200 + static_cast<se::i32>(practicalLightIndex) * 3
+                );
+            }
+
+            const se::u32 wallWashLightIndex = nextLocalLightIndex++;
+            scene.CreateRectLight(
+                "Showcase Practical Wall Wash Light " + suffix,
+                wallWashPosition,
+                wallWashDirection,
+                0.86f,
+                2.05f,
+                2.45f,
+                lightColor,
+                index == 1 ? 2.8f : 2.35f
+            );
+            if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
+                AddLightIndexLabel(
+                    *lightIndexOverlayScene,
+                    "Showcase Practical Wall Wash Light " + suffix,
+                    wallWashLightIndex,
+                    stripPositions[index] + glm::vec3{ -0.32f, -0.93f, 0.24f },
+                    200 + static_cast<se::i32>(wallWashLightIndex) * 3
+                );
+            }
+        }
+    }
+
+    const glm::vec3 sunDirection =
+        glm::normalize(glm::vec3{ -0.42f, -0.78f, -0.46f });
+    scene.SetPrimaryDirectionalLight(
+        "Showcase Low Sun Directional",
+        sunDirection,
+        0.86f,
+        0.62f,
+        0.52f
+    );
+
+    createFramedRectLightFixture(
+        "Showcase Warm Key Area",
+        { -3.88f, 1.38f, 0.84f },
+        glm::normalize(glm::vec3{ 1.0f, -0.22f, -0.20f }),
+        3.2f,
+        2.0f,
+        7.6f,
+        { 1.0f, 0.76f, 0.48f },
+        4.1f,
+        "ShowcaseWarmKeyLightMaterial",
+        20,
+        0.96f,
+        1.18f,
+        false,
+        { -3.34f, 1.92f, 1.12f }
+    );
+    createFramedRectLightFixture(
+        "Showcase Cool Rim Rect",
+        { 3.88f, 1.38f, 0.84f },
+        glm::normalize(glm::vec3{ -1.0f, -0.20f, -0.22f }),
+        2.8f,
+        1.55f,
+        7.0f,
+        { 0.48f, 0.68f, 1.0f },
+        4.8f,
+        "ShowcaseCoolRimLightMaterial",
+        21,
+        0.92f,
+        1.08f,
+        false,
+        { 3.34f, 1.92f, 1.12f }
+    );
+    if (showcaseOverheadFillOn) {
+        createFramedRectLightFixture(
+            "Showcase Soft Overhead Fill",
+            { 0.0f, 2.84f, -0.10f },
+            glm::normalize(glm::vec3{ 0.0f, -1.0f, -0.02f }),
+            5.0f,
+            2.2f,
+            8.0f,
+            { 0.70f, 0.80f, 1.0f },
+            2.45f,
+            "ShowcaseSoftFillLightMaterial",
+            22,
+            2.85f,
+            0.46f,
+            false,
+            { 0.0f, 2.48f, 1.04f }
+        );
+    }
+    if (showcaseFrontBounceLightsOn) {
+        createFramedRectLightFixture(
+            "Showcase Low Warm Bounce",
+            { -2.82f, -0.88f, 2.18f },
+            glm::normalize(glm::vec3{ 0.38f, 0.64f, -0.66f }),
+            1.55f,
+            0.75f,
+            4.6f,
+            { 1.0f, 0.36f, 0.16f },
+            1.45f,
+            "ShowcaseLowWarmLightMaterial",
+            23,
+            0.62f,
+            0.24f,
+            false,
+            { -2.42f, -0.50f, 2.56f }
+        );
+        createFramedRectLightFixture(
+            "Showcase Low Cool Bounce",
+            { 2.82f, -0.88f, 2.18f },
+            glm::normalize(glm::vec3{ -0.38f, 0.64f, -0.66f }),
+            1.55f,
+            0.75f,
+            4.8f,
+            { 0.24f, 0.56f, 1.0f },
+            1.30f,
+            "ShowcaseLowCoolLightMaterial",
+            24,
+            0.62f,
+            0.24f,
+            false,
+            { 2.42f, -0.50f, 2.56f }
+        );
+    }
+    if (!showcaseReflectionProbesOff) {
+        const std::string showcaseReflectionProbeAssetId =
+            LightingShowcaseReflectionProbeAssetId();
+        const se::ReflectionProbeCaptureSource showcaseReflectionProbeCaptureSource =
+            !showcaseCapturedReflectionProbesOff &&
+                    !showcaseAuthoredReflectionProbesOn
+                ? se::ReflectionProbeCaptureSource::CapturedScene
+            : showcaseReflectionProbeAssetId.empty()
+                ? se::ReflectionProbeCaptureSource::BuiltInProcedural
+                : se::ReflectionProbeCaptureSource::AuthoredCubemap;
+        const se::ReflectionProbeRefreshPolicy showcaseReflectionProbeRefreshPolicy =
+            DefaultReflectionProbeRefreshPolicy(showcaseReflectionProbeCaptureSource);
+        const std::string showcaseReflectionProbeCaptureAssetId =
+            showcaseReflectionProbeCaptureSource ==
+                    se::ReflectionProbeCaptureSource::AuthoredCubemap
+                ? showcaseReflectionProbeAssetId
+                : std::string{};
+        scene.CreateReflectionProbe(
+            "Showcase Center Warm Probe",
+            { -1.15f, 0.45f, 0.15f },
+            4.4f,
+            { 3.5f, 2.5f, 3.2f },
+            { 1.0f, 0.72f, 0.48f },
+            1.18f,
+            0.58f,
+            2.15f,
+            showcaseReflectionProbeCaptureSource,
+            showcaseReflectionProbeCaptureAssetId,
+            showcaseReflectionProbeRefreshPolicy
+        );
+        scene.CreateReflectionProbe(
+            "Showcase Cool Rim Probe",
+            { 2.1f, 0.55f, 0.1f },
+            4.0f,
+            { 3.0f, 2.4f, 3.0f },
+            { 0.48f, 0.66f, 1.0f },
+            1.08f,
+            0.52f,
+            2.0f,
+            showcaseReflectionProbeCaptureSource,
+            showcaseReflectionProbeCaptureAssetId,
+            showcaseReflectionProbeRefreshPolicy
+        );
+        scene.CreateReflectionProbe(
+            "Showcase Dark Ground Probe",
+            { 0.0f, -0.05f, 0.35f },
+            5.2f,
+            { 5.4f, 2.1f, 4.2f },
+            { 0.66f, 0.68f, 0.70f },
+            0.92f,
+            0.48f,
+            1.75f,
+            showcaseReflectionProbeCaptureSource,
+            showcaseReflectionProbeCaptureAssetId,
+            showcaseReflectionProbeRefreshPolicy
+        );
+    }
+
+    std::cout << "Lighting showcase enabled: deferred HDR lighting scene"
+        << std::endl;
+}
+
+void BuildShadowRegressionScene(
+    se::Scene3D& scene,
+    se::Scene3D* lightGizmoOverlayScene = nullptr
+) {
+    const bool rectLightOnly =
+        EnvironmentFlagEnabled("SE_SHADOW_REGRESSION_RECT_LIGHT_ONLY");
+    const bool lightGizmosEnabled =
+        !EnvironmentFlagEnabled("SE_SHADOW_REGRESSION_LIGHT_GIZMOS_OFF");
+    auto place = [](
+        se::Renderable3D& renderable,
+        glm::vec3 position,
+        glm::vec3 scale,
+        glm::vec3 rotationDegrees = glm::vec3(0.0f),
+        se::i32 drawOrder = 0
+    ) {
+        renderable.Transform().SetPosition(position);
+        renderable.Transform().SetScale(scale);
+        renderable.Transform().SetRotationDegrees(rotationDegrees);
+        renderable.Transform().SetAnimateRotation(false);
+        renderable.SetDrawOrder(drawOrder);
+    };
+
+    se::Renderable3D& ground = scene.CreateRenderable(
+        "Shadow Regression Ground",
+        "Plane",
+        "DefaultGroundMaterial"
+    );
+    place(ground, { 0.0f, -1.1f, 0.0f }, { 9.0f, 1.0f, 8.0f }, {}, -40);
+    ground.SetPickable(false);
+
+    se::Renderable3D& backWall = scene.CreateRenderable(
+        "Shadow Regression Back Wall",
+        "Cube",
+        "GroundMaterial"
+    );
+    place(backWall, { 0.0f, 1.0f, -3.25f }, { 9.0f, 3.8f, 0.16f }, {}, -35);
+    backWall.SetPickable(false);
+    backWall.SetCastShadow(false);
+
+    se::Renderable3D& lowStep = scene.CreateRenderable(
+        "Shadow Regression Low Step",
+        "Cube",
+        "WarmCubeMaterial"
+    );
+    place(lowStep, { 0.2f, -0.86f, -0.8f }, { 2.2f, 0.42f, 1.2f }, { 0.0f, 8.0f, 0.0f }, -15);
+
+    se::Renderable3D& tallCaster = scene.CreateRenderable(
+        "Shadow Regression Tall Caster",
+        "Cube",
+        "BlueCubeMaterial"
+    );
+    place(tallCaster, { 2.1f, -0.15f, 0.05f }, { 0.68f, 1.9f, 0.68f }, { 0.0f, -24.0f, 0.0f });
+
+    se::Renderable3D& nearCaster = scene.CreateRenderable(
+        "Shadow Regression Near Caster",
+        "Cube",
+        "GreenCubeMaterial"
+    );
+    place(nearCaster, { -2.2f, -0.42f, 0.95f }, { 0.82f, 1.05f, 0.82f }, { 0.0f, 18.0f, 0.0f });
+
+    se::Renderable3D& roundCaster = scene.CreateRenderable(
+        "Shadow Regression Round Caster",
+        "Sphere",
+        "ShowcaseCoolCeramicMaterial"
+    );
+    place(roundCaster, { 1.15f, -0.36f, 1.35f }, { 0.74f, 0.74f, 0.74f });
+
+    se::Renderable3D& offscreenCasterA = scene.CreateRenderable(
+        "Shadow Regression Offscreen Caster A",
+        "Cube",
+        "BlueCubeMaterial"
+    );
+    place(
+        offscreenCasterA,
+        { 6.7f, -0.24f, -0.15f },
+        { 0.82f, 1.72f, 0.82f },
+        { 0.0f, -18.0f, 0.0f }
+    );
+
+    se::Renderable3D& offscreenCasterB = scene.CreateRenderable(
+        "Shadow Regression Offscreen Caster B",
+        "Cube",
+        "GreenCubeMaterial"
+    );
+    place(
+        offscreenCasterB,
+        { -6.65f, -0.32f, 0.3f },
+        { 0.76f, 1.55f, 0.76f },
+        { 0.0f, 22.0f, 0.0f }
+    );
+
+    scene.SetPrimaryDirectionalLight(
+        "Shadow Regression Directional Light",
+        glm::normalize(glm::vec3{ -0.36f, -0.82f, -0.43f }),
+        rectLightOnly ? 0.16f : 0.92f,
+        rectLightOnly ? 0.08f : 0.18f,
+        rectLightOnly ? 0.08f : 0.28f
+    );
+
+    const glm::vec3 pointLightPosition{ -2.65f, 1.25f, 1.25f };
+    const glm::vec3 pointLightColor{ 1.0f, 0.58f, 0.34f };
+    const glm::vec3 spotLightPosition{ 2.9f, 3.0f, 2.6f };
+    const glm::vec3 spotLightDirection =
+        glm::normalize(glm::vec3{ -0.55f, -0.75f, -0.38f });
+    const glm::vec3 spotLightColor{ 0.62f, 0.76f, 1.0f };
+    const glm::vec3 rectLightPosition{ 0.0f, 2.6f, 2.4f };
+    const glm::vec3 rectLightDirection =
+        glm::normalize(glm::vec3{ 0.0f, -0.72f, -0.70f });
+    const glm::vec3 rectLightColor{ 1.0f, 0.88f, 0.64f };
+    constexpr se::f32 kRectLightWidth = 3.6f;
+    constexpr se::f32 kRectLightHeight = 1.4f;
+    if (!EnvironmentFlagEnabled("SE_SHADOW_REGRESSION_LOCAL_LIGHTS_OFF")) {
+        if (!rectLightOnly) {
+            scene.CreatePointLight(
+                "Shadow Regression Warm Local Light",
+                pointLightPosition,
+                5.2f,
+                pointLightColor,
+                4.2f
+            );
+            scene.CreateSpotLight(
+                "Shadow Regression Cool Spot Light",
+                spotLightPosition,
+                spotLightDirection,
+                7.2f,
+                spotLightColor,
+                3.4f,
+                15.0f,
+                30.0f
+            );
+        }
+        scene.CreateRectLight(
+            "Shadow Regression Soft Rect Light",
+            rectLightPosition,
+            rectLightDirection,
+            kRectLightWidth,
+            kRectLightHeight,
+            6.8f,
+            rectLightColor,
+            rectLightOnly ? 4.4f : 2.6f
+        );
+
+        if (lightGizmosEnabled) {
+            se::Scene3D& lightGizmoScene =
+                lightGizmoOverlayScene != nullptr ? *lightGizmoOverlayScene : scene;
+            if (!rectLightOnly) {
+                se::Renderable3D& pointGizmo = lightGizmoScene.CreateRenderable(
+                    "Shadow Regression Point Light Gizmo",
+                    "Sphere",
+                    "PointLightGizmoMaterial"
+                );
+                ConfigureLightGizmoRenderable(
+                    pointGizmo,
+                    pointLightPosition,
+                    {},
+                    { 0.34f, 0.34f, 0.34f },
+                    90
+                );
+
+                se::Renderable3D& spotGizmo = lightGizmoScene.CreateRenderable(
+                    "Shadow Regression Spot Light Gizmo",
+                    "Cone",
+                    "SpotLightGizmoMaterial"
+                );
+                ConfigureLightGizmoRenderable(
+                    spotGizmo,
+                    spotLightPosition,
+                    RotationDegreesFromLocalPositiveYToDirection(spotLightDirection),
+                    { 1.32f, 1.15f, 1.32f },
+                    91
+                );
+            }
+
+            se::Renderable3D& rectGizmo = lightGizmoScene.CreateRenderable(
+                "Shadow Regression Rect Light Gizmo",
+                "Plane",
+                "RectLightGizmoMaterial"
+            );
+            ConfigureLightGizmoRenderable(
+                rectGizmo,
+                rectLightPosition,
+                RotationDegreesFromLocalPositiveYToDirection(rectLightDirection),
+                { kRectLightWidth, 1.0f, kRectLightHeight },
+                92
+            );
+        }
+    }
+    scene.CreateReflectionProbe(
+        "Shadow Regression Reflection Probe",
+        { 0.0f, 0.75f, 0.0f },
+        6.0f,
+        { 4.8f, 3.2f, 4.8f },
+        { 0.85f, 0.76f, 0.66f },
+        0.9f,
+        0.42f,
+        1.8f
+    );
+
+    std::cout << "Shadow regression scene enabled: fixed camera, animated FBX, CSM/local/contact coverage"
+        << std::endl;
+}
+
+std::filesystem::path DefaultSceneSkinnedFbxPath() {
+    return std::filesystem::path(SE_ASSET_DIR) / "models" / "Fist Fight B.fbx";
+}
+
+void ApplyDefaultSceneFbxMaterialFallbacks(se::RuntimeModelLoader& loader) {
+    loader.ForEachMaterial([](se::VulkanMaterial& material) {
+        se::MaterialProperties& properties = material.Properties();
+        if (properties.textureMix <= 0.001f) {
+            properties.baseColorFactor = { 0.90f, 0.78f, 0.62f, 1.0f };
+            properties.textureMix = 0.0f;
+            properties.pbrFactors = { 1.0f, 0.42f, 0.0f, 0.0f };
+            properties.emissiveFactor = { 0.16f, 0.11f, 0.06f, 1.0f };
+        }
+        properties.viewControls[1] = std::max(properties.viewControls[1], 1.28f);
+    });
+}
+
+se::RuntimeModelLoadResult LoadDefaultSceneSkinnedFbx(
+    se::RuntimeModelLoader& loader,
+    glm::vec3 position,
+    glm::vec3 rotationDegrees,
+    se::f32 targetMaxExtent,
+    glm::vec3 scale,
+    bool bindSkinning,
+    const char* label
+) {
+    se::RuntimeModelLoadResult result{};
+    const std::filesystem::path modelPath = DefaultSceneSkinnedFbxPath();
+    if (!std::filesystem::exists(modelPath)) {
+        result.message = "Default-scene FBX model not found";
+        std::cout << "[warning] " << result.message << ": "
+            << se::UnrealPathToUtf8(modelPath)
+            << std::endl;
+        return result;
+    }
+
+    std::cout << "Loading " << label << " FBX model: "
+        << se::UnrealPathToUtf8(modelPath)
+        << (bindSkinning ? " [skinned production audit]" : " [rigid preview]")
+        << std::endl;
+    result = loader.LoadIntoScene(
+        modelPath,
+        position,
+        rotationDegrees,
+        targetMaxExtent,
+        scale,
+        bindSkinning
+    );
+    if (result.loaded) {
+        std::cout << label << " FBX model loaded: "
+            << result.message
+            << std::endl;
+        ApplyDefaultSceneFbxMaterialFallbacks(loader);
+    } else {
+        std::cout << "[warning] " << label << " FBX model load failed: "
+            << result.message
+            << std::endl;
+    }
+
+    return result;
+}
+
+void ApplyLightingShowcaseRendererSettings(se::VulkanRenderer& renderer) {
+    se::VulkanShadowSettings& shadow = renderer.ShadowSettings();
+    se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::High);
+    shadow.ambientStrength = 0.10f;
+    shadow.strength = 1.0f;
+    shadow.pcssStrength = 0.30f;
+    shadow.localPcssStrength = 0.24f;
+    shadow.contactShadowStrength = 0.0f;
+    shadow.contactShadowLength = 0.0f;
+    shadow.contactShadowThickness = 0.0f;
+    shadow.contactShadowSteps = 0u;
+    shadow.ssaoStrength = 0.12f;
+    shadow.ssaoRadius = 1.55f;
+    shadow.ssaoBias = 0.022f;
+    shadow.ssaoSampleCount = 16u;
+    shadow.ssrStrength = 0.0f;
+    shadow.ssrRayLength = 0.0f;
+    shadow.ssrThickness = 0.0f;
+    shadow.ssrStepCount = 0u;
+    shadow.reflectionProbeFallbackEnabled = true;
+    shadow.reflectionProbeCubemapEnabled = true;
+    shadow.reflectionProbeDiffuseIntensity = 1.32f;
+    shadow.reflectionProbeSpecularIntensity = 0.16f;
+    shadow.reflectionProbeHorizonBlend = 0.42f;
+    shadow.skyboxEnabled = true;
+    shadow.skyboxIntensity = 1.0f;
+    shadow.skyboxBlur = 0.0f;
+    shadow.heightFogEnabled = false;
+    shadow.heightFogDensity = 0.0f;
+    shadow.heightFogHeightFalloff = 0.16f;
+    shadow.heightFogStartDistance = 4.2f;
+    shadow.heightFogMaxOpacity = 0.0f;
+    shadow.heightFogColorR = 0.50f;
+    shadow.heightFogColorG = 0.58f;
+    shadow.heightFogColorB = 0.68f;
+
+    se::VulkanRenderDebugSettings& debug = renderer.RenderDebugSettings();
+    debug.forwardView = se::ForwardDebugView::DeferredHdr;
+    debug.exposure = 1.16f;
+    debug.toneMapMode = 0u;
+    debug.toneMapWhitePoint = 5.0f;
+    debug.autoExposureEnabled = false;
+    debug.bloomEnabled = true;
+    debug.bloomIntensity = 0.08f;
+    debug.bloomThreshold = 1.35f;
+    debug.bloomRadiusPixels = 4.5f;
+    debug.colorGradingEnabled = true;
+    debug.colorGradingSaturation = 1.06f;
+    debug.colorGradingContrast = 1.08f;
+    debug.colorGradingGamma = 1.0f;
+    debug.colorGradingLutStrength = 1.0f;
+    debug.sharpeningEnabled = false;
+    debug.sharpeningStrength = 0.0f;
+    debug.sharpeningRadiusPixels = 0.85f;
+}
+
+void ApplyForward3DRendererSettings(se::VulkanRenderer& renderer) {
+    se::VulkanShadowSettings& shadow = renderer.ShadowSettings();
+    if (Forward3DProductionShadowProfileRequested()) {
+        se::ApplyForward3DProductionShadowPreset(shadow);
+    } else {
+        se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::High);
+    }
+}
+
+bool ApplyEnvironmentF32Override(
+    se::f32& target,
+    const char* name,
+    se::f32 minValue,
+    se::f32 maxValue
+) {
+    if (ReadEnvironmentString(name).empty()) {
+        return false;
+    }
+
+    target = std::clamp(ReadEnvironmentF32(name, target), minValue, maxValue);
+    return true;
+}
+
+bool ApplyEnvironmentU32Override(
+    se::u32& target,
+    const char* name,
+    se::u32 minValue,
+    se::u32 maxValue
+) {
+    if (ReadEnvironmentString(name).empty()) {
+        return false;
+    }
+
+    target = std::clamp(
+        static_cast<se::u32>(ReadEnvironmentF32(name, static_cast<se::f32>(target)) + 0.5f),
+        minValue,
+        maxValue
+    );
+    return true;
+}
+
+void ApplyLocalShadowFilterEnvironmentOverrides(
+    se::VulkanLocalShadowFilterSettings& filter,
+    const char* biasMinName,
+    const char* biasSlopeName,
+    const char* pcfRadiusName,
+    const char* pcfKernelRadiusName,
+    const char* pcssStrengthName
+) {
+    (void)ApplyEnvironmentF32Override(filter.biasMin, biasMinName, 0.0f, 0.02f);
+    (void)ApplyEnvironmentF32Override(filter.biasSlope, biasSlopeName, 0.0f, 0.05f);
+    (void)ApplyEnvironmentF32Override(filter.pcfRadius, pcfRadiusName, 0.0f, 4.0f);
+    (void)ApplyEnvironmentU32Override(filter.pcfKernelRadius, pcfKernelRadiusName, 0u, 2u);
+    (void)ApplyEnvironmentF32Override(filter.pcssStrength, pcssStrengthName, 0.0f, 1.0f);
+}
+
+void ApplyForward3DLocalShadowEnvironmentOverrides(se::VulkanShadowSettings& shadow) {
+    bool sharedFilterOverridden = false;
+    sharedFilterOverridden |= ApplyEnvironmentF32Override(
+        shadow.localBiasMin,
+        "SE_LOCAL_SHADOW_BIAS_MIN",
+        0.0f,
+        0.02f
+    );
+    sharedFilterOverridden |= ApplyEnvironmentF32Override(
+        shadow.localBiasSlope,
+        "SE_LOCAL_SHADOW_BIAS_SLOPE",
+        0.0f,
+        0.05f
+    );
+    sharedFilterOverridden |= ApplyEnvironmentF32Override(
+        shadow.localPcfRadius,
+        "SE_LOCAL_SHADOW_PCF_RADIUS",
+        0.0f,
+        4.0f
+    );
+    sharedFilterOverridden |= ApplyEnvironmentU32Override(
+        shadow.localPcfKernelRadius,
+        "SE_LOCAL_SHADOW_PCF_KERNEL_RADIUS",
+        0u,
+        2u
+    );
+    sharedFilterOverridden |= ApplyEnvironmentF32Override(
+        shadow.localPcssStrength,
+        "SE_LOCAL_SHADOW_PCSS_STRENGTH",
+        0.0f,
+        1.0f
+    );
+    if (sharedFilterOverridden) {
+        se::SyncLocalShadowKindFiltersToShared(shadow);
+    }
+
+    ApplyLocalShadowFilterEnvironmentOverrides(
+        shadow.pointLocalShadowFilter,
+        "SE_LOCAL_SHADOW_POINT_BIAS_MIN",
+        "SE_LOCAL_SHADOW_POINT_BIAS_SLOPE",
+        "SE_LOCAL_SHADOW_POINT_PCF_RADIUS",
+        "SE_LOCAL_SHADOW_POINT_PCF_KERNEL_RADIUS",
+        "SE_LOCAL_SHADOW_POINT_PCSS_STRENGTH"
+    );
+    ApplyLocalShadowFilterEnvironmentOverrides(
+        shadow.spotLocalShadowFilter,
+        "SE_LOCAL_SHADOW_SPOT_BIAS_MIN",
+        "SE_LOCAL_SHADOW_SPOT_BIAS_SLOPE",
+        "SE_LOCAL_SHADOW_SPOT_PCF_RADIUS",
+        "SE_LOCAL_SHADOW_SPOT_PCF_KERNEL_RADIUS",
+        "SE_LOCAL_SHADOW_SPOT_PCSS_STRENGTH"
+    );
+    ApplyLocalShadowFilterEnvironmentOverrides(
+        shadow.rectLocalShadowFilter,
+        "SE_LOCAL_SHADOW_RECT_BIAS_MIN",
+        "SE_LOCAL_SHADOW_RECT_BIAS_SLOPE",
+        "SE_LOCAL_SHADOW_RECT_PCF_RADIUS",
+        "SE_LOCAL_SHADOW_RECT_PCF_KERNEL_RADIUS",
+        "SE_LOCAL_SHADOW_RECT_PCSS_STRENGTH"
+    );
+
+    (void)ApplyEnvironmentF32Override(
+        shadow.localFaceBlendStrength,
+        "SE_LOCAL_SHADOW_FACE_BLEND",
+        0.0f,
+        1.0f
+    );
+    if (!ReadEnvironmentString("SE_RECT_SHADOW_BIAS_SCALE").empty()) {
+        (void)ApplyEnvironmentF32Override(
+            shadow.rectLightShadowBiasScale,
+            "SE_RECT_SHADOW_BIAS_SCALE",
+            0.0f,
+            32.0f
+        );
+    } else {
+        (void)ApplyEnvironmentF32Override(
+            shadow.rectLightShadowBiasScale,
+            "SE_LOCAL_SHADOW_RECT_BIAS_SCALE",
+            0.0f,
+            32.0f
+        );
+    }
+    if (ApplyEnvironmentU32Override(
+            shadow.rectLightShadowSampleTiles,
+            "SE_LOCAL_SHADOW_RECT_SAMPLE_TILES",
+            2u,
+            4u
+        )) {
+        shadow.rectLightShadowSampleTiles =
+            shadow.rectLightShadowSampleTiles >= 4u ? 4u : 2u;
+    }
+}
+
+void ApplyForward3DEnvironmentShadowDefaults(se::VulkanRenderer& renderer) {
+    se::VulkanShadowSettings& shadow = renderer.ShadowSettings();
+    if (Forward3DProductionShadowProfileRequested()) {
+        se::ApplyForward3DShadowProductionOverrides(shadow);
+    }
+    ApplyForward3DLocalShadowEnvironmentOverrides(shadow);
+
+    if (!ReadEnvironmentString("SE_SHADOW_CASCADE_MAX_DISTANCE").empty()) {
+        shadow.cascadeMaxDistance = std::clamp(
+            ReadEnvironmentF32(
+                "SE_SHADOW_CASCADE_MAX_DISTANCE",
+                se::kForward3DShadowCascadeMaxDistance
+            ),
+            10.0f,
+            2000.0f
+        );
+    }
+
+    std::cout << "Forward 3D shadow profile: "
+        << (Forward3DProductionShadowProfileRequested()
+            ? "production"
+            : "generic")
+        << ", CSM max distance=" << shadow.cascadeMaxDistance
+        << "m"
+        << std::endl;
+}
+
 void ApplyCameraToMaterial(
     const se::Camera3D& camera,
     se::VulkanMaterial& material
@@ -1896,6 +3640,12 @@ bool ApplyBridgeSkyLightToRenderer(
 
 int main() {
     constexpr int kDisplay1 = 1;
+    constexpr bool kForceLightingShowcase =
+        SE_FORCE_LIGHTING_SHOWCASE != 0;
+    if (kForceLightingShowcase) {
+        SetEnvironmentDefault("SE_HIDE_IMGUI", "1");
+    }
+#if !SE_FORCE_LIGHTING_SHOWCASE
     if (EnvironmentFlagEnabled("SE_DISCOVER_UE_PROJECTS")) {
         se::UnrealProjectDiscoveryOptions discoveryOptions{};
         discoveryOptions.rootPath = UnrealProjectRootPath();
@@ -1906,28 +3656,72 @@ int main() {
         }
         PrintUnrealProjectDiscovery(se::DiscoverUnrealProjects(discoveryOptions));
     }
+#endif
 
     const std::string vertexShaderPath = std::string(SE_SHADER_DIR) + "/forward_3d.vert.spv";
     const std::string fragmentShaderPath = std::string(SE_SHADER_DIR) + "/forward_3d.frag.spv";
     const std::string checkerTexturePath = std::string(SE_ASSET_DIR) + "/textures/checker.ppm";
-    const StartupBridgeScene startupBridgeScene = ResolveStartupBridgeScene();
+    const StartupBridgeScene startupBridgeScene =
+        kForceLightingShowcase ? StartupBridgeScene{} : ResolveStartupBridgeScene();
     PrintStartupBridgeScene(startupBridgeScene);
-    const std::filesystem::path importedModelPath = ImportedModelPath();
+    const std::filesystem::path importedModelPath =
+        kForceLightingShowcase ? std::filesystem::path{} : ImportedModelPath();
     const std::filesystem::path bridgeModelPath =
         startupBridgeScene.exportedSceneReady ? startupBridgeScene.exportedScenePath : std::filesystem::path{};
     const std::filesystem::path startupModelPath =
         !importedModelPath.empty() ? importedModelPath : bridgeModelPath;
     const bool hasStartupModel = !startupModelPath.empty();
-    const bool useBenchmarkScene = !hasStartupModel && BenchmarkGridSceneRequested();
+    const bool lightingShowcaseSceneRequested =
+        !hasStartupModel && LightingShowcaseSceneRequested();
+    const bool shadowRegressionSceneRequested =
+        !hasStartupModel && ShadowRegressionSceneRequested();
+    const bool useBenchmarkScene =
+        !hasStartupModel &&
+        (
+            BenchmarkGridSceneRequested() ||
+            lightingShowcaseSceneRequested ||
+            shadowRegressionSceneRequested
+        );
+    const bool previewStartupModelLighting =
+        !importedModelPath.empty() && !UsesReferenceModelLighting(importedModelPath);
     const bool animateBenchmarkPartialLocalShadowCache =
         useBenchmarkScene && BenchmarkPartialLocalShadowCacheRequested();
-
+#if !defined(NDEBUG)
+    const bool reflectionCaptureCameraInvariantControl =
+        EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_CAMERA_INVARIANT_CONTROL");
+#else
+    constexpr bool reflectionCaptureCameraInvariantControl = false;
+#endif
+    const bool showcaseCameraControlsEnabled =
+        lightingShowcaseSceneRequested ||
+        (
+            shadowRegressionSceneRequested &&
+            (
+                EnvironmentFlagEnabled("SE_SHADOW_REGRESSION_CAMERA_CONTROLS") ||
+                Forward3DDebugDirectorySceneDefaultActive()
+            )
+        );
+    const int windowWidth = ForwardWindowWidth();
+    const int windowHeight = ForwardWindowHeight();
+    const se::RendererTemporalAntialiasingMode startupAntialiasingMode =
+        ForwardTemporalAntialiasingModeFromEnvironment();
+    ApplyForwardTemporalAntialiasingEnvironmentDefaults(startupAntialiasingMode);
+    if (lightingShowcaseSceneRequested) {
+        ApplyLightingShowcaseIblEnvironmentDefaults();
+    }
     se::Application app(
-        1280,
-        720,
-        "SelfEngine Forward 3D",
+        windowWidth,
+        windowHeight,
+        kForceLightingShowcase
+            ? "SelfEngine Lighting Showcase"
+            : "SelfEngine Forward 3D",
         kDisplay1,
         se::PipelineSpec::DefaultForward3D(vertexShaderPath, fragmentShaderPath)
+    );
+    const auto forwardShutdownTraceStartTime = std::chrono::steady_clock::now();
+    ForwardShutdownScopeTrace forwardShutdownScope(
+        "scene_resources_destroyed",
+        forwardShutdownTraceStartTime
     );
 
     se::MeshData3D cubeData = se::MeshFactory::CreateCube();
@@ -1959,6 +3753,26 @@ int main() {
         std::move(gridData.indices)
     );
     app.RenderResources().RegisterMesh("Grid", *gridMesh);
+
+    se::MeshData3D sphereData = se::MeshFactory::CreateUvSphere(192, 96);
+    auto sphereMesh = std::make_unique<se::VulkanMesh>(
+        app.Device(),
+        app.PhysicalDevice(),
+        app.CommandPool(),
+        std::move(sphereData.vertices),
+        std::move(sphereData.indices)
+    );
+    app.RenderResources().RegisterMesh("Sphere", *sphereMesh);
+
+    se::MeshData3D coneData = se::MeshFactory::CreateCone(64);
+    auto coneMesh = std::make_unique<se::VulkanMesh>(
+        app.Device(),
+        app.PhysicalDevice(),
+        app.CommandPool(),
+        std::move(coneData.vertices),
+        std::move(coneData.indices)
+    );
+    app.RenderResources().RegisterMesh("Cone", *coneMesh);
 
     se::VulkanMaterial& cubeMaterial = app.MaterialLibrary().Create(
         "WarmCubeMaterial",
@@ -1999,6 +3813,396 @@ int main() {
         checkerTexturePath,
         ForwardMaterial({ 1.0f, 1.0f, 1.0f, 1.0f }, 0.0f, 0.65f, 0.25f, 0.0f, 8.0f)
     );
+    constexpr std::array<se::u8, 4> kShowcaseCharcoalTexel{
+        168, 174, 182, 255
+    };
+    se::VulkanMaterial& showcaseCharcoalMaterial = app.MaterialLibrary().Create(
+        "ShowcaseCharcoalMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseCharcoalTexel.data(), kShowcaseCharcoalTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.56f, 0.58f, 0.60f, 1.0f }, 1.0f, 0.24f, 0.64f, 0.08f, 18.0f),
+        false,
+        false
+    );
+    showcaseCharcoalMaterial.Properties().cameraControls = { 0.0f, 0.76f, 0.0f, 0.0f };
+    showcaseCharcoalMaterial.Properties().pbrFactors = { 1.0f, 0.48f, 0.0f, 0.0f };
+
+    constexpr std::array<se::u8, 4> kShowcaseBackdropTexel{
+        190, 188, 184, 255
+    };
+    se::VulkanMaterial& showcaseBackdropMaterial = app.MaterialLibrary().Create(
+        "ShowcaseBackdropMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseBackdropTexel.data(), kShowcaseBackdropTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.58f, 0.58f, 0.56f, 1.0f }, 1.0f, 0.28f, 0.62f, 0.06f, 16.0f),
+        false,
+        false
+    );
+    showcaseBackdropMaterial.Properties().cameraControls = { 0.0f, 0.84f, 0.0f, 0.0f };
+    showcaseBackdropMaterial.Properties().pbrFactors = { 1.0f, 0.42f, 0.0f, 0.0f };
+
+    constexpr std::array<se::u8, 4> kShowcaseLampFixtureTexel{
+        96, 100, 104, 255
+    };
+    se::VulkanMaterial& showcaseLampFixtureMaterial = app.MaterialLibrary().Create(
+        "ShowcaseLampFixtureMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseLampFixtureTexel.data(), kShowcaseLampFixtureTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.44f, 0.46f, 0.48f, 1.0f }, 1.0f, 0.10f, 0.42f, 0.22f, 48.0f),
+        false,
+        false
+    );
+    showcaseLampFixtureMaterial.Properties().cameraControls = { 1.0f, 0.34f, 0.0f, 0.0f };
+    showcaseLampFixtureMaterial.Properties().specularFactor = { 0.62f, 0.66f, 0.70f, 1.0f };
+    showcaseLampFixtureMaterial.Properties().pbrFactors = { 1.0f, 0.62f, 0.0f, 0.0f };
+
+    constexpr std::array<se::u8, 4> kShowcaseWarmStoneTexel{
+        166, 118, 76, 255
+    };
+    se::VulkanMaterial& showcaseWarmStoneMaterial = app.MaterialLibrary().Create(
+        "ShowcaseWarmStoneMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseWarmStoneTexel.data(), kShowcaseWarmStoneTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.72f, 0.50f, 0.31f, 1.0f }, 1.0f, 0.10f, 0.68f, 0.18f, 36.0f),
+        false,
+        false
+    );
+    showcaseWarmStoneMaterial.Properties().cameraControls = { 0.0f, 0.68f, 0.0f, 0.0f };
+    showcaseWarmStoneMaterial.Properties().pbrFactors = { 1.0f, 0.64f, 0.0f, 0.0f };
+
+    constexpr std::array<se::u8, 4> kShowcaseMetalTexel{
+        194, 186, 170, 255
+    };
+    se::VulkanMaterial& showcaseBrushedMetalMaterial = app.MaterialLibrary().Create(
+        "ShowcaseBrushedMetalMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseMetalTexel.data(), kShowcaseMetalTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.88f, 0.82f, 0.72f, 1.0f }, 1.0f, 0.05f, 0.48f, 0.68f, 128.0f),
+        false,
+        false
+    );
+    showcaseBrushedMetalMaterial.Properties().cameraControls = { 1.0f, 0.58f, 0.0f, 0.0f };
+    showcaseBrushedMetalMaterial.Properties().specularFactor = { 1.02f, 0.98f, 0.92f, 1.0f };
+    showcaseBrushedMetalMaterial.Properties().pbrFactors = { 1.0f, 0.54f, 0.0f, 0.0f };
+
+    constexpr std::array<se::u8, 4> kShowcaseGlossBlackTexel{
+        28, 28, 34, 255
+    };
+    se::VulkanMaterial& showcaseGlossBlackMaterial = app.MaterialLibrary().Create(
+        "ShowcaseGlossBlackMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseGlossBlackTexel.data(), kShowcaseGlossBlackTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.14f, 0.135f, 0.15f, 1.0f }, 1.0f, 0.03f, 0.38f, 0.88f, 160.0f),
+        false,
+        false
+    );
+    showcaseGlossBlackMaterial.Properties().cameraControls = { 0.0f, 0.18f, 0.0f, 0.0f };
+    showcaseGlossBlackMaterial.Properties().specularFactor = { 1.55f, 1.48f, 1.36f, 1.0f };
+    showcaseGlossBlackMaterial.Properties().clearcoatFactor = 1.0f;
+    showcaseGlossBlackMaterial.Properties().clearcoatRoughness = 0.08f;
+
+    constexpr std::array<se::u8, 4> kShowcaseCoolCeramicTexel{
+        112, 150, 210, 255
+    };
+    se::VulkanMaterial& showcaseCoolCeramicMaterial = app.MaterialLibrary().Create(
+        "ShowcaseCoolCeramicMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseCoolCeramicTexel.data(), kShowcaseCoolCeramicTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.46f, 0.62f, 0.88f, 1.0f }, 1.0f, 0.08f, 0.68f, 0.46f, 72.0f),
+        false,
+        false
+    );
+    showcaseCoolCeramicMaterial.Properties().cameraControls = { 0.0f, 0.66f, 0.0f, 0.0f };
+    showcaseCoolCeramicMaterial.Properties().specularFactor = { 0.72f, 0.78f, 0.88f, 1.0f };
+    showcaseCoolCeramicMaterial.Properties().clearcoatFactor = 0.0f;
+    showcaseCoolCeramicMaterial.Properties().clearcoatRoughness = 0.5f;
+
+    auto createShowcaseReferenceMaterial = [&](
+        const char* name,
+        std::array<se::u8, 4> texel,
+        std::array<se::f32, 4> baseColor,
+        se::f32 metallic,
+        se::f32 roughness,
+        std::array<se::f32, 4> specular,
+        se::f32 clearcoat,
+        se::f32 clearcoatRoughness
+    ) -> se::VulkanMaterial& {
+        se::VulkanMaterial& material = app.MaterialLibrary().Create(
+            name,
+            se::VulkanTexturePixels{
+                std::span<const se::u8>(texel.data(), texel.size()),
+                1,
+                1
+            },
+            ForwardMaterial(baseColor, 1.0f, 0.06f, 0.54f, 0.46f, 96.0f),
+            false,
+            false
+        );
+        material.Properties().cameraControls = { metallic, roughness, 0.0f, 0.0f };
+        material.Properties().specularFactor = specular;
+        material.Properties().clearcoatFactor = clearcoat;
+        material.Properties().clearcoatRoughness = clearcoatRoughness;
+        material.Properties().pbrFactors = { 1.0f, 0.42f, 0.0f, 0.0f };
+        return material;
+    };
+
+    se::VulkanMaterial& showcaseReferenceChromeMaterial = createShowcaseReferenceMaterial(
+        "ShowcaseReferenceChromeMaterial",
+        { 224, 224, 218, 255 },
+        { 0.92f, 0.92f, 0.88f, 1.0f },
+        1.0f,
+        0.28f,
+        { 1.08f, 1.06f, 1.02f, 1.0f },
+        0.0f,
+        0.0f
+    );
+    se::VulkanMaterial& showcaseReflectionTestSilverMaterial =
+        createShowcaseReferenceMaterial(
+            "ShowcaseReflectionTestSilverMaterial",
+            { 214, 220, 228, 255 },
+            { 0.78f, 0.82f, 0.88f, 1.0f },
+            0.68f,
+            0.24f,
+            { 0.96f, 0.98f, 1.0f, 1.0f },
+            0.0f,
+            0.0f
+        );
+    se::VulkanMaterial& showcaseReferenceSatinMetalMaterial = createShowcaseReferenceMaterial(
+        "ShowcaseReferenceSatinMetalMaterial",
+        { 186, 176, 158, 255 },
+        { 0.82f, 0.76f, 0.66f, 1.0f },
+        1.0f,
+        0.56f,
+        { 0.88f, 0.84f, 0.76f, 1.0f },
+        0.0f,
+        0.0f
+    );
+    se::VulkanMaterial& showcaseReferencePorcelainMaterial = createShowcaseReferenceMaterial(
+        "ShowcaseReferencePorcelainMaterial",
+        { 232, 238, 242, 255 },
+        { 0.86f, 0.90f, 0.92f, 1.0f },
+        0.0f,
+        0.38f,
+        { 0.72f, 0.76f, 0.82f, 1.0f },
+        0.25f,
+        0.22f
+    );
+    se::VulkanMaterial& showcaseReferenceGlossRedMaterial = createShowcaseReferenceMaterial(
+        "ShowcaseReferenceGlossRedMaterial",
+        { 190, 38, 28, 255 },
+        { 0.78f, 0.12f, 0.08f, 1.0f },
+        0.0f,
+        0.20f,
+        { 1.05f, 0.86f, 0.78f, 1.0f },
+        1.0f,
+        0.10f
+    );
+    se::VulkanMaterial& showcaseReferenceMatteRubberMaterial = createShowcaseReferenceMaterial(
+        "ShowcaseReferenceMatteRubberMaterial",
+        { 42, 44, 48, 255 },
+        { 0.22f, 0.23f, 0.25f, 1.0f },
+        0.0f,
+        0.88f,
+        { 0.34f, 0.34f, 0.36f, 1.0f },
+        0.0f,
+        0.0f
+    );
+
+    constexpr std::array<se::u8, 4> kShowcaseEmissiveTexel{
+        255, 152, 42, 255
+    };
+    se::VulkanMaterial& showcaseEmissiveMaterial = app.MaterialLibrary().Create(
+        "ShowcaseEmissiveMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kShowcaseEmissiveTexel.data(), kShowcaseEmissiveTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 1.0f, 0.52f, 0.18f, 1.0f }, 1.0f, 0.0f, 0.15f, 0.12f, 16.0f),
+        false,
+        false
+    );
+    showcaseEmissiveMaterial.Properties().cameraControls = { 0.0f, 0.42f, 0.0f, 0.0f };
+    showcaseEmissiveMaterial.Properties().emissiveFactor = { 2.5f, 1.25f, 0.34f, 1.0f };
+
+    auto createShowcaseEmitterMaterial = [&](
+        const char* name,
+        std::array<se::u8, 4> texel,
+        std::array<se::f32, 4> baseColor,
+        std::array<se::f32, 4> emissive
+    ) -> se::VulkanMaterial& {
+        se::VulkanMaterial& material = app.MaterialLibrary().Create(
+            name,
+            se::VulkanTexturePixels{
+                std::span<const se::u8>(texel.data(), texel.size()),
+                1,
+                1
+            },
+            ForwardMaterial(baseColor, 1.0f, 0.0f, 0.12f, 0.08f, 10.0f),
+            false,
+            false
+        );
+        material.Properties().doubleSided = true;
+        material.Properties().pbrFactors = { 1.0f, 0.34f, 0.0f, 0.0f };
+        material.Properties().emissiveFactor = emissive;
+        return material;
+    };
+
+    se::VulkanMaterial& showcaseCoolStripLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseCoolStripLightMaterial",
+        { 186, 202, 255, 255 },
+        { 0.78f, 0.84f, 1.0f, 1.0f },
+        { 0.48f, 0.60f, 1.05f, 1.0f }
+    );
+    se::VulkanMaterial& showcaseWarmKeyLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseWarmKeyLightMaterial",
+        { 255, 194, 122, 255 },
+        { 1.0f, 0.72f, 0.42f, 1.0f },
+        { 0.88f, 0.54f, 0.26f, 1.0f }
+    );
+    se::VulkanMaterial& showcaseCoolRimLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseCoolRimLightMaterial",
+        { 116, 156, 255, 255 },
+        { 0.48f, 0.64f, 1.0f, 1.0f },
+        { 0.28f, 0.46f, 0.98f, 1.0f }
+    );
+    se::VulkanMaterial& showcaseSoftFillLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseSoftFillLightMaterial",
+        { 182, 210, 255, 255 },
+        { 0.72f, 0.82f, 1.0f, 1.0f },
+        { 0.34f, 0.44f, 0.72f, 1.0f }
+    );
+    se::VulkanMaterial& showcaseLowWarmLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseLowWarmLightMaterial",
+        { 255, 96, 42, 255 },
+        { 1.0f, 0.34f, 0.16f, 1.0f },
+        { 0.55f, 0.20f, 0.10f, 1.0f }
+    );
+    se::VulkanMaterial& showcaseLowCoolLightMaterial = createShowcaseEmitterMaterial(
+        "ShowcaseLowCoolLightMaterial",
+        { 70, 132, 255, 255 },
+        { 0.28f, 0.52f, 1.0f, 1.0f },
+        { 0.15f, 0.34f, 0.78f, 1.0f }
+    );
+
+    constexpr std::array<se::u8, 4> kPointLightGizmoTexel{
+        255, 150, 72, 210
+    };
+    se::VulkanMaterial& pointLightGizmoMaterial = app.MaterialLibrary().Create(
+        "PointLightGizmoMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kPointLightGizmoTexel.data(), kPointLightGizmoTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 1.0f, 0.58f, 0.24f, 0.64f }, 1.0f, 0.0f, 0.36f, 0.12f, 16.0f),
+        false,
+        false
+    );
+    pointLightGizmoMaterial.Properties().alphaMode = se::MaterialAlphaMode::Blend;
+    pointLightGizmoMaterial.Properties().renderClass = se::MaterialRenderClass::Transparent;
+    pointLightGizmoMaterial.Properties().emissiveFactor = { 2.2f, 0.95f, 0.24f, 1.0f };
+
+    constexpr std::array<se::u8, 4> kSpotLightGizmoTexel{
+        112, 166, 255, 180
+    };
+    se::VulkanMaterial& spotLightGizmoMaterial = app.MaterialLibrary().Create(
+        "SpotLightGizmoMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kSpotLightGizmoTexel.data(), kSpotLightGizmoTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.42f, 0.66f, 1.0f, 0.48f }, 1.0f, 0.0f, 0.30f, 0.08f, 12.0f),
+        false,
+        false
+    );
+    spotLightGizmoMaterial.Properties().alphaMode = se::MaterialAlphaMode::Blend;
+    spotLightGizmoMaterial.Properties().renderClass = se::MaterialRenderClass::Transparent;
+    spotLightGizmoMaterial.Properties().doubleSided = true;
+    spotLightGizmoMaterial.Properties().emissiveFactor = { 0.42f, 0.88f, 2.4f, 1.0f };
+
+    constexpr std::array<se::u8, 4> kRectLightGizmoTexel{
+        255, 226, 132, 190
+    };
+    se::VulkanMaterial& rectLightGizmoMaterial = app.MaterialLibrary().Create(
+        "RectLightGizmoMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(kRectLightGizmoTexel.data(), kRectLightGizmoTexel.size()),
+            1,
+            1
+        },
+        ForwardMaterial({ 1.0f, 0.86f, 0.44f, 0.56f }, 1.0f, 0.0f, 0.28f, 0.06f, 10.0f),
+        false,
+        false
+    );
+    rectLightGizmoMaterial.Properties().alphaMode = se::MaterialAlphaMode::Blend;
+    rectLightGizmoMaterial.Properties().renderClass = se::MaterialRenderClass::Transparent;
+    rectLightGizmoMaterial.Properties().doubleSided = true;
+    rectLightGizmoMaterial.Properties().emissiveFactor = { 2.8f, 2.0f, 0.62f, 1.0f };
+
+    std::array<se::VulkanMaterial*, 10> lightIndexDigitMaterials{};
+    for (se::u32 digit = 0; digit < lightIndexDigitMaterials.size(); ++digit) {
+        std::vector<se::u8> digitPixels = CreateLightIndexDigitPixels(digit);
+        se::VulkanMaterial& digitMaterial = app.MaterialLibrary().Create(
+            LightIndexDigitMaterialName(digit),
+            se::VulkanTexturePixels{
+                std::span<const se::u8>(digitPixels.data(), digitPixels.size()),
+                kLightIndexDigitTextureWidth,
+                kLightIndexDigitTextureHeight
+            },
+            ForwardMaterial({ 0.92f, 0.98f, 1.0f, 1.0f }, 1.0f, 0.0f, 0.18f, 0.04f, 8.0f),
+            true,
+            false
+        );
+        digitMaterial.Properties().alphaMode = se::MaterialAlphaMode::Blend;
+        digitMaterial.Properties().renderClass = se::MaterialRenderClass::Transparent;
+        digitMaterial.Properties().doubleSided = true;
+        digitMaterial.Properties().emissiveFactor = { 1.8f, 2.2f, 2.6f, 1.0f };
+        lightIndexDigitMaterials[digit] = &digitMaterial;
+    }
+
+    constexpr std::array<se::u8, 4> kLightIndexLabelBackplateTexel{
+        8, 12, 18, 180
+    };
+    se::VulkanMaterial& lightIndexLabelBackplateMaterial = app.MaterialLibrary().Create(
+        "LightIndexLabelBackplateMaterial",
+        se::VulkanTexturePixels{
+            std::span<const se::u8>(
+                kLightIndexLabelBackplateTexel.data(),
+                kLightIndexLabelBackplateTexel.size()
+            ),
+            1,
+            1
+        },
+        ForwardMaterial({ 0.02f, 0.025f, 0.035f, 0.70f }, 1.0f, 0.0f, 0.08f, 0.02f, 4.0f),
+        false,
+        false
+    );
+    lightIndexLabelBackplateMaterial.Properties().alphaMode = se::MaterialAlphaMode::Blend;
+    lightIndexLabelBackplateMaterial.Properties().renderClass = se::MaterialRenderClass::Transparent;
+    lightIndexLabelBackplateMaterial.Properties().emissiveFactor = { 0.02f, 0.03f, 0.04f, 1.0f };
     if (useBenchmarkScene && BenchmarkTransparentMaterialRequested()) {
         se::MaterialProperties& transparentProperties = blueCubeMaterial.Properties();
         transparentProperties.baseColorFactor[3] = 0.42f;
@@ -2177,8 +4381,42 @@ int main() {
     app.RenderResources().RegisterMaterial("GroundMaterial", groundMaterial);
     app.RenderResources().RegisterMaterial("DefaultGroundMaterial", defaultGroundMaterial);
     app.RenderResources().RegisterMaterial("GridMaterial", gridMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseCharcoalMaterial", showcaseCharcoalMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseBackdropMaterial", showcaseBackdropMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseLampFixtureMaterial", showcaseLampFixtureMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseWarmStoneMaterial", showcaseWarmStoneMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseBrushedMetalMaterial", showcaseBrushedMetalMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseGlossBlackMaterial", showcaseGlossBlackMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseCoolCeramicMaterial", showcaseCoolCeramicMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReferenceChromeMaterial", showcaseReferenceChromeMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReflectionTestSilverMaterial", showcaseReflectionTestSilverMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReferenceSatinMetalMaterial", showcaseReferenceSatinMetalMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReferencePorcelainMaterial", showcaseReferencePorcelainMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReferenceGlossRedMaterial", showcaseReferenceGlossRedMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseReferenceMatteRubberMaterial", showcaseReferenceMatteRubberMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseEmissiveMaterial", showcaseEmissiveMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseCoolStripLightMaterial", showcaseCoolStripLightMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseWarmKeyLightMaterial", showcaseWarmKeyLightMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseCoolRimLightMaterial", showcaseCoolRimLightMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseSoftFillLightMaterial", showcaseSoftFillLightMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseLowWarmLightMaterial", showcaseLowWarmLightMaterial);
+    app.RenderResources().RegisterMaterial("ShowcaseLowCoolLightMaterial", showcaseLowCoolLightMaterial);
+    app.RenderResources().RegisterMaterial("PointLightGizmoMaterial", pointLightGizmoMaterial);
+    app.RenderResources().RegisterMaterial("SpotLightGizmoMaterial", spotLightGizmoMaterial);
+    app.RenderResources().RegisterMaterial("RectLightGizmoMaterial", rectLightGizmoMaterial);
+    for (se::u32 digit = 0; digit < lightIndexDigitMaterials.size(); ++digit) {
+        app.RenderResources().RegisterMaterial(
+            LightIndexDigitMaterialName(digit),
+            *lightIndexDigitMaterials[digit]
+        );
+    }
+    app.RenderResources().RegisterMaterial(
+        "LightIndexLabelBackplateMaterial",
+        lightIndexLabelBackplateMaterial
+    );
 
     se::Scene3D scene;
+    se::Scene3D overlayScene;
     std::vector<BenchmarkMovingObject> benchmarkMovingObjects;
     se::RuntimeModelLoader runtimeModelLoader(
         app.Device(),
@@ -2189,7 +4427,23 @@ int main() {
         scene,
         checkerTexturePath
     );
-    if (useBenchmarkScene) {
+    se::RuntimeModelLoadResult defaultModelLoad{};
+    bool defaultModelLoadRequested = false;
+    if (lightingShowcaseSceneRequested) {
+        BuildLightingShowcaseScene(scene, &overlayScene);
+    } else if (shadowRegressionSceneRequested) {
+        BuildShadowRegressionScene(scene, &overlayScene);
+        defaultModelLoadRequested = true;
+        defaultModelLoad = LoadDefaultSceneSkinnedFbx(
+            runtimeModelLoader,
+            { -1.18f, -0.50f, 0.05f },
+            { 0.0f, 180.0f, 0.0f },
+            1.34f,
+            { 1.0f, 1.0f, 1.0f },
+            true,
+            "Shadow regression"
+        );
+    } else if (useBenchmarkScene) {
         BuildBenchmarkGridScene(scene, BenchmarkGridSize());
     } else if (!hasStartupModel) {
         se::Renderable3D& ground = scene.CreateRenderable(
@@ -2283,13 +4537,24 @@ int main() {
             0.65f,
             2.0f
         );
+
+        defaultModelLoadRequested = true;
+        defaultModelLoad = LoadDefaultSceneSkinnedFbx(
+            runtimeModelLoader,
+            { -1.35f, -0.48f, 0.45f },
+            { 0.0f, 180.0f, 0.0f },
+            1.35f,
+            { 1.0f, 1.0f, 1.0f },
+            DefaultSceneSkinnedFbxProductionRequested(),
+            "Default-scene"
+        );
     }
 
-    se::RuntimeModelLoadResult defaultModelLoad{};
     if (hasStartupModel) {
         std::cout << "Loading startup model: "
             << se::UnrealPathToUtf8(startupModelPath)
             << std::endl;
+        defaultModelLoadRequested = true;
         const std::size_t startupModelFirstRenderableIndex = scene.Count();
         defaultModelLoad = runtimeModelLoader.LoadIntoScene(
             startupModelPath,
@@ -2305,6 +4570,19 @@ int main() {
                 scene,
                 startupModelFirstRenderableIndex
             );
+            if (previewStartupModelLighting) {
+                se::Renderable3D& previewGround = scene.CreateRenderable(
+                    "Imported Preview Ground",
+                    "Plane",
+                    "DefaultGroundMaterial"
+                );
+                previewGround.Transform().SetPosition({ 0.0f, -1.12f, 0.0f });
+                previewGround.Transform().SetScale({ 7.0f, 1.0f, 7.0f });
+                previewGround.Transform().SetAnimateRotation(false);
+                previewGround.SetDrawOrder(-20);
+                previewGround.SetPickable(false);
+                previewGround.SetCastShadow(false);
+            }
         } else {
             std::cout << "[warning] Startup model load failed: "
                 << defaultModelLoad.message
@@ -2324,7 +4602,20 @@ int main() {
     }
 
     se::Camera3D camera;
-    if (useBenchmarkScene) {
+    if (lightingShowcaseSceneRequested) {
+        camera.SetPose(
+            { 0.2f, 1.35f, 6.6f },
+            { -0.02f, -0.20f, -1.0f }
+        );
+        camera.SetFovScale(0.72f);
+        camera.SetMoveSpeed(3.0f);
+    } else if (shadowRegressionSceneRequested) {
+        camera.SetPose(
+            { 0.25f, 1.55f, 6.45f },
+            { -0.04f, -0.24f, -1.0f }
+        );
+        camera.SetFovScale(0.70f);
+    } else if (useBenchmarkScene) {
         camera.SetPose(
             { 0.0f, 5.8f, 15.5f },
             { 0.0f, -0.38f, -1.0f }
@@ -2343,11 +4634,21 @@ int main() {
         !useBenchmarkScene
             ? ApplyBridgeSceneLights(startupBridgeScene, scene, camera)
             : BridgeSceneLightApplyResult{};
-    if (!bridgeLights.anyApplied) {
-        ApplySceneDirectionalLight(scene, camera);
+    if (
+        !lightingShowcaseSceneRequested &&
+        !shadowRegressionSceneRequested &&
+        !bridgeLights.anyApplied
+    ) {
+        ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
     }
     const bool benchmarkCameraMotionRequested =
         !useBenchmarkScene && BenchmarkCameraMotionRequested();
+    const bool cameraFreezeRequested =
+        EnvironmentFlagEnabled("SE_CAMERA_FREEZE") ||
+        EnvironmentFlagEnabled("SE_FREEZE_CAMERA");
+    const bool sceneUpdateFreezeRequested =
+        EnvironmentFlagEnabled("SE_SCENE_UPDATE_FREEZE") ||
+        EnvironmentFlagEnabled("SE_FREEZE_SCENE_UPDATE");
     const BenchmarkObjectMotionMode benchmarkObjectMotionMode =
         !useBenchmarkScene && !benchmarkMovingObjects.empty()
             ? BenchmarkObjectMotionModeFromEnvironment()
@@ -2357,6 +4658,16 @@ int main() {
     if (benchmarkObjectMotionRequested) {
         DisableBenchmarkAutoRotation(benchmarkMovingObjects);
     }
+    const bool useElapsedTimeRuntimeAnimationClock =
+        shadowRegressionSceneRequested ||
+        (
+            !useBenchmarkScene &&
+            (
+                benchmarkCameraMotionRequested ||
+                benchmarkObjectMotionRequested ||
+                DefaultSceneSkinnedFbxProductionRequested()
+            )
+        );
     const glm::vec3 benchmarkPartialLocalShadowBasePosition{
         -2.2f,
         1.1f,
@@ -2369,8 +4680,37 @@ int main() {
 
     app.CreateRenderer();
     SE_ASSERT(app.Renderer() != nullptr, "Forward 3D demo needs a renderer");
+    if (lightingShowcaseSceneRequested) {
+        ApplyLightingShowcaseRendererSettings(*app.Renderer());
+    } else {
+        ApplyForward3DRendererSettings(*app.Renderer());
+    }
+    app.Renderer()->SetTemporalAntialiasingMode(startupAntialiasingMode);
+    if (overlayScene.Count() > 0) {
+        se::PipelineSpec lightGizmoOverlaySpec =
+            se::PipelineSpec::DoubleSided(
+                se::PipelineSpec::ForwardResidual3D(
+                    vertexShaderPath,
+                    fragmentShaderPath
+                )
+            );
+        lightGizmoOverlaySpec.depthTestEnabled = false;
+        lightGizmoOverlaySpec.depthWriteEnabled = false;
+        app.Renderer()->SetOverlay3DContext(
+            &overlayScene,
+            &camera,
+            std::move(lightGizmoOverlaySpec)
+        );
+    }
+    std::cout << "Forward 3D antialiasing mode: "
+        << TemporalAntialiasingModeName(app.Renderer()->TemporalAntialiasingMode())
+        << " (F6 cycles Native TAA / DLSS DLAA L / DLSS SR)" << std::endl;
     bridgeLights.skyLightApplied =
         ApplyBridgeSkyLightToRenderer(bridgeLights, *app.Renderer());
+    app.Renderer()->ApplyEnvironmentRenderSettings();
+    if (!lightingShowcaseSceneRequested) {
+        ApplyForward3DEnvironmentShadowDefaults(*app.Renderer());
+    }
     se::BenchmarkSceneDiagnostics sceneDiagnostics =
         BenchmarkDiagnosticsForStartupBridgeScene(
             startupBridgeScene,
@@ -2378,7 +4718,8 @@ int main() {
             bridgeCameraApplied,
             bridgeLights
         );
-    sceneDiagnostics.runtimeImportModelRequested = hasStartupModel ? 1u : 0u;
+    sceneDiagnostics.runtimeImportModelRequested =
+        defaultModelLoadRequested ? 1u : 0u;
     sceneDiagnostics.runtimeImportModelLoaded = defaultModelLoad.loaded ? 1u : 0u;
     sceneDiagnostics.runtimeImportCacheHit = defaultModelLoad.cacheHit ? 1u : 0u;
     sceneDiagnostics.runtimeImportMeshCount = defaultModelLoad.meshCount;
@@ -2481,12 +4822,124 @@ int main() {
         defaultModelLoad.sourceBoneInfluenceOverflowCount;
     sceneDiagnostics.runtimeImportSkinnedVertexAttributeReady =
         defaultModelLoad.sourceSkinnedVertexAttributeReady;
-    sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
-        defaultModelLoad.skinnedAnimationUnsupported;
-    se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);
-    app.Renderer()->SetDlssQualitySceneContentMotionSupported(
-        sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported == 0u
-    );
+    sceneDiagnostics.runtimeImportSkinnedAnimationSpaceReady =
+        defaultModelLoad.runtimeSkinnedAnimationSpaceReady;
+    sceneDiagnostics.runtimeImportSkinnedAnimationSpaceBlockerMask =
+        defaultModelLoad.runtimeSkinnedAnimationSpaceBlockerMask;
+    sceneDiagnostics.runtimeImportSkinnedAnimationRenderableBound =
+        defaultModelLoad.runtimeSkinnedAnimationRenderableBound;
+    const bool runtimeImportHasSkinnedAnimationContent =
+        defaultModelLoad.sourceAnimationCount > 0u &&
+        defaultModelLoad.sourceMeshWithBonesCount > 0u &&
+        defaultModelLoad.sourceBoneCount > 0u;
+    auto refreshRuntimeAnimationDiagnostics = [&]() {
+        const se::RuntimeModelAnimationPlaybackDiagnostics playbackDiagnostics =
+            runtimeModelLoader.AnimationPlaybackDiagnostics();
+        sceneDiagnostics.runtimeImportAnimationPlaybackReady =
+            playbackDiagnostics.ready;
+        sceneDiagnostics.runtimeImportAnimationPlaybackCandidateModelCount =
+            playbackDiagnostics.candidateModelCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackReadyModelCount =
+            playbackDiagnostics.readyModelCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackFrameCount =
+            playbackDiagnostics.frameCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackLoopWrapCount =
+            playbackDiagnostics.loopWrapCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackPreviousPoseCollapsedCount =
+            playbackDiagnostics.previousPoseCollapsedCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackChangedBonePaletteEntryCount =
+            playbackDiagnostics.changedBonePaletteEntryCount;
+        sceneDiagnostics.runtimeImportAnimationPlaybackRendererPaletteReady =
+            playbackDiagnostics.rendererPaletteReady;
+        sceneDiagnostics.runtimeImportAnimationPlaybackGpuUploadReady =
+            playbackDiagnostics.gpuUploadReady;
+        sceneDiagnostics.runtimeImportAnimationPlaybackClockMode =
+            useElapsedTimeRuntimeAnimationClock ? 1u : 0u;
+        sceneDiagnostics.runtimeImportAnimationPlaybackPreviousTimeTicks =
+            playbackDiagnostics.previousTimeTicks;
+        sceneDiagnostics.runtimeImportAnimationPlaybackCurrentTimeTicks =
+            playbackDiagnostics.currentTimeTicks;
+        sceneDiagnostics.runtimeImportAnimationPlaybackPreviousAbsoluteSeconds =
+            playbackDiagnostics.previousAbsoluteSeconds;
+        sceneDiagnostics.runtimeImportAnimationPlaybackCurrentAbsoluteSeconds =
+            playbackDiagnostics.currentAbsoluteSeconds;
+        sceneDiagnostics.runtimeImportAnimationDiagnosticPoseOnly =
+            runtimeImportHasSkinnedAnimationContent &&
+            defaultModelLoad.sourcePoseSampledClipCount > 0u &&
+            defaultModelLoad.runtimePoseCarrierReady != 0u &&
+            playbackDiagnostics.ready == 0u
+                ? 1u
+                : 0u;
+        sceneDiagnostics.runtimeImportSkinnedAnimationSupportBlockerMask = 0u;
+        if (runtimeImportHasSkinnedAnimationContent) {
+            constexpr se::u32 kRenderableNotBoundBlocker = 1u << 0u;
+            constexpr se::u32 kPlaybackNotReadyBlocker = 1u << 1u;
+            constexpr se::u32 kSpaceNotReadyBlocker = 1u << 2u;
+            constexpr se::u32 kSkinnedVertexAttributeBlocker = 1u << 3u;
+            constexpr se::u32 kRendererPaletteNotReadyBlocker = 1u << 4u;
+            constexpr se::u32 kGpuUploadNotReadyBlocker = 1u << 5u;
+            sceneDiagnostics.runtimeImportSkinnedAnimationSupportBlockerMask =
+                (sceneDiagnostics.runtimeImportSkinnedAnimationRenderableBound == 0u
+                    ? kRenderableNotBoundBlocker
+                    : 0u) |
+                (playbackDiagnostics.ready == 0u
+                    ? kPlaybackNotReadyBlocker
+                    : 0u) |
+                (sceneDiagnostics.runtimeImportSkinnedAnimationSpaceReady == 0u
+                    ? kSpaceNotReadyBlocker
+                    : 0u) |
+                (defaultModelLoad.sourceSkinnedVertexAttributeReady == 0u
+                    ? kSkinnedVertexAttributeBlocker
+                    : 0u) |
+                (playbackDiagnostics.rendererPaletteReady == 0u
+                    ? kRendererPaletteNotReadyBlocker
+                    : 0u) |
+                (playbackDiagnostics.gpuUploadReady == 0u
+                    ? kGpuUploadNotReadyBlocker
+                    : 0u);
+        }
+        sceneDiagnostics.runtimeImportSkinnedAnimationSupportReady =
+            runtimeImportHasSkinnedAnimationContent
+                ? (sceneDiagnostics.runtimeImportSkinnedAnimationSupportBlockerMask == 0u
+                    ? 1u
+                    : 0u)
+                : 0u;
+        sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported =
+            runtimeImportHasSkinnedAnimationContent &&
+            sceneDiagnostics.runtimeImportSkinnedAnimationSupportReady != 0u
+                ? 0u
+                : defaultModelLoad.skinnedAnimationUnsupported;
+        sceneDiagnostics.runtimeImportAnimationPlaybackBlockerMask = 0u;
+        if (runtimeImportHasSkinnedAnimationContent) {
+            constexpr se::u32 kDiagnosticPoseOnlyBlocker = 1u << 0u;
+            constexpr se::u32 kNoRuntimePlaybackBlocker = 1u << 1u;
+            constexpr se::u32 kUnsupportedContentBlocker = 1u << 2u;
+            constexpr se::u32 kSkinnedAnimationSpaceBlocker = 1u << 3u;
+            sceneDiagnostics.runtimeImportAnimationPlaybackBlockerMask =
+                (playbackDiagnostics.ready == 0u
+                    ? kNoRuntimePlaybackBlocker
+                    : 0u) |
+                (sceneDiagnostics.runtimeImportAnimationDiagnosticPoseOnly != 0u
+                    ? kDiagnosticPoseOnlyBlocker
+                    : 0u) |
+                (sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported != 0u
+                    ? kUnsupportedContentBlocker
+                    : 0u) |
+                (sceneDiagnostics.runtimeImportSkinnedAnimationSpaceReady == 0u
+                    ? kSkinnedAnimationSpaceBlocker
+                    : 0u);
+        }
+
+        se::SetBenchmarkSceneDiagnostics(sceneDiagnostics);
+        app.Renderer()->SetDlssQualitySceneContentMotionSupported(
+            sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported == 0u &&
+            (
+                !runtimeImportHasSkinnedAnimationContent ||
+                sceneDiagnostics.runtimeImportAnimationPlaybackReady != 0u
+            )
+        );
+    };
+    refreshRuntimeAnimationDiagnostics();
     app.Renderer()->SetFrameMatricesProvider([&](se::f32 aspectRatio) {
         return se::FrameMatrices{
             camera.ViewMatrix(),
@@ -2512,45 +4965,72 @@ int main() {
             buildOptions
         );
         if (context.shadowRenderQueue != nullptr) {
-            context.shadowRenderQueue->BuildShadowCastersFrom(
-                renderQueue,
-                context.shadowCullingStats
+            se::RenderQueueBuildOptions shadowBuildOptions{};
+            shadowBuildOptions.shadowCastersOnly = true;
+            shadowBuildOptions.cullingStats = context.shadowCullingStats;
+            shadowBuildOptions.sceneIdentity = &scene;
+            shadowBuildOptions.sceneMembershipRevision = scene.MembershipRevision();
+            shadowBuildOptions.sceneRenderRevision = scene.RenderRevision();
+            shadowBuildOptions.useSceneRevisions = true;
+            context.shadowRenderQueue->BuildFromScene3D(
+                app.RenderResources(),
+                scene.Renderables(),
+                scene.SelectedRenderable(),
+                shadowBuildOptions
             );
-            if (context.shadowCullingStats != nullptr &&
-                context.cullingStats != nullptr) {
-                context.shadowCullingStats->culled += context.cullingStats->culled;
-            }
         }
     });
     app.Renderer()->SetImGui3DContext(&scene, &camera);
 
-    app.Run([&](float deltaSeconds, float) {
+    const int automaticAaToggleFrame = ReadEnvironmentInt(
+        "SE_FORWARD3D_AA_AUTO_TOGGLE_FRAME",
+        "SE_FORWARD3D_AUTO_F6_FRAME",
+        0,
+        0,
+        1000000
+    );
+    int forwardUpdateFrame = 0;
+
+    app.Run([&](float deltaSeconds, float elapsedSeconds) {
+        ++forwardUpdateFrame;
+        const bool automaticAaToggle =
+            automaticAaToggleFrame > 0 &&
+            forwardUpdateFrame == automaticAaToggleFrame;
+        if (app.WindowHandle().WasKeyPressed(GLFW_KEY_F6) || automaticAaToggle) {
+            app.Renderer()->ToggleTemporalAntialiasingMode();
+            std::cout << "Forward 3D antialiasing mode: "
+                << TemporalAntialiasingModeName(
+                    app.Renderer()->TemporalAntialiasingMode()
+                ) << std::endl;
+        }
+
         const float clampedDeltaSeconds = std::clamp(deltaSeconds, 0.0f, 0.05f);
-        if (!useBenchmarkScene) {
-            if (benchmarkCameraMotionRequested) {
-                benchmarkCameraMotionTime += std::max(
-                    clampedDeltaSeconds,
-                    1.0f / 60.0f
-                );
-                ApplyBenchmarkCameraMotion(camera, benchmarkCameraMotionTime);
-            } else {
-                camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
-                HandleScenePicking(
-                    app.WindowHandle(),
-                    camera,
-                    scene,
-                    clampedDeltaSeconds,
-                    pickClickState
-                );
-            }
-            if (!bridgeLights.anyApplied) {
-                ApplySceneDirectionalLight(scene, camera);
+        if (!useBenchmarkScene || showcaseCameraControlsEnabled) {
+            if (!cameraFreezeRequested) {
+                if (benchmarkCameraMotionRequested) {
+                    benchmarkCameraMotionTime = std::max(elapsedSeconds, 0.0f);
+                    ApplyBenchmarkCameraMotion(camera, benchmarkCameraMotionTime);
+                } else {
+                    camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
+                    HandleScenePicking(
+                        app.WindowHandle(),
+                        camera,
+                        scene,
+                        clampedDeltaSeconds,
+                        pickClickState
+                    );
+                }
+                if (
+                    !lightingShowcaseSceneRequested &&
+                    !shadowRegressionSceneRequested &&
+                    !bridgeLights.anyApplied &&
+                    !reflectionCaptureCameraInvariantControl
+                ) {
+                    ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
+                }
             }
             if (benchmarkObjectMotionRequested) {
-                benchmarkObjectMotionTime += std::max(
-                    clampedDeltaSeconds,
-                    1.0f / 60.0f
-                );
+                benchmarkObjectMotionTime = std::max(elapsedSeconds, 0.0f);
                 for (std::size_t movingObjectIndex = 0;
                      movingObjectIndex < benchmarkMovingObjects.size();
                      ++movingObjectIndex) {
@@ -2591,6 +5071,21 @@ int main() {
             };
             scene.MovePointLight(0, benchmarkPartialLocalShadowBasePosition + offset);
         }
+        sceneDiagnostics.benchmarkCameraMotionTimeSeconds =
+            benchmarkCameraMotionRequested ? benchmarkCameraMotionTime : 0.0f;
+        sceneDiagnostics.benchmarkObjectMotionTimeSeconds =
+            benchmarkObjectMotionRequested ? benchmarkObjectMotionTime : 0.0f;
+        if (EnvironmentFlagEnabled("SE_RUNTIME_ANIMATION_FREEZE") ||
+            EnvironmentFlagEnabled("SE_FBX_ANIMATION_FREEZE")) {
+            runtimeModelLoader.UpdateAnimationPlaybackAtTime(0.0f);
+        } else if (useElapsedTimeRuntimeAnimationClock) {
+            runtimeModelLoader.UpdateAnimationPlaybackAtTime(
+                std::max(elapsedSeconds, 0.0f)
+            );
+        } else {
+            runtimeModelLoader.UpdateAnimationPlayback(clampedDeltaSeconds);
+        }
+        refreshRuntimeAnimationDiagnostics();
         ApplyCameraToMaterial(camera, cubeMaterial);
         ApplyCameraToMaterial(camera, blueCubeMaterial);
         ApplyCameraToMaterial(camera, greenCubeMaterial);
@@ -2603,10 +5098,23 @@ int main() {
         runtimeModelLoader.ForEachMaterial([&](se::VulkanMaterial& material) {
             ApplyCameraToMaterial(camera, material);
         });
-        scene.Update(clampedDeltaSeconds);
+        if (!sceneUpdateFreezeRequested) {
+            scene.Update(clampedDeltaSeconds);
+        }
     });
+    TraceForwardShutdown("run_return", forwardShutdownTraceStartTime);
 
     app.WindowHandle().SetCursorCaptured(false);
+    TraceForwardShutdown("cursor_released", forwardShutdownTraceStartTime);
+    app.DestroyRenderer();
+    TraceForwardShutdown("renderer_destroyed", forwardShutdownTraceStartTime);
+    if (ForwardFastProcessExitEnabled()) {
+        app.Device().SavePipelineCache();
+        TraceForwardShutdown("fast_process_exit", forwardShutdownTraceStartTime);
+        std::cout.flush();
+        std::cerr.flush();
+        std::exit(0);
+    }
 
     return 0;
 }

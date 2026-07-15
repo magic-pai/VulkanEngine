@@ -9,6 +9,7 @@
 
 #include <array>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace se {
@@ -106,6 +107,11 @@ struct RenderCommand {
     u32 bonePaletteDescriptorSetIndex = 0;
     u32 bonePaletteDescriptorBinding = 0;
     u32 bonePaletteDescriptorRangeBytes = 0;
+    u32 skinnedWorldBoundsConservative = 0;
+#if !defined(NDEBUG)
+    u64 debugRenderableIdentity = 0;
+    std::string_view debugRenderableName;
+#endif
 };
 
 struct RenderInstanceBatch {
@@ -185,6 +191,7 @@ private:
     ) const;
     bool TryReuseScene3DQueue(
         u64 signature,
+        const VulkanRenderResources2D& renderResources,
         RenderQueueBuildOptions options
     );
     void StoreScene3DQueue(
@@ -193,7 +200,7 @@ private:
         u32 scannedRenderables,
         u32 visibilityCandidates
     );
-    void Refresh3DMaterialPushConstants();
+    void Refresh3DDynamicCommandState(const VulkanRenderResources2D& renderResources);
 
     std::vector<RenderCommand> m_Commands;
     std::unordered_map<const Renderable3D*, CachedRenderable3DCommand> m_3DCommandCache;

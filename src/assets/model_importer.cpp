@@ -1194,12 +1194,17 @@ void PopulateModelAnimationPoseDiagnostics(ImportedModel3D& model) {
     }
 }
 
-void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
+void PopulateMeshSkinning(
+    ImportedMesh3D& mesh,
+    const aiMesh* source,
+    const glm::mat4& meshToModelTransform
+) {
     SE_ASSERT(source != nullptr, "Assimp mesh must not be null");
     if (source->mNumBones == 0 || source->mNumVertices == 0) {
         return;
     }
 
+    const glm::mat4 modelToMeshTransform = glm::inverse(meshToModelTransform);
     mesh.bones.reserve(source->mNumBones);
     mesh.vertexBoneInfluences.resize(source->mNumVertices);
     for (u32 boneIndex = 0; boneIndex < source->mNumBones; ++boneIndex) {
@@ -1211,7 +1216,7 @@ void PopulateMeshSkinning(ImportedMesh3D& mesh, const aiMesh* source) {
         const u32 importedBoneIndex = static_cast<u32>(mesh.bones.size());
         mesh.bones.push_back({
             ToString(sourceBone->mName),
-            ToMat4(sourceBone->mOffsetMatrix)
+            ToMat4(sourceBone->mOffsetMatrix) * modelToMeshTransform
         });
 
         for (u32 weightIndex = 0; weightIndex < sourceBone->mNumWeights; ++weightIndex) {
@@ -1389,7 +1394,7 @@ ImportedMesh3D ConvertMeshInstance(
         mesh.mesh.indices.push_back(face.mIndices[2]);
     }
 
-    PopulateMeshSkinning(mesh, source);
+    PopulateMeshSkinning(mesh, source, transform);
     PackMeshSkinningVertexAttributes(mesh);
 
     return mesh;
@@ -1558,6 +1563,63 @@ std::size_t ImportedModel3D::TriangleCount() const {
     }
 
     return count;
+}
+
+f64 ModelImporter::AnimationDurationTicks(const ImportedAnimationClip3D& clip) {
+    return clip.durationTicks > 0.0
+        ? clip.durationTicks
+        : LastAnimationKeyTime(clip);
+}
+
+bool ModelImporter::SampleAnimationPose(
+    const ImportedModel3D& model,
+    u32 clipIndex,
+    f64 previousTimeTicks,
+    f64 currentTimeTicks,
+    ImportedPoseSample3D& sample,
+    u32* sampledChannelCount
+) {
+    sample = ImportedPoseSample3D{};
+    if (clipIndex >= model.animations.size() || model.nodes.empty()) {
+        if (sampledChannelCount != nullptr) {
+            *sampledChannelCount = 0;
+        }
+        return false;
+    }
+
+    const ImportedAnimationClip3D& clip = model.animations[clipIndex];
+    const std::unordered_map<std::string, u32> nodeLookup =
+        BuildNodeNameLookup(model);
+    const u32 sampledChannels = CountSampledChannels(clip, nodeLookup);
+    if (sampledChannelCount != nullptr) {
+        *sampledChannelCount = sampledChannels;
+    }
+    if (sampledChannels == 0) {
+        return false;
+    }
+
+    sample.clipIndex = clipIndex;
+    sample.previousTimeTicks = previousTimeTicks;
+    sample.currentTimeTicks = currentTimeTicks;
+
+    const std::vector<glm::mat4> previousLocalPose =
+        SampleLocalPose(model, clip, nodeLookup, previousTimeTicks);
+    const std::vector<glm::mat4> currentLocalPose =
+        SampleLocalPose(model, clip, nodeLookup, currentTimeTicks);
+    sample.previousNodeGlobalTransforms =
+        BuildGlobalPose(model, previousLocalPose);
+    sample.currentNodeGlobalTransforms =
+        BuildGlobalPose(model, currentLocalPose);
+    sample.previousBonePalette =
+        BuildBonePalette(model, nodeLookup, sample.previousNodeGlobalTransforms);
+    sample.currentBonePalette =
+        BuildBonePalette(model, nodeLookup, sample.currentNodeGlobalTransforms);
+
+    return true;
+}
+
+void ModelImporter::RebuildAnimationPoseDiagnostics(ImportedModel3D& model) {
+    PopulateModelAnimationPoseDiagnostics(model);
 }
 
 ImportedModel3D ModelImporter::LoadModel3D(

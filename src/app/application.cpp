@@ -3,6 +3,8 @@
 #include "app/benchmark_recorder.h"
 
 #include <cstdlib>
+#include <iostream>
+#include <string>
 #include <utility>
 
 namespace se {
@@ -30,9 +32,42 @@ int ReadAutoExitFrameCount() {
 #endif
 }
 
+bool ReadShutdownTraceEnabled() {
+#ifdef _WIN32
+    char* value = nullptr;
+    std::size_t valueSize = 0;
+    if (_dupenv_s(&value, &valueSize, "SE_SHUTDOWN_TRACE") != 0 || value == nullptr) {
+        return false;
+    }
+
+    const std::string text(value);
+    std::free(value);
+#else
+    const char* rawValue = std::getenv("SE_SHUTDOWN_TRACE");
+    if (!rawValue) {
+        return false;
+    }
+    const std::string text(rawValue);
+#endif
+    return text == "1" ||
+        text == "true" ||
+        text == "TRUE" ||
+        text == "on" ||
+        text == "ON" ||
+        text == "yes" ||
+        text == "YES";
+}
+
 float ElapsedSeconds(std::chrono::steady_clock::time_point startTime) {
     using Seconds = std::chrono::duration<float>;
     return std::chrono::duration_cast<Seconds>(
+        std::chrono::steady_clock::now() - startTime
+    ).count();
+}
+
+float ElapsedMilliseconds(std::chrono::steady_clock::time_point startTime) {
+    using Milliseconds = std::chrono::duration<float, std::milli>;
+    return std::chrono::duration_cast<Milliseconds>(
         std::chrono::steady_clock::now() - startTime
     ).count();
 }
@@ -110,6 +145,7 @@ void Application::Run(UpdateCallback update) {
     SE_ASSERT(m_Renderer != nullptr, "Application renderer must be created before Run");
 
     const int autoExitFrameCount = ReadAutoExitFrameCount();
+    const bool traceShutdown = ReadShutdownTraceEnabled();
     BenchmarkRecorder benchmark(BenchmarkRecorder::ConfigFromEnvironment());
     int renderedFrameCount = 0;
     const auto startTime = std::chrono::steady_clock::now();
@@ -141,11 +177,26 @@ void Application::Run(UpdateCallback update) {
 
         if (benchmark.ShouldStop() ||
             (autoExitFrameCount > 0 && renderedFrameCount >= autoExitFrameCount)) {
+            if (traceShutdown) {
+                std::cout << "[shutdown] application break_requested frame="
+                    << renderedFrameCount << " elapsed_ms="
+                    << ElapsedMilliseconds(startTime) << std::endl;
+            }
             break;
         }
     }
 
+    const auto waitIdleStartTime = std::chrono::steady_clock::now();
+    if (traceShutdown) {
+        std::cout << "[shutdown] application run_loop_end frame="
+            << renderedFrameCount << " elapsed_ms="
+            << ElapsedMilliseconds(startTime) << std::endl;
+    }
     m_Renderer->WaitIdle();
+    if (traceShutdown) {
+        std::cout << "[shutdown] application wait_idle +"
+            << ElapsedMilliseconds(waitIdleStartTime) << "ms" << std::endl;
+    }
 }
 
 Scene2D* Application::Scene2DForRenderer() {

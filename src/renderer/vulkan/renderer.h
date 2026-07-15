@@ -1,6 +1,7 @@
 #pragma once
 
 #include "renderer/vulkan/vulkan_common.h"
+#include "renderer/vulkan/ibl_generator.h"
 #include "renderer/vulkan/pipeline_spec.h"
 #include "renderer/vulkan/reflection_probe_resources.h"
 #include "renderer/vulkan/render_debug_settings.h"
@@ -76,6 +77,7 @@ class VulkanLightTileDiagnosticsBuffer;
 class VulkanMaterialBuffer;
 class VulkanDirectionalShadowCascadeBuffer;
 class VulkanLocalShadowBuffer;
+class VulkanTexture2D;
 class VulkanUniformBuffer;
 class Camera2D;
 class Camera3D;
@@ -93,6 +95,8 @@ struct FrameTemporalState {
     FrameMatrices previousMatrices{};
     glm::vec2 jitterPixels{ 0.0f };
     glm::vec2 jitterUv{ 0.0f };
+    glm::vec2 previousJitterPixels{ 0.0f };
+    glm::vec2 previousJitterUv{ 0.0f };
     u32 jitterSequenceIndex = 0;
     RendererTemporalHistoryResetReason resetReason =
         RendererTemporalHistoryResetReason::FirstFrame;
@@ -100,6 +104,8 @@ struct FrameTemporalState {
     bool historyReset = true;
     bool jitterEnabled = false;
     bool jitterApplied = false;
+    bool velocityJitteredHistoryPolicy = false;
+    bool velocityPreviousJitterApplied = false;
     bool velocityCameraMotionReady = false;
     bool velocityObjectMotionReady = false;
     bool velocityMaterialAuxMigrated = false;
@@ -142,6 +148,7 @@ struct FrameTemporalUpscaleState {
     bool dlssQualityEvaluateOutputReady = false;
     bool dlssQualityCameraMotionReady = false;
     bool dlssQualityObjectMotionReady = false;
+    bool dlssQualitySceneContentMotionSupported = false;
     bool dlssQualityReactiveMaskReady = false;
     bool dlssQualityTransparencyMaskReady = false;
     bool dlssQualityExposurePolicyReady = false;
@@ -154,6 +161,8 @@ struct FrameTemporalUpscaleState {
         RendererDlssQualityGateFallbackReason::NotRequested;
     TemporalUpscalerDlssQualityMode dlssQualityMode =
         TemporalUpscalerDlssQualityMode::Quality;
+    TemporalUpscalerDlssPreset dlssPreset =
+        TemporalUpscalerDlssPreset::Default;
     TemporalUpscalerPackageStatus upscalerPackage{};
     TemporalUpscalerRuntimeStatus upscalerRuntime{};
     RendererTemporalUpscaleFallbackReason fallbackReason =
@@ -205,6 +214,16 @@ struct FrameLightSet {
     FrameLightConstants Constants() const;
 };
 
+enum class RendererTemporalAntialiasingMode : u32 {
+    Environment = 0,
+    NativeTaa = 1,
+    DlssDlaa = 2,
+    DlssSrQuality = 3,
+    DlssSrBalanced = 4,
+    DlssSrPerformance = 5,
+    Off = 6
+};
+
 struct RendererReflectionProbe {
     glm::vec3 center{ 0.0f, 1.2f, 0.0f };
     f32 radius = 5.5f;
@@ -235,6 +254,7 @@ struct FrameReflectionProbeSet {
         selectedRefreshPolicies{};
     std::array<bool, kMaxFrameReflectionProbes> selectedCapturedScenePlaceholderReady{};
     std::array<bool, kMaxFrameReflectionProbes> selectedCapturedSceneInvalidated{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedCaptureMipCounts{};
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetSpecified{};
     std::array<bool, kMaxFrameReflectionProbes> selectedAuthoredAssetFound{};
@@ -351,6 +371,15 @@ struct DirectionalShadowCascadeSet {
 
 inline constexpr std::size_t kMaxLocalShadowTiles = 64;
 
+enum class LocalShadowCacheDecision : u32 {
+    Cold = 0,
+    Hit = 1,
+    TileLayoutChanged = 2,
+    LightChanged = 3,
+    CasterChanged = 4,
+    DynamicSkinnedCaster = 5
+};
+
 struct LocalShadowTile {
     glm::mat4 viewProjection{ 1.0f };
     u32 tileIndex = 0;
@@ -358,12 +387,17 @@ struct LocalShadowTile {
     u32 faceIndex = 0;
     u32 lightKind = 0;
     u64 cacheKey = 0;
+    u64 cacheTileIdentity = 0;
+    u64 cacheLightSignature = 0;
+    u64 cacheCasterSignature = 0;
+    LocalShadowCacheDecision cacheDecision = LocalShadowCacheDecision::Cold;
     bool cacheReusable = false;
 };
 
 struct LocalShadowTileSet {
     std::array<LocalShadowTile, kMaxLocalShadowTiles> tiles{};
-    std::array<u64, kMaxLocalShadowTiles> cacheKeys{};
+    std::array<u32, kRendererMaxFrameLocalLights> requestedTilesByLocalLight{};
+    std::array<u32, kRendererMaxFrameLocalLights> assignedTilesByLocalLight{};
     u32 tileSize = 0;
     u32 tileColumns = 0;
     u32 tileRows = 0;
@@ -373,16 +407,35 @@ struct LocalShadowTileSet {
     u32 droppedCount = 0;
     u32 pointLightCount = 0;
     u32 spotLightCount = 0;
+    u32 rectLightCount = 0;
     u32 pointFaceTiles = 0;
     u32 spotTiles = 0;
+    u32 rectTiles = 0;
+    u32 rectShadowBaseSampleTiles = 0;
+    u32 rectShadowMaxSampleTiles = 0;
+    u32 rectShadowSamplePattern = 0;
+    u32 rectShadowExtraSampleTiles = 0;
+    u32 rectShadowBudgetLimitedSampleTiles = 0;
     u32 cacheEligibleTiles = 0;
     u32 cacheHitTiles = 0;
     u32 cacheMissTiles = 0;
     u32 cacheSkippedTiles = 0;
+    u32 cacheColdTiles = 0;
+    u32 cacheTileLayoutChangedTiles = 0;
+    u32 cacheLightChangedTiles = 0;
+    u32 cacheCasterChangedTiles = 0;
+    u32 cacheDynamicSkinnedCasterTiles = 0;
+    std::string cacheReasonSummary;
+};
+
+struct LocalShadowCacheEntry {
+    u64 tileIdentity = 0;
+    u64 lightSignature = 0;
+    u64 casterSignature = 0;
 };
 
 struct LocalShadowCacheState {
-    std::array<u64, kMaxLocalShadowTiles> tileKeys{};
+    std::array<LocalShadowCacheEntry, kMaxLocalShadowTiles> tiles{};
     u32 tileCount = 0;
     bool valid = false;
 };
@@ -426,6 +479,9 @@ public:
     void SetFrameMatricesProvider(FrameMatricesProvider provider);
     void SetRenderQueueBuilder(RenderQueueBuilder builder);
     void SetDlssQualitySceneContentMotionSupported(bool supported);
+    void SetTemporalAntialiasingMode(RendererTemporalAntialiasingMode mode);
+    void ToggleTemporalAntialiasingMode();
+    RendererTemporalAntialiasingMode TemporalAntialiasingMode() const;
     void SetImGui3DContext(Scene3D* scene, Camera3D* camera);
     void SetOverlay3DContext(Scene3D* scene, Camera3D* camera, PipelineSpec pipelineSpec);
     void RefreshMaterialDescriptors();
@@ -434,12 +490,12 @@ public:
     const RendererStats& Stats() const;
     VulkanShadowSettings& ShadowSettings();
     const VulkanShadowSettings& ShadowSettings() const;
+    void ApplyEnvironmentRenderSettings();
 
 private:
     void ValidateSceneResources() const;
     void CreateSwapchainResources();
     void RecreateSwapchain();
-    void ApplyEnvironmentRenderSettings();
     void ApplyShadowMapSettings();
     void ResetLocalShadowCacheStates();
     void HandleObjectPicking();
@@ -465,11 +521,13 @@ private:
         const VkExtent2D& activeInternalExtent,
         bool hdrSceneColorReady,
         bool sceneDepthReady,
-        const FrameTemporalState& temporalState
+        const FrameTemporalState& temporalState,
+        bool temporalReconstructionAllowed
     ) const;
     void StoreTemporalHistory(
         const FrameMatrices* matrices,
-        const VkExtent2D& extent
+        const VkExtent2D& extent,
+        const FrameTemporalState* temporalState
     );
     void PopulateTemporalUniforms(
         UniformBufferObject& uniformData,
@@ -491,7 +549,20 @@ private:
         RendererTemporalStats& stats
     ) const;
     bool LocalReflectionProbeCubemapReady() const;
-    void PrepareReflectionProbeCaptureResources();
+    bool TemporalDlssModeActive() const;
+    bool TemporalDlssDlaaModeActive() const;
+    bool TemporalDlssSrModeActive() const;
+    bool TemporalNativeTaaModeActive() const;
+    f32 TemporalRenderScaleForCurrentMode() const;
+    bool TemporalRenderScaleApplyEnabledForCurrentMode() const;
+    VkExtent2D ActiveInternalExtentForDisplay(const VkExtent2D& displayExtent) const;
+    TemporalUpscalerDlssQualityMode TemporalDlssQualityModeForCurrentMode() const;
+    TemporalUpscalerDlssPreset TemporalDlssPresetForCurrentMode() const;
+    bool TemporalJitterEnabledForCurrentMode() const;
+    bool TemporalJitterApplyEnabledForCurrentMode() const;
+    bool TemporalVelocityJitteredHistoryPolicyForCurrentMode() const;
+    f32 ActiveMaterialTextureMipLodBias() const;
+    void EnsureVisibleSkyboxResources();
     u32 UpdateEnvironmentDescriptorSets(
         VulkanDescriptorSets* descriptorSets,
         const FrameReflectionProbeSet* reflectionProbes = nullptr,
@@ -548,6 +619,21 @@ private:
         const LocalShadowTileSet& localShadowTiles
     ) const;
     FrameLightSet BuildFrameLightSet(std::span<const RenderCommand> renderCommands) const;
+    void PrepareReflectionProbeCaptureResources(
+        std::size_t imageIndex,
+        const FrameLightSet& lights,
+        const FrameMatrices* matrices
+    );
+    bool EnsureReflectionProbeCapturePipelines();
+    bool CaptureNextReflectionProbeFace(
+        std::size_t imageIndex,
+        const FrameLightSet& lights,
+        const RendererReflectionProbe& probe
+    );
+    FrameMatrices ReflectionProbeCaptureMatrices(
+        const RendererReflectionProbe& probe,
+        u32 face
+    ) const;
     FrameReflectionProbeSet BuildFrameReflectionProbeSet(
         const FrameMatrices* matrices
     ) const;
@@ -607,6 +693,7 @@ private:
     RenderQueue m_RenderQueue;
     RenderQueue m_OverlayRenderQueue;
     RenderQueue m_ShadowRenderQueue;
+    RenderQueue m_ReflectionCaptureRenderQueue;
     std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
@@ -615,10 +702,16 @@ private:
     std::size_t m_CurrentFrame = 0;
     FrameMatrices m_PreviousTemporalMatrices{};
     VkExtent2D m_PreviousTemporalExtent{};
+    glm::vec2 m_PreviousTemporalJitterPixels{ 0.0f };
+    glm::vec2 m_PreviousTemporalJitterUv{ 0.0f };
+    bool m_PreviousTemporalJitterApplied = false;
     u32 m_TemporalFrameCounter = 0;
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
     bool m_DlssQualitySceneContentMotionSupported = true;
+    RendererTemporalAntialiasingMode m_TemporalAntialiasingMode =
+        RendererTemporalAntialiasingMode::Environment;
+    bool m_TemporalRenderTargetsRecreateRequested = false;
     std::vector<bool> m_TemporalUpscaleOutputInitialized;
     std::vector<bool> m_DlssMaskInputsInitialized;
 
@@ -656,6 +749,7 @@ private:
     std::unique_ptr<VulkanDlssMaskFramebuffer> m_DlssMaskFramebuffer;
     std::unique_ptr<VulkanHdrRenderPass> m_HdrRenderPass;
     std::unique_ptr<VulkanHdrFramebuffer> m_HdrFramebuffer;
+    std::unique_ptr<VulkanHdrFramebuffer> m_TaaResolveFramebuffer;
     std::unique_ptr<VulkanBloomRenderPass> m_BloomDownsampleRenderPass;
     std::unique_ptr<VulkanBloomRenderPass> m_BloomUpsampleRenderPass;
     std::unique_ptr<VulkanBloomFramebuffer> m_BloomDownsampleFramebuffer;
@@ -675,12 +769,16 @@ private:
     std::unique_ptr<VulkanImGuiLayer> m_ImGuiLayer;
     std::unique_ptr<VulkanGraphicsPipeline> m_GraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_ReflectionCaptureGraphicsPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedReflectionCaptureGraphicsPipeline;
+    VkRenderPass m_ReflectionCapturePipelineRenderPass = VK_NULL_HANDLE;
     std::unique_ptr<VulkanGraphicsPipeline> m_InstancedGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedInstancedGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedGBufferGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DeferredLightingPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_HdrCompositePipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_TaaResolvePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_BloomDownsamplePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_BloomUpsamplePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferDebugPipeline;
@@ -694,7 +792,13 @@ private:
     VkImageView m_IblIrradianceView = VK_NULL_HANDLE;
     VkImageView m_IblPrefilteredView = VK_NULL_HANDLE;
     VkSampler m_IblSampler = VK_NULL_HANDLE;
+    VulkanIblGenerationSettings m_IblGenerationSettings{};
+    VulkanIblGenerationInfo m_IblGenerationInfo{};
     VulkanReflectionProbeResources m_ReflectionProbeResources;
+    i32 m_ReflectionCaptureRoundRobinSceneIndex = -1;
+    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxTexture;
+    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxFallbackTexture;
+    std::unique_ptr<VulkanSampler> m_VisibleSkyboxSampler;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_WeightedTranslucencyGraphicsPipeline;

@@ -9,12 +9,16 @@
 #include "renderer/vulkan/upload_batch.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace se {
 
@@ -216,6 +220,91 @@ struct GpuBonePaletteDescriptorWrite {
     u32 rangeBytes = 0;
 };
 
+struct SkinnedAnimationSpaceDiagnostics {
+    u32 ready = 0;
+    u32 blockerMask = 0;
+};
+
+SkinnedAnimationSpaceDiagnostics SkinnedAnimationSpaceDiagnosticsFor(
+    const ImportedModel3D& model
+) {
+    SkinnedAnimationSpaceDiagnostics diagnostics{};
+    const bool hasSkinnedAnimation =
+        model.sourceAnimationCount > 0u &&
+        model.sourceMeshWithBonesCount > 0u &&
+        model.sourceBoneCount > 0u;
+    if (!hasSkinnedAnimation) {
+        return diagnostics;
+    }
+
+    constexpr u32 kSkinnedVertexAttributeBlocker = 1u << 0u;
+    constexpr u32 kBonePaletteBlocker = 1u << 1u;
+    constexpr u32 kUnmatchedBoneNameBlocker = 1u << 2u;
+    constexpr u32 kUnboundAnimationChannelBlocker = 1u << 3u;
+    constexpr u32 kStaticPaletteSampleBlocker = 1u << 4u;
+
+    if (model.sourceSkinnedVertexAttributeReady == 0u) {
+        diagnostics.blockerMask |= kSkinnedVertexAttributeBlocker;
+    }
+    if (model.sourcePoseBonePaletteReady == 0u ||
+        model.sourcePoseBonePaletteEntryCount != model.sourceBoneCount ||
+        model.sourcePosePreviousBonePaletteEntryCount != model.sourceBoneCount) {
+        diagnostics.blockerMask |= kBonePaletteBlocker;
+    }
+    if (model.sourceBoneNameUnmatchedCount != 0u) {
+        diagnostics.blockerMask |= kUnmatchedBoneNameBlocker;
+    }
+    if (model.sourceAnimationChannelUnboundCount != 0u ||
+        model.sourceAnimationChannelBoundCount == 0u) {
+        diagnostics.blockerMask |= kUnboundAnimationChannelBlocker;
+    }
+    if (model.sourcePoseChangedBonePaletteEntryCount == 0u) {
+        diagnostics.blockerMask |= kStaticPaletteSampleBlocker;
+    }
+
+    diagnostics.ready = diagnostics.blockerMask == 0u ? 1u : 0u;
+    return diagnostics;
+}
+
+ImportedModel3D BuildRuntimeAnimationSource(const ImportedModel3D& importedModel) {
+    ImportedModel3D animationSource;
+    animationSource.sourcePath = importedModel.sourcePath;
+    animationSource.animations = importedModel.animations;
+    animationSource.nodes = importedModel.nodes;
+    animationSource.sourceBoneCount = importedModel.sourceBoneCount;
+    animationSource.sourcePoseBonePaletteReady =
+        importedModel.sourcePoseBonePaletteReady;
+    animationSource.meshes.reserve(importedModel.meshes.size());
+
+    for (const ImportedMesh3D& importedMesh : importedModel.meshes) {
+        ImportedMesh3D animationMesh;
+        animationMesh.name = importedMesh.name;
+        animationMesh.bones = importedMesh.bones;
+        animationSource.meshes.push_back(std::move(animationMesh));
+    }
+
+    return animationSource;
+}
+
+std::vector<glm::mat4> ConcatenateBonePalettes(
+    const std::vector<glm::mat4>& previousPalette,
+    const std::vector<glm::mat4>& currentPalette
+) {
+    std::vector<glm::mat4> paletteData;
+    paletteData.reserve(previousPalette.size() + currentPalette.size());
+    paletteData.insert(
+        paletteData.end(),
+        previousPalette.begin(),
+        previousPalette.end()
+    );
+    paletteData.insert(
+        paletteData.end(),
+        currentPalette.begin(),
+        currentPalette.end()
+    );
+    return paletteData;
+}
+
 RendererBonePaletteRegistration RegisterRendererBonePaletteResource(
     VulkanRenderResources2D& renderResources,
     const std::string& resourceId,
@@ -271,18 +360,8 @@ GpuBonePaletteUpload CreateGpuBonePaletteBuffer(
         return result;
     }
 
-    std::vector<glm::mat4> paletteData;
-    paletteData.reserve(previousPalette.size() + currentPalette.size());
-    paletteData.insert(
-        paletteData.end(),
-        previousPalette.begin(),
-        previousPalette.end()
-    );
-    paletteData.insert(
-        paletteData.end(),
-        currentPalette.begin(),
-        currentPalette.end()
-    );
+    const std::vector<glm::mat4> paletteData =
+        ConcatenateBonePalettes(previousPalette, currentPalette);
 
     const VkDeviceSize bufferSize =
         static_cast<VkDeviceSize>(paletteData.size() * sizeof(glm::mat4));
@@ -382,6 +461,19 @@ ResolvedTextureSource PrimaryTextureSourceOrFallback(
     return ResolvedTextureSource{
         nullptr,
         fallbackTexturePath
+    };
+}
+
+std::array<u8, 4> ImportedFallbackTexel(const ImportedMaterial3D& material) {
+    auto channelToByte = [](f32 value) {
+        return static_cast<u8>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+    };
+
+    return {
+        channelToByte(material.baseColor.r),
+        channelToByte(material.baseColor.g),
+        channelToByte(material.baseColor.b),
+        channelToByte(material.opacity)
     };
 }
 
@@ -581,10 +673,6 @@ MaterialProperties ImportedForwardMaterial(
         1.0f
     };
     properties.alphaMode = ImportedAlphaModeToMaterialAlphaMode(material.alphaMode);
-    if (properties.alphaMode == MaterialAlphaMode::Opaque &&
-        material.FindTexture(ImportedTextureKind::Opacity) != nullptr) {
-        properties.alphaMode = MaterialAlphaMode::Blend;
-    }
     properties.alphaCutoff = std::clamp(material.alphaCutoff, 0.0f, 1.0f);
     properties.doubleSided = material.doubleSided;
     if (properties.alphaMode == MaterialAlphaMode::Blend) {
@@ -623,6 +711,10 @@ void NormalizeImportedModel(ImportedModel3D& model, f32 targetMaxExtent) {
 
     const glm::vec3 center = (model.boundsMin + model.boundsMax) * 0.5f;
     const f32 scale = targetMaxExtent / maxExtent;
+    const glm::mat4 normalization =
+        glm::scale(glm::mat4(1.0f), glm::vec3(scale)) *
+        glm::translate(glm::mat4(1.0f), -center);
+    const glm::mat4 inverseNormalization = glm::inverse(normalization);
     model.boundsMin = glm::vec3(std::numeric_limits<f32>::max());
     model.boundsMax = glm::vec3(std::numeric_limits<f32>::lowest());
 
@@ -645,11 +737,77 @@ void NormalizeImportedModel(ImportedModel3D& model, f32 targetMaxExtent) {
         model.boundsMin = glm::min(model.boundsMin, mesh.boundsMin);
         model.boundsMax = glm::max(model.boundsMax, mesh.boundsMax);
     }
+
+    for (ImportedNode3D& node : model.nodes) {
+        if (node.parentIndex < 0) {
+            node.localTransform = normalization * node.localTransform;
+        }
+    }
+    for (ImportedMesh3D& mesh : model.meshes) {
+        for (ImportedMesh3D::Bone& bone : mesh.bones) {
+            bone.offsetMatrix = bone.offsetMatrix * inverseNormalization;
+        }
+    }
+
+    ModelImporter::RebuildAnimationPoseDiagnostics(model);
 }
 
 std::string PathLabel(const std::filesystem::path& path) {
     const std::string filename = path.filename().string();
     return filename.empty() ? path.string() : filename;
+}
+
+bool ShaderSkinningDiagnosticEnabled(const std::filesystem::path& path) {
+    return path.filename().string() == "skinned_probe.dae";
+}
+
+std::string ReadEnvironmentString(const char* name) {
+#ifdef _WIN32
+    char* value = nullptr;
+    std::size_t size = 0;
+    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
+        return {};
+    }
+
+    std::string result{ value };
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string{ value } : std::string{};
+#endif
+}
+
+bool EnvironmentFlagEnabled(const char* name) {
+    const std::string text = ReadEnvironmentString(name);
+    if (text.empty()) {
+        return false;
+    }
+
+    return text != "0" &&
+        text != "false" &&
+        text != "False" &&
+        text != "FALSE" &&
+        text != "off" &&
+        text != "Off" &&
+        text != "OFF" &&
+        text != "no" &&
+        text != "No" &&
+        text != "NO";
+}
+
+bool ImportedSkinningPreviewEnabled() {
+    return EnvironmentFlagEnabled("SE_ENABLE_IMPORTED_SKINNING_PREVIEW") ||
+        EnvironmentFlagEnabled("SE_IMPORTED_SKINNING_PREVIEW");
+}
+
+bool ShouldBindImportedBonePalette(
+    const std::filesystem::path& path,
+    bool bindBonePalettePreview
+) {
+    return bindBonePalettePreview ||
+        ShaderSkinningDiagnosticEnabled(path) ||
+        ImportedSkinningPreviewEnabled();
 }
 
 }
@@ -678,7 +836,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
     glm::vec3 position,
     glm::vec3 rotationDegrees,
     f32 targetMaxExtent,
-    glm::vec3 scale
+    glm::vec3 scale,
+    bool bindBonePalettePreview
 ) {
     try {
         std::error_code ec;
@@ -690,6 +849,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             LoadedRuntimeModel& cached = *m_LoadedModels[cacheIt->second];
             const u32 modelId = m_NextModelId++;
             const std::string idPrefix = "RuntimeModel" + std::to_string(modelId);
+            const bool bindShaderSkinningPalette =
+                ShouldBindImportedBonePalette(modelPath, bindBonePalettePreview);
 
             for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
                 m_RenderResources.RegisterMesh(idPrefix + "_Mesh" + std::to_string(mi),
@@ -722,6 +883,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             }
 
             u32 partIdx = 0;
+            cached.bonePaletteResourceIds.push_back(cachedBonePaletteResourceId);
+            u32 cachedRenderableBound = 0;
             for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
                 const std::size_t matIdx = std::min(mi,
                     cached.materialIds.empty() ? size_t(0) : cached.materialIds.size() - 1);
@@ -733,9 +896,13 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 part.Transform().SetRotationDegrees(rotationDegrees);
                 part.Transform().SetScale(scale);
                 part.Transform().SetAnimateRotation(false);
-                if (rendererBonePalette.ready != 0u) {
+                if (bindShaderSkinningPalette && rendererBonePalette.ready != 0u) {
                     part.SetBonePaletteResourceId(cachedBonePaletteResourceId);
+                    cachedRenderableBound = 1u;
                 }
+            }
+            if (cachedRenderableBound != 0u) {
+                cached.runtimeSkinnedAnimationRenderableBound = 1u;
             }
 
             return RuntimeModelLoadResult{true,
@@ -798,6 +965,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourceMaxBoneAttributeInfluencesPerVertex,
                 cached.sourceBoneInfluenceOverflowCount,
                 cached.sourceSkinnedVertexAttributeReady,
+                cached.runtimeSkinnedAnimationSpaceReady,
+                cached.runtimeSkinnedAnimationSpaceBlockerMask,
+                cached.runtimeSkinnedAnimationRenderableBound,
                 cached.skinnedAnimationUnsupported};
         }
 
@@ -920,7 +1090,21 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             };
 
             VulkanMaterial* importedMaterial = nullptr;
-            if (primaryTexture.externalPath.has_value()) {
+            if (primaryTexture.UsesFallback()) {
+                const std::array<u8, 4> fallbackTexel = ImportedFallbackTexel(material);
+                importedMaterial = &m_MaterialLibrary.Create(
+                    materialId,
+                    VulkanTexturePixels{
+                        std::span<const u8>(fallbackTexel.data(), fallbackTexel.size()),
+                        1,
+                        1
+                    },
+                    importedProperties,
+                    false,
+                    false,
+                    &uploadBatch
+                );
+            } else if (primaryTexture.externalPath.has_value()) {
                 importedMaterial = &m_MaterialLibrary.Create(
                     materialId,
                     *primaryTexture.externalPath,
@@ -1363,6 +1547,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                     : 0u;
         }
         loadedModel->bonePaletteResourceId = idPrefix + "_BonePalette";
+        loadedModel->bonePaletteResourceIds.push_back(loadedModel->bonePaletteResourceId);
+        const bool bindShaderSkinningPalette =
+            ShouldBindImportedBonePalette(modelPath, bindBonePalettePreview);
 
         for (std::size_t meshIndex = 0; meshIndex < importedModelData.meshes.size(); ++meshIndex) {
             const ImportedMesh3D& mesh = importedModelData.meshes[meshIndex];
@@ -1383,9 +1570,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedPart.Transform().SetScale(scale);
             importedPart.Transform().SetAnimateRotation(false);
             importedPart.Transform().SetRotationSpeedDegreesPerSecond({ 0.0f, 0.0f, 0.0f });
-            if (loadedModel->runtimePoseCarrierReady != 0u &&
+            if (bindShaderSkinningPalette &&
+                loadedModel->runtimePoseCarrierReady != 0u &&
                 !loadedModel->bonePaletteResourceId.empty()) {
                 importedPart.SetBonePaletteResourceId(loadedModel->bonePaletteResourceId);
+                loadedModel->runtimeSkinnedAnimationRenderableBound = 1u;
             }
         }
 
@@ -1438,8 +1627,40 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceBoneInfluenceOverflowCount;
         loadedModel->sourceSkinnedVertexAttributeReady =
             importedModelData.sourceSkinnedVertexAttributeReady;
+        const SkinnedAnimationSpaceDiagnostics skinnedAnimationSpace =
+            SkinnedAnimationSpaceDiagnosticsFor(importedModelData);
+        loadedModel->runtimeSkinnedAnimationSpaceReady =
+            skinnedAnimationSpace.ready;
+        loadedModel->runtimeSkinnedAnimationSpaceBlockerMask =
+            skinnedAnimationSpace.blockerMask;
         loadedModel->skinnedAnimationUnsupported =
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u;
+        loadedModel->animationSource =
+            BuildRuntimeAnimationSource(importedModelData);
+        if (!loadedModel->animationSource.animations.empty() &&
+            !loadedModel->animationSource.nodes.empty() &&
+            loadedModel->animationSource.sourceBoneCount > 0u &&
+            loadedModel->runtimePoseCarrierReady != 0u) {
+            const u32 clipIndex =
+                !importedModelData.diagnosticPoseSamples.empty()
+                    ? importedModelData.diagnosticPoseSamples.front().clipIndex
+                    : 0u;
+            if (clipIndex < loadedModel->animationSource.animations.size()) {
+                const ImportedAnimationClip3D& clip =
+                    loadedModel->animationSource.animations[clipIndex];
+                const f64 durationTicks =
+                    ModelImporter::AnimationDurationTicks(clip);
+                if (durationTicks > 0.0) {
+                    loadedModel->animationPlaybackCandidate = 1u;
+                    loadedModel->animationPlaybackClipIndex = clipIndex;
+                    loadedModel->animationPlaybackDurationTicks = durationTicks;
+                    loadedModel->animationPlaybackTicksPerSecond =
+                        clip.ticksPerSecond > 0.0 ? clip.ticksPerSecond : 25.0;
+                    loadedModel->animationPlaybackPreviousTimeTicks = 0.0;
+                    loadedModel->animationPlaybackCurrentTimeTicks = 0.0;
+                }
+            }
+        }
         const u32 runtimePoseCarrierBonePaletteEntryCount =
             static_cast<u32>(loadedModel->runtimeCurrentBonePalette.size());
         const u32 runtimePoseCarrierPreviousBonePaletteEntryCount =
@@ -1512,13 +1733,15 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             loadedModel->gpuBonePaletteDescriptorSet != nullptr) {
             m_RenderResources.UpdateBonePaletteDescriptor(
                 loadedModel->bonePaletteResourceId,
-                loadedModel->gpuBonePaletteDescriptorSet->Handle(),
+            loadedModel->gpuBonePaletteDescriptorSet->Handle(),
                 loadedModel->gpuBonePaletteDescriptorSet->Ready(),
                 kBonePaletteDescriptorSetIndex,
                 loadedModel->gpuBonePaletteDescriptorSet->Binding(),
                 loadedModel->gpuBonePaletteDescriptorSet->RangeBytes()
             );
         }
+        const u32 runtimeSkinnedAnimationRenderableBound =
+            loadedModel->runtimeSkinnedAnimationRenderableBound;
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -1581,6 +1804,9 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             importedModelData.sourceMaxBoneAttributeInfluencesPerVertex,
             importedModelData.sourceBoneInfluenceOverflowCount,
             importedModelData.sourceSkinnedVertexAttributeReady,
+            skinnedAnimationSpace.ready,
+            skinnedAnimationSpace.blockerMask,
+            runtimeSkinnedAnimationRenderableBound,
             importedModelData.skinnedAnimationUnsupported ? 1u : 0u
         };
     } catch (const std::exception& error) {
@@ -1589,6 +1815,276 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             std::string("Failed to load model: ") + error.what()
         };
     }
+}
+
+void RuntimeModelLoader::UpdateAnimationPlayback(f32 deltaSeconds) {
+    const f64 frameSeconds = std::clamp(static_cast<f64>(deltaSeconds), 0.0, 0.25);
+    for (const std::unique_ptr<LoadedRuntimeModel>& loadedModel : m_LoadedModels) {
+        if (loadedModel == nullptr) {
+            continue;
+        }
+
+        LoadedRuntimeModel& model = *loadedModel;
+        if (model.animationPlaybackCandidate == 0u ||
+            model.animationPlaybackClipIndex >= model.animationSource.animations.size() ||
+            model.animationPlaybackDurationTicks <= 0.0 ||
+            model.animationPlaybackTicksPerSecond <= 0.0 ||
+            model.gpuBonePaletteBuffer == nullptr ||
+            model.gpuBonePaletteDescriptorSet == nullptr) {
+            continue;
+        }
+
+        f64 previousTimeTicks = model.animationPlaybackCurrentTimeTicks;
+        if (previousTimeTicks < 0.0 ||
+            previousTimeTicks >= model.animationPlaybackDurationTicks) {
+            previousTimeTicks = 0.0;
+        }
+
+        const f64 deltaTicks = frameSeconds * model.animationPlaybackTicksPerSecond;
+        f64 currentTimeTicks = previousTimeTicks + deltaTicks;
+        bool wrapped = false;
+        if (currentTimeTicks >= model.animationPlaybackDurationTicks) {
+            currentTimeTicks =
+                std::fmod(currentTimeTicks, model.animationPlaybackDurationTicks);
+            wrapped = true;
+        }
+        if (currentTimeTicks < 0.0) {
+            currentTimeTicks = 0.0;
+        }
+
+        model.animationPlaybackPreviousAbsoluteSeconds =
+            model.animationPlaybackCurrentAbsoluteSeconds;
+        model.animationPlaybackCurrentAbsoluteSeconds =
+            model.animationPlaybackCurrentAbsoluteSeconds >= 0.0
+                ? model.animationPlaybackCurrentAbsoluteSeconds + frameSeconds
+                : frameSeconds;
+        UpdateAnimationPlaybackSample(
+            model,
+            previousTimeTicks,
+            currentTimeTicks,
+            wrapped,
+            true
+        );
+    }
+}
+
+void RuntimeModelLoader::UpdateAnimationPlaybackAtTime(f32 elapsedSeconds) {
+    const f64 absoluteSeconds = std::max(static_cast<f64>(elapsedSeconds), 0.0);
+    for (const std::unique_ptr<LoadedRuntimeModel>& loadedModel : m_LoadedModels) {
+        if (loadedModel == nullptr) {
+            continue;
+        }
+
+        LoadedRuntimeModel& model = *loadedModel;
+        if (model.animationPlaybackCandidate == 0u ||
+            model.animationPlaybackClipIndex >= model.animationSource.animations.size() ||
+            model.animationPlaybackDurationTicks <= 0.0 ||
+            model.animationPlaybackTicksPerSecond <= 0.0 ||
+            model.gpuBonePaletteBuffer == nullptr ||
+            model.gpuBonePaletteDescriptorSet == nullptr) {
+            continue;
+        }
+
+        const bool hasPreviousAbsoluteSeconds =
+            model.animationPlaybackCurrentAbsoluteSeconds >= 0.0;
+        const f64 previousAbsoluteSeconds =
+            hasPreviousAbsoluteSeconds
+                ? model.animationPlaybackCurrentAbsoluteSeconds
+                : absoluteSeconds;
+        const f64 previousRawTicks =
+            previousAbsoluteSeconds * model.animationPlaybackTicksPerSecond;
+        const f64 currentRawTicks =
+            absoluteSeconds * model.animationPlaybackTicksPerSecond;
+        f64 previousTimeTicks =
+            std::fmod(previousRawTicks, model.animationPlaybackDurationTicks);
+        f64 currentTimeTicks =
+            std::fmod(currentRawTicks, model.animationPlaybackDurationTicks);
+        if (previousTimeTicks < 0.0) {
+            previousTimeTicks += model.animationPlaybackDurationTicks;
+        }
+        if (currentTimeTicks < 0.0) {
+            currentTimeTicks += model.animationPlaybackDurationTicks;
+        }
+        const bool wrapped =
+            currentRawTicks >= previousRawTicks &&
+            std::floor(currentRawTicks / model.animationPlaybackDurationTicks) >
+                std::floor(previousRawTicks / model.animationPlaybackDurationTicks);
+
+        model.animationPlaybackPreviousAbsoluteSeconds = previousAbsoluteSeconds;
+        model.animationPlaybackCurrentAbsoluteSeconds = absoluteSeconds;
+        UpdateAnimationPlaybackSample(
+            model,
+            previousTimeTicks,
+            currentTimeTicks,
+            wrapped,
+            hasPreviousAbsoluteSeconds
+        );
+    }
+}
+
+void RuntimeModelLoader::UpdateAnimationPlaybackSample(
+    LoadedRuntimeModel& model,
+    f64 previousTimeTicks,
+    f64 currentTimeTicks,
+    bool wrapped,
+    bool countContinuityDiagnostics
+) {
+    const f64 sampledPreviousTimeTicks = previousTimeTicks;
+    if (countContinuityDiagnostics && wrapped) {
+        ++model.runtimeAnimationPlaybackLoopWrapCount;
+    }
+    if (countContinuityDiagnostics &&
+        std::abs(sampledPreviousTimeTicks - currentTimeTicks) <= 0.000001) {
+        ++model.runtimeAnimationPlaybackPreviousPoseCollapsedCount;
+    }
+
+    ImportedPoseSample3D sample;
+    u32 sampledChannelCount = 0;
+    if (!ModelImporter::SampleAnimationPose(
+            model.animationSource,
+            model.animationPlaybackClipIndex,
+            sampledPreviousTimeTicks,
+            currentTimeTicks,
+            sample,
+            &sampledChannelCount
+        ) ||
+        sampledChannelCount == 0u ||
+        sample.previousBonePalette.empty() ||
+        sample.previousBonePalette.size() != sample.currentBonePalette.size() ||
+        sample.currentBonePalette.size() != model.animationSource.sourceBoneCount) {
+        model.animationPlaybackPreviousTimeTicks = sampledPreviousTimeTicks;
+        model.animationPlaybackCurrentTimeTicks = currentTimeTicks;
+        return;
+    }
+
+    model.runtimePreviousBonePalette = std::move(sample.previousBonePalette);
+    model.runtimeCurrentBonePalette = std::move(sample.currentBonePalette);
+    const u32 changedBonePaletteEntryCount = CountChangedMatrices(
+        model.runtimePreviousBonePalette,
+        model.runtimeCurrentBonePalette
+    );
+    model.runtimePoseCarrierChangedBonePaletteEntryCount =
+        changedBonePaletteEntryCount;
+    model.runtimePoseCarrierReady =
+        !model.runtimePreviousBonePalette.empty() &&
+        model.runtimePreviousBonePalette.size() ==
+            model.runtimeCurrentBonePalette.size() &&
+        model.runtimeCurrentBonePalette.size() ==
+            model.animationSource.sourceBoneCount
+            ? 1u
+            : 0u;
+
+    u32 rendererPaletteReady = 0;
+    for (const std::string& resourceId : model.bonePaletteResourceIds) {
+        if (resourceId.empty() || !m_RenderResources.ContainsBonePalette(resourceId)) {
+            continue;
+        }
+
+        m_RenderResources.UpdateBonePalette(
+            resourceId,
+            model.runtimePreviousBonePalette,
+            model.runtimeCurrentBonePalette,
+            changedBonePaletteEntryCount,
+            model.runtimePoseCarrierReady
+        );
+        const VulkanRenderResources2D::BonePaletteResource& palette =
+            m_RenderResources.BonePalette(resourceId);
+        if (palette.ready != 0u &&
+            palette.currentPalette.size() == model.runtimeCurrentBonePalette.size() &&
+            palette.previousPalette.size() ==
+                model.runtimePreviousBonePalette.size()) {
+            rendererPaletteReady = 1u;
+        }
+    }
+
+    const std::vector<glm::mat4> paletteData = ConcatenateBonePalettes(
+        model.runtimePreviousBonePalette,
+        model.runtimeCurrentBonePalette
+    );
+    const VkDeviceSize uploadSize =
+        static_cast<VkDeviceSize>(paletteData.size() * sizeof(glm::mat4));
+    u32 gpuUploadReady = 0;
+    if (!paletteData.empty() &&
+        uploadSize > 0 &&
+        uploadSize <= model.gpuBonePaletteBuffer->Size()) {
+        model.gpuBonePaletteBuffer->Upload(
+            std::as_bytes(std::span<const glm::mat4>(paletteData))
+        );
+        gpuUploadReady = 1u;
+    }
+
+    model.gpuPosePaletteBufferUploaded = gpuUploadReady;
+    model.gpuPosePaletteCurrentEntryCount =
+        static_cast<u32>(model.runtimeCurrentBonePalette.size());
+    model.gpuPosePalettePreviousEntryCount =
+        static_cast<u32>(model.runtimePreviousBonePalette.size());
+    model.runtimeAnimationPlaybackChangedBonePaletteEntryCount =
+        changedBonePaletteEntryCount;
+    model.runtimeAnimationPlaybackRendererPaletteReady = rendererPaletteReady;
+    model.runtimeAnimationPlaybackGpuUploadReady = gpuUploadReady;
+
+    const u32 frameReady =
+        model.runtimePoseCarrierReady != 0u &&
+        rendererPaletteReady != 0u &&
+        gpuUploadReady != 0u &&
+        model.gpuBonePaletteDescriptorSet->Ready() != 0u &&
+        changedBonePaletteEntryCount > 0u
+            ? 1u
+            : 0u;
+    if (frameReady != 0u) {
+        model.runtimeAnimationPlaybackReady = 1u;
+        ++model.runtimeAnimationPlaybackFrameCount;
+    }
+
+    model.animationPlaybackPreviousTimeTicks = sampledPreviousTimeTicks;
+    model.animationPlaybackCurrentTimeTicks = currentTimeTicks;
+}
+
+RuntimeModelAnimationPlaybackDiagnostics
+RuntimeModelLoader::AnimationPlaybackDiagnostics() const {
+    RuntimeModelAnimationPlaybackDiagnostics diagnostics{};
+    for (const std::unique_ptr<LoadedRuntimeModel>& loadedModel : m_LoadedModels) {
+        if (loadedModel == nullptr || loadedModel->animationPlaybackCandidate == 0u) {
+            continue;
+        }
+
+        ++diagnostics.candidateModelCount;
+        if (loadedModel->animationPlaybackCurrentAbsoluteSeconds >=
+            diagnostics.currentAbsoluteSeconds) {
+            diagnostics.previousTimeTicks =
+                loadedModel->animationPlaybackPreviousTimeTicks;
+            diagnostics.currentTimeTicks =
+                loadedModel->animationPlaybackCurrentTimeTicks;
+            diagnostics.previousAbsoluteSeconds =
+                loadedModel->animationPlaybackPreviousAbsoluteSeconds;
+            diagnostics.currentAbsoluteSeconds =
+                loadedModel->animationPlaybackCurrentAbsoluteSeconds;
+        }
+        diagnostics.frameCount += loadedModel->runtimeAnimationPlaybackFrameCount;
+        diagnostics.loopWrapCount += loadedModel->runtimeAnimationPlaybackLoopWrapCount;
+        diagnostics.previousPoseCollapsedCount +=
+            loadedModel->runtimeAnimationPlaybackPreviousPoseCollapsedCount;
+        diagnostics.changedBonePaletteEntryCount = std::max(
+            diagnostics.changedBonePaletteEntryCount,
+            loadedModel->runtimeAnimationPlaybackChangedBonePaletteEntryCount
+        );
+        if (loadedModel->runtimeAnimationPlaybackRendererPaletteReady != 0u) {
+            diagnostics.rendererPaletteReady = 1u;
+        }
+        if (loadedModel->runtimeAnimationPlaybackGpuUploadReady != 0u) {
+            diagnostics.gpuUploadReady = 1u;
+        }
+        if (loadedModel->runtimeAnimationPlaybackReady != 0u) {
+            ++diagnostics.readyModelCount;
+        }
+    }
+
+    diagnostics.ready =
+        diagnostics.candidateModelCount > 0u &&
+        diagnostics.readyModelCount == diagnostics.candidateModelCount
+            ? 1u
+            : 0u;
+    return diagnostics;
 }
 
 void RuntimeModelLoader::ForEachMaterial(

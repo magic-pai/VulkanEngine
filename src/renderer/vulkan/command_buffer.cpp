@@ -23,6 +23,7 @@
 #include "renderer/vulkan/swapchain.h"
 #include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/renderer_stats.h"
+#include "renderer/vulkan/vulkan_common.h"
 #include "renderer/render_queue.h"
 
 #include <cstddef>
@@ -63,6 +64,7 @@ constexpr std::size_t kMaterialPushConstantBytes =
 struct ShadowDepthPushConstants {
     alignas(16) glm::mat4 model{ 1.0f };
     alignas(16) glm::mat4 lightViewProjection{ 1.0f };
+    alignas(16) glm::vec4 skinningControls{ 0.0f };
 };
 constexpr std::size_t kShadowPushConstantBytes = sizeof(ShadowDepthPushConstants);
 
@@ -78,6 +80,104 @@ static_assert(
     sizeof(ShadowDepthPushConstants) <= sizeof(ObjectPushConstants),
     "Shadow push constants must fit inside the graphics pipeline push-constant range"
 );
+
+bool DlssUnitMotionVectorScaleRequested() {
+    const std::string mode = LowerAscii(
+        ReadVulkanEnvironmentString("SE_DLSS_MOTION_VECTOR_SCALE_MODE")
+    );
+    return mode == "unit" ||
+        mode == "normalized" ||
+        VulkanEnvironmentFlagEnabled("SE_DLSS_UNIT_MOTION_VECTOR_SCALE") ||
+        VulkanEnvironmentFlagEnabled("SE_DLSS_MV_SCALE_UNIT");
+}
+
+glm::vec2 DlssMotionVectorDirection() {
+    std::string mode = LowerAscii(
+        ReadVulkanEnvironmentString("SE_DLSS_MOTION_VECTOR_DIRECTION")
+    );
+    if (mode.empty()) {
+        mode = LowerAscii(ReadVulkanEnvironmentString("SE_DLSS_MV_DIRECTION"));
+    }
+    if (mode.empty()) {
+        mode = LowerAscii(ReadVulkanEnvironmentString("SE_DLSS_MV_SIGN"));
+    }
+
+    if (mode == "engine" ||
+        mode == "native" ||
+        mode == "normal" ||
+        mode == "raw" ||
+        mode == "motion" ||
+        mode == "current-previous" ||
+        mode == "current_to_previous_raw") {
+        return glm::vec2(1.0f);
+    }
+    if (mode == "invert-x" || mode == "previous-current-x") {
+        return glm::vec2(-1.0f, 1.0f);
+    }
+    if (mode == "invert-y" || mode == "previous-current-y") {
+        return glm::vec2(1.0f, -1.0f);
+    }
+
+    return glm::vec2(-1.0f);
+}
+
+glm::vec2 DlssMotionVectorScale(const VkExtent2D& renderExtent) {
+    if (DlssUnitMotionVectorScaleRequested()) {
+        return DlssMotionVectorDirection();
+    }
+    const glm::vec2 direction = DlssMotionVectorDirection();
+    return glm::vec2(
+        direction.x * static_cast<f32>(renderExtent.width),
+        direction.y * static_cast<f32>(renderExtent.height)
+    );
+}
+
+glm::vec2 DlssJitterOffsetPixels(const glm::vec2& jitterPixels) {
+    std::string mode = LowerAscii(
+        ReadVulkanEnvironmentString("SE_DLSS_JITTER_OFFSET_MODE")
+    );
+    if (mode.empty()) {
+        mode = LowerAscii(ReadVulkanEnvironmentString("SE_DLSS_JITTER_MODE"));
+    }
+
+    if (VulkanEnvironmentFlagEnabled("SE_DLSS_ZERO_JITTER_OFFSET") ||
+        mode == "0" ||
+        mode == "zero" ||
+        mode == "none" ||
+        mode == "off") {
+        return glm::vec2(0.0f);
+    }
+    if (VulkanEnvironmentFlagEnabled("SE_DLSS_INVERT_JITTER_OFFSET") ||
+        mode == "invert" ||
+        mode == "inverted" ||
+        mode == "negate" ||
+        mode == "negative") {
+        return -jitterPixels;
+    }
+    if (mode == "normal" ||
+        mode == "raw" ||
+        mode == "passthrough" ||
+        mode == "pass-through") {
+        return jitterPixels;
+    }
+    if (mode == "invert-x" || mode == "negative-x") {
+        return glm::vec2(-jitterPixels.x, jitterPixels.y);
+    }
+    if (mode == "invert-y" || mode == "negative-y") {
+        return glm::vec2(jitterPixels.x, -jitterPixels.y);
+    }
+
+    return -jitterPixels;
+}
+
+bool DlssBypassPostSourceRequested() {
+    return VulkanEnvironmentFlagEnabled("SE_DLSS_BYPASS_POST_SOURCE") ||
+        VulkanEnvironmentFlagEnabled("SE_TEMPORAL_UPSCALE_BYPASS_POST_SOURCE");
+}
+
+bool DlssClearOutputBeforeEvaluateRequested() {
+    return VulkanEnvironmentFlagEnabled("SE_DLSS_CLEAR_OUTPUT_BEFORE_EVALUATE");
+}
 
 ObjectPushConstants DeferredLightingPushConstants(std::span<const RenderCommand> renderCommands) {
     ObjectPushConstants lightingConstants{};
@@ -135,7 +235,7 @@ void PushMaterialConstants(
         static_cast<f32>(extent.width),
         static_cast<f32>(extent.height),
         hdrOutputFlag,
-        0.0f
+        static_cast<f32>(renderCommand.bonePalettePreviousEntryCount)
     );
 
     PushConstants(
@@ -185,6 +285,12 @@ void PushShadowObjectConstants(
     ShadowDepthPushConstants objectData{};
     objectData.model = renderCommand.model;
     objectData.lightViewProjection = lightViewProjection;
+    const bool realBonePaletteDescriptorReady =
+        renderCommand.bonePaletteDescriptorSet != VK_NULL_HANDLE &&
+        renderCommand.bonePaletteDescriptorSetReady != 0u;
+    objectData.skinningControls.x = realBonePaletteDescriptorReady
+        ? static_cast<f32>(renderCommand.bonePalettePreviousEntryCount)
+        : 0.0f;
 
     PushConstants(
         commandBuffer,
@@ -452,8 +558,12 @@ void DrawShadowCommand(
     const VulkanGraphicsPipeline& graphicsPipeline,
     const RenderCommand& renderCommand,
     const glm::mat4& lightViewProjection,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady,
     DrawStateCache& state,
     u32& meshBindCount,
+    u32& bonePaletteDescriptorBindCount,
+    u32& bonePaletteFallbackDescriptorBindCount,
     u32& pushConstantUpdateCount,
     u64& pushConstantByteCount
 ) {
@@ -470,6 +580,27 @@ void DrawShadowCommand(
 
     if (BindMeshIfNeeded(commandBuffer, renderCommand, state)) {
         ++meshBindCount;
+    }
+    const bool realBonePaletteDescriptorReady =
+        renderCommand.bonePaletteDescriptorSet != VK_NULL_HANDLE &&
+        renderCommand.bonePaletteDescriptorSetReady != 0u;
+    if (!realBonePaletteDescriptorReady &&
+        BindBonePaletteFallbackIfNeeded(
+            commandBuffer,
+            graphicsPipeline,
+            bonePaletteFallbackDescriptorSet,
+            bonePaletteFallbackDescriptorReady,
+            state
+        )) {
+        ++bonePaletteFallbackDescriptorBindCount;
+    }
+    if (BindBonePaletteIfNeeded(
+            commandBuffer,
+            graphicsPipeline,
+            renderCommand,
+            state
+        )) {
+        ++bonePaletteDescriptorBindCount;
     }
     vkCmdDrawIndexed(commandBuffer, renderCommand.mesh->IndexCount(), 1, 0, 0, 0);
 }
@@ -510,9 +641,13 @@ void DrawShadowCommands(
     std::span<const RenderCommand> shadowRenderCommands,
     std::size_t imageIndex,
     const glm::mat4& lightViewProjection,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady,
     VkOffset2D viewportOffset,
     VkExtent2D viewportExtent,
     u32& meshBindCount,
+    u32& bonePaletteDescriptorBindCount,
+    u32& bonePaletteFallbackDescriptorBindCount,
     u32& pushConstantUpdateCount,
     u64& pushConstantByteCount
 ) {
@@ -559,8 +694,12 @@ void DrawShadowCommands(
             activeShadowPipeline,
             renderCommand,
             lightViewProjection,
+            bonePaletteFallbackDescriptorSet,
+            bonePaletteFallbackDescriptorReady,
             shadowState,
             meshBindCount,
+            bonePaletteDescriptorBindCount,
+            bonePaletteFallbackDescriptorBindCount,
             pushConstantUpdateCount,
             pushConstantByteCount
         );
@@ -650,6 +789,8 @@ u32 DrawDepthPrefillCommands(
         state = DrawStateCache{};
         boundPipeline = &pipeline;
     };
+    u32 ignoredBonePaletteDescriptorBinds = 0;
+    u32 ignoredBonePaletteFallbackDescriptorBinds = 0;
     for (const RenderCommand& renderCommand : renderCommands) {
         const VulkanGraphicsPipeline& activePipeline = PipelineForCommand(
             *depthPrefillPipeline,
@@ -662,8 +803,12 @@ u32 DrawDepthPrefillCommands(
             activePipeline,
             renderCommand,
             glm::mat4{ 1.0f },
+            VK_NULL_HANDLE,
+            0u,
             state,
             meshBindCount,
+            ignoredBonePaletteDescriptorBinds,
+            ignoredBonePaletteFallbackDescriptorBinds,
             pushConstantUpdateCount,
             pushConstantByteCount
         );
@@ -861,23 +1006,43 @@ void PrepareTemporalHistoryColorForSampling(
     }
 }
 
-void CopyHdrSceneColorToTemporalHistory(
+VkImage TemporalHistoryCopySourceImage(
+    const VulkanSceneRenderTargets& renderTargets,
+    std::size_t sourceImageIndex,
+    TemporalHistoryColorCopySource copySource
+) {
+    return copySource == TemporalHistoryColorCopySource::TaaResolvedColor
+        ? renderTargets.TemporalResolvedColorImage(sourceImageIndex)
+        : renderTargets.HdrSceneColorImage(sourceImageIndex);
+}
+
+void CopyColorToTemporalHistory(
     VkCommandBuffer commandBuffer,
     const VulkanSceneRenderTargets& renderTargets,
-    std::size_t sourceImageIndex
+    std::size_t sourceImageIndex,
+    TemporalHistoryColorCopySource copySource
 ) {
     if (sourceImageIndex >= renderTargets.Count()) {
         return;
     }
 
+    const VkImage sourceImage =
+        TemporalHistoryCopySourceImage(renderTargets, sourceImageIndex, copySource);
+    const bool sourceWrittenByResolvePass =
+        copySource == TemporalHistoryColorCopySource::TaaResolvedColor;
+
     TransitionColorImage(
         commandBuffer,
-        renderTargets.HdrSceneColorImage(sourceImageIndex),
+        sourceImage,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_ACCESS_SHADER_READ_BIT,
+        sourceWrittenByResolvePass
+            ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+            : VK_ACCESS_SHADER_READ_BIT,
         VK_ACCESS_TRANSFER_READ_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        sourceWrittenByResolvePass
+            ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT
     );
 
@@ -906,7 +1071,7 @@ void CopyHdrSceneColorToTemporalHistory(
         );
         vkCmdCopyImage(
             commandBuffer,
-            renderTargets.HdrSceneColorImage(sourceImageIndex),
+            sourceImage,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             renderTargets.TemporalHistoryColorImage(index),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -927,7 +1092,7 @@ void CopyHdrSceneColorToTemporalHistory(
 
     TransitionColorImage(
         commandBuffer,
-        renderTargets.HdrSceneColorImage(sourceImageIndex),
+        sourceImage,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_TRANSFER_READ_BIT,
@@ -935,6 +1100,71 @@ void CopyHdrSceneColorToTemporalHistory(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
     );
+}
+
+void RecordTaaResolveHistoryPass(
+    VkCommandBuffer commandBuffer,
+    const VulkanHdrRenderPass& renderPass,
+    const VulkanHdrFramebuffer& framebuffer,
+    const VulkanGraphicsPipeline& pipeline,
+    const VulkanDescriptorSets& frameDescriptorSets,
+    const VulkanHdrDescriptorSets& hdrDescriptorSets,
+    std::size_t imageIndex
+) {
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+    clearValues[1].depthStencil = { 1.0f, 0 };
+
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = renderPass.Handle();
+    renderPassInfo.framebuffer = framebuffer.Handle(imageIndex);
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = framebuffer.Extent();
+    renderPassInfo.clearValueCount = static_cast<u32>(clearValues.size());
+    renderPassInfo.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(
+        commandBuffer,
+        &renderPassInfo,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    vkCmdBindPipeline(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.Handle()
+    );
+
+    const VkDescriptorSet frameDescriptorSet =
+        frameDescriptorSets.Handle(imageIndex);
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.Layout(),
+        0,
+        1,
+        &frameDescriptorSet,
+        0,
+        nullptr
+    );
+
+    const VkDescriptorSet hdrDescriptorSet =
+        hdrDescriptorSets.Handle(imageIndex);
+    vkCmdBindDescriptorSets(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipeline.Layout(),
+        1,
+        1,
+        &hdrDescriptorSet,
+        0,
+        nullptr
+    );
+
+    SetViewportAndScissor(commandBuffer, { 0, 0 }, framebuffer.Extent());
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    vkCmdEndRenderPass(commandBuffer);
 }
 
 void RecordTemporalUpscalerEvaluate(
@@ -1002,26 +1232,81 @@ void RecordTemporalUpscalerEvaluate(
             dlssMaskInputsInitialized
         );
     }
-    TransitionColorImage(
-        commandBuffer,
-        renderTargets.TemporalUpscaleOutputImage(imageIndex),
-        temporalUpscaleOutputInitialized
-            ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            : VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL,
-        temporalUpscaleOutputInitialized ? VK_ACCESS_SHADER_READ_BIT : 0,
-        VK_ACCESS_SHADER_WRITE_BIT,
-        temporalUpscaleOutputInitialized
-            ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-            : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
-    );
+    const VkImage temporalUpscaleOutputImage =
+        renderTargets.TemporalUpscaleOutputImage(imageIndex);
+    if (DlssClearOutputBeforeEvaluateRequested()) {
+        TransitionColorImage(
+            commandBuffer,
+            temporalUpscaleOutputImage,
+            temporalUpscaleOutputInitialized
+                ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            temporalUpscaleOutputInitialized ? VK_ACCESS_SHADER_READ_BIT : 0,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            temporalUpscaleOutputInitialized
+                ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT
+        );
+
+        VkClearColorValue clearValue{};
+        clearValue.float32[0] = 0.0f;
+        clearValue.float32[1] = 1.0f;
+        clearValue.float32[2] = 0.0f;
+        clearValue.float32[3] = 1.0f;
+        const VkImageSubresourceRange range{
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            1,
+            0,
+            1
+        };
+        vkCmdClearColorImage(
+            commandBuffer,
+            temporalUpscaleOutputImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            &clearValue,
+            1,
+            &range
+        );
+
+        TransitionColorImage(
+            commandBuffer,
+            temporalUpscaleOutputImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+        );
+    } else {
+        TransitionColorImage(
+            commandBuffer,
+            temporalUpscaleOutputImage,
+            temporalUpscaleOutputInitialized
+                ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_GENERAL,
+            temporalUpscaleOutputInitialized ? VK_ACCESS_SHADER_READ_BIT : 0,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            temporalUpscaleOutputInitialized
+                ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
+        );
+    }
 
     const VkExtent2D renderExtent = renderTargets.Extent();
     const VkExtent2D outputExtent = renderTargets.DisplayExtent();
-    const glm::vec2 dlssJitterPixels = temporalState.jitterApplied
+    const glm::vec2 rawDlssJitterPixels = temporalState.jitterApplied
         ? temporalState.jitterPixels
         : glm::vec2(0.0f);
+    const glm::vec2 dlssJitterPixels =
+        DlssJitterOffsetPixels(rawDlssJitterPixels);
+    const glm::vec2 dlssMotionVectorScale =
+        DlssMotionVectorScale(renderExtent);
     evaluateStatus = EvaluateTemporalUpscaler(
         TemporalUpscalerEvaluateRequest{
             temporalUpscaleState.upscalerRuntime,
@@ -1078,11 +1363,12 @@ void RecordTemporalUpscalerEvaluate(
             renderExtent,
             outputExtent,
             temporalUpscaleState.dlssQualityMode,
-            temporalState.historyReset ? 1u : 0u,
+            temporalUpscaleState.dlssPreset,
+            (temporalState.historyReset || !temporalUpscaleOutputInitialized) ? 1u : 0u,
             dlssJitterPixels.x,
             dlssJitterPixels.y,
-            1.0f,
-            1.0f,
+            dlssMotionVectorScale.x,
+            dlssMotionVectorScale.y,
             temporalUpscaleState.upscalerRuntime.sharpness
         }
     );
@@ -1429,6 +1715,40 @@ void DrawInstancedRenderCommand(
 
 }
 
+ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
+    VkCommandBuffer commandBuffer,
+    const VulkanGraphicsPipeline& graphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedGraphicsPipeline,
+    const VulkanDescriptorSets& descriptorSets,
+    const VulkanMaterialDescriptorSets& materialDescriptorSets,
+    const FrameMaterialSet& frameMaterials,
+    std::span<const RenderCommand> renderCommands,
+    const VkExtent2D& extent,
+    std::size_t imageIndex
+) {
+    ReflectionCaptureDrawStats stats{};
+    DrawStateCache state{};
+    DrawForwardCommands(
+        commandBuffer,
+        graphicsPipeline,
+        doubleSidedGraphicsPipeline,
+        descriptorSets,
+        materialDescriptorSets,
+        &frameMaterials,
+        renderCommands,
+        extent,
+        imageIndex,
+        state,
+        stats.materialBindCount,
+        stats.meshBindCount,
+        stats.pushConstantUpdateCount,
+        stats.pushConstantByteCount,
+        1.0f
+    );
+    stats.drawCount = static_cast<u32>(renderCommands.size());
+    return stats;
+}
+
 VulkanCommandBuffer::VulkanCommandBuffer(
     const VulkanDevice& device,
     const VulkanCommandPool& commandPool,
@@ -1515,6 +1835,8 @@ void VulkanCommandBuffer::Record(
     const DirectionalShadowCascadeSet* directionalShadowCascades,
     const VulkanShadowFramebuffer* localShadowFramebuffer,
     const LocalShadowTileSet* localShadowTiles,
+    std::span<const std::span<const RenderCommand>> directionalShadowCascadeRenderCommands,
+    std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
     bool skipCachedLocalShadowTiles,
     const VulkanHdrRenderPass* hdrRenderPass,
     const VulkanHdrFramebuffer* hdrFramebuffer,
@@ -1543,6 +1865,9 @@ void VulkanCommandBuffer::Record(
     bool sharpeningDebugView,
     bool temporalHistoryColorInitialized,
     bool recordTemporalHistoryColorCopy,
+    TemporalHistoryColorCopySource temporalHistoryColorCopySource,
+    const VulkanHdrFramebuffer* taaResolveFramebuffer,
+    const VulkanGraphicsPipeline* taaResolvePipeline,
     const FrameTemporalState* temporalState,
     const FrameTemporalUpscaleState* temporalUpscaleState,
     bool temporalUpscaleOutputInitialized,
@@ -1645,6 +1970,12 @@ void VulkanCommandBuffer::Record(
             "HDR framebuffer count must match command buffer count"
         );
     }
+    if (taaResolveFramebuffer != nullptr) {
+        SE_ASSERT(
+            taaResolveFramebuffer->Count() == m_CommandBuffers.size(),
+            "TAA resolve framebuffer count must match command buffer count"
+        );
+    }
     if (depthLoadFramebuffer != nullptr) {
         SE_ASSERT(
             depthLoadFramebuffer->Handles().size() == m_CommandBuffers.size(),
@@ -1716,6 +2047,8 @@ void VulkanCommandBuffer::Record(
         );
 
         u32 shadowMeshBinds = 0;
+        u32 shadowBonePaletteDescriptorBinds = 0;
+        u32 shadowBonePaletteFallbackDescriptorBinds = 0;
         u32 shadowPushConstantUpdates = 0;
         u64 shadowPushConstantBytes = 0;
         const glm::mat4 legacyLightViewProjection =
@@ -1731,14 +2064,21 @@ void VulkanCommandBuffer::Record(
             shadowRenderCommands,
             imageIndex,
             legacyLightViewProjection,
+            gBufferBonePaletteFallbackDescriptorSet,
+            gBufferBonePaletteFallbackDescriptorReady,
             { 0, 0 },
             shadowFramebuffer->Extent(),
             shadowMeshBinds,
+            shadowBonePaletteDescriptorBinds,
+            shadowBonePaletteFallbackDescriptorBinds,
             shadowPushConstantUpdates,
             shadowPushConstantBytes
         );
         if (bindStats != nullptr) {
             bindStats->shadowMeshBinds += shadowMeshBinds;
+            bindStats->bonePaletteDescriptorBinds += shadowBonePaletteDescriptorBinds;
+            bindStats->bonePaletteFallbackDescriptorBinds +=
+                shadowBonePaletteFallbackDescriptorBinds;
             bindStats->pushConstantUpdates += shadowPushConstantUpdates;
             bindStats->pushConstantBytes += shadowPushConstantBytes;
         }
@@ -1790,8 +2130,11 @@ void VulkanCommandBuffer::Record(
             static_cast<u32>(kMaxDirectionalShadowCascades)
         );
         u32 cascadeAtlasMeshBinds = 0;
+        u32 cascadeAtlasBonePaletteDescriptorBinds = 0;
+        u32 cascadeAtlasBonePaletteFallbackDescriptorBinds = 0;
         u32 cascadeAtlasPushConstantUpdates = 0;
         u64 cascadeAtlasPushConstantBytes = 0;
+        u32 cascadeAtlasDraws = 0;
         for (u32 cascadeIndex = 0; cascadeIndex < activeCascadeCount; ++cascadeIndex) {
             const u32 tileX = cascadeIndex % 2u;
             const u32 tileY = cascadeIndex / 2u;
@@ -1799,27 +2142,39 @@ void VulkanCommandBuffer::Record(
                 static_cast<i32>(tileX * cascadeTileExtent.width),
                 static_cast<i32>(tileY * cascadeTileExtent.height)
             };
+            const std::span<const RenderCommand> cascadeRenderCommands =
+                cascadeIndex < directionalShadowCascadeRenderCommands.size()
+                    ? directionalShadowCascadeRenderCommands[cascadeIndex]
+                    : shadowRenderCommands;
             DrawShadowCommands(
                 commandBuffer,
                 *shadowGraphicsPipeline,
                 doubleSidedShadowGraphicsPipeline,
                 *shadowDescriptorSets,
-                shadowRenderCommands,
+                cascadeRenderCommands,
                 imageIndex,
                 directionalShadowCascades->cascades[cascadeIndex].viewProjection,
+                gBufferBonePaletteFallbackDescriptorSet,
+                gBufferBonePaletteFallbackDescriptorReady,
                 tileOffset,
                 cascadeTileExtent,
                 cascadeAtlasMeshBinds,
+                cascadeAtlasBonePaletteDescriptorBinds,
+                cascadeAtlasBonePaletteFallbackDescriptorBinds,
                 cascadeAtlasPushConstantUpdates,
                 cascadeAtlasPushConstantBytes
             );
+            cascadeAtlasDraws += static_cast<u32>(cascadeRenderCommands.size());
         }
 
         if (bindStats != nullptr) {
             bindStats->shadowCascadeAtlasPasses += activeCascadeCount;
-            bindStats->shadowCascadeAtlasDraws +=
-                activeCascadeCount * static_cast<u32>(shadowRenderCommands.size());
+            bindStats->shadowCascadeAtlasDraws += cascadeAtlasDraws;
             bindStats->shadowCascadeAtlasMeshBinds += cascadeAtlasMeshBinds;
+            bindStats->bonePaletteDescriptorBinds +=
+                cascadeAtlasBonePaletteDescriptorBinds;
+            bindStats->bonePaletteFallbackDescriptorBinds +=
+                cascadeAtlasBonePaletteFallbackDescriptorBinds;
             bindStats->pushConstantUpdates += cascadeAtlasPushConstantUpdates;
             bindStats->pushConstantBytes += cascadeAtlasPushConstantBytes;
         }
@@ -1871,8 +2226,11 @@ void VulkanCommandBuffer::Record(
                 : std::max(localAtlasExtent.height / tileColumns, 1u)
         };
         u32 localAtlasMeshBinds = 0;
+        u32 localAtlasBonePaletteDescriptorBinds = 0;
+        u32 localAtlasBonePaletteFallbackDescriptorBinds = 0;
         u32 localAtlasPushConstantUpdates = 0;
         u64 localAtlasPushConstantBytes = 0;
+        u32 localAtlasDraws = 0;
         const u32 assignedLocalShadowTileCount = std::min<u32>(
             localShadowTiles->assignedCount,
             static_cast<u32>(localShadowTiles->tiles.size())
@@ -1912,28 +2270,40 @@ void VulkanCommandBuffer::Record(
                     &clearRect
                 );
             }
+            const std::span<const RenderCommand> tileRenderCommands =
+                tileSetIndex < localShadowTileRenderCommands.size()
+                    ? localShadowTileRenderCommands[tileSetIndex]
+                    : shadowRenderCommands;
             DrawShadowCommands(
                 commandBuffer,
                 *shadowGraphicsPipeline,
                 doubleSidedShadowGraphicsPipeline,
                 *shadowDescriptorSets,
-                shadowRenderCommands,
+                tileRenderCommands,
                 imageIndex,
                 tile.viewProjection,
+                gBufferBonePaletteFallbackDescriptorSet,
+                gBufferBonePaletteFallbackDescriptorReady,
                 tileOffset,
                 tileExtent,
                 localAtlasMeshBinds,
+                localAtlasBonePaletteDescriptorBinds,
+                localAtlasBonePaletteFallbackDescriptorBinds,
                 localAtlasPushConstantUpdates,
                 localAtlasPushConstantBytes
             );
             ++recordedLocalShadowTileCount;
+            localAtlasDraws += static_cast<u32>(tileRenderCommands.size());
         }
 
         if (bindStats != nullptr) {
             bindStats->localShadowAtlasPasses += recordedLocalShadowTileCount;
-            bindStats->localShadowAtlasDraws +=
-                recordedLocalShadowTileCount * static_cast<u32>(shadowRenderCommands.size());
+            bindStats->localShadowAtlasDraws += localAtlasDraws;
             bindStats->localShadowAtlasMeshBinds += localAtlasMeshBinds;
+            bindStats->bonePaletteDescriptorBinds +=
+                localAtlasBonePaletteDescriptorBinds;
+            bindStats->bonePaletteFallbackDescriptorBinds +=
+                localAtlasBonePaletteFallbackDescriptorBinds;
             bindStats->pushConstantUpdates += localAtlasPushConstantUpdates;
             bindStats->pushConstantBytes += localAtlasPushConstantBytes;
         }
@@ -2710,6 +3080,17 @@ void VulkanCommandBuffer::Record(
         *temporalUpscalePostSourceStatus = postSourceStatus;
     }
 
+    const bool bypassTemporalUpscalePostSource =
+        DlssBypassPostSourceRequested();
+    if (bypassTemporalUpscalePostSource && postSourceStatus.active > 0u) {
+        postSourceStatus.active = 0u;
+        postSourceStatus.fallbackReason =
+            TemporalUpscalePostSourceFallbackReason::Disabled;
+        if (temporalUpscalePostSourceStatus != nullptr) {
+            *temporalUpscalePostSourceStatus = postSourceStatus;
+        }
+    }
+
     const bool routeTemporalUpscaleOutputToPost =
         postSourceStatus.active > 0u;
     const VulkanHdrDescriptorSets* activeHdrCompositeDescriptorSets =
@@ -2962,7 +3343,7 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->deferredShadowDebugFrameBinds;
                 ++bindStats->deferredShadowDebugTextureBinds;
             }
-            if (gBufferDebugView == 9) {
+            if (gBufferDebugView == 9 || gBufferDebugView == 10) {
                 ++bindStats->shadowCascadeDebugDraws;
                 ++bindStats->shadowCascadeDebugFrameBinds;
                 ++bindStats->shadowCascadeDebugTextureBinds;
@@ -3297,11 +3678,38 @@ void VulkanCommandBuffer::Record(
 
     vkCmdEndRenderPass(commandBuffer);
 
+    const bool recordResolvedTemporalHistoryColor =
+        recordTemporalHistoryColorCopy &&
+        temporalHistoryColorCopySource == TemporalHistoryColorCopySource::TaaResolvedColor &&
+        sceneRenderTargets != nullptr &&
+        temporalState != nullptr &&
+        temporalState->taaResolveEnabled &&
+        hdrRenderPass != nullptr &&
+        taaResolveFramebuffer != nullptr &&
+        taaResolvePipeline != nullptr &&
+        hdrCompositeDescriptorSets != nullptr;
+    if (recordResolvedTemporalHistoryColor) {
+        RecordTaaResolveHistoryPass(
+            commandBuffer,
+            *hdrRenderPass,
+            *taaResolveFramebuffer,
+            *taaResolvePipeline,
+            descriptorSets,
+            *hdrCompositeDescriptorSets,
+            imageIndex
+        );
+    }
+
     if (recordTemporalHistoryColorCopy && sceneRenderTargets != nullptr) {
-        CopyHdrSceneColorToTemporalHistory(
+        const TemporalHistoryColorCopySource actualCopySource =
+            recordResolvedTemporalHistoryColor
+                ? TemporalHistoryColorCopySource::TaaResolvedColor
+                : TemporalHistoryColorCopySource::HdrSceneColor;
+        CopyColorToTemporalHistory(
             commandBuffer,
             *sceneRenderTargets,
-            imageIndex
+            imageIndex,
+            actualCopySource
         );
     }
 

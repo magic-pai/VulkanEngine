@@ -2,6 +2,8 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <functional>
+
 namespace se {
 
 class Camera2D;
@@ -20,6 +22,8 @@ class Window;
 
 class VulkanImGuiLayer {
 public:
+    using TemporalAntialiasingModeCallback = std::function<void(u32)>;
+
     VulkanImGuiLayer(
         Window& window,
         VkInstance instance,
@@ -42,7 +46,9 @@ public:
         const VulkanRenderResources2D* renderResources = nullptr,
         const RendererStats* rendererStats = nullptr,
         VulkanRenderDebugSettings* renderDebugSettings = nullptr,
-        VulkanShadowSettings* shadowSettings = nullptr
+        VulkanShadowSettings* shadowSettings = nullptr,
+        u32 temporalAntialiasingMode = 0,
+        TemporalAntialiasingModeCallback temporalAntialiasingModeCallback = {}
     );
     void Render(VkCommandBuffer commandBuffer);
     void OnSwapchainRecreated(const VulkanSwapchain& swapchain);

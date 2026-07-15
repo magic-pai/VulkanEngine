@@ -76,7 +76,26 @@ struct RuntimeModelLoadResult {
     u32 sourceMaxBoneAttributeInfluencesPerVertex = 0;
     u32 sourceBoneInfluenceOverflowCount = 0;
     u32 sourceSkinnedVertexAttributeReady = 0;
+    u32 runtimeSkinnedAnimationSpaceReady = 0;
+    u32 runtimeSkinnedAnimationSpaceBlockerMask = 0;
+    u32 runtimeSkinnedAnimationRenderableBound = 0;
     u32 skinnedAnimationUnsupported = 0;
+};
+
+struct RuntimeModelAnimationPlaybackDiagnostics {
+    u32 candidateModelCount = 0;
+    u32 readyModelCount = 0;
+    u32 frameCount = 0;
+    u32 loopWrapCount = 0;
+    u32 previousPoseCollapsedCount = 0;
+    f64 previousTimeTicks = 0.0;
+    f64 currentTimeTicks = 0.0;
+    f64 previousAbsoluteSeconds = -1.0;
+    f64 currentAbsoluteSeconds = -1.0;
+    u32 changedBonePaletteEntryCount = 0;
+    u32 rendererPaletteReady = 0;
+    u32 gpuUploadReady = 0;
+    u32 ready = 0;
 };
 
 class RuntimeModelLoader {
@@ -97,8 +116,12 @@ public:
         glm::vec3 rotationDegrees = glm::vec3(0.0f),
         // Use <= 0 to preserve imported scene scale for bridge/exported content.
         f32 targetMaxExtent = 2.1f,
-        glm::vec3 scale = glm::vec3(1.0f)
+        glm::vec3 scale = glm::vec3(1.0f),
+        bool bindBonePalettePreview = false
     );
+    void UpdateAnimationPlayback(f32 deltaSeconds);
+    void UpdateAnimationPlaybackAtTime(f32 elapsedSeconds);
+    RuntimeModelAnimationPlaybackDiagnostics AnimationPlaybackDiagnostics() const;
     void ForEachMaterial(const std::function<void(VulkanMaterial&)>& visitor) const;
 
 private:
@@ -136,6 +159,7 @@ private:
         u32 runtimePoseCarrierChangedBonePaletteEntryCount = 0;
         u32 runtimePoseCarrierReady = 0;
         std::string bonePaletteResourceId;
+        std::vector<std::string> bonePaletteResourceIds;
         std::unique_ptr<VulkanBuffer> gpuBonePaletteBuffer;
         std::unique_ptr<RuntimeBonePaletteDescriptorSet> gpuBonePaletteDescriptorSet;
         u32 gpuPosePaletteBufferUploaded = 0;
@@ -157,8 +181,35 @@ private:
         u32 sourceMaxBoneAttributeInfluencesPerVertex = 0;
         u32 sourceBoneInfluenceOverflowCount = 0;
         u32 sourceSkinnedVertexAttributeReady = 0;
+        u32 runtimeSkinnedAnimationSpaceReady = 0;
+        u32 runtimeSkinnedAnimationSpaceBlockerMask = 0;
+        u32 runtimeSkinnedAnimationRenderableBound = 0;
         u32 skinnedAnimationUnsupported = 0;
+        ImportedModel3D animationSource;
+        u32 animationPlaybackCandidate = 0;
+        u32 animationPlaybackClipIndex = 0;
+        f64 animationPlaybackDurationTicks = 0.0;
+        f64 animationPlaybackTicksPerSecond = 0.0;
+        f64 animationPlaybackPreviousTimeTicks = 0.0;
+        f64 animationPlaybackCurrentTimeTicks = 0.0;
+        f64 animationPlaybackPreviousAbsoluteSeconds = -1.0;
+        f64 animationPlaybackCurrentAbsoluteSeconds = -1.0;
+        u32 runtimeAnimationPlaybackReady = 0;
+        u32 runtimeAnimationPlaybackFrameCount = 0;
+        u32 runtimeAnimationPlaybackLoopWrapCount = 0;
+        u32 runtimeAnimationPlaybackPreviousPoseCollapsedCount = 0;
+        u32 runtimeAnimationPlaybackChangedBonePaletteEntryCount = 0;
+        u32 runtimeAnimationPlaybackRendererPaletteReady = 0;
+        u32 runtimeAnimationPlaybackGpuUploadReady = 0;
     };
+
+    void UpdateAnimationPlaybackSample(
+        LoadedRuntimeModel& model,
+        f64 previousTimeTicks,
+        f64 currentTimeTicks,
+        bool wrapped,
+        bool countContinuityDiagnostics
+    );
 
     VulkanDevice& m_Device;
     VulkanPhysicalDevice& m_PhysicalDevice;

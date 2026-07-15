@@ -227,6 +227,17 @@ public:
     );
 
     static MeshData3D LoadMeshData3D(const std::filesystem::path& path);
+
+    static f64 AnimationDurationTicks(const ImportedAnimationClip3D& clip);
+    static bool SampleAnimationPose(
+        const ImportedModel3D& model,
+        u32 clipIndex,
+        f64 previousTimeTicks,
+        f64 currentTimeTicks,
+        ImportedPoseSample3D& sample,
+        u32* sampledChannelCount = nullptr
+    );
+    static void RebuildAnimationPoseDiagnostics(ImportedModel3D& model);
 };
 
 }

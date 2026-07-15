@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vulkan/vulkan.h>
 
 namespace se {
@@ -201,6 +203,95 @@ inline bool IsExtensionEnabled(
             return std::strcmp(current, extensionName) == 0;
         }
     );
+}
+
+template <typename VulkanHandle>
+inline std::uint64_t VulkanHandleValue(VulkanHandle handle) {
+    if constexpr (std::is_pointer_v<VulkanHandle>) {
+        return reinterpret_cast<std::uint64_t>(handle);
+    } else {
+        return static_cast<std::uint64_t>(handle);
+    }
+}
+
+template <typename VulkanHandle>
+inline void SetVulkanDebugObjectName(
+    VkDevice device,
+    VkObjectType objectType,
+    VulkanHandle handle,
+    const char* name
+) {
+    if (device == VK_NULL_HANDLE ||
+        handle == VK_NULL_HANDLE ||
+        name == nullptr ||
+        name[0] == '\0') {
+        return;
+    }
+
+    const auto setName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+        vkGetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT")
+    );
+    if (setName == nullptr) {
+        return;
+    }
+
+    VkDebugUtilsObjectNameInfoEXT nameInfo{};
+    nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    nameInfo.objectType = objectType;
+    nameInfo.objectHandle = VulkanHandleValue(handle);
+    nameInfo.pObjectName = name;
+    setName(device, &nameInfo);
+}
+
+inline void BeginVulkanDebugLabel(
+    VkDevice device,
+    VkCommandBuffer commandBuffer,
+    const char* name,
+    float red = 0.2f,
+    float green = 0.45f,
+    float blue = 1.0f,
+    float alpha = 1.0f
+) {
+    if (device == VK_NULL_HANDLE ||
+        commandBuffer == VK_NULL_HANDLE ||
+        name == nullptr ||
+        name[0] == '\0') {
+        return;
+    }
+
+    const auto beginLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+        vkGetDeviceProcAddr(device, "vkCmdBeginDebugUtilsLabelEXT")
+    );
+    if (beginLabel == nullptr) {
+        return;
+    }
+
+    VkDebugUtilsLabelEXT label{};
+    label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.pLabelName = name;
+    label.color[0] = red;
+    label.color[1] = green;
+    label.color[2] = blue;
+    label.color[3] = alpha;
+    beginLabel(commandBuffer, &label);
+}
+
+inline void EndVulkanDebugLabel(
+    VkDevice device,
+    VkCommandBuffer commandBuffer
+) {
+    if (device == VK_NULL_HANDLE || commandBuffer == VK_NULL_HANDLE) {
+        return;
+    }
+
+    const auto endLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+        vkGetDeviceProcAddr(device, "vkCmdEndDebugUtilsLabelEXT")
+    );
+    if (endLabel == nullptr) {
+        return;
+    }
+
+    endLabel(commandBuffer);
 }
 
 }

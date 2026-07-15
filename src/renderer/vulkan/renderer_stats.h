@@ -21,6 +21,14 @@ struct RendererCpuStats {
     f32 totalFrameMs = 0.0f;
 };
 
+struct RendererRenderDebugStats {
+    u32 forwardView = 0;
+    u32 deferredPbrDebugView = 0;
+    u32 usesDeferredHdrComposite = 0;
+    u32 temporalReconstructionBypassed = 0;
+    u32 lightingEnergyViewEnabled = 0;
+};
+
 struct RendererDrawStats {
     u32 mainDraws = 0;
     u32 gBufferDraws = 0;
@@ -70,6 +78,8 @@ struct RendererDrawStats {
     u32 mainInstancedInstances = 0;
     u32 mainInstanceBatchCacheHits = 0;
     u32 mainInstanceBatchCacheMisses = 0;
+    u32 mainSkinnedConservativeBounds = 0;
+    u32 shadowSkinnedConservativeBounds = 0;
 };
 
 struct RendererShadowCascadeStats {
@@ -89,6 +99,7 @@ struct RendererShadowCascadeStats {
     f32 maxDistance = 0.0f;
     f32 blendRatio = 0.0f;
     f32 fadeRatio = 0.0f;
+    f32 receiverGuardRatio = 0.0f;
     f32 contactShadowStrength = 0.0f;
     f32 contactShadowLength = 0.0f;
     f32 contactShadowThickness = 0.0f;
@@ -112,8 +123,10 @@ struct RendererLocalShadowAtlasStats {
     u32 shadowableLocalLights = 0;
     u32 pointLightCount = 0;
     u32 spotLightCount = 0;
+    u32 rectLightCount = 0;
     u32 pointFaceTiles = 0;
     u32 spotTiles = 0;
+    u32 rectTiles = 0;
     u32 requestedTiles = 0;
     u32 assignedTiles = 0;
     u32 droppedTiles = 0;
@@ -124,12 +137,61 @@ struct RendererLocalShadowAtlasStats {
     u32 cacheHitTiles = 0;
     u32 cacheMissTiles = 0;
     u32 cacheSkippedTiles = 0;
+    u32 cacheColdTiles = 0;
+    u32 cacheTileLayoutChangedTiles = 0;
+    u32 cacheLightChangedTiles = 0;
+    u32 cacheCasterChangedTiles = 0;
+    u32 cacheDynamicSkinnedCasterTiles = 0;
+    std::string cacheReasonSummary;
     u32 pcfKernelRadius = 0;
     f32 biasMin = 0.0f;
     f32 biasSlope = 0.0f;
     f32 pcfRadius = 0.0f;
     f32 pcssStrength = 0.0f;
     f32 faceBlendStrength = 0.0f;
+    f32 rectBiasScale = 8.0f;
+    f32 pointBiasMin = 0.0f;
+    f32 pointBiasSlope = 0.0f;
+    f32 pointPcfRadius = 0.0f;
+    u32 pointPcfKernelRadius = 0;
+    f32 pointPcssStrength = 0.0f;
+    f32 spotBiasMin = 0.0f;
+    f32 spotBiasSlope = 0.0f;
+    f32 spotPcfRadius = 0.0f;
+    u32 spotPcfKernelRadius = 0;
+    f32 spotPcssStrength = 0.0f;
+    f32 rectBiasMin = 0.0f;
+    f32 rectBiasSlope = 0.0f;
+    f32 rectPcfRadius = 0.0f;
+    u32 rectPcfKernelRadius = 0;
+    f32 rectPcssStrength = 0.0f;
+    u32 rectShadowBaseSampleTiles = 0;
+    u32 rectShadowMaxSampleTiles = 0;
+    u32 rectShadowSamplePattern = 0;
+    u32 rectShadowExtraSampleTiles = 0;
+    u32 rectShadowBudgetLimitedSampleTiles = 0;
+    u32 pointShadowEnabled = 1;
+    u32 spotShadowEnabled = 1;
+    u32 rectShadowEnabled = 1;
+    i32 debugLightIndex = -1;
+    i32 attributionLightIndex = -1;
+    u32 attributionLightValid = 0;
+    u32 attributionLightKind = 0;
+    u32 attributionExpectedTiles = 0;
+    u32 attributionRequestedTiles = 0;
+    u32 attributionAssignedTiles = 0;
+    u32 attributionDroppedTiles = 0;
+    u32 attributionCacheHitTiles = 0;
+    u32 attributionCacheMissTiles = 0;
+    u32 attributionRecordedTilePasses = 0;
+    u32 attributionRecordedDraws = 0;
+    u32 attributionCandidateDraws = 0;
+    u32 attributionUniqueCasters = 0;
+    u64 attributionCasterSignature = 0;
+    std::string attributionTileCandidateDraws;
+    std::string attributionCasterSummary;
+    u32 attributionShadowEnabled = 0;
+    u32 attributionMatchesGenerationFilter = 0;
 };
 
 struct RendererWeightedTranslucencyStats {
@@ -167,6 +229,17 @@ struct RendererSsrStats {
 };
 
 struct RendererIblStats {
+    u32 quality = 1;
+    u32 requestedSource = 0;
+    u32 actualSource = 0;
+    u32 sourceFallbackReason = 0;
+    u32 cachePolicy = 0;
+    u32 cacheFallbackReason = 0;
+    u32 cacheHit = 0;
+    u32 runtimeGenerated = 1;
+    u32 sourceAssetSpecified = 0;
+    u32 sourceAssetFound = 0;
+    u64 sourceSignature = 0;
     u32 brdfLutAllocated = 0;
     u32 brdfLutSize = 0;
     VkFormat brdfLutFormat = VK_FORMAT_UNDEFINED;
@@ -240,6 +313,16 @@ struct RendererBonePaletteDrawStats {
     u32 shaderConsumerReadyCommandCount = 0;
     u32 shaderConsumerFallbackDescriptorReady = 0;
     u32 shaderConsumerPathReady = 0;
+    u32 shaderSkinningCommandCount = 0;
+    u32 shaderSkinningReadyCommandCount = 0;
+    u32 shaderSkinningCurrentPaletteOffset = 0;
+    u32 shaderSkinningCurrentEntryCount = 0;
+    u32 shaderSkinningPathReady = 0;
+    u32 shaderVelocityCommandCount = 0;
+    u32 shaderVelocityReadyCommandCount = 0;
+    u32 shaderVelocityPreviousPaletteOffset = 0;
+    u32 shaderVelocityPreviousEntryCount = 0;
+    u32 shaderVelocityPathReady = 0;
 };
 
 struct RendererReflectionProbeStats {
@@ -247,6 +330,7 @@ struct RendererReflectionProbeStats {
     f32 diffuseIntensity = 0.0f;
     f32 specularIntensity = 0.0f;
     f32 horizonBlend = 0.0f;
+    u32 globalIblCubemapSamplingEnabled = 0;
     u32 sceneProbeCount = 0;
     u32 activeProbeCount = 0;
     u32 sceneEligibleProbeCount = 0;
@@ -270,6 +354,42 @@ struct RendererReflectionProbeStats {
     u32 capturedScenePlaceholderReadyCount = 0;
     u32 capturedSceneInvalidatedCount = 0;
     u32 capturedSceneRefreshRequestedCount = 0;
+    u32 capturedSceneCaptureBackend = 0;
+    u32 capturedSceneFaceCount = 0;
+    u32 capturedSceneFacesRendered = 0;
+    u32 capturedSceneFacesPending = 0;
+    u32 capturedSceneCapturePassCount = 0;
+    u32 capturedSceneCaptureDrawCount = 0;
+    u32 capturedSceneCaptureVisibleCount = 0;
+    u32 capturedSceneCaptureCulledCount = 0;
+    u32 capturedSceneMipGenerationCount = 0;
+    u32 capturedSceneGgxPrefilterDispatchCount = 0;
+    u32 capturedSceneGgxPrefilterSampleCount = 0;
+    u32 capturedSceneLastCapturedFace = 0;
+    u32 capturedSceneRasterizedGeometry = 0;
+    u32 capturedSceneGpuResourcesAllocated = 0;
+    u32 capturedSceneGpuCaptureInProgress = 0;
+    u32 capturedSceneMipChainReady = 0;
+    u32 capturedSceneGgxPrefilterReady = 0;
+    i32 capturedSceneProbeSceneIndex = -1;
+    u32 selectedCapturedSceneMapMatchesActiveMask = 0;
+    u32 selectedCapturedSceneDuplicateActiveViewMask = 0;
+    u32 capturedSceneProbeResourceCount = 0;
+    u32 capturedSceneReadyProbeCount = 0;
+    u32 capturedSceneInFlightProbeCount = 0;
+    u32 capturedSceneDistinctActiveViewCount = 0;
+    u32 capturedSceneUploadCount = 0;
+    u32 capturedSceneRefreshCheckCount = 0;
+    u32 capturedSceneRefreshPerformed = 0;
+    u32 capturedSceneRefreshReason = 0;
+    u32 capturedSceneLastRefreshReason = 0;
+    u32 capturedSceneDirtyMask = 0;
+    u32 capturedSceneActiveSignature = 0;
+    u32 capturedSceneRequestedSignature = 0;
+    u32 capturedSceneRadianceSignature = 0;
+    u64 capturedSceneMembershipRevision = 0;
+    u64 capturedSceneLightRevision = 0;
+    u64 capturedSceneRenderRevision = 0;
     u32 forcedRefreshRequested = 0;
     u32 sceneDirtyRequested = 0;
     u32 authoredCubemapLoadedCount = 0;
@@ -320,6 +440,7 @@ struct RendererReflectionProbeStats {
     std::array<u32, kMaxFrameReflectionProbes> selectedRefreshPolicies{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCapturedScenePlaceholderReady{};
     std::array<u32, kMaxFrameReflectionProbes> selectedCapturedSceneInvalidated{};
+    std::array<u32, kMaxFrameReflectionProbes> selectedCaptureMipCounts{};
     std::array<u32, kMaxFrameReflectionProbes> selectedAuthoredAssetHashes{};
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
@@ -577,6 +698,7 @@ struct RendererBindStats {
     u32 frameMaterialVolumeCount = 0;
     u32 frameMaterialOpacityTextureCount = 0;
     u32 frameMaterialTexturedCount = 0;
+    f32 frameMaterialTextureMipLodBias = 0.0f;
     u32 mainInstancedDraws = 0;
     u32 mainInstancedInstances = 0;
     u32 mainInstanceBufferUploads = 0;
@@ -637,6 +759,7 @@ enum class RendererDlssQualityGateFallbackReason : u32 {
 };
 
 struct RendererTemporalStats {
+    u32 antialiasingMode = 0;
     u32 velocityTargetAllocated = 0;
     VkFormat velocityFormat = VK_FORMAT_UNDEFINED;
     u32 velocityCameraMotionEnabled = 0;
@@ -655,6 +778,12 @@ struct RendererTemporalStats {
     f32 jitterPixelsY = 0.0f;
     f32 jitterUvX = 0.0f;
     f32 jitterUvY = 0.0f;
+    u32 velocityJitteredHistoryPolicy = 0;
+    u32 velocityPreviousJitterApplied = 0;
+    f32 previousJitterPixelsX = 0.0f;
+    f32 previousJitterPixelsY = 0.0f;
+    f32 previousJitterUvX = 0.0f;
+    f32 previousJitterUvY = 0.0f;
     u32 taaResolveConfigured = 0;
     u32 taaResolveEnabled = 0;
     u32 taaResolveSuppressedForUpscaler = 0;
@@ -758,6 +887,13 @@ struct RendererTemporalStats {
     std::string temporalUpscalerDeviceExtensionRequirements;
     std::string temporalUpscalerDeviceExtensionMissingAvailable;
     std::string temporalUpscalerDeviceExtensionMissingEnabled;
+    u32 temporalUpscalerRuntimeFlavor = 0;
+    u32 temporalUpscalerRuntimePathOverridden = 0;
+    u32 temporalUpscalerRuntimePathFound = 0;
+    std::string temporalUpscalerRuntimePath;
+    u32 temporalUpscalerRuntimeDllFound = 0;
+    u32 temporalUpscalerRuntimeDllSizeBytes = 0;
+    u32 temporalUpscalerRuntimeDllHash = 0;
     u32 temporalUpscalerDlssSuperResolutionSupported = 0;
     u32 temporalUpscalerNeedsUpdatedDriver = 0;
     u32 temporalUpscalerMinDriverVersionMajor = 0;
@@ -792,6 +928,27 @@ struct RendererTemporalStats {
     u32 temporalUpscalerDlssOutputWidth = 0;
     u32 temporalUpscalerDlssOutputHeight = 0;
     u32 temporalUpscalerDlssCreateFlags = 0;
+    u32 temporalUpscalerDlssCreateFlagIsHdr = 0;
+    u32 temporalUpscalerDlssCreateFlagMvLowRes = 0;
+    u32 temporalUpscalerDlssCreateFlagMvJittered = 0;
+    u32 temporalUpscalerDlssCreateFlagDepthInverted = 0;
+    u32 temporalUpscalerDlssCreateFlagAutoExposure = 0;
+    u32 temporalUpscalerDlssInputColorFormat = 0;
+    u32 temporalUpscalerDlssInputDepthFormat = 0;
+    u32 temporalUpscalerDlssInputMotionVectorFormat = 0;
+    u32 temporalUpscalerDlssInputColorWidth = 0;
+    u32 temporalUpscalerDlssInputColorHeight = 0;
+    u32 temporalUpscalerDlssInputDepthWidth = 0;
+    u32 temporalUpscalerDlssInputDepthHeight = 0;
+    u32 temporalUpscalerDlssInputMotionVectorWidth = 0;
+    u32 temporalUpscalerDlssInputMotionVectorHeight = 0;
+    u32 temporalUpscalerDlssInputDepthAspectMask = 0;
+    u32 temporalUpscalerDlssInputMotionVectorAspectMask = 0;
+    u32 temporalUpscalerDlssInputDepthMatchesRenderExtent = 0;
+    u32 temporalUpscalerDlssInputMotionVectorMatchesRenderExtent = 0;
+    u32 temporalUpscalerDlssMotionVectorScalePixelSpace = 0;
+    u32 temporalUpscalerDlssMotionVectorScaleUnitSpace = 0;
+    u32 temporalUpscalerDlssMotionVectorScaleMatchesRenderExtent = 0;
     u32 temporalUpscalerDlssReset = 0;
     f32 temporalUpscalerDlssJitterOffsetX = 0.0f;
     f32 temporalUpscalerDlssJitterOffsetY = 0.0f;
@@ -807,6 +964,7 @@ struct RendererTemporalStats {
     u32 temporalUpscalerDlssQualityEvaluateOutputReady = 0;
     u32 temporalUpscalerDlssQualityCameraMotionReady = 0;
     u32 temporalUpscalerDlssQualityObjectMotionReady = 0;
+    u32 temporalUpscalerDlssQualitySceneContentMotionSupported = 0;
     u32 temporalUpscalerDlssQualityReactiveMaskReady = 0;
     u32 temporalUpscalerDlssQualityTransparencyMaskReady = 0;
     u32 temporalUpscalerDlssQualityExposurePolicyReady = 0;
@@ -816,6 +974,7 @@ struct RendererTemporalStats {
 
 struct RendererStats {
     RendererCpuStats cpu;
+    RendererRenderDebugStats renderDebug;
     RendererDrawStats draw;
     RendererShadowCascadeStats shadowCascades;
     RendererLocalShadowAtlasStats localShadowAtlas;

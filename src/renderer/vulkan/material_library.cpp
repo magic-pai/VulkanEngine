@@ -4,9 +4,36 @@
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/physical_device.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include <utility>
 
 namespace se {
+namespace {
+
+float EnvironmentFloat(const char* name, float fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    return end != value ? parsed : fallback;
+}
+
+float MaterialTextureMipLodBiasFromEnvironment() {
+    float value = EnvironmentFloat(
+        "SE_TEXTURE_MIP_LOD_BIAS",
+        EnvironmentFloat(
+            "SE_MATERIAL_TEXTURE_MIP_BIAS",
+            EnvironmentFloat("SE_TEXTURE_MIP_BIAS", 0.0f)
+        )
+    );
+    return std::clamp(value, -2.0f, 2.0f);
+}
+
+}
 
 VulkanMaterialLibrary::VulkanMaterialLibrary(
     const VulkanDevice& device,
@@ -15,11 +42,16 @@ VulkanMaterialLibrary::VulkanMaterialLibrary(
 ) : m_Device(device),
     m_PhysicalDevice(physicalDevice),
     m_CommandPool(commandPool),
+    m_TextureMipLodBias(MaterialTextureMipLodBiasFromEnvironment()),
     m_TextureCache(device, physicalDevice, commandPool) {
 }
 
 VulkanTextureCache& VulkanMaterialLibrary::TextureCache() {
     return m_TextureCache;
+}
+
+f32 VulkanMaterialLibrary::TextureMipLodBias() const {
+    return m_TextureMipLodBias;
 }
 
 VulkanMaterial& VulkanMaterialLibrary::Create(
@@ -40,7 +72,8 @@ VulkanMaterial& VulkanMaterialLibrary::Create(
         std::move(albedoTexturePath),
         generateMipmaps,
         flipVertically,
-        uploadBatch
+        uploadBatch,
+        m_TextureMipLodBias
     );
     material->Properties() = properties;
 
@@ -70,7 +103,8 @@ VulkanMaterial& VulkanMaterialLibrary::Create(
         albedoTextureBytes,
         generateMipmaps,
         flipVertically,
-        uploadBatch
+        uploadBatch,
+        m_TextureMipLodBias
     );
     material->Properties() = properties;
 
@@ -100,7 +134,8 @@ VulkanMaterial& VulkanMaterialLibrary::Create(
         albedoTexturePixels,
         generateMipmaps,
         flipVertically,
-        uploadBatch
+        uploadBatch,
+        m_TextureMipLodBias
     );
     material->Properties() = properties;
 

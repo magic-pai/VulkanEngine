@@ -66,6 +66,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/deferred_lighting.frag
     ${SHADER_SOURCE_DIR}/hdr_composite.vert
     ${SHADER_SOURCE_DIR}/hdr_composite.frag
+    ${SHADER_SOURCE_DIR}/taa_resolve.frag
     ${SHADER_SOURCE_DIR}/bloom_downsample.frag
     ${SHADER_SOURCE_DIR}/bloom_upsample.frag
     ${SHADER_SOURCE_DIR}/gbuffer_debug.vert
@@ -73,6 +74,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/auto_exposure_histogram.comp
     ${SHADER_SOURCE_DIR}/light_tile_cull.comp
     ${SHADER_SOURCE_DIR}/light_cluster_cull.comp
+    ${SHADER_SOURCE_DIR}/reflection_probe_prefilter.comp
     ${SHADER_SOURCE_DIR}/depth_prefill_3d.vert
     ${SHADER_SOURCE_DIR}/shadow_depth.vert
     ${SHADER_SOURCE_DIR}/black_hole.frag
@@ -165,6 +167,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/renderer.cpp
     src/renderer/vulkan/imgui_layer.cpp
     src/renderer/vulkan/shader_module.cpp
+    src/renderer/vulkan/pipeline_cache.cpp
     src/renderer/vulkan/graphics_pipeline.cpp
     src/renderer/vulkan/compute_pipeline.cpp
     src/renderer/vulkan/uniform_buffer.cpp
@@ -216,11 +219,17 @@ add_executable(SelfEngineForward3D
     ${SELFENGINE_COMMON_SOURCES}
 )
 
+add_executable(SelfEngineLightingShowcase
+    src/forward_3d.cpp
+    ${SELFENGINE_COMMON_SOURCES}
+)
+
 add_dependencies(SelfEngine SelfEngineShaders)
 add_dependencies(SelfEngineBlackHole SelfEngineShaders)
 add_dependencies(SelfEngineForward3D SelfEngineShaders)
+add_dependencies(SelfEngineLightingShowcase SelfEngineShaders)
 
-foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
+foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D SelfEngineLightingShowcase)
     if (WIN32)
         set_target_properties(${SELFENGINE_TARGET} PROPERTIES
             WIN32_EXECUTABLE TRUE
@@ -259,6 +268,7 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D)
     if (SELFENGINE_NVIDIA_DLSS_ENABLED)
         target_compile_definitions(${SELFENGINE_TARGET} PRIVATE
             SE_ENABLE_NVIDIA_DLSS=1
+            SE_NVIDIA_DLSS_SDK_DIR="${SELFENGINE_NVIDIA_DLSS_SDK_DIR}"
         )
         target_include_directories(${SELFENGINE_TARGET} PRIVATE
             ${SELFENGINE_NVIDIA_DLSS_SDK_DIR}/include
@@ -280,4 +290,9 @@ if (MSVC)
     target_compile_options(SelfEngine PRIVATE /W4 /permissive- /FS)
     target_compile_options(SelfEngineBlackHole PRIVATE /W4 /permissive- /FS)
     target_compile_options(SelfEngineForward3D PRIVATE /W4 /permissive- /FS)
+    target_compile_options(SelfEngineLightingShowcase PRIVATE /W4 /permissive- /FS)
 endif()
+
+target_compile_definitions(SelfEngineLightingShowcase PRIVATE
+    SE_FORCE_LIGHTING_SHOWCASE=1
+)

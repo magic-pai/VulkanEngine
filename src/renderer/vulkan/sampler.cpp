@@ -8,10 +8,11 @@ namespace se {
 VulkanSampler::VulkanSampler(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    u32 mipLevels
+    u32 mipLevels,
+    f32 mipLodBias
 )
     : m_Device(device.Handle()) {
-    CreateSampler(device, physicalDevice, mipLevels);
+    CreateSampler(device, physicalDevice, mipLevels, mipLodBias);
 }
 
 VulkanSampler::~VulkanSampler() {
@@ -22,14 +23,19 @@ VkSampler VulkanSampler::Handle() const {
     return m_Sampler;
 }
 
+f32 VulkanSampler::MipLodBias() const {
+    return m_MipLodBias;
+}
+
 void VulkanSampler::Recreate(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    u32 mipLevels
+    u32 mipLevels,
+    f32 mipLodBias
 ) {
     Release();
     m_Device = device.Handle();
-    CreateSampler(device, physicalDevice, mipLevels);
+    CreateSampler(device, physicalDevice, mipLevels, mipLodBias);
 }
 
 void VulkanSampler::Release() {
@@ -42,7 +48,8 @@ void VulkanSampler::Release() {
 void VulkanSampler::CreateSampler(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    u32 mipLevels
+    u32 mipLevels,
+    f32 mipLodBias
 ) {
     SE_ASSERT(mipLevels > 0, "Sampler mip levels must be greater than zero");
 
@@ -65,7 +72,8 @@ void VulkanSampler::CreateSampler(
     samplerInfo.compareEnable = VK_FALSE;
     samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.mipLodBias = 0.0f;
+    m_MipLodBias = mipLodBias;
+    samplerInfo.mipLodBias = m_MipLodBias;
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = static_cast<f32>(mipLevels - 1);
 

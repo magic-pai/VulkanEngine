@@ -6,7 +6,9 @@
 #include "renderer/vulkan/surface.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
+#include <string>
 
 namespace se {
 
@@ -23,7 +25,59 @@ VkSurfaceFormatKHR ChooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& av
     return availableFormats.front();
 }
 
+std::string ReadSwapchainEnvironmentString(const char* name) {
+#ifdef _WIN32
+    char* value = nullptr;
+    std::size_t valueSize = 0;
+    if (_dupenv_s(&value, &valueSize, name) != 0 || value == nullptr) {
+        return {};
+    }
+
+    std::string result(value);
+    std::free(value);
+    return result;
+#else
+    const char* value = std::getenv(name);
+    return value != nullptr ? std::string(value) : std::string{};
+#endif
+}
+
+std::string LowerAscii(std::string text) {
+    for (char& ch : text) {
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = static_cast<char>(ch - 'A' + 'a');
+        }
+    }
+    return text;
+}
+
+bool PresentModeAvailable(
+    const std::vector<VkPresentModeKHR>& availablePresentModes,
+    VkPresentModeKHR requestedMode
+) {
+    return std::find(
+        availablePresentModes.begin(),
+        availablePresentModes.end(),
+        requestedMode
+    ) != availablePresentModes.end();
+}
+
 VkPresentModeKHR ChoosePresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+    const std::string requestedMode =
+        LowerAscii(ReadSwapchainEnvironmentString("SE_SWAPCHAIN_PRESENT_MODE"));
+    if ((requestedMode == "fifo" || requestedMode == "vsync") &&
+        PresentModeAvailable(availablePresentModes, VK_PRESENT_MODE_FIFO_KHR)) {
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+    if ((requestedMode == "immediate" || requestedMode == "no-vsync") &&
+        PresentModeAvailable(availablePresentModes, VK_PRESENT_MODE_IMMEDIATE_KHR)) {
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    if (requestedMode == "mailbox" &&
+        PresentModeAvailable(availablePresentModes, VK_PRESENT_MODE_MAILBOX_KHR)) {
+        return VK_PRESENT_MODE_MAILBOX_KHR;
+    }
+
     for (VkPresentModeKHR availablePresentMode : availablePresentModes) {
         if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
             return availablePresentMode;

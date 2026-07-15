@@ -2,10 +2,12 @@
 
 #include "renderer/vulkan/buffer.h"
 #include "renderer/vulkan/command_pool.h"
+#include "renderer/vulkan/depth_buffer.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/ibl_generator.h"
 #include "renderer/vulkan/image.h"
 #include "renderer/vulkan/physical_device.h"
+#include "renderer/vulkan/shader_module.h"
 
 #include "stb_image.h"
 
@@ -13,6 +15,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -21,9 +24,209 @@
 #include <span>
 #include <vector>
 
+#ifndef SE_SHADER_DIR
+#define SE_SHADER_DIR "assets/shaders"
+#endif
+
 namespace se {
 
 namespace {
+
+constexpr u32 kDefaultEquirectangularCubemapFaceSizeLimit = 128u;
+constexpr u32 kMinEquirectangularCubemapFaceSizeLimit = 64u;
+constexpr u32 kMaxEquirectangularCubemapFaceSizeLimit = 1024u;
+constexpr const char* kEquirectangularCubemapFaceSizeEnv =
+    "SE_REFLECTION_PROBE_EQUIRECT_FACE_SIZE";
+constexpr u32 kCapturedSceneCubemapFaceSize = 256u;
+constexpr u32 kCapturedSceneMaxLightSamples = 16u;
+constexpr std::size_t kMaxCapturedSceneProbeResourceCount = 4u;
+constexpr VkFormat kGpuCapturedSceneFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr u32 kGpuCapturedSceneGgxSampleCount = 64u;
+
+u32 MipCountForExtent(u32 extent) {
+    u32 mipCount = 1u;
+    while (extent > 1u) {
+        extent >>= 1u;
+        ++mipCount;
+    }
+    return mipCount;
+}
+
+void RecordImageBarrier(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    VkAccessFlags sourceAccess,
+    VkAccessFlags destinationAccess,
+    VkPipelineStageFlags sourceStage,
+    VkPipelineStageFlags destinationStage,
+    VkImageAspectFlags aspectMask,
+    u32 baseMipLevel,
+    u32 levelCount,
+    u32 baseArrayLayer,
+    u32 layerCount
+) {
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.srcAccessMask = sourceAccess;
+    barrier.dstAccessMask = destinationAccess;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspectMask;
+    barrier.subresourceRange.baseMipLevel = baseMipLevel;
+    barrier.subresourceRange.levelCount = levelCount;
+    barrier.subresourceRange.baseArrayLayer = baseArrayLayer;
+    barrier.subresourceRange.layerCount = layerCount;
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        sourceStage,
+        destinationStage,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+}
+
+VkRenderPass CreateGpuCapturedSceneRenderPass(
+    const VulkanDevice& device,
+    VkFormat depthFormat
+) {
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = kGpuCapturedSceneFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    VkAttachmentReference colorReference{};
+    colorReference.attachment = 0;
+    colorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = depthFormat;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depthReference{};
+    depthReference.attachment = 1;
+    depthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorReference;
+    subpass.pDepthStencilAttachment = &depthReference;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    const std::array<VkAttachmentDescription, 2> attachments = {
+        colorAttachment,
+        depthAttachment
+    };
+    VkRenderPassCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.attachmentCount = static_cast<u32>(attachments.size());
+    createInfo.pAttachments = attachments.data();
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 1;
+    createInfo.pDependencies = &dependency;
+
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &renderPass) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create GPU reflection capture render pass");
+    }
+    return renderPass;
+}
+
+VkImageView CreateGpuCapturedSceneFaceView(
+    const VulkanDevice& device,
+    VkImage image,
+    u32 face
+) {
+    VkImageViewCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.image = image;
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    createInfo.format = kGpuCapturedSceneFormat;
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.baseMipLevel = 0;
+    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.baseArrayLayer = face;
+    createInfo.subresourceRange.layerCount = 1;
+
+    VkImageView view = VK_NULL_HANDLE;
+    if (vkCreateImageView(device.Handle(), &createInfo, nullptr, &view) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create GPU reflection capture face view");
+    }
+    return view;
+}
+
+VkImageView CreateGpuCapturedSceneCubeBaseView(
+    const VulkanDevice& device,
+    VkImage image
+) {
+    VkImageViewCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.image = image;
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    createInfo.format = kGpuCapturedSceneFormat;
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.baseMipLevel = 0u;
+    createInfo.subresourceRange.levelCount = 1u;
+    createInfo.subresourceRange.baseArrayLayer = 0u;
+    createInfo.subresourceRange.layerCount = 6u;
+    VkImageView view = VK_NULL_HANDLE;
+    if (vkCreateImageView(device.Handle(), &createInfo, nullptr, &view) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create GPU reflection capture source cube view");
+    }
+    return view;
+}
+
+VkImageView CreateGpuCapturedSceneMipArrayView(
+    const VulkanDevice& device,
+    VkImage image,
+    u32 mipLevel
+) {
+    VkImageViewCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    createInfo.image = image;
+    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    createInfo.format = kGpuCapturedSceneFormat;
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.baseMipLevel = mipLevel;
+    createInfo.subresourceRange.levelCount = 1u;
+    createInfo.subresourceRange.baseArrayLayer = 0u;
+    createInfo.subresourceRange.layerCount = 6u;
+    VkImageView view = VK_NULL_HANDLE;
+    if (vkCreateImageView(device.Handle(), &createInfo, nullptr, &view) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create GPU reflection capture prefilter mip view");
+    }
+    return view;
+}
 
 struct StbiImageDeleter {
     void operator()(stbi_uc* pixels) const {
@@ -130,6 +333,49 @@ std::string Trim(std::string value) {
         return {};
     }
     return std::string(first, last);
+}
+
+u32 ParseEquirectangularCubemapFaceSizeLimit(const char* value) {
+    if (value == nullptr || value[0] == '\0') {
+        return kDefaultEquirectangularCubemapFaceSizeLimit;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value) {
+        return kDefaultEquirectangularCubemapFaceSizeLimit;
+    }
+
+    return std::clamp(
+        static_cast<u32>(parsed),
+        kMinEquirectangularCubemapFaceSizeLimit,
+        kMaxEquirectangularCubemapFaceSizeLimit
+    );
+}
+
+u32 EquirectangularCubemapFaceSizeLimit() {
+#if defined(_MSC_VER)
+    char* value = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&value, &length, kEquirectangularCubemapFaceSizeEnv) != 0) {
+        return kDefaultEquirectangularCubemapFaceSizeLimit;
+    }
+    const u32 limit = ParseEquirectangularCubemapFaceSizeLimit(value);
+    std::free(value);
+    return limit;
+#else
+    return ParseEquirectangularCubemapFaceSizeLimit(
+        std::getenv(kEquirectangularCubemapFaceSizeEnv)
+    );
+#endif
+}
+
+u32 EquirectangularCubemapFaceSizeForSource(
+    const LoadedEquirectangularImage& image
+) {
+    const u32 sourceFaceSize =
+        std::max(1u, static_cast<u32>(image.height / 2));
+    return std::min(sourceFaceSize, EquirectangularCubemapFaceSizeLimit());
 }
 
 std::filesystem::path ResolveAssetPath(std::string_view assetId) {
@@ -664,6 +910,22 @@ std::array<float, 3> Add3(
     return { a[0] + b[0], a[1] + b[1], a[2] + b[2] };
 }
 
+std::array<float, 3> Sub3(
+    const std::array<float, 3>& a,
+    const std::array<float, 3>& b
+) {
+    return { a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+}
+
+float SmoothStep01(float edge0, float edge1, float value) {
+    if (edge0 == edge1) {
+        return value < edge0 ? 0.0f : 1.0f;
+    }
+    const float t =
+        std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 float RadicalInverseVdc(u32 bits) {
     bits = (bits << 16u) | (bits >> 16u);
     bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
@@ -1104,6 +1366,263 @@ AuthoredReflectionProbeDiffuseLobes ComputeCubemapDiffuseIrradianceLobes(
     return lobes;
 }
 
+std::array<float, 3> Multiply3(
+    const std::array<float, 3>& a,
+    const std::array<float, 3>& b
+) {
+    return { a[0] * b[0], a[1] * b[1], a[2] * b[2] };
+}
+
+std::array<float, 3> Clamp3(
+    const std::array<float, 3>& value,
+    float minValue,
+    float maxValue
+) {
+    return {
+        std::clamp(value[0], minValue, maxValue),
+        std::clamp(value[1], minValue, maxValue),
+        std::clamp(value[2], minValue, maxValue)
+    };
+}
+
+std::array<float, 3> BoxFaceTintForDirection(
+    const std::array<float, 3>& direction
+) {
+    const float up = std::max(direction[1], 0.0f);
+    const float down = std::max(-direction[1], 0.0f);
+    const float side = std::max(
+        std::fabs(direction[0]),
+        std::fabs(direction[2])
+    );
+    std::array<float, 3> tint{
+        0.30f + side * 0.16f + up * 0.16f,
+        0.32f + side * 0.15f + up * 0.17f,
+        0.35f + side * 0.16f + up * 0.20f
+    };
+    tint[0] += down * 0.08f;
+    tint[1] += down * 0.075f;
+    tint[2] += down * 0.07f;
+    return tint;
+}
+
+float CapturedPointLightLobe(
+    const CapturedReflectionProbeSceneSample& sceneSample,
+    const CapturedReflectionProbeLightSample& light,
+    const std::array<float, 3>& sampleDirection
+) {
+    std::array<float, 3> lightVector{
+        light.position[0] - sceneSample.center[0],
+        light.position[1] - sceneSample.center[1],
+        light.position[2] - sceneSample.center[2]
+    };
+    const float distanceSquared = std::max(Dot3(lightVector, lightVector), 0.0001f);
+    const float distance = std::sqrt(distanceSquared);
+    const std::array<float, 3> lightDirection =
+        Scale3(lightVector, 1.0f / distance);
+    const float angular = std::pow(
+        std::max(Dot3(sampleDirection, lightDirection), 0.0f),
+        42.0f
+    );
+    const float radius = std::max(light.radius, 0.25f);
+    const float range = std::max(0.0f, 1.0f - distance / radius);
+    return angular * range * range;
+}
+
+float CapturedDirectionalLightLobe(
+    const CapturedReflectionProbeLightSample& light,
+    const std::array<float, 3>& sampleDirection
+) {
+    const std::array<float, 3> lightForward =
+        Normalize3(light.direction);
+    const float facing = std::max(Dot3(sampleDirection, Scale3(lightForward, -1.0f)), 0.0f);
+    return std::pow(facing, light.kind == 2u ? 26.0f : 36.0f);
+}
+
+float CapturedRectLightLobe(
+    const CapturedReflectionProbeSceneSample& sceneSample,
+    const CapturedReflectionProbeLightSample& light,
+    const std::array<float, 3>& sampleDirection
+) {
+    const std::array<float, 3> center{
+        sceneSample.center[0],
+        sceneSample.center[1],
+        sceneSample.center[2]
+    };
+    const std::array<float, 3> lightPosition{
+        light.position[0],
+        light.position[1],
+        light.position[2]
+    };
+    const std::array<float, 3> lightVector = Sub3(lightPosition, center);
+    const float distanceSquared =
+        std::max(Dot3(lightVector, lightVector), 0.0001f);
+    const float distance = std::sqrt(distanceSquared);
+    const std::array<float, 3> lightDirection =
+        Scale3(lightVector, 1.0f / distance);
+    const std::array<float, 3> normal = Normalize3(light.direction);
+    const float denom = Dot3(sampleDirection, normal);
+    if (std::fabs(denom) <= 0.0001f) {
+        return 0.0f;
+    }
+
+    const float t = Dot3(lightVector, normal) / denom;
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+
+    const std::array<float, 3> hitOffset =
+        Sub3(Scale3(sampleDirection, t), lightVector);
+    const std::array<float, 3> reference =
+        std::fabs(normal[1]) > 0.94f
+            ? std::array<float, 3>{ 1.0f, 0.0f, 0.0f }
+            : std::array<float, 3>{ 0.0f, 1.0f, 0.0f };
+    const std::array<float, 3> right =
+        Normalize3(Cross3(reference, normal));
+    const std::array<float, 3> up =
+        Normalize3(Cross3(normal, right));
+    const float halfWidth = std::max(light.width * 0.5f, 0.04f);
+    const float halfHeight = std::max(light.height * 0.5f, 0.04f);
+    const float u = Dot3(hitOffset, right) / halfWidth;
+    const float v = Dot3(hitOffset, up) / halfHeight;
+    const float edgeDistance = std::max(std::fabs(u), std::fabs(v));
+    const float rectMask =
+        1.0f - SmoothStep01(0.92f, 1.18f, edgeDistance);
+    if (rectMask <= 0.0001f) {
+        return 0.0f;
+    }
+
+    const float radius = std::max(light.radius, 0.25f);
+    const float range = std::max(0.0f, 1.0f - distance / radius);
+    const float facing =
+        std::max(Dot3(normal, Scale3(lightDirection, -1.0f)), 0.0f);
+    const float facingWeight = 0.22f + 0.78f * facing;
+    const float angleWeight =
+        std::pow(std::clamp(std::fabs(denom), 0.02f, 1.0f), 0.35f);
+    return rectMask * range * range * facingWeight * angleWeight;
+}
+
+std::array<float, 3> CapturedSceneRadiance(
+    const CapturedReflectionProbeSceneSample& sceneSample,
+    std::span<const CapturedReflectionProbeLightSample> lights,
+    const std::array<float, 3>& direction
+) {
+    std::array<float, 3> radiance = Scale3(
+        Multiply3(BoxFaceTintForDirection(direction), sceneSample.tint),
+        std::clamp(sceneSample.ambientStrength, 0.0f, 2.0f)
+    );
+    radiance = Add3(
+        radiance,
+        Scale3(
+            sceneSample.ambientColor,
+            std::clamp(sceneSample.ambientStrength, 0.0f, 2.0f)
+        )
+    );
+
+    const std::array<float, 3> sunDirection =
+        Normalize3(sceneSample.directionalDirection);
+    const float sunFacing =
+        std::pow(std::max(Dot3(direction, Scale3(sunDirection, -1.0f)), 0.0f), 16.0f);
+    radiance = Add3(
+        radiance,
+        Scale3(
+            sceneSample.tint,
+            sunFacing * std::max(sceneSample.directionalIntensity, 0.0f) * 0.16f
+        )
+    );
+
+    const std::size_t lightCount = std::min<std::size_t>(
+        lights.size(),
+        kCapturedSceneMaxLightSamples
+    );
+    for (std::size_t index = 0; index < lightCount; ++index) {
+        const CapturedReflectionProbeLightSample& light = lights[index];
+        float lobe = 0.0f;
+        float energyScale = 0.12f;
+        if (light.kind == 3u) {
+            lobe = CapturedRectLightLobe(sceneSample, light, direction);
+            energyScale = 0.15f;
+        } else {
+            const float pointLobe = CapturedPointLightLobe(
+                sceneSample,
+                light,
+                direction
+            );
+            const float directionalLobe = light.kind == 2u
+                ? CapturedDirectionalLightLobe(light, direction)
+                : 1.0f;
+            lobe = pointLobe * directionalLobe;
+            energyScale = light.kind == 2u ? 0.16f : 0.12f;
+        }
+        const float energy =
+            lobe *
+            std::max(light.intensity, 0.0f) *
+            energyScale;
+        radiance = Add3(
+            radiance,
+            Scale3(
+                Multiply3(light.color, sceneSample.tint),
+                energy
+            )
+        );
+    }
+
+    return Clamp3(
+        Scale3(radiance, std::clamp(sceneSample.intensity, 0.0f, 4.0f)),
+        0.0f,
+        1.0f
+    );
+}
+
+AuthoredCubemapPixelData BuildCapturedSceneCubemapPixels(
+    const CapturedReflectionProbeSceneSample& sceneSample,
+    std::span<const CapturedReflectionProbeLightSample> lights
+) {
+    AuthoredCubemapPixelData pixelData{};
+    pixelData.format = VK_FORMAT_R8G8B8A8_SRGB;
+    pixelData.hdr = false;
+    pixelData.bytesPerTexel = 4u;
+    pixelData.pixels.resize(
+        static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) *
+        static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) *
+        6u *
+        pixelData.bytesPerTexel
+    );
+
+    for (std::size_t face = 0; face < 6u; ++face) {
+        for (u32 y = 0; y < kCapturedSceneCubemapFaceSize; ++y) {
+            for (u32 x = 0; x < kCapturedSceneCubemapFaceSize; ++x) {
+                const float faceU =
+                    (2.0f * (static_cast<float>(x) + 0.5f) /
+                     static_cast<float>(kCapturedSceneCubemapFaceSize)) -
+                    1.0f;
+                const float faceV =
+                    (2.0f * (static_cast<float>(y) + 0.5f) /
+                     static_cast<float>(kCapturedSceneCubemapFaceSize)) -
+                    1.0f;
+                const std::array<float, 3> direction =
+                    CubemapDirection(face, faceU, faceV);
+                const std::array<float, 3> radiance =
+                    CapturedSceneRadiance(sceneSample, lights, direction);
+                const std::size_t offset =
+                    (((face * static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) +
+                       static_cast<std::size_t>(y)) *
+                      static_cast<std::size_t>(kCapturedSceneCubemapFaceSize)) +
+                     static_cast<std::size_t>(x)) *
+                    pixelData.bytesPerTexel;
+                pixelData.pixels[offset + 0u] =
+                    EncodeReflectionChannel(radiance[0], false);
+                pixelData.pixels[offset + 1u] =
+                    EncodeReflectionChannel(radiance[1], false);
+                pixelData.pixels[offset + 2u] =
+                    EncodeReflectionChannel(radiance[2], false);
+                pixelData.pixels[offset + 3u] = 255u;
+            }
+        }
+    }
+
+    return pixelData;
+}
+
 struct CubemapSampleLocation {
     std::size_t face = 0;
     float x = 0.0f;
@@ -1536,7 +2055,7 @@ AuthoredCubemapLoadResult CreateAuthoredCubemapImage(
         const LoadedEquirectangularImage equirectangular =
             LoadEquirectangularImage(source.equirectangularPath);
         const u32 faceSize =
-            std::max(1u, static_cast<u32>(equirectangular.height / 2));
+            EquirectangularCubemapFaceSizeForSource(equirectangular);
         AuthoredCubemapPixelData pixelData =
             ConvertEquirectangularToCubemapPixels(equirectangular, faceSize);
         const std::array<f32, 3> irradianceColor =
@@ -1806,9 +2325,948 @@ void VulkanReflectionProbeResources::EnsureAuthoredCubemap(
     }
 }
 
+VulkanReflectionProbeResources::CapturedSceneProbeResource*
+VulkanReflectionProbeResources::FindCapturedSceneProbeResource(
+    i32 probeSceneIndex
+) {
+    const auto found = m_CapturedSceneProbeResources.find(probeSceneIndex);
+    return found != m_CapturedSceneProbeResources.end() ? &found->second : nullptr;
+}
+
+const VulkanReflectionProbeResources::CapturedSceneProbeResource*
+VulkanReflectionProbeResources::FindCapturedSceneProbeResource(
+    i32 probeSceneIndex
+) const {
+    const auto found = m_CapturedSceneProbeResources.find(probeSceneIndex);
+    return found != m_CapturedSceneProbeResources.end() ? &found->second : nullptr;
+}
+
+VulkanReflectionProbeResources::CapturedSceneProbeResource*
+VulkanReflectionProbeResources::FindOrCreateCapturedSceneProbeResource(
+    i32 probeSceneIndex
+) {
+    if (probeSceneIndex < 0) {
+        return nullptr;
+    }
+    if (const auto found = FindCapturedSceneProbeResource(probeSceneIndex);
+        found != nullptr) {
+        return found;
+    }
+    if (m_CapturedSceneProbeResources.size() >=
+        kMaxCapturedSceneProbeResourceCount) {
+        return nullptr;
+    }
+    auto [inserted, created] = m_CapturedSceneProbeResources.try_emplace(
+        probeSceneIndex
+    );
+    inserted->second.audit.probeSceneIndex = probeSceneIndex;
+    return &inserted->second;
+}
+
+void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    i32 probeSceneIndex,
+    const CapturedReflectionProbeSceneSample& sceneSample,
+    std::span<const CapturedReflectionProbeLightSample> lights,
+    const CapturedSceneRefreshRequest& refreshRequest,
+    AuthoredReflectionProbeFilteringSettings filteringSettings
+) {
+    CapturedSceneProbeResource* resource =
+        FindOrCreateCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr) {
+        return;
+    }
+    m_LastCapturedSceneProbeSceneIndex = probeSceneIndex;
+    ++resource->refreshCheckCount;
+    const bool resourceReady =
+        resource->activeImage != nullptr &&
+        resource->activeImage->View() != VK_NULL_HANDLE;
+    CapturedSceneCaptureAudit audit{};
+    audit.backend = CapturedSceneCaptureBackend::AnalyticCpu;
+    audit.lastRefreshReason = resource->lastRefreshReason;
+    audit.probeSceneIndex = probeSceneIndex;
+    audit.faceCount = 6u;
+    audit.captureSignature = refreshRequest.captureSignature;
+    audit.radianceSignature = sceneSample.signature;
+    audit.membershipRevision = refreshRequest.membershipRevision;
+    audit.lightRevision = refreshRequest.lightRevision;
+    audit.renderRevision = refreshRequest.renderRevision;
+    audit.resourceReady = resourceReady;
+    audit.rasterizedGeometry = false;
+
+    if (!resourceReady) {
+        audit.refreshReason = CapturedSceneRefreshReason::Initial;
+        audit.refreshRequested = true;
+    } else {
+        if (refreshRequest.membershipRevision != resource->membershipRevision) {
+            audit.dirtyMask |= CapturedSceneDirtyMembership;
+        }
+        if (refreshRequest.lightRevision != resource->lightRevision) {
+            audit.dirtyMask |= CapturedSceneDirtyLight;
+        }
+        if (refreshRequest.renderRevision != resource->renderRevision) {
+            audit.dirtyMask |= CapturedSceneDirtyRender;
+        }
+        if (sceneSample.signature != resource->radianceSignature) {
+            audit.dirtyMask |= CapturedSceneDirtyContent;
+        }
+        if (refreshRequest.sceneDirtyOverride) {
+            audit.dirtyMask |= CapturedSceneDirtyExternal;
+        }
+
+        if (refreshRequest.forceRefresh) {
+            audit.refreshReason = CapturedSceneRefreshReason::Forced;
+            audit.refreshRequested = true;
+        } else if (refreshRequest.refreshPolicy ==
+                   RendererReflectionProbeRefreshPolicy::Forced) {
+            audit.refreshReason = CapturedSceneRefreshReason::ForcedPolicy;
+            audit.refreshRequested = true;
+        } else if (refreshRequest.refreshPolicy ==
+                   RendererReflectionProbeRefreshPolicy::SceneDirty) {
+            if ((audit.dirtyMask & CapturedSceneDirtyExternal) != 0u) {
+                audit.refreshReason = CapturedSceneRefreshReason::SceneDirtyOverride;
+            } else if ((audit.dirtyMask & CapturedSceneDirtyMembership) != 0u) {
+                audit.refreshReason = CapturedSceneRefreshReason::MembershipChanged;
+            } else if ((audit.dirtyMask & CapturedSceneDirtyLight) != 0u) {
+                audit.refreshReason = CapturedSceneRefreshReason::LightChanged;
+            } else if ((audit.dirtyMask & CapturedSceneDirtyRender) != 0u) {
+                audit.refreshReason = CapturedSceneRefreshReason::RenderChanged;
+            } else if ((audit.dirtyMask & CapturedSceneDirtyContent) != 0u) {
+                audit.refreshReason = CapturedSceneRefreshReason::ContentChanged;
+            }
+            audit.refreshRequested = audit.dirtyMask != CapturedSceneDirtyNone;
+        } else if (refreshRequest.refreshPolicy ==
+                   RendererReflectionProbeRefreshPolicy::FileSignature &&
+                   (audit.dirtyMask & CapturedSceneDirtyContent) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::ContentChanged;
+            audit.refreshRequested = true;
+        }
+    }
+
+    if (!audit.refreshRequested) {
+        resource->audit = audit;
+        return;
+    }
+
+    const AuthoredCubemapPixelData pixelData =
+        BuildCapturedSceneCubemapPixels(sceneSample, lights);
+    AuthoredCubemapMipChain mipChain =
+        BuildPrefilteredCubemapMipChain(
+            pixelData,
+            kCapturedSceneCubemapFaceSize,
+            filteringSettings
+        );
+    resource->activeImage = UploadAuthoredCubemapMipChain(
+        device,
+        physicalDevice,
+        commandPool,
+        mipChain
+    );
+    resource->signature = refreshRequest.captureSignature;
+    resource->radianceSignature = sceneSample.signature;
+    resource->membershipRevision = refreshRequest.membershipRevision;
+    resource->lightRevision = refreshRequest.lightRevision;
+    resource->renderRevision = refreshRequest.renderRevision;
+    resource->activeBackend = CapturedSceneCaptureBackend::AnalyticCpu;
+    ++resource->uploadCount;
+    audit.resourceReady = true;
+    audit.refreshPerformed = true;
+    resource->lastRefreshReason = audit.refreshReason;
+    audit.lastRefreshReason = resource->lastRefreshReason;
+    resource->audit = audit;
+}
+
+bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
+    const VulkanDevice& device
+) {
+    if (m_GpuCapturedScenePrefilterPipeline != VK_NULL_HANDLE &&
+        m_GpuCapturedScenePrefilterPipelineLayout != VK_NULL_HANDLE &&
+        m_GpuCapturedScenePrefilterDescriptorSetLayout != VK_NULL_HANDLE &&
+        m_GpuCapturedScenePrefilterDescriptorPool != VK_NULL_HANDLE &&
+        m_GpuCapturedScenePrefilterSampler != VK_NULL_HANDLE) {
+        return true;
+    }
+
+    try {
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerInfo.maxLod = 0.0f;
+        if (vkCreateSampler(
+                device.Handle(),
+                &samplerInfo,
+                nullptr,
+                &m_GpuCapturedScenePrefilterSampler
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create reflection capture prefilter sampler");
+        }
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+        bindings[0].binding = 0u;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[0].descriptorCount = 1u;
+        bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[1].binding = 1u;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[1].descriptorCount = 1u;
+        bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<u32>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
+        if (vkCreateDescriptorSetLayout(
+                device.Handle(),
+                &layoutInfo,
+                nullptr,
+                &m_GpuCapturedScenePrefilterDescriptorSetLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create reflection capture prefilter descriptor layout");
+        }
+
+        const u32 descriptorSetCapacity =
+            static_cast<u32>(kMaxCapturedSceneProbeResourceCount) *
+            (MipCountForExtent(kCapturedSceneCubemapFaceSize) - 1u);
+        std::array<VkDescriptorPoolSize, 2> poolSizes{};
+        poolSizes[0] = {
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorSetCapacity
+        };
+        poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, descriptorSetCapacity };
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+        poolInfo.maxSets = descriptorSetCapacity;
+        if (vkCreateDescriptorPool(
+                device.Handle(),
+                &poolInfo,
+                nullptr,
+                &m_GpuCapturedScenePrefilterDescriptorPool
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create reflection capture prefilter descriptor pool");
+        }
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushRange.offset = 0u;
+        pushRange.size = sizeof(f32) + sizeof(u32) * 3u;
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1u;
+        pipelineLayoutInfo.pSetLayouts = &m_GpuCapturedScenePrefilterDescriptorSetLayout;
+        pipelineLayoutInfo.pushConstantRangeCount = 1u;
+        pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+        if (vkCreatePipelineLayout(
+                device.Handle(),
+                &pipelineLayoutInfo,
+                nullptr,
+                &m_GpuCapturedScenePrefilterPipelineLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create reflection capture prefilter pipeline layout");
+        }
+
+        const VulkanShaderModule shader(
+            device,
+            std::string(SE_SHADER_DIR) + "/reflection_probe_prefilter.comp.spv"
+        );
+        VkPipelineShaderStageCreateInfo shaderStage{};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = shader.Handle();
+        shaderStage.pName = "main";
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStage;
+        pipelineInfo.layout = m_GpuCapturedScenePrefilterPipelineLayout;
+        if (vkCreateComputePipelines(
+                device.Handle(),
+                device.PipelineCacheHandle(),
+                1u,
+                &pipelineInfo,
+                nullptr,
+                &m_GpuCapturedScenePrefilterPipeline
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create reflection capture prefilter pipeline");
+        }
+    } catch (...) {
+        ReleaseGpuCapturedScenePrefilterResources();
+        return false;
+    }
+    return true;
+}
+
+void VulkanReflectionProbeResources::ReleaseGpuCapturedScenePrefilterResources() {
+    if (m_GpuCapturedScenePrefilterPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedScenePrefilterPipeline,
+            nullptr
+        );
+        m_GpuCapturedScenePrefilterPipeline = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedScenePrefilterPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedScenePrefilterPipelineLayout,
+            nullptr
+        );
+        m_GpuCapturedScenePrefilterPipelineLayout = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedScenePrefilterDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedScenePrefilterDescriptorPool,
+            nullptr
+        );
+        m_GpuCapturedScenePrefilterDescriptorPool = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedScenePrefilterDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedScenePrefilterDescriptorSetLayout,
+            nullptr
+        );
+        m_GpuCapturedScenePrefilterDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+    if (m_GpuCapturedScenePrefilterSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(
+            m_GpuCapturedSceneDevice,
+            m_GpuCapturedScenePrefilterSampler,
+            nullptr
+        );
+        m_GpuCapturedScenePrefilterSampler = VK_NULL_HANDLE;
+    }
+}
+
+bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    i32 probeSceneIndex
+) {
+    CapturedSceneProbeResource* resource =
+        FindOrCreateCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr) {
+        return false;
+    }
+    if (m_GpuCapturedSceneDevice != VK_NULL_HANDLE &&
+        m_GpuCapturedSceneDevice != device.Handle()) {
+        return false;
+    }
+    if (resource->targetImage != nullptr &&
+        resource->depthImage != nullptr &&
+        m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE &&
+        resource->framebuffers.size() == 6u) {
+        return true;
+    }
+
+    ReleaseGpuCapturedSceneResources(*resource);
+
+    try {
+        const VkExtent2D extent{
+            kCapturedSceneCubemapFaceSize,
+            kCapturedSceneCubemapFaceSize
+        };
+        const u32 mipCount = MipCountForExtent(extent.width);
+        const VkFormat depthFormat = VulkanDepthBuffer::FindDepthFormat(physicalDevice);
+        m_GpuCapturedSceneDevice = device.Handle();
+        if (!EnsureGpuCapturedScenePrefilterResources(device)) {
+            throw std::runtime_error("Failed to prepare GPU reflection capture GGX prefilter");
+        }
+        if (m_GpuCapturedSceneRenderPass == VK_NULL_HANDLE) {
+            m_GpuCapturedSceneRenderPass = CreateGpuCapturedSceneRenderPass(
+                device,
+                depthFormat
+            );
+        }
+        resource->targetImage = std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
+            kGpuCapturedSceneFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            mipCount,
+            6u,
+            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            VK_IMAGE_VIEW_TYPE_CUBE
+        );
+        resource->depthImage = std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
+            depthFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+        resource->prefilterSourceView = CreateGpuCapturedSceneCubeBaseView(
+            device,
+            resource->targetImage->Handle()
+        );
+        resource->prefilterMipViews.reserve(mipCount - 1u);
+        for (u32 mip = 1u; mip < mipCount; ++mip) {
+            resource->prefilterMipViews.push_back(
+                CreateGpuCapturedSceneMipArrayView(
+                    device,
+                    resource->targetImage->Handle(),
+                    mip
+                )
+            );
+        }
+        if (resource->prefilterDescriptorSets.empty()) {
+            std::vector<VkDescriptorSetLayout> layouts(
+                mipCount - 1u,
+                m_GpuCapturedScenePrefilterDescriptorSetLayout
+            );
+            resource->prefilterDescriptorSets.resize(mipCount - 1u);
+            VkDescriptorSetAllocateInfo allocateInfo{};
+            allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocateInfo.descriptorPool = m_GpuCapturedScenePrefilterDescriptorPool;
+            allocateInfo.descriptorSetCount = static_cast<u32>(layouts.size());
+            allocateInfo.pSetLayouts = layouts.data();
+            if (vkAllocateDescriptorSets(
+                    device.Handle(),
+                    &allocateInfo,
+                    resource->prefilterDescriptorSets.data()
+                ) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to allocate reflection capture prefilter descriptors");
+            }
+        }
+        if (resource->prefilterDescriptorSets.size() != mipCount - 1u) {
+            throw std::runtime_error("Reflection capture prefilter descriptor count mismatch");
+        }
+        for (u32 mip = 1u; mip < mipCount; ++mip) {
+            VkDescriptorImageInfo sourceInfo{};
+            sourceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            sourceInfo.imageView = resource->prefilterSourceView;
+            sourceInfo.sampler = m_GpuCapturedScenePrefilterSampler;
+            VkDescriptorImageInfo destinationInfo{};
+            destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            destinationInfo.imageView = resource->prefilterMipViews[mip - 1u];
+            std::array<VkWriteDescriptorSet, 2> writes{};
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = resource->prefilterDescriptorSets[mip - 1u];
+            writes[0].dstBinding = 0u;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].descriptorCount = 1u;
+            writes[0].pImageInfo = &sourceInfo;
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = resource->prefilterDescriptorSets[mip - 1u];
+            writes[1].dstBinding = 1u;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[1].descriptorCount = 1u;
+            writes[1].pImageInfo = &destinationInfo;
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                static_cast<u32>(writes.size()),
+                writes.data(),
+                0u,
+                nullptr
+            );
+        }
+        resource->faceViews.reserve(6u);
+        resource->framebuffers.reserve(6u);
+        for (u32 face = 0; face < 6u; ++face) {
+            const VkImageView faceView = CreateGpuCapturedSceneFaceView(
+                device,
+                resource->targetImage->Handle(),
+                face
+            );
+            resource->faceViews.push_back(faceView);
+
+            const VkImageView attachments[] = {
+                faceView,
+                resource->depthImage->View()
+            };
+            VkFramebufferCreateInfo createInfo{};
+            createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            createInfo.renderPass = m_GpuCapturedSceneRenderPass;
+            createInfo.attachmentCount = static_cast<u32>(std::size(attachments));
+            createInfo.pAttachments = attachments;
+            createInfo.width = extent.width;
+            createInfo.height = extent.height;
+            createInfo.layers = 1;
+            VkFramebuffer framebuffer = VK_NULL_HANDLE;
+            if (vkCreateFramebuffer(
+                    device.Handle(),
+                    &createInfo,
+                    nullptr,
+                    &framebuffer
+                ) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create GPU reflection capture framebuffer");
+            }
+            resource->framebuffers.push_back(framebuffer);
+        }
+    } catch (...) {
+        ReleaseGpuCapturedSceneResources(*resource);
+        return false;
+    }
+    return true;
+}
+
+bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
+    const CapturedSceneProbeResource& resource,
+    const CapturedSceneRefreshRequest& refreshRequest,
+    CapturedSceneCaptureAudit& audit
+) const {
+    const bool resourceReady =
+        resource.activeImage != nullptr &&
+        resource.activeImage->View() != VK_NULL_HANDLE;
+    audit.resourceReady = resourceReady;
+    audit.lastRefreshReason = resource.lastRefreshReason;
+    audit.faceCount = 6u;
+    audit.captureSignature = refreshRequest.captureSignature;
+    audit.radianceSignature = refreshRequest.captureSignature;
+    audit.membershipRevision = refreshRequest.membershipRevision;
+    audit.lightRevision = refreshRequest.lightRevision;
+    audit.renderRevision = refreshRequest.renderRevision;
+    audit.gpuResourcesAllocated =
+        resource.targetImage != nullptr &&
+        m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE;
+    audit.mipChainReady = resourceReady &&
+        resource.activeBackend == CapturedSceneCaptureBackend::RasterizedGpu;
+    audit.ggxPrefilterReady = audit.mipChainReady;
+
+    if (!resourceReady ||
+        resource.activeBackend != CapturedSceneCaptureBackend::RasterizedGpu) {
+        audit.refreshReason = CapturedSceneRefreshReason::Initial;
+        audit.refreshRequested = true;
+        return true;
+    }
+
+    if (refreshRequest.membershipRevision != resource.membershipRevision) {
+        audit.dirtyMask |= CapturedSceneDirtyMembership;
+    }
+    if (refreshRequest.lightRevision != resource.lightRevision) {
+        audit.dirtyMask |= CapturedSceneDirtyLight;
+    }
+    if (refreshRequest.renderRevision != resource.renderRevision) {
+        audit.dirtyMask |= CapturedSceneDirtyRender;
+    }
+    if (refreshRequest.captureSignature != resource.signature) {
+        audit.dirtyMask |= CapturedSceneDirtyContent;
+    }
+    if (refreshRequest.sceneDirtyOverride) {
+        audit.dirtyMask |= CapturedSceneDirtyExternal;
+    }
+
+    if (refreshRequest.forceRefresh) {
+        audit.refreshReason = CapturedSceneRefreshReason::Forced;
+        audit.refreshRequested = true;
+    } else if (refreshRequest.refreshPolicy ==
+               RendererReflectionProbeRefreshPolicy::Forced) {
+        audit.refreshReason = CapturedSceneRefreshReason::ForcedPolicy;
+        audit.refreshRequested = true;
+    } else if (refreshRequest.refreshPolicy ==
+               RendererReflectionProbeRefreshPolicy::SceneDirty) {
+        if ((audit.dirtyMask & CapturedSceneDirtyExternal) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::SceneDirtyOverride;
+        } else if ((audit.dirtyMask & CapturedSceneDirtyMembership) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::MembershipChanged;
+        } else if ((audit.dirtyMask & CapturedSceneDirtyLight) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::LightChanged;
+        } else if ((audit.dirtyMask & CapturedSceneDirtyRender) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::RenderChanged;
+        } else if ((audit.dirtyMask & CapturedSceneDirtyContent) != 0u) {
+            audit.refreshReason = CapturedSceneRefreshReason::ContentChanged;
+        }
+        audit.refreshRequested = audit.dirtyMask != CapturedSceneDirtyNone;
+    } else if (refreshRequest.refreshPolicy ==
+               RendererReflectionProbeRefreshPolicy::FileSignature &&
+               (audit.dirtyMask & CapturedSceneDirtyContent) != 0u) {
+        audit.refreshReason = CapturedSceneRefreshReason::ContentChanged;
+        audit.refreshRequested = true;
+    }
+    return audit.refreshRequested;
+}
+
+void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
+    CapturedSceneProbeResource& resource,
+    const CapturedSceneRefreshRequest& refreshRequest
+) {
+    resource.captureInProgress = true;
+    resource.nextFace = 0u;
+    resource.facesRendered = 0u;
+    resource.refreshRequest = refreshRequest;
+    resource.audit.gpuCaptureInProgress = true;
+    resource.audit.facesRendered = 0u;
+    resource.audit.facesPending = 6u;
+    resource.audit.capturePassCount = 0u;
+    resource.audit.captureDrawCount = 0u;
+    resource.audit.captureVisibleCount = 0u;
+    resource.audit.captureCulledCount = 0u;
+    resource.audit.mipGenerationCount = 0u;
+    resource.audit.ggxPrefilterDispatchCount = 0u;
+    resource.audit.ggxPrefilterSampleCount = 0u;
+    resource.audit.ggxPrefilterReady = false;
+    resource.audit.rasterizedGeometry = true;
+    resource.audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
+}
+
+bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
+    const CapturedSceneRefreshRequest& refreshRequest,
+    i32 probeSceneIndex
+) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr) {
+        return false;
+    }
+    m_LastCapturedSceneProbeSceneIndex = probeSceneIndex;
+    ++resource->refreshCheckCount;
+    CapturedSceneCaptureAudit audit{};
+    audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
+    audit.rasterizedGeometry = true;
+    audit.probeSceneIndex = probeSceneIndex;
+
+    if (resource->captureInProgress) {
+        // A six-face capture is a coherent snapshot. Changes arriving while it is
+        // in flight schedule the next snapshot instead of repeatedly restarting it.
+        audit = resource->audit;
+        audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
+        audit.rasterizedGeometry = true;
+        audit.captureSignature = resource->refreshRequest.captureSignature;
+        audit.radianceSignature = resource->refreshRequest.captureSignature;
+        audit.membershipRevision = resource->refreshRequest.membershipRevision;
+        audit.lightRevision = resource->refreshRequest.lightRevision;
+        audit.renderRevision = resource->refreshRequest.renderRevision;
+        audit.probeSceneIndex = probeSceneIndex;
+        audit.resourceReady = resource->activeImage != nullptr;
+        audit.gpuResourcesAllocated = true;
+        audit.gpuCaptureInProgress = true;
+        audit.facesRendered = resource->facesRendered;
+        audit.facesPending = 6u - resource->facesRendered;
+        audit.refreshRequested = true;
+        resource->audit = audit;
+        return true;
+    }
+
+    const CapturedSceneCaptureAudit previousAudit = resource->audit;
+    if (!CapturedSceneRefreshRequested(*resource, refreshRequest, audit)) {
+        audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
+        audit.rasterizedGeometry = true;
+        audit.facesRendered = previousAudit.facesRendered;
+        audit.facesPending = previousAudit.facesPending;
+        audit.capturePassCount = previousAudit.capturePassCount;
+        audit.captureDrawCount = previousAudit.captureDrawCount;
+        audit.captureVisibleCount = previousAudit.captureVisibleCount;
+        audit.captureCulledCount = previousAudit.captureCulledCount;
+        audit.mipGenerationCount = previousAudit.mipGenerationCount;
+        audit.ggxPrefilterDispatchCount =
+            previousAudit.ggxPrefilterDispatchCount;
+        audit.ggxPrefilterSampleCount = previousAudit.ggxPrefilterSampleCount;
+        audit.ggxPrefilterReady = previousAudit.ggxPrefilterReady;
+        audit.lastCapturedFace = previousAudit.lastCapturedFace;
+        audit.probeSceneIndex = probeSceneIndex;
+        resource->audit = audit;
+        return false;
+    }
+
+    resource->audit = audit;
+    BeginGpuCapturedSceneRefresh(*resource, refreshRequest);
+    return true;
+}
+
+bool VulkanReflectionProbeResources::GpuCapturedSceneRefreshPending(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->captureInProgress &&
+        resource->targetImage != nullptr && resource->nextFace < 6u;
+}
+
+u32 VulkanReflectionProbeResources::GpuCapturedSceneNextFace(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr ? resource->nextFace : 0u;
+}
+
+VkRenderPass VulkanReflectionProbeResources::GpuCapturedSceneRenderPass() const {
+    return m_GpuCapturedSceneRenderPass;
+}
+
+VkExtent2D VulkanReflectionProbeResources::GpuCapturedSceneExtent() const {
+    return m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE
+        ? VkExtent2D{ kCapturedSceneCubemapFaceSize, kCapturedSceneCubemapFaceSize }
+        : VkExtent2D{};
+}
+
+VkFramebuffer VulkanReflectionProbeResources::GpuCapturedSceneFramebuffer(
+    i32 probeSceneIndex,
+    u32 face
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && face < resource->framebuffers.size()
+        ? resource->framebuffers[face]
+        : VK_NULL_HANDLE;
+}
+
+VkExtent2D VulkanReflectionProbeResources::GpuCapturedSceneExtent(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->targetImage != nullptr
+        ? resource->targetImage->Extent()
+        : VkExtent2D{};
+}
+
+void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
+    i32 probeSceneIndex,
+    VkCommandBuffer commandBuffer
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || resource->targetImage == nullptr ||
+        commandBuffer == VK_NULL_HANDLE) {
+        return;
+    }
+
+    const VkImage image = resource->targetImage->Handle();
+    const u32 mipCount = resource->targetImage->MipLevels();
+    if (m_GpuCapturedScenePrefilterPipeline == VK_NULL_HANDLE ||
+        resource->prefilterDescriptorSets.size() != mipCount - 1u) {
+        return;
+    }
+
+    RecordImageBarrier(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_TRANSFER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u,
+        1u,
+        0u,
+        6u
+    );
+    RecordImageBarrier(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_GENERAL,
+        0u,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        1u,
+        mipCount - 1u,
+        0u,
+        6u
+    );
+    vkCmdBindPipeline(
+        commandBuffer,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        m_GpuCapturedScenePrefilterPipeline
+    );
+    for (u32 mip = 1u; mip < mipCount; ++mip) {
+        struct PrefilterPushConstants {
+            f32 roughness = 0.0f;
+            u32 mipExtent = 1u;
+            u32 sampleCount = kGpuCapturedSceneGgxSampleCount;
+            u32 reserved = 0u;
+        } constants;
+        constants.roughness = static_cast<f32>(mip) /
+            static_cast<f32>(std::max(1u, mipCount - 1u));
+        constants.mipExtent = std::max(1u, kCapturedSceneCubemapFaceSize >> mip);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            m_GpuCapturedScenePrefilterPipelineLayout,
+            0u,
+            1u,
+            &resource->prefilterDescriptorSets[mip - 1u],
+            0u,
+            nullptr
+        );
+        vkCmdPushConstants(
+            commandBuffer,
+            m_GpuCapturedScenePrefilterPipelineLayout,
+            VK_SHADER_STAGE_COMPUTE_BIT,
+            0u,
+            sizeof(PrefilterPushConstants),
+            &constants
+        );
+        vkCmdDispatch(
+            commandBuffer,
+            (constants.mipExtent + 7u) / 8u,
+            (constants.mipExtent + 7u) / 8u,
+            6u
+        );
+    }
+    RecordImageBarrier(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        1u,
+        mipCount - 1u,
+        0u,
+        6u
+    );
+}
+
+void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
+    i32 probeSceneIndex,
+    u32 face,
+    u32 drawCount,
+    u32 visibleCount,
+    u32 culledCount,
+    bool captureComplete
+) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || !resource->captureInProgress ||
+        face != resource->nextFace) {
+        return;
+    }
+
+    ++resource->facesRendered;
+    ++resource->nextFace;
+    resource->audit.lastCapturedFace = face;
+    ++resource->audit.capturePassCount;
+    resource->audit.captureDrawCount += drawCount;
+    resource->audit.captureVisibleCount += visibleCount;
+    resource->audit.captureCulledCount += culledCount;
+    resource->audit.facesRendered = resource->facesRendered;
+    resource->audit.facesPending = 6u - resource->facesRendered;
+
+    if (!captureComplete || resource->facesRendered != 6u) {
+        return;
+    }
+
+    ReleaseGpuCapturedSceneAttachments(*resource);
+    resource->activeImage = std::move(resource->targetImage);
+    resource->depthImage.reset();
+    resource->captureInProgress = false;
+    resource->nextFace = 0u;
+    resource->facesRendered = 0u;
+    resource->signature = resource->refreshRequest.captureSignature;
+    resource->radianceSignature = resource->refreshRequest.captureSignature;
+    resource->membershipRevision = resource->refreshRequest.membershipRevision;
+    resource->lightRevision = resource->refreshRequest.lightRevision;
+    resource->renderRevision = resource->refreshRequest.renderRevision;
+    resource->activeBackend = CapturedSceneCaptureBackend::RasterizedGpu;
+    ++resource->uploadCount;
+    resource->lastRefreshReason = resource->audit.refreshReason;
+    resource->audit.lastRefreshReason = resource->lastRefreshReason;
+    resource->audit.resourceReady = true;
+    resource->audit.refreshPerformed = true;
+    resource->audit.refreshRequested = false;
+    resource->audit.gpuCaptureInProgress = false;
+    resource->audit.mipChainReady = true;
+    resource->audit.mipGenerationCount = 1u;
+    resource->audit.ggxPrefilterDispatchCount =
+        resource->activeImage != nullptr
+            ? resource->activeImage->MipLevels() - 1u
+            : 0u;
+    resource->audit.ggxPrefilterSampleCount = kGpuCapturedSceneGgxSampleCount;
+    resource->audit.ggxPrefilterReady = true;
+    resource->audit.probeSceneIndex = probeSceneIndex;
+    resource->audit.facesRendered = 6u;
+    resource->audit.facesPending = 0u;
+    m_LastCapturedSceneProbeSceneIndex = probeSceneIndex;
+}
+
+void VulkanReflectionProbeResources::FailGpuCapturedSceneRefresh(i32 probeSceneIndex) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr) {
+        return;
+    }
+    ReleaseGpuCapturedSceneResources(*resource);
+    resource->captureInProgress = false;
+    resource->nextFace = 0u;
+    resource->facesRendered = 0u;
+    resource->audit.gpuCaptureInProgress = false;
+    resource->audit.gpuResourcesAllocated = false;
+    m_LastCapturedSceneProbeSceneIndex = probeSceneIndex;
+}
+
+void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneAttachments(
+    CapturedSceneProbeResource& resource
+) {
+    for (VkFramebuffer framebuffer : resource.framebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(m_GpuCapturedSceneDevice, framebuffer, nullptr);
+        }
+    }
+    resource.framebuffers.clear();
+    for (VkImageView view : resource.faceViews) {
+        if (view != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_GpuCapturedSceneDevice, view, nullptr);
+        }
+    }
+    resource.faceViews.clear();
+    if (resource.prefilterSourceView != VK_NULL_HANDLE) {
+        vkDestroyImageView(
+            m_GpuCapturedSceneDevice,
+            resource.prefilterSourceView,
+            nullptr
+        );
+        resource.prefilterSourceView = VK_NULL_HANDLE;
+    }
+    for (VkImageView view : resource.prefilterMipViews) {
+        if (view != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_GpuCapturedSceneDevice, view, nullptr);
+        }
+    }
+    resource.prefilterMipViews.clear();
+}
+
+void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneResources(
+    CapturedSceneProbeResource& resource
+) {
+    ReleaseGpuCapturedSceneAttachments(resource);
+    resource.depthImage.reset();
+    resource.targetImage.reset();
+}
+
 void VulkanReflectionProbeResources::Release() {
+    for (auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        ReleaseGpuCapturedSceneResources(resource);
+        resource.activeImage.reset();
+    }
+    m_CapturedSceneProbeResources.clear();
+    ReleaseGpuCapturedScenePrefilterResources();
+    if (m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_GpuCapturedSceneDevice, m_GpuCapturedSceneRenderPass, nullptr);
+        m_GpuCapturedSceneRenderPass = VK_NULL_HANDLE;
+    }
+    m_GpuCapturedSceneDevice = VK_NULL_HANDLE;
     m_BuiltInCubemapImage.reset();
     m_BuiltInCubemapView = VK_NULL_HANDLE;
+    m_LastCapturedSceneProbeSceneIndex = -1;
+    m_EmptyCapturedSceneAudit = {};
     m_AuthoredCubemaps.clear();
     m_AuthoredCubemapUploadCount = 0;
     m_AuthoredCubemapEquirectangularConversionCount = 0;
@@ -1824,6 +3282,17 @@ bool VulkanReflectionProbeResources::BuiltInProceduralReady(
 ) const {
     return m_BuiltInCubemapImage != nullptr &&
         m_BuiltInCubemapView != VK_NULL_HANDLE &&
+        sampler != VK_NULL_HANDLE;
+}
+
+bool VulkanReflectionProbeResources::CapturedSceneReady(
+    i32 probeSceneIndex,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->activeImage != nullptr &&
+        resource->activeImage->View() != VK_NULL_HANDLE &&
         sampler != VK_NULL_HANDLE;
 }
 
@@ -1871,6 +3340,29 @@ VkImageView VulkanReflectionProbeResources::AuthoredDescriptorViewFor(
             sampler != VK_NULL_HANDLE
         ? found->second.image->View()
         : fallbackView;
+}
+
+VkImageView VulkanReflectionProbeResources::CapturedSceneDescriptorViewFor(
+    i32 probeSceneIndex,
+    VkImageView fallbackView,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return CapturedSceneReady(probeSceneIndex, sampler)
+        ? resource->activeImage->View()
+        : fallbackView;
+}
+
+bool VulkanReflectionProbeResources::CapturedSceneDescriptorMatchesProbe(
+    i32 probeSceneIndex,
+    VkImageView descriptorView,
+    VkSampler sampler
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && CapturedSceneReady(probeSceneIndex, sampler) &&
+        descriptorView == resource->activeImage->View();
 }
 
 VkImageView VulkanReflectionProbeResources::BuiltInView() const {
@@ -2151,6 +3643,117 @@ AuthoredReflectionCubemapSourceType VulkanReflectionProbeResources::AuthoredCube
     return found != m_AuthoredCubemaps.end()
         ? found->second.sourceType
         : AuthoredReflectionCubemapSourceType::Unknown;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneFaceSize(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->activeImage != nullptr
+        ? resource->activeImage->Extent().width
+        : 0u;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneMipCount(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->activeImage != nullptr
+        ? resource->activeImage->MipLevels()
+        : 0u;
+}
+
+VkFormat VulkanReflectionProbeResources::CapturedSceneFormat(
+    i32 probeSceneIndex
+) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr && resource->activeImage != nullptr
+        ? resource->activeImage->Format()
+        : VK_FORMAT_UNDEFINED;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneUploadCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        count += resource.uploadCount;
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneRefreshCheckCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        count += resource.refreshCheckCount;
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneSignature() const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(m_LastCapturedSceneProbeSceneIndex);
+    return resource != nullptr ? resource->signature : 0u;
+}
+
+const CapturedSceneCaptureAudit&
+VulkanReflectionProbeResources::CapturedSceneAudit() const {
+    return CapturedSceneAudit(m_LastCapturedSceneProbeSceneIndex);
+}
+
+const CapturedSceneCaptureAudit&
+VulkanReflectionProbeResources::CapturedSceneAudit(i32 probeSceneIndex) const {
+    const CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    return resource != nullptr ? resource->audit : m_EmptyCapturedSceneAudit;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneProbeResourceCount() const {
+    return static_cast<u32>(std::min<std::size_t>(
+        m_CapturedSceneProbeResources.size(),
+        std::numeric_limits<u32>::max()
+    ));
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneReadyProbeCount(
+    VkSampler sampler
+) const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)resource;
+        if (CapturedSceneReady(sceneIndex, sampler)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneInFlightProbeCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        if (resource.captureInProgress) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneDistinctActiveViewCount(
+    VkSampler sampler
+) const {
+    std::vector<VkImageView> views;
+    views.reserve(m_CapturedSceneProbeResources.size());
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        if (CapturedSceneReady(sceneIndex, sampler)) {
+            views.push_back(resource.activeImage->View());
+        }
+    }
+    std::sort(views.begin(), views.end());
+    return static_cast<u32>(std::unique(views.begin(), views.end()) - views.begin());
 }
 
 void VulkanReflectionProbeResources::SetDescriptorSetsBound(u32 count) {

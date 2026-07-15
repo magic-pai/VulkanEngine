@@ -21,9 +21,9 @@
   "expected": {
     "dlssPresent": {
       "postSource": "1/1/0",
-      "qualityGate": "1/1/0",
-      "qualityMasks": "255/255/0",
-      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/1/1/1/1/1/1",
+      "qualityGate": "1/0/4",
+      "qualityMasks": "255/251/4",
+      "qualityInputs": "output/camera/object/reactive/transparency/exposure/post/baseline=1/1/0/1/1/1/1/1",
       "renderScale": "1/1/0",
       "renderScaleActive": "1",
       "renderScaleApplied": "0",
@@ -37,12 +37,18 @@
       "dlssReset": "0",
       "dlssMotionVectorScale": "1/1",
       "qualityMode": "6",
-      "recommendedPreset": "11",
+      "recommendedPreset": "13",
       "cameraMotionReady": "1",
-      "mainDraws": "4",
-      "gbufferDraws": "4",
+      "mainDraws": "5",
+      "gbufferDraws": "5",
       "forwardResidualDraws": "0",
-      "weightedTranslucencyDraws": "0"
+      "weightedTranslucencyDraws": "0",
+      "runtimeImportModelRequested": "1",
+      "runtimeImportModelLoaded": "1",
+      "runtimeImportBoneNodeCount": "65",
+      "runtimeImportAnimationChannelCount": "52",
+      "runtimeImportSkinnedVertexCount": "37878",
+      "runtimeImportSkinnedAnimationUnsupported": "1"
     }
   },
   "thresholds": {
@@ -60,7 +66,7 @@
     "captureMonitor": "requested=1 actual=1/2 device=\\\\.\\DISPLAY2 area=2560,0 2560x1380",
     "dlssColumns": "782/782",
     "qualityMode": 6,
-    "recommendedPreset": 11,
+    "recommendedPreset": 13,
     "renderScale": "1/1/0",
     "jitterApplied": 1,
     "temporalHistory": "valid/reset/reason=1/0/0",
@@ -68,14 +74,16 @@
     "dlssMotionVectorScale": "1/1",
     "taaResolve": "input/enabled/suppressed=1/0/1",
     "dlssExtents": "1280x720->1280x720",
-    "qualityGate": "1/1/0",
-    "qualityMasks": "255/255/0",
-    "sequencePairMinChangedPixels": 1459,
-    "sequencePairMaxMeanDelta": 93.5157,
-    "sequencePairMaxDelta": 597,
-    "sequencePairMinEdgePixels": 1859,
-    "sequencePairMaxChangedEdgePixels": 482,
-    "sequencePairMaxMeanEdgeDelta": 24.6082,
-    "sequencePairMaxEdgeDelta": 199
+    "qualityGate": "1/0/4",
+    "qualityMasks": "255/251/4",
+    "runtimeImport": "bones=65, animationChannels=52, skinnedVertices=37878, unsupported=1",
+    "sequencePairMinChangedPixels": 3153,
+    "sequencePairMaxMeanDelta": 18.2637,
+    "sequencePairMaxDelta": 564,
+    "sequencePairMinEdgePixels": 2456,
+    "sequencePairMaxChangedEdgePixels": 433,
+    "sequencePairMaxChangedEdgeRatio": 0.1763,
+    "sequencePairMaxMeanEdgeDelta": 7.7685,
+    "sequencePairMaxEdgeDelta": 188
   }
 }

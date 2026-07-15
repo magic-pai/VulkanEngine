@@ -4,9 +4,11 @@
 
 #include <array>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace se {
 
@@ -40,6 +42,29 @@ struct AuthoredReflectionProbeFilteringSettings {
     bool seamAwareFiltering = true;
 };
 
+struct CapturedReflectionProbeLightSample {
+    std::array<f32, 3> position{ 0.0f, 0.0f, 0.0f };
+    std::array<f32, 3> direction{ 0.0f, -1.0f, 0.0f };
+    std::array<f32, 3> color{ 1.0f, 1.0f, 1.0f };
+    f32 intensity = 0.0f;
+    f32 radius = 1.0f;
+    f32 width = 0.0f;
+    f32 height = 0.0f;
+    u32 kind = 0;
+};
+
+struct CapturedReflectionProbeSceneSample {
+    std::array<f32, 3> center{ 0.0f, 1.2f, 0.0f };
+    std::array<f32, 3> boxExtents{ 5.5f, 5.5f, 5.5f };
+    std::array<f32, 3> tint{ 1.0f, 1.0f, 1.0f };
+    std::array<f32, 3> directionalDirection{ -0.45f, -0.82f, -0.35f };
+    std::array<f32, 3> ambientColor{ 0.12f, 0.12f, 0.12f };
+    f32 intensity = 1.0f;
+    f32 ambientStrength = 0.12f;
+    f32 directionalIntensity = 0.0f;
+    u32 signature = 0;
+};
+
 enum class RendererReflectionProbeCaptureSource : u32 {
     None = 0,
     BuiltInProcedural = 1,
@@ -64,7 +89,82 @@ enum class RendererReflectionProbeCaptureFallbackReason : u32 {
     NoActiveSceneProbe = 6,
     FallbackDisabled = 7,
     AuthoredCubemapAssetMissing = 8,
-    AuthoredCubemapLoadFailed = 9
+    AuthoredCubemapLoadFailed = 9,
+    CapturedSceneResourceUnavailable = 10
+};
+
+// The current captured-scene implementation builds an analytic CPU cubemap.
+// Keeping this explicit prevents callers from treating it as a rasterized scene capture.
+enum class CapturedSceneCaptureBackend : u32 {
+    None = 0,
+    AnalyticCpu = 1,
+    RasterizedGpu = 2
+};
+
+enum class CapturedSceneRefreshReason : u32 {
+    None = 0,
+    Initial = 1,
+    Forced = 2,
+    ForcedPolicy = 3,
+    SceneDirtyOverride = 4,
+    MembershipChanged = 5,
+    LightChanged = 6,
+    RenderChanged = 7,
+    ContentChanged = 8
+};
+
+enum CapturedSceneDirtyFlag : u32 {
+    CapturedSceneDirtyNone = 0u,
+    CapturedSceneDirtyMembership = 1u << 0u,
+    CapturedSceneDirtyLight = 1u << 1u,
+    CapturedSceneDirtyRender = 1u << 2u,
+    CapturedSceneDirtyContent = 1u << 3u,
+    CapturedSceneDirtyExternal = 1u << 4u
+};
+
+struct CapturedSceneRefreshRequest {
+    RendererReflectionProbeRefreshPolicy refreshPolicy =
+        RendererReflectionProbeRefreshPolicy::SceneDirty;
+    u64 membershipRevision = 0;
+    u64 lightRevision = 0;
+    u64 renderRevision = 0;
+    u32 captureSignature = 0;
+    bool forceRefresh = false;
+    bool sceneDirtyOverride = false;
+};
+
+struct CapturedSceneCaptureAudit {
+    CapturedSceneCaptureBackend backend = CapturedSceneCaptureBackend::None;
+    CapturedSceneRefreshReason refreshReason =
+        CapturedSceneRefreshReason::None;
+    CapturedSceneRefreshReason lastRefreshReason =
+        CapturedSceneRefreshReason::None;
+    u32 dirtyMask = CapturedSceneDirtyNone;
+    u32 faceCount = 0;
+    u32 captureSignature = 0;
+    u32 radianceSignature = 0;
+    u64 membershipRevision = 0;
+    u64 lightRevision = 0;
+    u64 renderRevision = 0;
+    i32 probeSceneIndex = -1;
+    u32 facesRendered = 0;
+    u32 facesPending = 0;
+    u32 capturePassCount = 0;
+    u32 captureDrawCount = 0;
+    u32 captureVisibleCount = 0;
+    u32 captureCulledCount = 0;
+    u32 mipGenerationCount = 0;
+    u32 ggxPrefilterDispatchCount = 0;
+    u32 ggxPrefilterSampleCount = 0;
+    u32 lastCapturedFace = 0;
+    bool resourceReady = false;
+    bool refreshRequested = false;
+    bool refreshPerformed = false;
+    bool rasterizedGeometry = false;
+    bool gpuResourcesAllocated = false;
+    bool gpuCaptureInProgress = false;
+    bool mipChainReady = false;
+    bool ggxPrefilterReady = false;
 };
 
 class VulkanReflectionProbeResources {
@@ -81,9 +181,48 @@ public:
         std::string_view assetId,
         AuthoredReflectionProbeFilteringSettings filteringSettings = {}
     );
+    void EnsureCapturedSceneCubemap(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        i32 probeSceneIndex,
+        const CapturedReflectionProbeSceneSample& sceneSample,
+        std::span<const CapturedReflectionProbeLightSample> lights,
+        const CapturedSceneRefreshRequest& refreshRequest,
+        AuthoredReflectionProbeFilteringSettings filteringSettings = {}
+    );
+    bool EnsureGpuCapturedSceneResources(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        i32 probeSceneIndex
+    );
+    bool RequestGpuCapturedSceneRefresh(
+        const CapturedSceneRefreshRequest& refreshRequest,
+        i32 probeSceneIndex
+    );
+    bool GpuCapturedSceneRefreshPending(i32 probeSceneIndex) const;
+    u32 GpuCapturedSceneNextFace(i32 probeSceneIndex) const;
+    VkRenderPass GpuCapturedSceneRenderPass() const;
+    VkExtent2D GpuCapturedSceneExtent() const;
+    VkFramebuffer GpuCapturedSceneFramebuffer(i32 probeSceneIndex, u32 face) const;
+    VkExtent2D GpuCapturedSceneExtent(i32 probeSceneIndex) const;
+    void RecordGpuCapturedSceneMipGeneration(
+        i32 probeSceneIndex,
+        VkCommandBuffer commandBuffer
+    ) const;
+    void CompleteGpuCapturedSceneFace(
+        i32 probeSceneIndex,
+        u32 face,
+        u32 drawCount,
+        u32 visibleCount,
+        u32 culledCount,
+        bool captureComplete
+    );
+    void FailGpuCapturedSceneRefresh(i32 probeSceneIndex);
     void Release();
 
     bool BuiltInProceduralReady(VkSampler sampler) const;
+    bool CapturedSceneReady(i32 probeSceneIndex, VkSampler sampler) const;
     bool AuthoredCubemapReady(std::string_view assetId, VkSampler sampler) const;
     bool AuthoredCubemapAssetFound(std::string_view assetId) const;
     bool AuthoredCubemapLoadFailed(std::string_view assetId) const;
@@ -91,6 +230,16 @@ public:
     VkImageView AuthoredDescriptorViewFor(
         std::string_view assetId,
         VkImageView fallbackView,
+        VkSampler sampler
+    ) const;
+    VkImageView CapturedSceneDescriptorViewFor(
+        i32 probeSceneIndex,
+        VkImageView fallbackView,
+        VkSampler sampler
+    ) const;
+    bool CapturedSceneDescriptorMatchesProbe(
+        i32 probeSceneIndex,
+        VkImageView descriptorView,
         VkSampler sampler
     ) const;
     VkImageView BuiltInView() const;
@@ -134,11 +283,70 @@ public:
     AuthoredReflectionCubemapSourceType AuthoredCubemapSourceType(
         std::string_view assetId
     ) const;
+    u32 CapturedSceneFaceSize(i32 probeSceneIndex) const;
+    u32 CapturedSceneMipCount(i32 probeSceneIndex) const;
+    VkFormat CapturedSceneFormat(i32 probeSceneIndex) const;
+    u32 CapturedSceneUploadCount() const;
+    u32 CapturedSceneRefreshCheckCount() const;
+    u32 CapturedSceneSignature() const;
+    const CapturedSceneCaptureAudit& CapturedSceneAudit() const;
+    const CapturedSceneCaptureAudit& CapturedSceneAudit(i32 probeSceneIndex) const;
+    u32 CapturedSceneProbeResourceCount() const;
+    u32 CapturedSceneReadyProbeCount(VkSampler sampler) const;
+    u32 CapturedSceneInFlightProbeCount() const;
+    u32 CapturedSceneDistinctActiveViewCount(VkSampler sampler) const;
 
     void SetDescriptorSetsBound(u32 count);
     u32 DescriptorSetsBound() const;
 
 private:
+    struct CapturedSceneProbeResource {
+        std::unique_ptr<VulkanImage> activeImage;
+        std::unique_ptr<VulkanImage> targetImage;
+        std::unique_ptr<VulkanImage> depthImage;
+        std::vector<VkImageView> faceViews;
+        std::vector<VkFramebuffer> framebuffers;
+        VkImageView prefilterSourceView = VK_NULL_HANDLE;
+        std::vector<VkImageView> prefilterMipViews;
+        std::vector<VkDescriptorSet> prefilterDescriptorSets;
+        CapturedSceneRefreshRequest refreshRequest{};
+        CapturedSceneCaptureBackend activeBackend = CapturedSceneCaptureBackend::None;
+        u32 signature = 0;
+        u32 radianceSignature = 0;
+        u64 membershipRevision = 0;
+        u64 lightRevision = 0;
+        u64 renderRevision = 0;
+        u32 uploadCount = 0;
+        u32 refreshCheckCount = 0;
+        CapturedSceneRefreshReason lastRefreshReason =
+            CapturedSceneRefreshReason::None;
+        CapturedSceneCaptureAudit audit{};
+        bool captureInProgress = false;
+        u32 nextFace = 0;
+        u32 facesRendered = 0;
+    };
+
+    CapturedSceneProbeResource* FindCapturedSceneProbeResource(i32 probeSceneIndex);
+    const CapturedSceneProbeResource* FindCapturedSceneProbeResource(
+        i32 probeSceneIndex
+    ) const;
+    CapturedSceneProbeResource* FindOrCreateCapturedSceneProbeResource(
+        i32 probeSceneIndex
+    );
+    void ReleaseGpuCapturedSceneAttachments(CapturedSceneProbeResource& resource);
+    void ReleaseGpuCapturedSceneResources(CapturedSceneProbeResource& resource);
+    bool EnsureGpuCapturedScenePrefilterResources(const VulkanDevice& device);
+    void ReleaseGpuCapturedScenePrefilterResources();
+    void BeginGpuCapturedSceneRefresh(
+        CapturedSceneProbeResource& resource,
+        const CapturedSceneRefreshRequest& refreshRequest
+    );
+    bool CapturedSceneRefreshRequested(
+        const CapturedSceneProbeResource& resource,
+        const CapturedSceneRefreshRequest& refreshRequest,
+        CapturedSceneCaptureAudit& audit
+    ) const;
+
     struct AuthoredCubemapResource {
         std::unique_ptr<VulkanImage> image;
         AuthoredReflectionCubemapSourceType sourceType =
@@ -162,6 +370,17 @@ private:
 private:
     std::unique_ptr<VulkanImage> m_BuiltInCubemapImage;
     VkImageView m_BuiltInCubemapView = VK_NULL_HANDLE;
+    VkDevice m_GpuCapturedSceneDevice = VK_NULL_HANDLE;
+    VkRenderPass m_GpuCapturedSceneRenderPass = VK_NULL_HANDLE;
+    VkSampler m_GpuCapturedScenePrefilterSampler = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_GpuCapturedScenePrefilterDescriptorSetLayout =
+        VK_NULL_HANDLE;
+    VkDescriptorPool m_GpuCapturedScenePrefilterDescriptorPool = VK_NULL_HANDLE;
+    VkPipelineLayout m_GpuCapturedScenePrefilterPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline m_GpuCapturedScenePrefilterPipeline = VK_NULL_HANDLE;
+    std::unordered_map<i32, CapturedSceneProbeResource> m_CapturedSceneProbeResources;
+    i32 m_LastCapturedSceneProbeSceneIndex = -1;
+    CapturedSceneCaptureAudit m_EmptyCapturedSceneAudit{};
     std::unordered_map<std::string, AuthoredCubemapResource> m_AuthoredCubemaps;
     u32 m_AuthoredCubemapUploadCount = 0;
     u32 m_AuthoredCubemapEquirectangularConversionCount = 0;

@@ -106,7 +106,7 @@ void VulkanComputePipeline::CreateComputePipeline(
 
     if (vkCreateComputePipelines(
             device.Handle(),
-            VK_NULL_HANDLE,
+            device.PipelineCacheHandle(),
             1,
             &pipelineInfo,
             nullptr,

@@ -167,7 +167,7 @@ void main() {
     bool hasClearcoatTexture = HasTextureFlag(textureFlags, 256.0);
     bool hasTransmissionTexture = HasTextureFlag(textureFlags, 512.0);
     bool hasClearcoatRoughnessTexture = HasTextureFlag(textureFlags, 1024.0);
-    if (hasOpacityTexture) {
+    if (hasOpacityTexture && alphaMode > 0.5) {
         materialAlpha *= clamp(texture(opacitySampler, materialUv).r, 0.0, 1.0);
     }
     if (hasClearcoatTexture) {

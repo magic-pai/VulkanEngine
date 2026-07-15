@@ -63,6 +63,7 @@ struct UniformBufferObject {
     alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeControlsArray{};
     alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeColorArray{};
     alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes> reflectionProbeBoxExtentsProjectionArray{};
+    // x: selected probe count, y: local blend enabled, z: global IBL cubemap sampling, w: total local weight.
     alignas(16) glm::vec4 reflectionProbeBlendControls{ 0.0f, 0.0f, 0.0f, 0.0f };
     alignas(16) glm::vec4 heightFogControls{ 0.0f, 0.035f, 0.08f, 3.0f };
     alignas(16) glm::vec4 heightFogColor{ 0.58f, 0.68f, 0.76f, 0.72f };
@@ -74,6 +75,8 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 autoExposureControls{ 0.18f, 0.25f, 4.0f, 1.0f };
     alignas(16) glm::vec4 sharpeningControls{ 0.0f, 0.35f, 1.0f, 0.0f };
     alignas(16) glm::vec4 colorGradingLutControls{ 0.0f, 16.0f, 0.0f, 0.0f };
+    // x: selected local-light index for shadow debug, -1 means auto per pixel.
+    alignas(16) glm::vec4 debugControls{ -1.0f, 0.0f, 0.0f, 0.0f };
     alignas(16) std::array<glm::vec4, kReflectionProbeDiffuseLobeVec4Count>
         reflectionProbeDiffuseLobes{};
     alignas(16) glm::mat4 previousView{ 1.0f };
@@ -82,6 +85,11 @@ struct UniformBufferObject {
     alignas(16) glm::vec4 temporalControls{ 0.0f };
     alignas(16) glm::vec4 temporalResolveControls{ 0.0f };
     alignas(16) glm::vec4 temporalRejectionControls{ 0.0f };
+    // x: skybox enabled, y: intensity, z: visible LOD, w: 1 pre-temporal, 2 hybrid post-stable sky.
+    alignas(16) glm::vec4 environmentControls{ 0.0f, 1.0f, 0.0f, 0.0f };
+    // x: maximum valid local-probe LOD, y: mip count, z: prefilter readiness, w: reserved.
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes>
+        reflectionProbeMipControls{};
 };
 
 struct GpuLocalLightRecord {
@@ -145,6 +153,10 @@ struct LocalShadowBufferObject {
     alignas(16) glm::uvec4 atlasInfo2{ 0u };
     alignas(16) glm::vec4 filterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
     alignas(16) glm::vec4 softShadowControls{ 0.0f };
+    alignas(16) glm::vec4 pointFilterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
+    alignas(16) glm::vec4 spotFilterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
+    alignas(16) glm::vec4 rectFilterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
+    alignas(16) glm::vec4 kindSoftShadowControls{ 0.0f };
     alignas(16) std::array<GpuLocalShadowTileRecord, kMaxFrameLocalShadowTiles> tiles{};
 };
 
@@ -199,8 +211,8 @@ static_assert(
     sizeof(UniformBufferObject) ==
         sizeof(glm::mat4) * 7 +
         sizeof(glm::vec4) *
-            (28 + kMaxFrameReflectionProbes *
-                (4 + kReflectionProbeDiffuseLobeCount)),
+            (30 + kMaxFrameReflectionProbes *
+                (5 + kReflectionProbeDiffuseLobeCount)),
     "UniformBufferObject layout must match the shader uniform block"
 );
 
@@ -252,7 +264,7 @@ static_assert(
 static_assert(
     sizeof(LocalShadowBufferObject) ==
         sizeof(glm::uvec4) * 2 +
-        sizeof(glm::vec4) * 2 +
+        sizeof(glm::vec4) * 6 +
         sizeof(GpuLocalShadowTileRecord) * kMaxFrameLocalShadowTiles,
     "LocalShadowBufferObject layout must match the shader storage buffer"
 );

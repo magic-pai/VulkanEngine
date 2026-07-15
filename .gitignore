@@ -9,3 +9,6 @@ build/
 __pycache__/
 *.pyc
 nul
+.selfengine/
+tmp/
+tools/downloads/

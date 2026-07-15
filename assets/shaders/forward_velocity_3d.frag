@@ -7,6 +7,7 @@ layout(location = 3) in vec3 fragWorldPosition;
 layout(location = 4) in vec4 fragTangent;
 layout(location = 5) in vec4 fragCurrentClip;
 layout(location = 6) in vec4 fragPreviousClip;
+layout(location = 7) in float fragBonePaletteDiagnostic;
 
 layout(location = 0) out vec2 outVelocity;
 
@@ -108,7 +109,7 @@ void main() {
     vec4 pbrFactors = hasMaterialRecord ? materialRecord.pbrFactors : vec4(1.0, 1.0, 0.0, 0.0);
     float alphaMode = pbrFactors.z;
     float alphaCutoff = clamp(pbrFactors.w, 0.0, 1.0);
-    if (HasTextureFlag(textureFlags, 64.0)) {
+    if (HasTextureFlag(textureFlags, 64.0) && alphaMode > 0.5) {
         materialAlpha *= clamp(texture(opacitySampler, materialUv).r, 0.0, 1.0);
     }
     if (alphaMode > 0.5 && alphaMode < 1.5 && materialAlpha < alphaCutoff) {
@@ -121,4 +122,5 @@ void main() {
     vec2 currentNdc = fragCurrentClip.xy / max(abs(fragCurrentClip.w), 0.000001);
     vec2 previousNdc = fragPreviousClip.xy / max(abs(fragPreviousClip.w), 0.000001);
     outVelocity = currentNdc * 0.5 + 0.5 - (previousNdc * 0.5 + 0.5);
+    outVelocity += vec2(fragBonePaletteDiagnostic * 0.0);
 }

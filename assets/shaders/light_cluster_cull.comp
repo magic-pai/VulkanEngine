@@ -25,6 +25,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 probeGridSizeBlend;
     vec4 autoExposureControls; vec4 sharpeningControls;
     vec4 colorGradingLutControls;
+    vec4 debugControls;
 } frame;
 
 struct LocalLightRecord { vec4 positionRadius; vec4 colorIntensity; vec4 directionType; vec4 parameters; };

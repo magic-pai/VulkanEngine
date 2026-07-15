@@ -10,6 +10,8 @@ namespace se {
 
 class VulkanMaterial;
 class VulkanMesh;
+class VulkanDevice;
+class VulkanPhysicalDevice;
 
 class VulkanRenderResources2D {
 public:
@@ -28,6 +30,13 @@ public:
     void RegisterMesh(std::string id, const VulkanMesh& mesh);
     void RegisterMaterial(std::string id, VulkanMaterial& material);
     void RegisterBonePalette(std::string id, BonePaletteResource palette);
+    void UpdateBonePalette(
+        std::string_view id,
+        std::vector<glm::mat4> previousPalette,
+        std::vector<glm::mat4> currentPalette,
+        u32 changedEntryCount,
+        u32 ready
+    );
     void UpdateBonePaletteDescriptor(
         std::string_view id,
         VkDescriptorSet descriptorSet,
@@ -45,6 +54,11 @@ public:
     bool ContainsBonePalette(std::string_view id) const;
 
     std::vector<const VulkanMaterial*> Materials() const;
+    bool RecreateMaterialSamplers(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        f32 mipLodBias
+    ) const;
 
     // LOD support
     void RegisterMeshLodChain(std::string_view baseMeshId, const MeshLodChain& chain);

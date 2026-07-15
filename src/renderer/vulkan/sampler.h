@@ -12,7 +12,8 @@ public:
     VulkanSampler(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        u32 mipLevels
+        u32 mipLevels,
+        f32 mipLodBias = 0.0f
     );
     ~VulkanSampler();
 
@@ -20,10 +21,12 @@ public:
     SE_DISABLE_MOVE(VulkanSampler);
 
     VkSampler Handle() const;
+    f32 MipLodBias() const;
     void Recreate(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        u32 mipLevels
+        u32 mipLevels,
+        f32 mipLodBias = 0.0f
     );
     void Release();
 
@@ -31,12 +34,14 @@ private:
     void CreateSampler(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        u32 mipLevels
+        u32 mipLevels,
+        f32 mipLodBias
     );
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     VkSampler m_Sampler = VK_NULL_HANDLE;
+    f32 m_MipLodBias = 0.0f;
 };
 
 }
