@@ -209,6 +209,7 @@ struct CapturedSceneCaptureAudit {
     u32 captureDrawCount = 0;
     u32 captureVisibleCount = 0;
     u32 captureCulledCount = 0;
+    u32 captureFaceOrientationMask = 0;
     u32 mipGenerationCount = 0;
     u32 ggxPrefilterDispatchCount = 0;
     u32 ggxPrefilterSampleCount = 0;
@@ -261,6 +262,7 @@ struct CapturedSceneCaptureAudit {
     bool rasterizedGeometry = false;
     bool gpuResourcesAllocated = false;
     bool gpuCaptureInProgress = false;
+    bool captureFaceOrientationValid = false;
     bool mipChainReady = false;
     bool ggxPrefilterReady = false;
     bool ggxPrefilterFallbackActive = false;
@@ -325,6 +327,11 @@ public:
         i32 probeSceneIndex,
         VkCommandBuffer commandBuffer,
         CapturedReflectionProbeFilteringSettings filteringSettings
+    );
+    void RecordGpuCapturedSceneFaceOrientation(
+        i32 probeSceneIndex,
+        u32 face,
+        bool valid
     );
     void RecordGpuCapturedSceneDiffuseIrradiance(
         i32 probeSceneIndex,

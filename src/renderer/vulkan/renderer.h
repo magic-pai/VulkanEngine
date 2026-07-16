@@ -294,6 +294,9 @@ struct FrameReflectionProbeSet {
     u32 selectedBoxProjectionMask = 0;
     u32 selectedSceneOwnedMask = 0;
     u32 selectedPositiveInfluenceMask = 0;
+    u32 selectedProbeDuplicateIndexMask = 0;
+    u32 selectedCaptureMipReadyMask = 0;
+    u32 spatialContractFailureMask = 0;
     u32 blendWeightNormalizationFallbackCount = 0;
     u32 capturedSceneRequestedCount = 0;
     u32 capturedScenePlaceholderAllocatedCount = 0;
@@ -305,10 +308,12 @@ struct FrameReflectionProbeSet {
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
     f32 normalizedBlendWeightSum = 0.0f;
+    f32 normalizedBlendWeightError = 0.0f;
     bool fallbackEnabled = false;
     bool boxProjectionEnabled = false;
     bool parallaxCorrectionEnabled = false;
     bool multiBlendEnabled = false;
+    bool spatialContractValid = false;
     u32 influenceMode = 0;
     bool captureResourceReady = false;
     bool captureDescriptorBound = false;

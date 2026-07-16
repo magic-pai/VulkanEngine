@@ -189,6 +189,24 @@ function Test-AnyMask {
     return $false
 }
 
+function Test-AllMasksSubset {
+    param(
+        [Parameter(Mandatory = $true)]$Rows,
+        [Parameter(Mandatory = $true)][string]$SubsetName,
+        [Parameter(Mandatory = $true)][string]$SupersetName
+    )
+
+    foreach ($row in $Rows) {
+        $subset = Get-Number -Row $row -Name $SubsetName
+        $superset = Get-Number -Row $row -Name $SupersetName
+        if ([double]::IsNaN($subset) -or [double]::IsNaN($superset) -or
+            (([int]$subset -band (-bnot [int]$superset)) -ne 0)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Test-AnyPersistentShadowCacheHit {
     param([Parameter(Mandatory = $true)]$Rows)
 
@@ -283,6 +301,7 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_capture_draw_count",
         "reflection_probe_captured_scene_capture_visible_count",
         "reflection_probe_captured_scene_capture_culled_count",
+        "reflection_probe_captured_scene_capture_face_orientation_mask",
         "reflection_probe_captured_scene_mip_generation_count",
         "reflection_probe_captured_scene_ggx_prefilter_dispatch_count",
         "reflection_probe_captured_scene_ggx_prefilter_sample_count",
@@ -352,6 +371,7 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_rasterized_geometry",
         "reflection_probe_captured_scene_gpu_resources_allocated",
         "reflection_probe_captured_scene_gpu_capture_in_progress",
+        "reflection_probe_captured_scene_capture_face_orientation_valid",
         "reflection_probe_captured_scene_mip_chain_ready",
         "reflection_probe_captured_scene_ggx_prefilter_ready",
         "reflection_probe_captured_scene_ggx_prefilter_fallback_active",
@@ -371,6 +391,16 @@ function New-ReflectionCaptureReport {
         "reflection_probe_selected_capture_mip_count_0",
         "reflection_probe_selected_capture_mip_count_1",
         "reflection_probe_selected_capture_mip_count_2",
+        "reflection_probe_selected_probe_count",
+        "reflection_probe_max_blend_weight",
+        "reflection_probe_normalized_blend_weight_sum",
+        "reflection_probe_normalized_blend_weight_error",
+        "reflection_probe_selected_probe_mask",
+        "reflection_probe_selected_box_projection_mask",
+        "reflection_probe_selected_probe_duplicate_index_mask",
+        "reflection_probe_selected_capture_mip_ready_mask",
+        "reflection_probe_spatial_contract_failure_mask",
+        "reflection_probe_spatial_contract_valid",
         "reflection_probe_captured_scene_upload_count",
         "reflection_probe_captured_scene_refresh_check_count",
         "reflection_probe_captured_scene_refresh_performed",
@@ -433,6 +463,13 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "six cubemap faces declared" `
         -Passed ($metrics["reflection_probe_captured_scene_face_count"].max -eq 6) `
         -Actual $metrics["reflection_probe_captured_scene_face_count"].max -Expected 6
+    Add-BooleanCheck -Checks $checks -Area "spatial" -Name "all cubemap faces use canonical capture orientation" `
+        -Passed (
+            $metrics["reflection_probe_captured_scene_capture_face_orientation_mask"].max -eq 63 -and
+            $metrics["reflection_probe_captured_scene_capture_face_orientation_valid"].max -eq 1
+        ) `
+        -Actual "mask=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_capture_face_orientation_mask'].max, 16)),valid=$($metrics['reflection_probe_captured_scene_capture_face_orientation_valid'].max)" `
+        -Expected "mask=0x3F,valid=1"
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "rasterized geometry is explicit" `
         -Passed ($metrics["reflection_probe_captured_scene_rasterized_geometry"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_rasterized_geometry"].max -Expected 1
@@ -649,6 +686,24 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "sampled diffuse irradiance map matches its producer probe" `
         -Passed ($metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -gt 0) `
         -Actual $metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -Expected "non-zero mask"
+    Add-BooleanCheck -Checks $checks -Area "spatial" -Name "selected probes have unique identities" `
+        -Passed ($metrics["reflection_probe_selected_probe_duplicate_index_mask"].max -eq 0) `
+        -Actual "0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_probe_duplicate_index_mask'].max, 16))" `
+        -Expected 0
+    Add-BooleanCheck -Checks $checks -Area "spatial" -Name "reflection blend weights remain normalized" `
+        -Passed ($metrics["reflection_probe_normalized_blend_weight_error"].max -le 0.001) `
+        -Actual $metrics["reflection_probe_normalized_blend_weight_error"].max -Expected "<= 0.001"
+    Add-BooleanCheck -Checks $checks -Area "spatial" -Name "box-projection mask is a selected-probe subset" `
+        -Passed (Test-AllMasksSubset -Rows $rows -SubsetName "reflection_probe_selected_box_projection_mask" -SupersetName "reflection_probe_selected_probe_mask") `
+        -Actual "box=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_box_projection_mask'].max, 16)),selected=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_probe_mask'].max, 16))" `
+        -Expected "box mask subset of selected mask"
+    Add-BooleanCheck -Checks $checks -Area "spatial" -Name "reflection spatial contract is valid" `
+        -Passed (
+            $metrics["reflection_probe_spatial_contract_valid"].min -eq 1 -and
+            $metrics["reflection_probe_spatial_contract_failure_mask"].max -eq 0
+        ) `
+        -Actual "valid=$($metrics['reflection_probe_spatial_contract_valid'].min)..$($metrics['reflection_probe_spatial_contract_valid'].max),failure=0x$([Convert]::ToString([int]$metrics['reflection_probe_spatial_contract_failure_mask'].max, 16))" `
+        -Expected "valid=1,failure=0"
     $captureUploadEvidence = if ($Mode -eq "multi" -or $Mode -eq "rect-off" -or $Mode -eq "persistent-hit" -or $Mode -eq "persistent-off") {
         $metrics["reflection_probe_captured_scene_upload_count"].max
     } else {
@@ -846,6 +901,22 @@ function New-ReflectionCaptureReport {
             -Actual "enabled=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_enabled'].max),capacity/resources/evictions=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_capacity'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_resource_count'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_eviction_count'].max),probes=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1'].max),signatures=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_input_signature_0'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_input_signature_1'].max)" `
             -Expected "enabled=1, capacity/resources=2, evictions>=1, distinct probe owners, nonzero signatures"
     }
+    "spatial" {
+        Add-BooleanCheck -Checks $checks -Area "spatial" -Name "LightingShowcase traversal advances camera time" `
+            -Passed ($metrics["benchmark_camera_motion_time_seconds"].max -gt 0.0) `
+            -Actual $metrics["benchmark_camera_motion_time_seconds"].max -Expected "> 0"
+        Add-BooleanCheck -Checks $checks -Area "spatial" -Name "traversal keeps three captured probes ready" `
+            -Passed (
+                $metrics["reflection_probe_selected_probe_count"].max -ge 3 -and
+                $metrics["reflection_probe_captured_scene_ready_probe_count"].max -ge 3 -and
+                (($metrics["reflection_probe_selected_capture_mip_ready_mask"].max -band 7) -eq 7)
+            ) `
+            -Actual "selected=$($metrics['reflection_probe_selected_probe_count'].max),ready=$($metrics['reflection_probe_captured_scene_ready_probe_count'].max),mips=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_capture_mip_ready_mask'].max, 16))" `
+            -Expected "selected/ready>=3,mip-ready mask includes 0x7"
+        Add-BooleanCheck -Checks $checks -Area "spatial" -Name "camera traversal changes resolved probe blend" `
+            -Passed ($metrics["reflection_probe_max_blend_weight"].delta -gt 0.0001) `
+            -Actual $metrics["reflection_probe_max_blend_weight"].delta -Expected "> 0.0001"
+    }
     }
 
     $passCount = @($checks | Where-Object { $_.status -eq "pass" }).Count
@@ -899,6 +970,10 @@ $managedKeys = @(
     "SE_FORWARD3D_AA_MODE",
     "SE_RENDER_VIEW",
     "SE_BENCHMARK_CAMERA_MOTION",
+    "SE_BENCHMARK_CAMERA_MOTION_SPEED",
+    "SE_BENCHMARK_CAMERA_MOTION_YAW",
+    "SE_BENCHMARK_CAMERA_MOTION_PITCH",
+    "SE_BENCHMARK_CAMERA_MOTION_DISTANCE",
     "SE_BENCHMARK_OBJECT_MOTION",
     "SE_REFLECTION_CAPTURE_CAMERA_INVARIANT_CONTROL",
     "SE_REFLECTION_PROBE_CAPTURE_SOURCE",
@@ -1072,6 +1147,23 @@ $laneSpecs = @(
             SE_BENCHMARK_SCENE = "lighting-showcase"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "spatial-blend-traversal"
+        mode = "spatial"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_BENCHMARK_CAMERA_MOTION = "1"
+            SE_BENCHMARK_CAMERA_MOTION_SPEED = "5.0"
+            SE_BENCHMARK_CAMERA_MOTION_YAW = "1.35"
+            SE_BENCHMARK_CAMERA_MOTION_PITCH = "0.18"
+            SE_BENCHMARK_CAMERA_MOTION_DISTANCE = "4.5"
+            SE_BENCHMARK_WARMUP_FRAMES = "8"
+            SE_BENCHMARK_FRAMES = "60"
+            SE_AUTO_EXIT_FRAMES = "74"
         }
     },
     [pscustomobject]@{

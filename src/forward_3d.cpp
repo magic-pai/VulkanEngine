@@ -4822,8 +4822,9 @@ int main() {
     ) {
         ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
     }
-    const bool benchmarkCameraMotionRequested =
-        !useBenchmarkScene && BenchmarkCameraMotionRequested();
+    // An explicit benchmark camera path is valid for every scene type. The
+    // normal benchmark camera remains fixed unless this opt-in is supplied.
+    const bool benchmarkCameraMotionRequested = BenchmarkCameraMotionRequested();
     const bool cameraFreezeRequested =
         EnvironmentFlagEnabled("SE_CAMERA_FREEZE") ||
         EnvironmentFlagEnabled("SE_FREEZE_CAMERA");
@@ -5186,58 +5187,58 @@ int main() {
         }
 
         const float clampedDeltaSeconds = std::clamp(deltaSeconds, 0.0f, 0.05f);
-        if (!useBenchmarkScene || showcaseCameraControlsEnabled) {
-            if (!cameraFreezeRequested) {
-                if (benchmarkCameraMotionRequested) {
-                    benchmarkCameraMotionTime = std::max(elapsedSeconds, 0.0f);
-                    ApplyBenchmarkCameraMotion(camera, benchmarkCameraMotionTime);
-                } else {
-                    camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
-                    HandleScenePicking(
-                        app.WindowHandle(),
-                        camera,
-                        scene,
-                        clampedDeltaSeconds,
-                        pickClickState
-                    );
-                }
-                if (
-                    !lightingShowcaseSceneRequested &&
-                    !shadowRegressionSceneRequested &&
-                    !bridgeLights.anyApplied &&
-                    !reflectionCaptureCameraInvariantControl
-                ) {
-                    ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
-                }
+        if (!cameraFreezeRequested &&
+            (benchmarkCameraMotionRequested ||
+                !useBenchmarkScene || showcaseCameraControlsEnabled)) {
+            if (benchmarkCameraMotionRequested) {
+                benchmarkCameraMotionTime = std::max(elapsedSeconds, 0.0f);
+                ApplyBenchmarkCameraMotion(camera, benchmarkCameraMotionTime);
+            } else {
+                camera.Update(app.WindowHandle(), clampedDeltaSeconds, ImGuiWantsMouse());
+                HandleScenePicking(
+                    app.WindowHandle(),
+                    camera,
+                    scene,
+                    clampedDeltaSeconds,
+                    pickClickState
+                );
             }
-            if (benchmarkObjectMotionRequested) {
-                benchmarkObjectMotionTime = std::max(elapsedSeconds, 0.0f);
-                for (std::size_t movingObjectIndex = 0;
-                     movingObjectIndex < benchmarkMovingObjects.size();
-                     ++movingObjectIndex) {
-                    const BenchmarkMovingObject& movingObject =
-                        benchmarkMovingObjects[movingObjectIndex];
-                    if (movingObject.renderable == nullptr) {
-                        continue;
-                    }
+            if (
+                !lightingShowcaseSceneRequested &&
+                !shadowRegressionSceneRequested &&
+                !bridgeLights.anyApplied &&
+                !reflectionCaptureCameraInvariantControl
+            ) {
+                ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
+            }
+        }
+        if (benchmarkObjectMotionRequested) {
+            benchmarkObjectMotionTime = std::max(elapsedSeconds, 0.0f);
+            for (std::size_t movingObjectIndex = 0;
+                 movingObjectIndex < benchmarkMovingObjects.size();
+                 ++movingObjectIndex) {
+                const BenchmarkMovingObject& movingObject =
+                    benchmarkMovingObjects[movingObjectIndex];
+                if (movingObject.renderable == nullptr) {
+                    continue;
+                }
 
-                    if (benchmarkObjectMotionMode == BenchmarkObjectMotionMode::Articulated) {
-                        ApplyBenchmarkArticulatedObjectMotion(
-                            *movingObject.renderable,
-                            movingObject.basePosition,
-                            movingObject.baseRotationDegrees,
-                            benchmarkObjectMotionTime,
-                            movingObjectIndex,
-                            benchmarkMovingObjects.size()
-                        );
-                    } else {
-                        ApplyBenchmarkObjectMotion(
-                            *movingObject.renderable,
-                            movingObject.basePosition,
-                            movingObject.baseRotationDegrees,
-                            benchmarkObjectMotionTime
-                        );
-                    }
+                if (benchmarkObjectMotionMode == BenchmarkObjectMotionMode::Articulated) {
+                    ApplyBenchmarkArticulatedObjectMotion(
+                        *movingObject.renderable,
+                        movingObject.basePosition,
+                        movingObject.baseRotationDegrees,
+                        benchmarkObjectMotionTime,
+                        movingObjectIndex,
+                        benchmarkMovingObjects.size()
+                    );
+                } else {
+                    ApplyBenchmarkObjectMotion(
+                        *movingObject.renderable,
+                        movingObject.basePosition,
+                        movingObject.baseRotationDegrees,
+                        benchmarkObjectMotionTime
+                    );
                 }
             }
         } else if (animateBenchmarkPartialLocalShadowCache) {

@@ -3217,6 +3217,8 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.captureDrawCount = 0u;
     resource.audit.captureVisibleCount = 0u;
     resource.audit.captureCulledCount = 0u;
+    resource.audit.captureFaceOrientationMask = 0u;
+    resource.audit.captureFaceOrientationValid = false;
     resource.audit.mipGenerationCount = 0u;
     resource.audit.ggxPrefilterDispatchCount = 0u;
     resource.audit.ggxPrefilterSampleCount = 0u;
@@ -3367,6 +3369,10 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         audit.captureDrawCount = previousAudit.captureDrawCount;
         audit.captureVisibleCount = previousAudit.captureVisibleCount;
         audit.captureCulledCount = previousAudit.captureCulledCount;
+        audit.captureFaceOrientationMask =
+            previousAudit.captureFaceOrientationMask;
+        audit.captureFaceOrientationValid =
+            previousAudit.captureFaceOrientationValid;
         audit.mipGenerationCount = previousAudit.mipGenerationCount;
         audit.ggxPrefilterDispatchCount =
             previousAudit.ggxPrefilterDispatchCount;
@@ -3636,6 +3642,23 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         0u,
         6u
     );
+}
+
+void VulkanReflectionProbeResources::RecordGpuCapturedSceneFaceOrientation(
+    i32 probeSceneIndex,
+    u32 face,
+    bool valid
+) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || !resource->captureInProgress ||
+        face != resource->nextFace || face >= 6u) {
+        return;
+    }
+
+    if (valid) {
+        resource->audit.captureFaceOrientationMask |= 1u << face;
+    }
 }
 
 void VulkanReflectionProbeResources::RecordGpuCapturedSceneDiffuseIrradiance(
@@ -3913,6 +3936,8 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.captureCulledCount += culledCount;
     resource->audit.facesRendered = resource->facesRendered;
     resource->audit.facesPending = 6u - resource->facesRendered;
+    resource->audit.captureFaceOrientationValid =
+        resource->audit.captureFaceOrientationMask == 0x3fu;
 
     if (!captureComplete || resource->facesRendered != 6u) {
         return;

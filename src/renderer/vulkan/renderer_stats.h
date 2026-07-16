@@ -362,6 +362,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneCaptureDrawCount = 0;
     u32 capturedSceneCaptureVisibleCount = 0;
     u32 capturedSceneCaptureCulledCount = 0;
+    u32 capturedSceneCaptureFaceOrientationMask = 0;
     u32 capturedSceneMipGenerationCount = 0;
     u32 capturedSceneGgxPrefilterDispatchCount = 0;
     u32 capturedSceneGgxPrefilterSampleCount = 0;
@@ -432,6 +433,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneRasterizedGeometry = 0;
     u32 capturedSceneGpuResourcesAllocated = 0;
     u32 capturedSceneGpuCaptureInProgress = 0;
+    u32 capturedSceneCaptureFaceOrientationValid = 0;
     u32 capturedSceneMipChainReady = 0;
     u32 capturedSceneGgxPrefilterReady = 0;
     u32 capturedSceneGgxPrefilterFallbackActive = 0;
@@ -528,8 +530,13 @@ struct RendererReflectionProbeStats {
     f32 maxBlendWeight = 0.0f;
     f32 totalBlendWeight = 0.0f;
     f32 normalizedBlendWeightSum = 0.0f;
+    f32 normalizedBlendWeightError = 0.0f;
     std::array<f32, kMaxFrameReflectionProbes> selectedBlendWeights{};
     std::array<f32, kMaxFrameReflectionProbes> selectedNormalizedBlendWeights{};
+    u32 selectedProbeDuplicateIndexMask = 0;
+    u32 selectedCaptureMipReadyMask = 0;
+    u32 spatialContractFailureMask = 0;
+    u32 spatialContractValid = 0;
     u32 multiBlendEnabled = 0;
     u32 localEnabled = 0;
     u32 localSceneOwned = 0;

@@ -1696,3 +1696,33 @@ Validation:
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_capture_filter_quality` passed `578 pass / 0 warn / 0 fail`.
 - Default Medium reported `quality/samples/dispatches = 2/64/8`; LightingShowcase High reported `3/128/8` across three probe resources; Off reported `0/1/8`, mip ready `1`, GGX ready `0`, fallback `1`.
 - User accepted the single normal `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Reflection-Probe Spatial Contracts Need Traversal Evidence
+
+Symptom:
+- Per-probe resources and filtering were individually correct, but there was no data proof that six capture faces used the expected cubemap axes or that multi-probe selection stayed spatially coherent while the camera moved.
+
+False leads:
+- Treating a visually plausible static LightingShowcase frame as proof of cubemap orientation or blend correctness.
+- Checking resource-view uniqueness without checking selected probe identity, blend normalization, box-projection masks, and usable roughness mips together.
+
+Cause:
+- The probe pipeline had producer/consumer audits, but no single spatial contract spanning capture orientation, selected-probe identity, blend normalization, box-projection membership, and camera traversal.
+
+Control test:
+- The Debug-only `spatial-blend-traversal` lane moves the camera through LightingShowcase with three captured probes and requires the resolved blend to vary.
+
+Fix:
+- Validate and record each canonical cubemap face orientation at capture time.
+- Publish a per-frame spatial contract with duplicate scene-index mask, normalized blend error, box-projection subset check, and selected roughness-mip readiness mask.
+- Extend `Test-ReflectionCaptureHealth.ps1` with strict generic assertions and the LightingShowcase traversal lane; explicit benchmark camera motion now works in all scene types without changing normal camera behavior.
+
+Prevention:
+- Do not accept multi-probe reflection changes from a static screenshot alone. Require capture-axis, identity, normalization, resource-readiness, and movement-driven blend evidence before visual review.
+- Keep camera traversal opt-in through `SE_BENCHMARK_CAMERA_MOTION`; scene type must not silently disable an explicit diagnostic control.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and both signed binaries verified valid.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_probe_spatial` passed `694 pass / 0 warn / 0 fail`.
+- Traversal reports canonical orientation `0x3F`, three selected/ready probes, mip-ready mask `0x7`, duplicate/failure masks `0x0`, blend error `1.19209e-7`, and blend delta `0.02769`.
+- User accepted the single normal `SelfEngineLightingShowcase` visual window.

@@ -2948,7 +2948,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedCaptureMipCounts[3]
     );
     ImGui::Text(
-        "Captured scene GPU progress: resources %s, faces %u/%u pending %u, pass/draw/visible/culled %u/%u/%u/%u, mip %u ready %s, last face %u",
+        "Captured scene GPU progress: resources %s, faces %u/%u pending %u, pass/draw/visible/culled %u/%u/%u/%u, orientation 0x%X %s, mip %u ready %s, last face %u",
         stats.reflectionProbe.capturedSceneGpuResourcesAllocated ? "ready" : "off",
         stats.reflectionProbe.capturedSceneFacesRendered,
         stats.reflectionProbe.capturedSceneFaceCount,
@@ -2957,6 +2957,10 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneCaptureDrawCount,
         stats.reflectionProbe.capturedSceneCaptureVisibleCount,
         stats.reflectionProbe.capturedSceneCaptureCulledCount,
+        stats.reflectionProbe.capturedSceneCaptureFaceOrientationMask,
+        stats.reflectionProbe.capturedSceneCaptureFaceOrientationValid
+            ? "valid"
+            : "pending",
         stats.reflectionProbe.capturedSceneMipGenerationCount,
         stats.reflectionProbe.capturedSceneMipChainReady ? "ready" : "pending",
         stats.reflectionProbe.capturedSceneLastCapturedFace
@@ -3023,12 +3027,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.influenceMode
     );
     ImGui::Text(
-        "Reflection blend masks: selected 0x%X, box 0x%X, scene 0x%X, influence 0x%X, normalized %.3f, fallback %u, weights [%.3f %.3f %.3f %.3f]",
+        "Reflection blend masks: selected 0x%X, box 0x%X, scene 0x%X, influence 0x%X, normalized %.3f err %.5f, contract %s fail 0x%X duplicate 0x%X mip-ready 0x%X, fallback %u, weights [%.3f %.3f %.3f %.3f]",
         stats.reflectionProbe.selectedProbeMask,
         stats.reflectionProbe.selectedBoxProjectionMask,
         stats.reflectionProbe.selectedSceneOwnedMask,
         stats.reflectionProbe.selectedPositiveInfluenceMask,
         stats.reflectionProbe.normalizedBlendWeightSum,
+        stats.reflectionProbe.normalizedBlendWeightError,
+        stats.reflectionProbe.spatialContractValid ? "valid" : "invalid",
+        stats.reflectionProbe.spatialContractFailureMask,
+        stats.reflectionProbe.selectedProbeDuplicateIndexMask,
+        stats.reflectionProbe.selectedCaptureMipReadyMask,
         stats.reflectionProbe.blendWeightNormalizationFallbackCount,
         stats.reflectionProbe.selectedNormalizedBlendWeights[0],
         stats.reflectionProbe.selectedNormalizedBlendWeights[1],

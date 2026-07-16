@@ -579,6 +579,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneCaptureDrawCount << ','
         << reflectionProbe.capturedSceneCaptureVisibleCount << ','
         << reflectionProbe.capturedSceneCaptureCulledCount << ','
+        << reflectionProbe.capturedSceneCaptureFaceOrientationMask << ','
         << reflectionProbe.capturedSceneMipGenerationCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
@@ -648,6 +649,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneRasterizedGeometry << ','
         << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
         << reflectionProbe.capturedSceneGpuCaptureInProgress << ','
+        << reflectionProbe.capturedSceneCaptureFaceOrientationValid << ','
         << reflectionProbe.capturedSceneMipChainReady << ','
         << reflectionProbe.capturedSceneGgxPrefilterReady << ','
         << reflectionProbe.capturedSceneGgxPrefilterFallbackActive << ','
@@ -762,11 +764,16 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.maxBlendWeight << ','
         << reflectionProbe.totalBlendWeight << ','
         << reflectionProbe.normalizedBlendWeightSum << ','
+        << reflectionProbe.normalizedBlendWeightError << ','
         << reflectionProbe.blendWeightNormalizationFallbackCount << ','
         << reflectionProbe.selectedProbeMask << ','
         << reflectionProbe.selectedBoxProjectionMask << ','
         << reflectionProbe.selectedSceneOwnedMask << ','
         << reflectionProbe.selectedPositiveInfluenceMask << ','
+        << reflectionProbe.selectedProbeDuplicateIndexMask << ','
+        << reflectionProbe.selectedCaptureMipReadyMask << ','
+        << reflectionProbe.spatialContractFailureMask << ','
+        << reflectionProbe.spatialContractValid << ','
         << reflectionProbe.selectedBlendWeights[0] << ','
         << reflectionProbe.selectedBlendWeights[1] << ','
         << reflectionProbe.selectedBlendWeights[2] << ','
@@ -1623,6 +1630,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_capture_draw_count,"
         << "reflection_probe_captured_scene_capture_visible_count,"
         << "reflection_probe_captured_scene_capture_culled_count,"
+        << "reflection_probe_captured_scene_capture_face_orientation_mask,"
         << "reflection_probe_captured_scene_mip_generation_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
@@ -1692,6 +1700,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_rasterized_geometry,"
         << "reflection_probe_captured_scene_gpu_resources_allocated,"
         << "reflection_probe_captured_scene_gpu_capture_in_progress,"
+        << "reflection_probe_captured_scene_capture_face_orientation_valid,"
         << "reflection_probe_captured_scene_mip_chain_ready,"
         << "reflection_probe_captured_scene_ggx_prefilter_ready,"
         << "reflection_probe_captured_scene_ggx_prefilter_fallback_active,"
@@ -1806,11 +1815,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_max_blend_weight,"
         << "reflection_probe_total_blend_weight,"
         << "reflection_probe_normalized_blend_weight_sum,"
+        << "reflection_probe_normalized_blend_weight_error,"
         << "reflection_probe_blend_weight_normalization_fallback_count,"
         << "reflection_probe_selected_probe_mask,"
         << "reflection_probe_selected_box_projection_mask,"
         << "reflection_probe_selected_scene_owned_mask,"
         << "reflection_probe_selected_positive_influence_mask,"
+        << "reflection_probe_selected_probe_duplicate_index_mask,"
+        << "reflection_probe_selected_capture_mip_ready_mask,"
+        << "reflection_probe_spatial_contract_failure_mask,"
+        << "reflection_probe_spatial_contract_valid,"
         << "reflection_probe_selected_blend_weight_0,"
         << "reflection_probe_selected_blend_weight_1,"
         << "reflection_probe_selected_blend_weight_2,"

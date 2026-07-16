@@ -3674,9 +3674,16 @@ void WriteFrameReflectionProbeStats(
     stats.selectedSceneOwnedMask = frameProbes.selectedSceneOwnedMask;
     stats.selectedPositiveInfluenceMask =
         frameProbes.selectedPositiveInfluenceMask;
+    stats.selectedProbeDuplicateIndexMask =
+        frameProbes.selectedProbeDuplicateIndexMask;
+    stats.selectedCaptureMipReadyMask =
+        frameProbes.selectedCaptureMipReadyMask;
+    stats.spatialContractFailureMask = frameProbes.spatialContractFailureMask;
+    stats.spatialContractValid = frameProbes.spatialContractValid ? 1u : 0u;
     stats.blendWeightNormalizationFallbackCount =
         frameProbes.blendWeightNormalizationFallbackCount;
     stats.normalizedBlendWeightSum = frameProbes.normalizedBlendWeightSum;
+    stats.normalizedBlendWeightError = frameProbes.normalizedBlendWeightError;
     stats.capturedSceneRequestedCount =
         frameProbes.capturedSceneRequestedCount;
     stats.capturedScenePlaceholderAllocatedCount =
@@ -5715,6 +5722,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.captureVisibleCount;
     frameStats.reflectionProbe.capturedSceneCaptureCulledCount =
         capturedSceneAudit.captureCulledCount;
+    frameStats.reflectionProbe.capturedSceneCaptureFaceOrientationMask =
+        capturedSceneAudit.captureFaceOrientationMask;
     frameStats.reflectionProbe.capturedSceneMipGenerationCount =
         capturedSceneAudit.mipGenerationCount;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterDispatchCount =
@@ -5863,6 +5872,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.gpuResourcesAllocated ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneGpuCaptureInProgress =
         capturedSceneAudit.gpuCaptureInProgress ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneCaptureFaceOrientationValid =
+        capturedSceneAudit.captureFaceOrientationValid ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneMipChainReady =
         capturedSceneAudit.mipChainReady ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterReady =
@@ -12020,7 +12031,41 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                         probes.normalizedBlendWeightSum += equalWeight;
                     }
                 }
+                probes.normalizedBlendWeightError = std::abs(
+                    probes.normalizedBlendWeightSum - 1.0f
+                );
             }
+
+            for (u32 index = 0; index < probes.selectedProbeCount; ++index) {
+                if (probes.selectedCaptureMipCounts[index] >= 2u) {
+                    probes.selectedCaptureMipReadyMask |= 1u << index;
+                }
+                if (probes.selectedCaptureDescriptorBound[index] &&
+                    probes.selectedCaptureMipCounts[index] == 0u) {
+                    probes.spatialContractFailureMask |= 1u << 3u;
+                }
+                const i32 sceneIndex = probes.selectedProbes[index].sceneIndex;
+                if (sceneIndex < 0) {
+                    continue;
+                }
+                for (u32 previous = 0; previous < index; ++previous) {
+                    if (probes.selectedProbes[previous].sceneIndex == sceneIndex) {
+                        probes.selectedProbeDuplicateIndexMask |=
+                            (1u << previous) | (1u << index);
+                    }
+                }
+            }
+            if (probes.selectedProbeDuplicateIndexMask != 0u) {
+                probes.spatialContractFailureMask |= 1u << 0u;
+            }
+            if (probes.normalizedBlendWeightError > 0.001f) {
+                probes.spatialContractFailureMask |= 1u << 1u;
+            }
+            if ((probes.selectedBoxProjectionMask & ~probes.selectedProbeMask) != 0u) {
+                probes.spatialContractFailureMask |= 1u << 2u;
+            }
+            probes.spatialContractValid =
+                probes.spatialContractFailureMask == 0u;
 
             probes.localProbe = probes.selectedProbes[0];
             probes.selectedSceneProbeIndex = probes.localProbe.sceneIndex;
@@ -12058,6 +12103,7 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
         probes.selectedProbeMask = 1u;
         probes.selectedBlendWeights[0] = settingsProbe.blendStrength;
         probes.selectedNormalizedBlendWeights[0] = 1.0f;
+        probes.normalizedBlendWeightError = 0.0f;
         if (settingsProbe.blendStrength > 0.0001f) {
             probes.selectedPositiveInfluenceMask = 1u;
         }
@@ -12079,6 +12125,37 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                 settingsProbe.sceneIndex
             )
         );
+        if (probes.selectedCaptureResourceReady[0]) {
+            switch (settingsProbe.captureSource) {
+            case RendererReflectionProbeCaptureSource::BuiltInProcedural:
+                probes.selectedCaptureMipCounts[0] =
+                    m_ReflectionProbeResources.MipCount();
+                break;
+            case RendererReflectionProbeCaptureSource::AuthoredCubemap:
+                probes.selectedCaptureMipCounts[0] =
+                    m_ReflectionProbeResources.AuthoredCubemapMipCount(
+                        settingsProbe.captureAssetId
+                    );
+                break;
+            case RendererReflectionProbeCaptureSource::CapturedScene:
+                probes.selectedCaptureMipCounts[0] =
+                    m_ReflectionProbeResources.CapturedSceneMipCount(
+                        settingsProbe.sceneIndex
+                    );
+                break;
+            case RendererReflectionProbeCaptureSource::None:
+                break;
+            }
+        }
+        if (probes.selectedCaptureMipCounts[0] >= 2u) {
+            probes.selectedCaptureMipReadyMask = 1u;
+        }
+        if (probes.selectedCaptureDescriptorBound[0] &&
+            probes.selectedCaptureMipCounts[0] == 0u) {
+            probes.spatialContractFailureMask |= 1u << 3u;
+        }
+        probes.spatialContractValid =
+            probes.spatialContractFailureMask == 0u;
         probes.captureSource = settingsProbe.captureSource;
         probes.refreshPolicy = settingsProbe.refreshPolicy;
         probes.captureResourceReady = probes.selectedCaptureResourceReady[0];
@@ -12949,10 +13026,12 @@ bool VulkanRenderer::EnsureReflectionProbeCapturePipelines() {
     return true;
 }
 
-FrameMatrices VulkanRenderer::ReflectionProbeCaptureMatrices(
-    const RendererReflectionProbe& probe,
-    u32 face
-) const {
+struct ReflectionProbeCaptureFaceAxes {
+    glm::vec3 direction{ 0.0f, 0.0f, 1.0f };
+    glm::vec3 up{ 0.0f, 1.0f, 0.0f };
+};
+
+ReflectionProbeCaptureFaceAxes ReflectionProbeCaptureFaceAxesFor(u32 face) {
     static const std::array<glm::vec3, 6> directions = {
         glm::vec3{ 1.0f, 0.0f, 0.0f },
         glm::vec3{ -1.0f, 0.0f, 0.0f },
@@ -12970,6 +13049,32 @@ FrameMatrices VulkanRenderer::ReflectionProbeCaptureMatrices(
         glm::vec3{ 0.0f, -1.0f, 0.0f }
     };
     const u32 index = std::min<u32>(face, 5u);
+    return ReflectionProbeCaptureFaceAxes{ directions[index], ups[index] };
+}
+
+bool ReflectionProbeCaptureFaceOrientationValid(
+    const FrameMatrices& matrices,
+    const RendererReflectionProbe& probe,
+    u32 face
+) {
+    const ReflectionProbeCaptureFaceAxes axes =
+        ReflectionProbeCaptureFaceAxesFor(face);
+    const glm::mat4 cameraWorld = glm::inverse(matrices.view);
+    const glm::vec3 position = glm::vec3(cameraWorld[3]);
+    const glm::vec3 forward = -glm::normalize(glm::vec3(cameraWorld[2]));
+    const glm::vec3 up = glm::normalize(glm::vec3(cameraWorld[1]));
+    return glm::distance(position, probe.center) <= 0.001f &&
+        glm::dot(forward, axes.direction) >= 0.999f &&
+        glm::dot(up, axes.up) >= 0.999f &&
+        std::abs(glm::dot(forward, up)) <= 0.001f;
+}
+
+FrameMatrices VulkanRenderer::ReflectionProbeCaptureMatrices(
+    const RendererReflectionProbe& probe,
+    u32 face
+) const {
+    const ReflectionProbeCaptureFaceAxes axes =
+        ReflectionProbeCaptureFaceAxesFor(face);
     const f32 farPlane = std::max(
         24.0f,
         std::max(probe.radius * 2.5f, glm::length(probe.boxExtents) * 2.25f)
@@ -12984,7 +13089,7 @@ FrameMatrices VulkanRenderer::ReflectionProbeCaptureMatrices(
         farPlane
     );
     return FrameMatrices{
-        glm::lookAt(probe.center, probe.center + directions[index], ups[index]),
+        glm::lookAt(probe.center, probe.center + axes.direction, axes.up),
         cubemapProjection
     };
 }
@@ -13024,6 +13129,11 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     }
 
     const FrameMatrices matrices = ReflectionProbeCaptureMatrices(probe, face);
+    m_ReflectionProbeResources.RecordGpuCapturedSceneFaceOrientation(
+        probe.sceneIndex,
+        face,
+        ReflectionProbeCaptureFaceOrientationValid(matrices, probe, face)
+    );
     const Frustum frustum = Frustum::FromViewProjection(matrices.proj * matrices.view);
     RenderQueueCullingStats cullingStats{};
     RenderQueueCacheStats cacheStats{};
