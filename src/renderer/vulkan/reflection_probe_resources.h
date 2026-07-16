@@ -211,6 +211,11 @@ struct CapturedSceneCaptureAudit {
     u32 shadowSnapshotBuildFaceMask = 0;
     u32 shadowSnapshotReuseFaceMask = 0;
     i32 shadowSnapshotProbeSceneIndex = -1;
+    i32 shadowSnapshotPersistentCacheSlot = -1;
+    u32 shadowSnapshotPersistentHitCount = 0;
+    u32 shadowSnapshotPersistentCacheResourceCount = 0;
+    u32 shadowSnapshotPersistentCacheEvictionCount = 0;
+    u32 shadowSnapshotInputSignature = 0;
     u32 lastCapturedFace = 0;
     bool resourceReady = false;
     bool refreshRequested = false;
@@ -232,6 +237,8 @@ struct CapturedSceneCaptureAudit {
     bool shadowSnapshotCameraIndependent = false;
     bool shadowSnapshotEnabled = false;
     bool shadowSnapshotFallbackActive = false;
+    bool shadowSnapshotPersistentEnabled = false;
+    bool shadowSnapshotPersistentHit = false;
     bool selectiveInvalidationEnabled = false;
     bool refreshDeferredByBudget = false;
 };
@@ -328,7 +335,13 @@ public:
         u32 savedLocalDrawCount,
         bool ready,
         bool cameraIndependent,
-        bool enabled
+        bool enabled,
+        bool persistentEnabled,
+        bool persistentHit,
+        i32 persistentCacheSlot,
+        u32 persistentCacheResourceCount,
+        u32 persistentCacheEvictionCount,
+        u32 inputSignature
     );
     void CompleteGpuCapturedSceneFace(
         i32 probeSceneIndex,

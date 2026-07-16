@@ -4929,6 +4929,7 @@ VulkanRenderer::~VulkanRenderer() {
     traceStep("begin");
     WaitIdle();
     ResetReflectionCaptureShadowSnapshot();
+    ReleaseReflectionCapturePersistentShadowSnapshots();
     traceStep("wait_idle");
     ShutdownTemporalUpscalerRuntime(m_Device.Handle());
     traceStep("temporal_upscaler_shutdown");
@@ -5782,6 +5783,18 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.shadowSnapshotReuseFaceMask;
     frameStats.reflectionProbe.capturedSceneShadowSnapshotProbeSceneIndex =
         capturedSceneAudit.shadowSnapshotProbeSceneIndex;
+    frameStats.reflectionProbe.capturedSceneShadowSnapshotPersistentCacheSlot =
+        capturedSceneAudit.shadowSnapshotPersistentCacheSlot;
+    frameStats.reflectionProbe.capturedSceneShadowSnapshotPersistentHitCount =
+        capturedSceneAudit.shadowSnapshotPersistentHitCount;
+    frameStats.reflectionProbe
+        .capturedSceneShadowSnapshotPersistentCacheResourceCount =
+        capturedSceneAudit.shadowSnapshotPersistentCacheResourceCount;
+    frameStats.reflectionProbe
+        .capturedSceneShadowSnapshotPersistentCacheEvictionCount =
+        capturedSceneAudit.shadowSnapshotPersistentCacheEvictionCount;
+    frameStats.reflectionProbe.capturedSceneShadowSnapshotInputSignature =
+        capturedSceneAudit.shadowSnapshotInputSignature;
     frameStats.reflectionProbe.capturedSceneShadowSnapshotReady =
         capturedSceneAudit.shadowSnapshotReady ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneShadowSnapshotCameraIndependent =
@@ -5790,6 +5803,31 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.shadowSnapshotEnabled ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneShadowSnapshotFallbackActive =
         capturedSceneAudit.shadowSnapshotFallbackActive ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneShadowSnapshotPersistentEnabled =
+        capturedSceneAudit.shadowSnapshotPersistentEnabled ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneShadowSnapshotPersistentHit =
+        capturedSceneAudit.shadowSnapshotPersistentHit ? 1u : 0u;
+    frameStats.reflectionProbe.capturedScenePersistentShadowCacheCapacity =
+        static_cast<u32>(m_ReflectionCapturePersistentShadowSnapshots.size());
+    frameStats.reflectionProbe.capturedScenePersistentShadowCacheResourceCount =
+        ReflectionCapturePersistentShadowSnapshotCount();
+    frameStats.reflectionProbe.capturedScenePersistentShadowCacheEvictionCount =
+        m_ReflectionCapturePersistentShadowSnapshotEvictionCount;
+    for (std::size_t index = 0;
+         index < m_ReflectionCapturePersistentShadowSnapshots.size();
+         ++index) {
+        const ReflectionCapturePersistentShadowSnapshot& snapshot =
+            m_ReflectionCapturePersistentShadowSnapshots[index];
+        const bool resourceReady = snapshot.directionalShadowMap != nullptr &&
+            snapshot.localShadowAtlas != nullptr &&
+            snapshot.materialDescriptorSets != nullptr;
+        frameStats.reflectionProbe
+            .capturedScenePersistentShadowCacheProbeSceneIndices[index] =
+            resourceReady ? snapshot.snapshot.probeSceneIndex : -1;
+        frameStats.reflectionProbe
+            .capturedScenePersistentShadowCacheInputSignatures[index] =
+            resourceReady ? snapshot.snapshot.inputSignature : 0u;
+    }
     frameStats.reflectionProbe.capturedSceneLastCapturedFace =
         capturedSceneAudit.lastCapturedFace;
     frameStats.reflectionProbe.capturedSceneRasterizedGeometry =
@@ -7394,6 +7432,7 @@ void VulkanRenderer::SetOverlay3DContext(
 
 void VulkanRenderer::RefreshMaterialDescriptors() {
     WaitIdle();
+    ReleaseReflectionCapturePersistentShadowSnapshots();
     std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     m_MaterialDescriptorSets->Recreate(
         m_Device,
@@ -7551,7 +7590,7 @@ bool VulkanRenderer::TemporalVelocityJitteredHistoryPolicyForCurrentMode() const
 }
 
 f32 VulkanRenderer::ActiveMaterialTextureMipLodBias() const {
-    const std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
+    std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
     if (materials.empty() || materials.front() == nullptr) {
         return MaterialTextureMipLodBiasFromEnvironment();
     }
@@ -8328,6 +8367,7 @@ void VulkanRenderer::RecreateSwapchain() {
     m_Window.ResetResizedFlag();
     vkDeviceWaitIdle(m_Device.Handle());
     ResetReflectionCaptureShadowSnapshot();
+    ReleaseReflectionCapturePersistentShadowSnapshots();
 
     m_CommandBuffer->Release();
     if (m_GpuTimer != nullptr) {
@@ -9902,6 +9942,7 @@ void VulkanRenderer::ApplyShadowMapSettings() {
 
     WaitIdle();
     ResetReflectionCaptureShadowSnapshot();
+    ReleaseReflectionCapturePersistentShadowSnapshots();
     m_ShadowGraphicsPipeline->Release();
     if (m_DoubleSidedShadowGraphicsPipeline != nullptr) {
         m_DoubleSidedShadowGraphicsPipeline->Release();
@@ -10073,6 +10114,169 @@ void VulkanRenderer::ResetLocalShadowCacheStates() {
 void VulkanRenderer::ResetReflectionCaptureShadowSnapshot() {
     m_ReflectionCaptureShadowSnapshot = {};
     m_ReflectionCaptureActiveSceneIndex = -1;
+}
+
+void VulkanRenderer::ReleaseReflectionCapturePersistentShadowSnapshots() {
+    for (ReflectionCapturePersistentShadowSnapshot& snapshot :
+        m_ReflectionCapturePersistentShadowSnapshots) {
+        snapshot = {};
+    }
+    m_ReflectionCapturePersistentShadowSnapshotEvictionCount = 0u;
+}
+
+u32 VulkanRenderer::ReflectionCapturePersistentShadowSnapshotCount() const {
+    u32 count = 0u;
+    for (const ReflectionCapturePersistentShadowSnapshot& snapshot :
+        m_ReflectionCapturePersistentShadowSnapshots) {
+        if (snapshot.directionalShadowMap != nullptr &&
+            snapshot.localShadowAtlas != nullptr &&
+            snapshot.materialDescriptorSets != nullptr) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+VulkanRenderer::ReflectionCaptureShadowSnapshot*
+VulkanRenderer::AcquireReflectionCapturePersistentShadowSnapshot(
+    i32 probeSceneIndex
+) {
+    if (probeSceneIndex < 0 ||
+        m_ShadowRenderPass == nullptr ||
+        m_MaterialDescriptorSetLayout == nullptr) {
+        return nullptr;
+    }
+
+    ReflectionCapturePersistentShadowSnapshot* candidate = nullptr;
+    for (ReflectionCapturePersistentShadowSnapshot& snapshot :
+        m_ReflectionCapturePersistentShadowSnapshots) {
+        if (snapshot.snapshot.probeSceneIndex == probeSceneIndex &&
+            snapshot.directionalShadowMap != nullptr &&
+            snapshot.localShadowAtlas != nullptr &&
+            snapshot.materialDescriptorSets != nullptr) {
+            snapshot.lastUsedSchedulerFrame = m_ReflectionCaptureSchedulerFrame;
+            return &snapshot.snapshot;
+        }
+        if (candidate == nullptr && snapshot.snapshot.probeSceneIndex < 0) {
+            candidate = &snapshot;
+        }
+    }
+
+    if (candidate == nullptr) {
+        candidate = &*std::min_element(
+            m_ReflectionCapturePersistentShadowSnapshots.begin(),
+            m_ReflectionCapturePersistentShadowSnapshots.end(),
+            [](const ReflectionCapturePersistentShadowSnapshot& left,
+               const ReflectionCapturePersistentShadowSnapshot& right) {
+                return left.lastUsedSchedulerFrame < right.lastUsedSchedulerFrame;
+            }
+        );
+        if (candidate->snapshot.probeSceneIndex >= 0) {
+            ++m_ReflectionCapturePersistentShadowSnapshotEvictionCount;
+        }
+    }
+
+    *candidate = {};
+    std::vector<const VulkanMaterial*> materials = m_RenderResources.Materials();
+    try {
+        candidate->directionalShadowMap = std::make_unique<VulkanShadowMap>(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            1u,
+            m_ShadowSettings.mapSize
+        );
+        candidate->localShadowAtlas = std::make_unique<VulkanLocalShadowAtlas>(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            1u,
+            LocalShadowAtlasTileSizeFor(m_ShadowSettings),
+            LocalShadowAtlasTileCapacityFor(m_ShadowSettings)
+        );
+        candidate->directionalShadowFramebuffer =
+            std::make_unique<VulkanShadowFramebuffer>(
+                m_Device,
+                *m_ShadowRenderPass,
+                *candidate->directionalShadowMap
+            );
+        candidate->localShadowFramebuffer = std::make_unique<VulkanShadowFramebuffer>(
+            m_Device,
+            *m_ShadowRenderPass,
+            *candidate->localShadowAtlas
+        );
+        candidate->materialDescriptorSets =
+            std::make_unique<VulkanMaterialDescriptorSets>(
+                m_Device,
+                *m_MaterialDescriptorSetLayout,
+                materials,
+                candidate->directionalShadowMap.get(),
+                nullptr,
+                candidate->localShadowAtlas.get()
+            );
+    } catch (...) {
+        *candidate = {};
+        return nullptr;
+    }
+
+    candidate->snapshot.probeSceneIndex = probeSceneIndex;
+    candidate->lastUsedSchedulerFrame = m_ReflectionCaptureSchedulerFrame;
+    return &candidate->snapshot;
+}
+
+i32 VulkanRenderer::ReflectionCapturePersistentShadowSnapshotSlot(
+    const ReflectionCaptureShadowSnapshot* snapshot
+) const {
+    if (snapshot == nullptr) {
+        return -1;
+    }
+    for (std::size_t index = 0;
+         index < m_ReflectionCapturePersistentShadowSnapshots.size();
+         ++index) {
+        if (&m_ReflectionCapturePersistentShadowSnapshots[index].snapshot == snapshot) {
+            return static_cast<i32>(index);
+        }
+    }
+    return -1;
+}
+
+u32 VulkanRenderer::ReflectionCaptureShadowInputSignature(
+    const RendererReflectionProbe& probe,
+    const CapturedSceneCaptureAudit& audit,
+    bool rectShadowEnabled
+) const {
+    u64 signature = 0x0d3a20f4bd7f1c59ull;
+    signature = HashCombine(signature, audit.localLightSignature);
+    signature = HashCombine(signature, audit.geometrySignature);
+    signature = HashCombine(signature, FloatBits(probe.center.x));
+    signature = HashCombine(signature, FloatBits(probe.center.y));
+    signature = HashCombine(signature, FloatBits(probe.center.z));
+    signature = HashCombine(signature, FloatBits(probe.radius));
+    signature = HashCombine(signature, FloatBits(probe.boxExtents.x));
+    signature = HashCombine(signature, FloatBits(probe.boxExtents.y));
+    signature = HashCombine(signature, FloatBits(probe.boxExtents.z));
+    signature = HashCombine(signature, m_ShadowSettings.mapSize);
+    signature = HashCombine(signature, m_ShadowSettings.enabled ? 1u : 0u);
+    signature = HashCombine(
+        signature,
+        m_ShadowSettings.directionalShadowReceiveEnabled ? 1u : 0u
+    );
+    signature = HashCombine(
+        signature,
+        m_ShadowSettings.pointLightShadowEnabled ? 1u : 0u
+    );
+    signature = HashCombine(
+        signature,
+        m_ShadowSettings.spotLightShadowEnabled ? 1u : 0u
+    );
+    signature = HashCombine(
+        signature,
+        m_ShadowSettings.rectLightShadowEnabled ? 1u : 0u
+    );
+    signature = HashCombine(signature, m_ShadowSettings.rectLightShadowSampleTiles);
+    signature = HashCombine(signature, rectShadowEnabled ? 1u : 0u);
+    const u32 folded = static_cast<u32>(signature ^ (signature >> 32u));
+    return folded == 0u ? 1u : folded;
 }
 
 void VulkanRenderer::HandleObjectPicking() {
@@ -12347,7 +12551,8 @@ DirectionalShadowCascadeSet
 VulkanRenderer::BuildReflectionCaptureDirectionalShadow(
     std::span<const RenderCommand> shadowCommands,
     const FrameLightSet& lights,
-    const RendererReflectionProbe& probe
+    const RendererReflectionProbe& probe,
+    u32 mapSize
 ) const {
     DirectionalShadowCascadeSet cascadeSet{};
     if (!m_ShadowSettings.enabled ||
@@ -12394,9 +12599,7 @@ VulkanRenderer::BuildReflectionCaptureDirectionalShadow(
         lights,
         corners,
         cascadeSet.stableSnappingEnabled,
-        m_ReflectionCaptureShadowMap != nullptr
-            ? std::max(m_ReflectionCaptureShadowMap->Extent().width, 1u)
-            : std::max(m_ShadowSettings.mapSize, 1u),
+        std::max(mapSize, 1u),
         &cascade.texelWorldSize
     );
     return cascadeSet;
@@ -12821,23 +13024,78 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         ShadowRenderCommands();
     const bool snapshotEnabled =
         !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF");
+    const bool persistentShadowCacheEnabled = snapshotEnabled &&
+        !EnvironmentFlagEnabled(
+            "SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF"
+        );
+    const bool captureRectShadowEnabled =
+        !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF");
+    ReflectionCaptureShadowSnapshot* persistentShadowSnapshot =
+        persistentShadowCacheEnabled
+            ? AcquireReflectionCapturePersistentShadowSnapshot(probe.sceneIndex)
+            : nullptr;
+    const i32 persistentShadowCacheSlot =
+        ReflectionCapturePersistentShadowSnapshotSlot(persistentShadowSnapshot);
+    ReflectionCapturePersistentShadowSnapshot* persistentShadowResource =
+        persistentShadowCacheSlot >= 0
+            ? &m_ReflectionCapturePersistentShadowSnapshots[
+                static_cast<std::size_t>(persistentShadowCacheSlot)]
+            : nullptr;
+    const bool persistentShadowCacheActive = persistentShadowResource != nullptr;
+    const CapturedSceneCaptureAudit& captureAudit =
+        m_ReflectionProbeResources.CapturedSceneAudit(probe.sceneIndex);
+    const u32 shadowInputSignature = ReflectionCaptureShadowInputSignature(
+        probe,
+        captureAudit,
+        captureRectShadowEnabled
+    );
     const bool snapshotInvalid =
-        !m_ReflectionCaptureShadowSnapshot.built ||
-        m_ReflectionCaptureShadowSnapshot.probeSceneIndex != probe.sceneIndex;
+        !(persistentShadowCacheActive
+            ? persistentShadowResource->snapshot.built
+            : m_ReflectionCaptureShadowSnapshot.built) ||
+        (persistentShadowCacheActive
+            ? persistentShadowResource->snapshot.probeSceneIndex
+            : m_ReflectionCaptureShadowSnapshot.probeSceneIndex) != probe.sceneIndex ||
+        (persistentShadowCacheActive
+            ? persistentShadowResource->snapshot.inputSignature
+            : m_ReflectionCaptureShadowSnapshot.inputSignature) != shadowInputSignature;
     if (snapshotEnabled && face != 0u && snapshotInvalid) {
         return false;
     }
-    const bool buildShadowSnapshot = snapshotEnabled &&
-        (face == 0u || snapshotInvalid);
+    const bool buildShadowSnapshot = snapshotEnabled && snapshotInvalid;
     const bool recordShadowDepthMaps = !snapshotEnabled || buildShadowSnapshot;
     ReflectionCaptureShadowSnapshot transientShadowSnapshot{};
     ReflectionCaptureShadowSnapshot* captureShadowSnapshot = snapshotEnabled
-        ? &m_ReflectionCaptureShadowSnapshot
+        ? persistentShadowCacheActive
+            ? &persistentShadowResource->snapshot
+            : &m_ReflectionCaptureShadowSnapshot
         : &transientShadowSnapshot;
+    const VulkanShadowMap* captureShadowMap = persistentShadowCacheActive
+        ? persistentShadowResource->directionalShadowMap.get()
+        : m_ReflectionCaptureShadowMap.get();
+    const VulkanLocalShadowAtlas* captureLocalShadowAtlas =
+        persistentShadowCacheActive
+            ? persistentShadowResource->localShadowAtlas.get()
+            : m_ReflectionCaptureLocalShadowAtlas.get();
+    const VulkanShadowFramebuffer* captureDirectionalShadowFramebuffer =
+        persistentShadowCacheActive
+            ? persistentShadowResource->directionalShadowFramebuffer.get()
+            : m_ReflectionCaptureShadowFramebuffer.get();
+    const VulkanShadowFramebuffer* captureLocalShadowFramebuffer =
+        persistentShadowCacheActive
+            ? persistentShadowResource->localShadowFramebuffer.get()
+            : m_ReflectionCaptureLocalShadowFramebuffer.get();
+    const VulkanMaterialDescriptorSets* captureMaterialDescriptorSets =
+        persistentShadowCacheActive
+            ? persistentShadowResource->materialDescriptorSets.get()
+            : m_ReflectionCaptureMaterialDescriptorSets.get();
+    const bool persistentShadowCacheHit = persistentShadowCacheActive &&
+        !snapshotInvalid && face == 0u;
 
     if (recordShadowDepthMaps) {
         *captureShadowSnapshot = {};
         captureShadowSnapshot->probeSceneIndex = probe.sceneIndex;
+        captureShadowSnapshot->inputSignature = shadowInputSignature;
         captureShadowSnapshot->directionalRequested =
             m_ShadowSettings.enabled &&
             m_ShadowSettings.strength > 0.001f &&
@@ -12848,23 +13106,25 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
                 ? BuildReflectionCaptureDirectionalShadow(
                     captureShadowCommands,
                     lights,
-                    probe
+                    probe,
+                    captureShadowMap != nullptr
+                        ? captureShadowMap->Extent().width
+                        : m_ShadowSettings.mapSize
                 )
                 : DirectionalShadowCascadeSet{};
         captureShadowSnapshot->directionalAvailable =
             captureShadowSnapshot->directionalRequested &&
             captureShadowSnapshot->directionalShadows.activeCount == 1u &&
-            m_ReflectionCaptureShadowMap != nullptr &&
-            m_ReflectionCaptureShadowFramebuffer != nullptr &&
+            captureShadowMap != nullptr &&
+            captureDirectionalShadowFramebuffer != nullptr &&
             m_ShadowRenderPass != nullptr &&
             m_ShadowGraphicsPipeline != nullptr;
-        captureShadowSnapshot->rectShadowEnabled =
-            !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF");
+        captureShadowSnapshot->rectShadowEnabled = captureRectShadowEnabled;
         captureShadowSnapshot->localShadowTiles = BuildLocalShadowTiles(
             lights,
             captureShadowCommands,
-            m_ReflectionCaptureLocalShadowAtlas != nullptr
-                ? m_ReflectionCaptureLocalShadowAtlas->TileCapacity()
+            captureLocalShadowAtlas != nullptr
+                ? captureLocalShadowAtlas->TileCapacity()
                 : 0u,
             nullptr,
             captureShadowSnapshot->rectShadowEnabled
@@ -12875,8 +13135,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             captureShadowSnapshot->localShadowTiles.assignedCount > 0u;
         captureShadowSnapshot->localAvailable =
             captureShadowSnapshot->localRequested &&
-            m_ReflectionCaptureLocalShadowAtlas != nullptr &&
-            m_ReflectionCaptureLocalShadowFramebuffer != nullptr &&
+            captureLocalShadowAtlas != nullptr &&
+            captureLocalShadowFramebuffer != nullptr &&
             m_ShadowRenderPass != nullptr &&
             m_ShadowGraphicsPipeline != nullptr;
         captureShadowSnapshot->localShadowTileCommandLists =
@@ -12936,10 +13196,11 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         captureShadowSnapshot->directionalAvailable;
     const bool captureLocalShadowRequested = captureShadowSnapshot->localRequested;
     const bool captureLocalShadowAvailable = captureShadowSnapshot->localAvailable;
-    const bool captureRectShadowEnabled =
+    const bool captureRectShadowsApplied =
         captureShadowSnapshot->rectShadowEnabled;
-    const VulkanMaterialDescriptorSets& captureMaterialDescriptorSets =
-        *m_ReflectionCaptureMaterialDescriptorSets;
+    if (captureMaterialDescriptorSets == nullptr) {
+        return false;
+    }
     const FrameMaterialSet captureMaterials = BuildFrameMaterialSet(captureCommands);
     FrameReflectionProbeSet captureProbes{};
     captureProbes.fallbackEnabled = m_ShadowSettings.reflectionProbeFallbackEnabled;
@@ -13040,7 +13301,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
                 *m_ShadowRenderPass,
                 *m_ShadowGraphicsPipeline,
                 m_DoubleSidedShadowGraphicsPipeline.get(),
-                *m_ReflectionCaptureShadowFramebuffer,
+                *captureDirectionalShadowFramebuffer,
                 *m_DescriptorSets,
                 captureShadowCommands,
                 kReflectionCaptureDescriptorIndex,
@@ -13060,7 +13321,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
                 *m_ShadowRenderPass,
                 *m_ShadowGraphicsPipeline,
                 m_DoubleSidedShadowGraphicsPipeline.get(),
-                *m_ReflectionCaptureLocalShadowFramebuffer,
+                *captureLocalShadowFramebuffer,
                 *m_DescriptorSets,
                 captureLocalShadowTiles,
                 std::span<const std::span<const RenderCommand>>(
@@ -13097,7 +13358,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             *m_ReflectionCaptureGraphicsPipeline,
             m_DoubleSidedReflectionCaptureGraphicsPipeline.get(),
             *m_DescriptorSets,
-            captureMaterialDescriptorSets,
+            *captureMaterialDescriptorSets,
             captureMaterials,
             captureCommands,
             extent,
@@ -13160,8 +13421,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     m_ReflectionProbeResources.RecordGpuCapturedSceneDirectionalShadow(
         probe.sceneIndex,
         face,
-        directionalShadowAvailable && m_ReflectionCaptureShadowMap != nullptr
-            ? m_ReflectionCaptureShadowMap->Extent().width
+        directionalShadowAvailable && captureShadowMap != nullptr
+            ? captureShadowMap->Extent().width
             : 0u,
         recordShadowDepthMaps ? directionalShadowDrawStats.passCount : 0u,
         recordShadowDepthMaps ? directionalShadowDrawStats.drawCount : 0u,
@@ -13183,8 +13444,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     m_ReflectionProbeResources.RecordGpuCapturedSceneLocalShadow(
         probe.sceneIndex,
         face,
-        m_ReflectionCaptureLocalShadowAtlas != nullptr
-            ? m_ReflectionCaptureLocalShadowAtlas->TileSize()
+        captureLocalShadowAtlas != nullptr
+            ? captureLocalShadowAtlas->TileSize()
             : 0u,
         recordShadowDepthMaps ? localShadowDrawStats.tilePassCount : 0u,
         recordShadowDepthMaps ? localShadowDrawStats.drawCount : 0u,
@@ -13213,8 +13474,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         captureLocalShadowRequested,
         localShadowFaceReady,
         true,
-        captureRectShadowEnabled ? 0x7u : 0x3u,
-        captureRectShadowEnabled ? 0x0u : 0x4u
+        captureRectShadowsApplied ? 0x7u : 0x3u,
+        captureRectShadowsApplied ? 0x0u : 0x4u
     );
     m_ReflectionProbeResources.RecordGpuCapturedSceneShadowSnapshot(
         probe.sceneIndex,
@@ -13231,7 +13492,13 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             : 0u,
         directionalShadowReady || localShadowFaceReady,
         true,
-        snapshotEnabled
+        snapshotEnabled,
+        persistentShadowCacheActive,
+        persistentShadowCacheHit,
+        persistentShadowCacheSlot,
+        ReflectionCapturePersistentShadowSnapshotCount(),
+        m_ReflectionCapturePersistentShadowSnapshotEvictionCount,
+        shadowInputSignature
     );
 
     m_ReflectionProbeResources.CompleteGpuCapturedSceneFace(

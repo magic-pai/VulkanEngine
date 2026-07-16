@@ -500,6 +500,8 @@ public:
     void ApplyEnvironmentRenderSettings();
 
 private:
+    struct ReflectionCaptureShadowSnapshot;
+
     void ValidateSceneResources() const;
     void CreateSwapchainResources();
     void RecreateSwapchain();
@@ -668,7 +670,8 @@ private:
     DirectionalShadowCascadeSet BuildReflectionCaptureDirectionalShadow(
         std::span<const RenderCommand> shadowCommands,
         const FrameLightSet& lights,
-        const RendererReflectionProbe& probe
+        const RendererReflectionProbe& probe,
+        u32 mapSize
     ) const;
     LocalShadowTileSet BuildLocalShadowTiles(
         const FrameLightSet& lights,
@@ -680,6 +683,19 @@ private:
     std::span<const RenderCommand> ShadowRenderCommands() const;
     const VulkanDescriptorSets* ShadowDescriptorSets() const;
     void ResetReflectionCaptureShadowSnapshot();
+    void ReleaseReflectionCapturePersistentShadowSnapshots();
+    u32 ReflectionCapturePersistentShadowSnapshotCount() const;
+    ReflectionCaptureShadowSnapshot* AcquireReflectionCapturePersistentShadowSnapshot(
+        i32 probeSceneIndex
+    );
+    i32 ReflectionCapturePersistentShadowSnapshotSlot(
+        const ReflectionCaptureShadowSnapshot* snapshot
+    ) const;
+    u32 ReflectionCaptureShadowInputSignature(
+        const RendererReflectionProbe& probe,
+        const CapturedSceneCaptureAudit& audit,
+        bool rectShadowEnabled
+    ) const;
     bool BuildMainInstanceBatches(
         std::span<const RenderCommand> commands,
         bool allowCacheReuse
@@ -689,6 +705,7 @@ private:
 private:
     struct ReflectionCaptureShadowSnapshot {
         i32 probeSceneIndex = -1;
+        u32 inputSignature = 0;
         DirectionalShadowCascadeSet directionalShadows{};
         LocalShadowTileSet localShadowTiles{};
         std::vector<std::vector<RenderCommand>> localShadowTileCommandLists;
@@ -708,6 +725,18 @@ private:
         bool rectShadowEnabled = false;
         bool built = false;
     };
+
+    struct ReflectionCapturePersistentShadowSnapshot {
+        ReflectionCaptureShadowSnapshot snapshot{};
+        std::unique_ptr<VulkanShadowMap> directionalShadowMap;
+        std::unique_ptr<VulkanLocalShadowAtlas> localShadowAtlas;
+        std::unique_ptr<VulkanShadowFramebuffer> directionalShadowFramebuffer;
+        std::unique_ptr<VulkanShadowFramebuffer> localShadowFramebuffer;
+        std::unique_ptr<VulkanMaterialDescriptorSets> materialDescriptorSets;
+        u64 lastUsedSchedulerFrame = 0;
+    };
+
+    static constexpr std::size_t kReflectionCapturePersistentShadowCacheCapacity = 2u;
 
     Window& m_Window;
     const VulkanDevice& m_Device;
@@ -844,6 +873,10 @@ private:
     i32 m_ReflectionCaptureActiveSceneIndex = -1;
     u64 m_ReflectionCaptureSchedulerFrame = 0;
     ReflectionCaptureShadowSnapshot m_ReflectionCaptureShadowSnapshot{};
+    std::array<ReflectionCapturePersistentShadowSnapshot,
+        kReflectionCapturePersistentShadowCacheCapacity>
+        m_ReflectionCapturePersistentShadowSnapshots{};
+    u32 m_ReflectionCapturePersistentShadowSnapshotEvictionCount = 0;
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxTexture;
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxFallbackTexture;
     std::unique_ptr<VulkanSampler> m_VisibleSkyboxSampler;

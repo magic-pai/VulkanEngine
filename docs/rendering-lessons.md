@@ -1629,3 +1629,38 @@ Validation:
 - Budget control: interval `64`, deferred-count delta `11`, deferred flag `1`, upload delta `0`.
 - Locality control: two probe resources, ignored-light-revision count `1`; disabled-selective fallback recorded two additional uploads.
 - User accepted the single normal `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Persistent Probe Shadow Snapshots Need Bounded Per-Probe Ownership
+
+Symptom:
+- A probe whose local lights and geometry had not changed still rebuilt its directional depth map and local shadow atlas on every later six-face refresh.
+- A naive per-probe allocation would retain one 2048-scale directional map and local atlas for every captured probe without a VRAM bound.
+
+False leads:
+- Reusing the main camera's shadow resources or camera-local shadow cache.
+- Treating a face-local reuse counter as proof that a separate later refresh reused the same depth data.
+
+Cause:
+- The existing capture snapshot belonged only to the active six-face refresh. It had no persistent probe identity, input signature, resource ownership, or capacity policy across completed captures.
+
+Control test:
+- Set `SE_REFLECTION_PROBE_SCENE_DIRTY=1` with `SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES=0` to force repeated static-scene captures.
+- Set `SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF=1` to restore the explicit per-refresh rebuild fallback.
+- Use the three-probe LightingShowcase lane to require two resident slots and an auditable eviction.
+
+Fix:
+- Add a fixed two-slot LRU cache keyed by probe `sceneIndex`. Each slot owns its directional map, local atlas, framebuffers, material descriptors, input signature, and last-used scheduler frame.
+- Reuse a slot only when conservative local-light/geometry signatures, probe volume, and relevant shadow settings match; otherwise rebuild that slot's snapshot.
+- Export per-capture hit state plus global capacity, resource count, eviction count, slot owner, and signature through Debug ImGui and benchmark CSV.
+- Release all slots when material descriptors, swapchain resources, or shadow-map dimensions are rebuilt.
+
+Prevention:
+- A persistent GPU cache must have a stable spatial key, complete input signature, explicit ownership, a bounded capacity, deterministic eviction, and a measurable disabled fallback.
+- Multi-resource tests must query global cache state directly; a single selected probe audit cannot prove overall cache occupancy.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and both signed binaries verified valid.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_capture_persistent_shadow` passed `490 pass / 0 warn / 0 fail`.
+- Reuse control recorded a persistent hit with shadow build `0`, directional depth pass `0`, and local depth pass `0`; disabled control reported zero persistent resources.
+- Three-probe LightingShowcase reported capacity/resources/evictions `2/2/1`, with two distinct slot owners and nonzero input signatures.
+- User accepted the single normal `SelfEngineLightingShowcase` visual window.

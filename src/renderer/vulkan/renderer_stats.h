@@ -408,10 +408,25 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneShadowSnapshotBuildFaceMask = 0;
     u32 capturedSceneShadowSnapshotReuseFaceMask = 0;
     i32 capturedSceneShadowSnapshotProbeSceneIndex = -1;
+    i32 capturedSceneShadowSnapshotPersistentCacheSlot = -1;
+    u32 capturedSceneShadowSnapshotPersistentHitCount = 0;
+    u32 capturedSceneShadowSnapshotPersistentCacheResourceCount = 0;
+    u32 capturedSceneShadowSnapshotPersistentCacheEvictionCount = 0;
+    u32 capturedSceneShadowSnapshotInputSignature = 0;
     u32 capturedSceneShadowSnapshotReady = 0;
     u32 capturedSceneShadowSnapshotCameraIndependent = 0;
     u32 capturedSceneShadowSnapshotEnabled = 0;
     u32 capturedSceneShadowSnapshotFallbackActive = 0;
+    u32 capturedSceneShadowSnapshotPersistentEnabled = 0;
+    u32 capturedSceneShadowSnapshotPersistentHit = 0;
+    u32 capturedScenePersistentShadowCacheCapacity = 0;
+    u32 capturedScenePersistentShadowCacheResourceCount = 0;
+    u32 capturedScenePersistentShadowCacheEvictionCount = 0;
+    std::array<i32, 2> capturedScenePersistentShadowCacheProbeSceneIndices = {
+        -1,
+        -1
+    };
+    std::array<u32, 2> capturedScenePersistentShadowCacheInputSignatures{};
     u32 capturedSceneLastCapturedFace = 0;
     u32 capturedSceneRasterizedGeometry = 0;
     u32 capturedSceneGpuResourcesAllocated = 0;

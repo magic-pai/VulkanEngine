@@ -625,10 +625,24 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneShadowSnapshotBuildFaceMask << ','
         << reflectionProbe.capturedSceneShadowSnapshotReuseFaceMask << ','
         << reflectionProbe.capturedSceneShadowSnapshotProbeSceneIndex << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentCacheSlot << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentHitCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentCacheResourceCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentCacheEvictionCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotInputSignature << ','
         << reflectionProbe.capturedSceneShadowSnapshotReady << ','
         << reflectionProbe.capturedSceneShadowSnapshotCameraIndependent << ','
         << reflectionProbe.capturedSceneShadowSnapshotEnabled << ','
         << reflectionProbe.capturedSceneShadowSnapshotFallbackActive << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentEnabled << ','
+        << reflectionProbe.capturedSceneShadowSnapshotPersistentHit << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheCapacity << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheResourceCount << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheEvictionCount << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheProbeSceneIndices[0] << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheProbeSceneIndices[1] << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheInputSignatures[0] << ','
+        << reflectionProbe.capturedScenePersistentShadowCacheInputSignatures[1] << ','
         << reflectionProbe.capturedSceneLastCapturedFace << ','
         << reflectionProbe.capturedSceneRasterizedGeometry << ','
         << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
@@ -1653,10 +1667,24 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_shadow_snapshot_build_face_mask,"
         << "reflection_probe_captured_scene_shadow_snapshot_reuse_face_mask,"
         << "reflection_probe_captured_scene_shadow_snapshot_probe_scene_index,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_eviction_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_input_signature,"
         << "reflection_probe_captured_scene_shadow_snapshot_ready,"
         << "reflection_probe_captured_scene_shadow_snapshot_camera_independent,"
         << "reflection_probe_captured_scene_shadow_snapshot_enabled,"
         << "reflection_probe_captured_scene_shadow_snapshot_fallback_active,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_enabled,"
+        << "reflection_probe_captured_scene_shadow_snapshot_persistent_hit,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_capacity,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_resource_count,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_eviction_count,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_input_signature_0,"
+        << "reflection_probe_captured_scene_persistent_shadow_cache_input_signature_1,"
         << "reflection_probe_captured_scene_last_captured_face,"
         << "reflection_probe_captured_scene_rasterized_geometry,"
         << "reflection_probe_captured_scene_gpu_resources_allocated,"

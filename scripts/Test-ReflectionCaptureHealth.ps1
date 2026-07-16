@@ -189,6 +189,27 @@ function Test-AnyMask {
     return $false
 }
 
+function Test-AnyPersistentShadowCacheHit {
+    param([Parameter(Mandatory = $true)]$Rows)
+
+    foreach ($row in $Rows) {
+        if (
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_persistent_enabled") -eq 1 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_persistent_hit") -eq 1 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot") -ge 0 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count") -ge 1 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count") -le 2 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_input_signature") -gt 0 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_shadow_snapshot_build_count") -eq 0 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_directional_shadow_pass_count") -eq 0 -and
+            (Get-Number -Row $row -Name "reflection_probe_captured_scene_local_shadow_pass_count") -eq 0
+        ) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function New-ReflectionCaptureReport {
     param(
         [Parameter(Mandatory = $true)][string]$LaneName,
@@ -308,10 +329,24 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_shadow_snapshot_build_face_mask",
         "reflection_probe_captured_scene_shadow_snapshot_reuse_face_mask",
         "reflection_probe_captured_scene_shadow_snapshot_probe_scene_index",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_cache_eviction_count",
+        "reflection_probe_captured_scene_shadow_snapshot_input_signature",
         "reflection_probe_captured_scene_shadow_snapshot_ready",
         "reflection_probe_captured_scene_shadow_snapshot_camera_independent",
         "reflection_probe_captured_scene_shadow_snapshot_enabled",
         "reflection_probe_captured_scene_shadow_snapshot_fallback_active",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_enabled",
+        "reflection_probe_captured_scene_shadow_snapshot_persistent_hit",
+        "reflection_probe_captured_scene_persistent_shadow_cache_capacity",
+        "reflection_probe_captured_scene_persistent_shadow_cache_resource_count",
+        "reflection_probe_captured_scene_persistent_shadow_cache_eviction_count",
+        "reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0",
+        "reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1",
+        "reflection_probe_captured_scene_persistent_shadow_cache_input_signature_0",
+        "reflection_probe_captured_scene_persistent_shadow_cache_input_signature_1",
         "reflection_probe_captured_scene_last_captured_face",
         "reflection_probe_captured_scene_rasterized_geometry",
         "reflection_probe_captured_scene_gpu_resources_allocated",
@@ -468,6 +503,26 @@ function New-ReflectionCaptureReport {
             ) `
             -Actual "enabled=$($metrics['reflection_probe_captured_scene_shadow_snapshot_enabled'].max),fallback=$($metrics['reflection_probe_captured_scene_shadow_snapshot_fallback_active'].max),build=$($metrics['reflection_probe_captured_scene_shadow_snapshot_build_count'].max),reuse=$($metrics['reflection_probe_captured_scene_shadow_snapshot_reuse_face_count'].max)" `
             -Expected "enabled=0,fallback=1,build=0,reuse=0"
+    } elseif ($Mode -eq "persistent-hit") {
+        Add-BooleanCheck -Checks $checks -Area "snapshot" -Name "persistent snapshot cache serves a repeated capture" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_enabled"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_fallback_active"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_ready"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_enabled"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_hit"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count"].max -ge 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count"].max -ge 1 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count"].max -le 2 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot"].max -ge 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_input_signature"].max -gt 0
+            ) `
+            -Actual "enabled/hit/hits=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_enabled'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_hit'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count'].max),slot/resources/evictions=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_cache_eviction_count'].max),signature=$($metrics['reflection_probe_captured_scene_shadow_snapshot_input_signature'].max)" `
+            -Expected "enabled=1, hit>=1, slot>=0, resources=1..2, signature>0"
+        Add-BooleanCheck -Checks $checks -Area "snapshot" -Name "persistent hit records no new depth passes" `
+            -Passed (Test-AnyPersistentShadowCacheHit -Rows $rows) `
+            -Actual "hit=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_hit'].max),directional passes=$($metrics['reflection_probe_captured_scene_directional_shadow_pass_count'].min)..$($metrics['reflection_probe_captured_scene_directional_shadow_pass_count'].max),local passes=$($metrics['reflection_probe_captured_scene_local_shadow_pass_count'].min)..$($metrics['reflection_probe_captured_scene_local_shadow_pass_count'].max)" `
+            -Expected "one hit row with build/directional/local depth passes all zero"
     } else {
         Add-BooleanCheck -Checks $checks -Area "snapshot" -Name "single probe snapshot serves all cubemap faces" `
             -Passed (
@@ -569,7 +624,7 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "sampled diffuse irradiance map matches its producer probe" `
         -Passed ($metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -gt 0) `
         -Actual $metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -Expected "non-zero mask"
-    $captureUploadEvidence = if ($Mode -eq "multi" -or $Mode -eq "rect-off") {
+    $captureUploadEvidence = if ($Mode -eq "multi" -or $Mode -eq "rect-off" -or $Mode -eq "persistent-hit" -or $Mode -eq "persistent-off") {
         $metrics["reflection_probe_captured_scene_upload_count"].max
     } else {
         $metrics["reflection_probe_captured_scene_upload_count"].min
@@ -595,6 +650,26 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "static capture reuses local shadow data" `
             -Passed ($metrics["reflection_probe_captured_scene_local_shadow_pass_count"].delta -eq 0) `
             -Actual $metrics["reflection_probe_captured_scene_local_shadow_pass_count"].delta -Expected 0
+    }
+    "persistent-hit" {
+        Add-BooleanCheck -Checks $checks -Area "snapshot" -Name "scene-dirty control completes more than one capture" `
+            -Passed ($metrics["reflection_probe_captured_scene_upload_count"].delta -ge 1) `
+            -Actual $metrics["reflection_probe_captured_scene_upload_count"].delta -Expected ">= 1"
+    }
+    "persistent-off" {
+        Add-BooleanCheck -Checks $checks -Area "fallback" -Name "persistent cache disable is explicit" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_enabled"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_hit"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot"].max -eq -1
+            ) `
+            -Actual "enabled/hit/hits=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_enabled'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_hit'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_hit_count'].max),slot/resources=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_cache_slot'].max)/$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_cache_resource_count'].max)" `
+            -Expected "enabled=0, hit/hits=0, slot=-1, resources=0"
+        Add-BooleanCheck -Checks $checks -Area "fallback" -Name "disabled persistent cache rebuilds each repeated capture" `
+            -Passed ($metrics["reflection_probe_captured_scene_upload_count"].delta -ge 1) `
+            -Actual $metrics["reflection_probe_captured_scene_upload_count"].delta -Expected ">= 1"
     }
     "light" {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "light revision advances" `
@@ -730,6 +805,21 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "sampling" -Name "selected probes publish their real mip counts" `
             -Passed (@($selectedMipCounts | Where-Object { $_ -ge 2 }).Count -eq 3) `
             -Actual $selectedMipCounts -Expected "three counts >= 2"
+        Add-BooleanCheck -Checks $checks -Area "snapshot-cache" -Name "three probes stay within the bounded persistent shadow cache" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_shadow_snapshot_persistent_enabled"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_capacity"].max -eq 2 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_resource_count"].max -eq 2 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_eviction_count"].max -ge 1 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0"].max -ge 0 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1"].max -ge 0 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0"].max -ne
+                    $metrics["reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1"].max -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_input_signature_0"].max -gt 0 -and
+                $metrics["reflection_probe_captured_scene_persistent_shadow_cache_input_signature_1"].max -gt 0
+            ) `
+            -Actual "enabled=$($metrics['reflection_probe_captured_scene_shadow_snapshot_persistent_enabled'].max),capacity/resources/evictions=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_capacity'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_resource_count'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_eviction_count'].max),probes=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_0'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_probe_scene_index_1'].max),signatures=$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_input_signature_0'].max)/$($metrics['reflection_probe_captured_scene_persistent_shadow_cache_input_signature_1'].max)" `
+            -Expected "enabled=1, capacity/resources=2, evictions>=1, distinct probe owners, nonzero signatures"
     }
     }
 
@@ -793,6 +883,7 @@ $managedKeys = @(
     "SE_REFLECTION_PROBE_SCENE_DIRTY",
     "SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF",
     "SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF",
+    "SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF",
     "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES",
     "SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF",
     "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL",
@@ -826,6 +917,35 @@ $laneSpecs = @(
             SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "default"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "persistent-shadow-reuse"
+        mode = "persistent-hit"
+        environment = @{
+            SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "default"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_PROBE_SCENE_DIRTY = "1"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "0"
+            SE_BENCHMARK_WARMUP_FRAMES = "0"
+            SE_BENCHMARK_FRAMES = "18"
+            SE_AUTO_EXIT_FRAMES = "26"
+        }
+    },
+    [pscustomobject]@{
+        name = "persistent-shadow-cache-disabled"
+        mode = "persistent-off"
+        environment = @{
+            SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "default"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_PROBE_SCENE_DIRTY = "1"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "0"
+            SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF = "1"
+            SE_BENCHMARK_WARMUP_FRAMES = "0"
+            SE_BENCHMARK_FRAMES = "18"
+            SE_AUTO_EXIT_FRAMES = "26"
         }
     },
     [pscustomobject]@{

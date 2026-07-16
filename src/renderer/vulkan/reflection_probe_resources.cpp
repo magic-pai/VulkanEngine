@@ -3255,10 +3255,17 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.shadowSnapshotBuildFaceMask = 0u;
     resource.audit.shadowSnapshotReuseFaceMask = 0u;
     resource.audit.shadowSnapshotProbeSceneIndex = -1;
+    resource.audit.shadowSnapshotPersistentCacheSlot = -1;
+    resource.audit.shadowSnapshotPersistentHitCount = 0u;
+    resource.audit.shadowSnapshotPersistentCacheResourceCount = 0u;
+    resource.audit.shadowSnapshotPersistentCacheEvictionCount = 0u;
+    resource.audit.shadowSnapshotInputSignature = 0u;
     resource.audit.shadowSnapshotReady = false;
     resource.audit.shadowSnapshotCameraIndependent = false;
     resource.audit.shadowSnapshotEnabled = false;
     resource.audit.shadowSnapshotFallbackActive = false;
+    resource.audit.shadowSnapshotPersistentEnabled = false;
+    resource.audit.shadowSnapshotPersistentHit = false;
     resource.audit.refreshDeferredByBudget = false;
     resource.audit.rasterizedGeometry = true;
     resource.audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
@@ -3420,12 +3427,26 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
             previousAudit.shadowSnapshotReuseFaceMask;
         audit.shadowSnapshotProbeSceneIndex =
             previousAudit.shadowSnapshotProbeSceneIndex;
+        audit.shadowSnapshotPersistentCacheSlot =
+            previousAudit.shadowSnapshotPersistentCacheSlot;
+        audit.shadowSnapshotPersistentHitCount =
+            previousAudit.shadowSnapshotPersistentHitCount;
+        audit.shadowSnapshotPersistentCacheResourceCount =
+            previousAudit.shadowSnapshotPersistentCacheResourceCount;
+        audit.shadowSnapshotPersistentCacheEvictionCount =
+            previousAudit.shadowSnapshotPersistentCacheEvictionCount;
+        audit.shadowSnapshotInputSignature =
+            previousAudit.shadowSnapshotInputSignature;
         audit.shadowSnapshotReady = previousAudit.shadowSnapshotReady;
         audit.shadowSnapshotCameraIndependent =
             previousAudit.shadowSnapshotCameraIndependent;
         audit.shadowSnapshotEnabled = previousAudit.shadowSnapshotEnabled;
         audit.shadowSnapshotFallbackActive =
             previousAudit.shadowSnapshotFallbackActive;
+        audit.shadowSnapshotPersistentEnabled =
+            previousAudit.shadowSnapshotPersistentEnabled;
+        audit.shadowSnapshotPersistentHit =
+            previousAudit.shadowSnapshotPersistentHit;
         audit.lastCapturedFace = previousAudit.lastCapturedFace;
         audit.probeSceneIndex = probeSceneIndex;
         resource->audit = audit;
@@ -3791,7 +3812,13 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneShadowSnapshot(
     u32 savedLocalDrawCount,
     bool ready,
     bool cameraIndependent,
-    bool enabled
+    bool enabled,
+    bool persistentEnabled,
+    bool persistentHit,
+    i32 persistentCacheSlot,
+    u32 persistentCacheResourceCount,
+    u32 persistentCacheEvictionCount,
+    u32 inputSignature
 ) {
     CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
@@ -3803,6 +3830,16 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneShadowSnapshot(
     CapturedSceneCaptureAudit& audit = resource->audit;
     audit.shadowSnapshotEnabled = enabled;
     audit.shadowSnapshotFallbackActive = !enabled;
+    audit.shadowSnapshotPersistentEnabled = persistentEnabled;
+    audit.shadowSnapshotPersistentHit =
+        audit.shadowSnapshotPersistentHit || persistentHit;
+    audit.shadowSnapshotPersistentHitCount += persistentHit ? 1u : 0u;
+    audit.shadowSnapshotPersistentCacheSlot = persistentCacheSlot;
+    audit.shadowSnapshotPersistentCacheResourceCount =
+        persistentCacheResourceCount;
+    audit.shadowSnapshotPersistentCacheEvictionCount =
+        persistentCacheEvictionCount;
+    audit.shadowSnapshotInputSignature = inputSignature;
     if (!enabled) {
         audit.shadowSnapshotReady = false;
         return;
@@ -3818,8 +3855,8 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneShadowSnapshot(
     audit.shadowSnapshotCameraIndependent =
         audit.shadowSnapshotCameraIndependent || cameraIndependent;
     audit.shadowSnapshotReady = ready &&
-        audit.shadowSnapshotBuildCount == 1u &&
-        audit.shadowSnapshotBuildFaceMask != 0u &&
+        (audit.shadowSnapshotBuildCount == 1u ||
+            audit.shadowSnapshotPersistentHit) &&
         audit.shadowSnapshotReuseFaceCount + audit.shadowSnapshotBuildCount >= 6u &&
         audit.shadowSnapshotCameraIndependent;
 }

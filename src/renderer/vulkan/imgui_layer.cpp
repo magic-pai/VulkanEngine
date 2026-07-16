@@ -2913,6 +2913,26 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneShadowSnapshotCameraIndependent
     );
     ImGui::Text(
+        "Persistent capture shadow cache: enabled/hit/hits %u/%u/%u, slot/resources/evictions %d/%u/%u, input signature 0x%X",
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentEnabled,
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentHit,
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentHitCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentCacheSlot,
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentCacheResourceCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotPersistentCacheEvictionCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotInputSignature
+    );
+    ImGui::Text(
+        "Persistent capture cache slots: capacity/resources/evictions %u/%u/%u, probe [ %d %d ], signatures [ 0x%X 0x%X ]",
+        stats.reflectionProbe.capturedScenePersistentShadowCacheCapacity,
+        stats.reflectionProbe.capturedScenePersistentShadowCacheResourceCount,
+        stats.reflectionProbe.capturedScenePersistentShadowCacheEvictionCount,
+        stats.reflectionProbe.capturedScenePersistentShadowCacheProbeSceneIndices[0],
+        stats.reflectionProbe.capturedScenePersistentShadowCacheProbeSceneIndices[1],
+        stats.reflectionProbe.capturedScenePersistentShadowCacheInputSignatures[0],
+        stats.reflectionProbe.capturedScenePersistentShadowCacheInputSignatures[1]
+    );
+    ImGui::Text(
         "Reflection probe sampled mips: [%u %u %u %u]",
         stats.reflectionProbe.selectedCaptureMipCounts[0],
         stats.reflectionProbe.selectedCaptureMipCounts[1],
