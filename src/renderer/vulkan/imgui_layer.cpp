@@ -2898,6 +2898,21 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneLocalShadowRectDroppedTileCount
     );
     ImGui::Text(
+        "Captured shadow snapshot: enabled/fallback/ready %u/%u/%u, build/reuse %u/%u, saved directional/local pass/draw %u/%u/%u, faces 0x%X/0x%X, probe %d, camera independent %u",
+        stats.reflectionProbe.capturedSceneShadowSnapshotEnabled,
+        stats.reflectionProbe.capturedSceneShadowSnapshotFallbackActive,
+        stats.reflectionProbe.capturedSceneShadowSnapshotReady,
+        stats.reflectionProbe.capturedSceneShadowSnapshotBuildCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotReuseFaceCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotSavedDirectionalPassCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotSavedLocalTilePassCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotSavedLocalDrawCount,
+        stats.reflectionProbe.capturedSceneShadowSnapshotBuildFaceMask,
+        stats.reflectionProbe.capturedSceneShadowSnapshotReuseFaceMask,
+        stats.reflectionProbe.capturedSceneShadowSnapshotProbeSceneIndex,
+        stats.reflectionProbe.capturedSceneShadowSnapshotCameraIndependent
+    );
+    ImGui::Text(
         "Reflection probe sampled mips: [%u %u %u %u]",
         stats.reflectionProbe.selectedCaptureMipCounts[0],
         stats.reflectionProbe.selectedCaptureMipCounts[1],

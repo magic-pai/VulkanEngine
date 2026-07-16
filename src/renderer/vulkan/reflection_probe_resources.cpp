@@ -3176,6 +3176,18 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.localShadowSuppressedKindMask = 0u;
     resource.audit.localShadowProbeSceneIndex = -1;
     resource.audit.localShadowCameraIndependent = false;
+    resource.audit.shadowSnapshotBuildCount = 0u;
+    resource.audit.shadowSnapshotReuseFaceCount = 0u;
+    resource.audit.shadowSnapshotSavedDirectionalPassCount = 0u;
+    resource.audit.shadowSnapshotSavedLocalTilePassCount = 0u;
+    resource.audit.shadowSnapshotSavedLocalDrawCount = 0u;
+    resource.audit.shadowSnapshotBuildFaceMask = 0u;
+    resource.audit.shadowSnapshotReuseFaceMask = 0u;
+    resource.audit.shadowSnapshotProbeSceneIndex = -1;
+    resource.audit.shadowSnapshotReady = false;
+    resource.audit.shadowSnapshotCameraIndependent = false;
+    resource.audit.shadowSnapshotEnabled = false;
+    resource.audit.shadowSnapshotFallbackActive = false;
     resource.audit.rasterizedGeometry = true;
     resource.audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
 }
@@ -3285,6 +3297,27 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         audit.localShadowProbeSceneIndex = previousAudit.localShadowProbeSceneIndex;
         audit.localShadowCameraIndependent =
             previousAudit.localShadowCameraIndependent;
+        audit.shadowSnapshotBuildCount = previousAudit.shadowSnapshotBuildCount;
+        audit.shadowSnapshotReuseFaceCount =
+            previousAudit.shadowSnapshotReuseFaceCount;
+        audit.shadowSnapshotSavedDirectionalPassCount =
+            previousAudit.shadowSnapshotSavedDirectionalPassCount;
+        audit.shadowSnapshotSavedLocalTilePassCount =
+            previousAudit.shadowSnapshotSavedLocalTilePassCount;
+        audit.shadowSnapshotSavedLocalDrawCount =
+            previousAudit.shadowSnapshotSavedLocalDrawCount;
+        audit.shadowSnapshotBuildFaceMask =
+            previousAudit.shadowSnapshotBuildFaceMask;
+        audit.shadowSnapshotReuseFaceMask =
+            previousAudit.shadowSnapshotReuseFaceMask;
+        audit.shadowSnapshotProbeSceneIndex =
+            previousAudit.shadowSnapshotProbeSceneIndex;
+        audit.shadowSnapshotReady = previousAudit.shadowSnapshotReady;
+        audit.shadowSnapshotCameraIndependent =
+            previousAudit.shadowSnapshotCameraIndependent;
+        audit.shadowSnapshotEnabled = previousAudit.shadowSnapshotEnabled;
+        audit.shadowSnapshotFallbackActive =
+            previousAudit.shadowSnapshotFallbackActive;
         audit.lastCapturedFace = previousAudit.lastCapturedFace;
         audit.probeSceneIndex = probeSceneIndex;
         resource->audit = audit;
@@ -3534,6 +3567,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDirectionalShadow(
     i32 probeSceneIndex,
     u32 face,
     u32 mapSize,
+    u32 passCount,
     u32 drawCount,
     u32 casterCount,
     bool requested,
@@ -3551,7 +3585,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDirectionalShadow(
     CapturedSceneCaptureAudit& audit = resource->audit;
     audit.directionalShadowRequested =
         audit.directionalShadowRequested || requested;
-    audit.directionalShadowPassCount += ready ? 1u : 0u;
+    audit.directionalShadowPassCount += passCount;
     audit.directionalShadowDrawCount += drawCount;
     audit.directionalShadowCasterCount += casterCount;
     audit.directionalShadowMapSize = std::max(
@@ -3566,7 +3600,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDirectionalShadow(
         audit.directionalShadowLocalTilesSuppressed || localTilesSuppressed;
     audit.directionalShadowReady = audit.directionalShadowRequested &&
         audit.directionalShadowFaceMask == 0x3fu &&
-        audit.directionalShadowPassCount >= 6u &&
+        audit.directionalShadowPassCount >= 1u &&
         audit.directionalShadowDrawCount > 0u &&
         audit.directionalShadowCameraIndependent &&
         audit.directionalShadowLocalTilesSuppressed;
@@ -3629,7 +3663,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneLocalShadow(
         audit.localShadowCameraIndependent || cameraIndependent;
     audit.localShadowReady = audit.localShadowRequested &&
         audit.localShadowFaceMask == 0x3fu &&
-        audit.localShadowPassCount >= 6u &&
+        audit.localShadowPassCount >= 1u &&
         audit.localShadowDrawCount > 0u &&
         audit.localShadowTileCount > 0u &&
         audit.localShadowCameraIndependent &&
@@ -3638,6 +3672,48 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneLocalShadow(
          audit.localShadowSuppressedKindMask) == 0x7u &&
         (audit.localShadowSupportedKindMask &
          audit.localShadowSuppressedKindMask) == 0u;
+}
+
+void VulkanReflectionProbeResources::RecordGpuCapturedSceneShadowSnapshot(
+    i32 probeSceneIndex,
+    u32 face,
+    bool built,
+    u32 savedDirectionalPassCount,
+    u32 savedLocalTilePassCount,
+    u32 savedLocalDrawCount,
+    bool ready,
+    bool cameraIndependent,
+    bool enabled
+) {
+    CapturedSceneProbeResource* resource =
+        FindCapturedSceneProbeResource(probeSceneIndex);
+    if (resource == nullptr || !resource->captureInProgress ||
+        face != resource->nextFace || face >= 6u) {
+        return;
+    }
+
+    CapturedSceneCaptureAudit& audit = resource->audit;
+    audit.shadowSnapshotEnabled = enabled;
+    audit.shadowSnapshotFallbackActive = !enabled;
+    if (!enabled) {
+        audit.shadowSnapshotReady = false;
+        return;
+    }
+    audit.shadowSnapshotBuildCount += built ? 1u : 0u;
+    audit.shadowSnapshotReuseFaceCount += built ? 0u : 1u;
+    audit.shadowSnapshotSavedDirectionalPassCount += savedDirectionalPassCount;
+    audit.shadowSnapshotSavedLocalTilePassCount += savedLocalTilePassCount;
+    audit.shadowSnapshotSavedLocalDrawCount += savedLocalDrawCount;
+    audit.shadowSnapshotBuildFaceMask |= built ? (1u << face) : 0u;
+    audit.shadowSnapshotReuseFaceMask |= built ? 0u : (1u << face);
+    audit.shadowSnapshotProbeSceneIndex = probeSceneIndex;
+    audit.shadowSnapshotCameraIndependent =
+        audit.shadowSnapshotCameraIndependent || cameraIndependent;
+    audit.shadowSnapshotReady = ready &&
+        audit.shadowSnapshotBuildCount == 1u &&
+        audit.shadowSnapshotBuildFaceMask != 0u &&
+        audit.shadowSnapshotReuseFaceCount + audit.shadowSnapshotBuildCount >= 6u &&
+        audit.shadowSnapshotCameraIndependent;
 }
 
 void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(

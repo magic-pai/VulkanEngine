@@ -678,6 +678,7 @@ private:
     ) const;
     std::span<const RenderCommand> ShadowRenderCommands() const;
     const VulkanDescriptorSets* ShadowDescriptorSets() const;
+    void ResetReflectionCaptureShadowSnapshot();
     bool BuildMainInstanceBatches(
         std::span<const RenderCommand> commands,
         bool allowCacheReuse
@@ -685,6 +686,28 @@ private:
     bool UploadMainInstancesIfNeeded(std::size_t imageIndex);
 
 private:
+    struct ReflectionCaptureShadowSnapshot {
+        i32 probeSceneIndex = -1;
+        DirectionalShadowCascadeSet directionalShadows{};
+        LocalShadowTileSet localShadowTiles{};
+        std::vector<std::vector<RenderCommand>> localShadowTileCommandLists;
+        u32 directionalDrawCount = 0;
+        u32 directionalCasterCount = 0;
+        u32 localTilePassCount = 0;
+        u32 localDrawCount = 0;
+        u32 localPointFaceTileCount = 0;
+        u32 localSpotTileCount = 0;
+        u32 localRectTileCount = 0;
+        u32 localRectRequestedTileCount = 0;
+        u32 localRectDroppedTileCount = 0;
+        bool directionalRequested = false;
+        bool directionalAvailable = false;
+        bool localRequested = false;
+        bool localAvailable = false;
+        bool rectShadowEnabled = false;
+        bool built = false;
+    };
+
     Window& m_Window;
     const VulkanDevice& m_Device;
     const VulkanPhysicalDevice& m_PhysicalDevice;
@@ -775,10 +798,15 @@ private:
     std::unique_ptr<VulkanShadowMap> m_ShadowMap;
     std::unique_ptr<VulkanDirectionalShadowCascadeAtlas> m_DirectionalShadowCascadeAtlas;
     std::unique_ptr<VulkanLocalShadowAtlas> m_LocalShadowAtlas;
+    std::unique_ptr<VulkanShadowMap> m_ReflectionCaptureShadowMap;
+    std::unique_ptr<VulkanLocalShadowAtlas> m_ReflectionCaptureLocalShadowAtlas;
     std::unique_ptr<VulkanShadowRenderPass> m_ShadowRenderPass;
     std::unique_ptr<VulkanShadowFramebuffer> m_ShadowFramebuffer;
     std::unique_ptr<VulkanShadowFramebuffer> m_DirectionalShadowCascadeFramebuffer;
     std::unique_ptr<VulkanShadowFramebuffer> m_LocalShadowFramebuffer;
+    std::unique_ptr<VulkanShadowFramebuffer> m_ReflectionCaptureShadowFramebuffer;
+    std::unique_ptr<VulkanShadowFramebuffer>
+        m_ReflectionCaptureLocalShadowFramebuffer;
     std::unique_ptr<VulkanRenderPass> m_RenderPass;
     std::unique_ptr<VulkanRenderPass> m_DepthLoadRenderPass;
     std::unique_ptr<VulkanImGuiLayer> m_ImGuiLayer;
@@ -811,6 +839,8 @@ private:
     VulkanIblGenerationInfo m_IblGenerationInfo{};
     VulkanReflectionProbeResources m_ReflectionProbeResources;
     i32 m_ReflectionCaptureRoundRobinSceneIndex = -1;
+    i32 m_ReflectionCaptureActiveSceneIndex = -1;
+    ReflectionCaptureShadowSnapshot m_ReflectionCaptureShadowSnapshot{};
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxTexture;
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxFallbackTexture;
     std::unique_ptr<VulkanSampler> m_VisibleSkyboxSampler;

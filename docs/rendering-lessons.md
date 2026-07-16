@@ -1559,3 +1559,38 @@ Validation:
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `231 pass / 0 warn / 0 fail`.
 - Completed LightingShowcase capture reported 192 local tile passes: point/spot/rect `36/12/144`, rect requested/maximum `144/192`, extra/budget-limited `48/48`, no drops, tile size 1024, and `0x3F` coverage.
 - User accepted the single real `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Probe Capture Shadow Snapshots Must Own Their Resources
+
+Symptom:
+- A complete six-face captured-scene probe refresh rebuilt the same probe-centered directional and local shadow depth maps once for every cubemap face.
+- Reusing descriptor slot zero without waiting for the previous main submission caused Vulkan validation errors when that main frame still referenced the slot.
+
+False leads:
+- Sharing the main camera shadow map or local atlas with probe capture.
+- Round-robinning unrelated probe faces while one capture snapshot is still needed.
+
+Cause:
+- Capture shadow projections are derived from probe/light/caster state and are face-independent within one coherent refresh, but the old path treated each face as an independent shadow producer.
+- Main rendering and capture both use swapchain-indexed global descriptors, so the capture-reserved slot can still be pending from the prior main submission.
+
+Control test:
+- Set `SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF=1` to force the legacy per-face depth rebuild.
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict`.
+
+Fix:
+- Give capture a dedicated single-slot directional shadow map, local atlas, framebuffers, and material descriptors.
+- Build and render the snapshot on face zero, serialize the active probe until face five, and reuse the stored tile lists/depth maps for faces one through five.
+- Wait for the graphics queue before rewriting descriptor slot zero, then submit and wait the capture before main rendering consumes its normal frame state.
+- Publish build/reuse masks, saved directional/local work, identity, readiness, and fallback state to CSV and ImGui.
+
+Prevention:
+- A resource reused across cubemap faces must be owned by the active probe refresh, not by a main-camera frame or an unrelated probe.
+- Any reserved descriptor slot shared with a previous submission needs an explicit synchronization proof before it is rewritten.
+- Keep a disabled control path and validate both a structurally different Forward3D scene and LightingShowcase before visual review.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `280 pass / 0 warn / 0 fail` across static, moving-light, moving-object, camera-invariant, LightingShowcase multi-probe, rect-disabled, and snapshot-disabled lanes.
+- Normal completed captures report one shadow snapshot build, five reuse faces, five saved directional passes, and LightingShowcase saved 160 local tile passes / 2060 local draws; the disabled control reports six directional passes and no snapshot reuse.
+- User accepted the single real `SelfEngineLightingShowcase` visual window.

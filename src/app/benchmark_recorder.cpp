@@ -617,6 +617,18 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneLocalShadowSuppressedKindMask << ','
         << reflectionProbe.capturedSceneLocalShadowCameraIndependent << ','
         << reflectionProbe.capturedSceneLocalShadowProbeSceneIndex << ','
+        << reflectionProbe.capturedSceneShadowSnapshotBuildCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotReuseFaceCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotSavedDirectionalPassCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotSavedLocalTilePassCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotSavedLocalDrawCount << ','
+        << reflectionProbe.capturedSceneShadowSnapshotBuildFaceMask << ','
+        << reflectionProbe.capturedSceneShadowSnapshotReuseFaceMask << ','
+        << reflectionProbe.capturedSceneShadowSnapshotProbeSceneIndex << ','
+        << reflectionProbe.capturedSceneShadowSnapshotReady << ','
+        << reflectionProbe.capturedSceneShadowSnapshotCameraIndependent << ','
+        << reflectionProbe.capturedSceneShadowSnapshotEnabled << ','
+        << reflectionProbe.capturedSceneShadowSnapshotFallbackActive << ','
         << reflectionProbe.capturedSceneLastCapturedFace << ','
         << reflectionProbe.capturedSceneRasterizedGeometry << ','
         << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
@@ -1620,6 +1632,18 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_local_shadow_suppressed_kind_mask,"
         << "reflection_probe_captured_scene_local_shadow_camera_independent,"
         << "reflection_probe_captured_scene_local_shadow_probe_scene_index,"
+        << "reflection_probe_captured_scene_shadow_snapshot_build_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_reuse_face_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_saved_directional_pass_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_saved_local_tile_pass_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_saved_local_draw_count,"
+        << "reflection_probe_captured_scene_shadow_snapshot_build_face_mask,"
+        << "reflection_probe_captured_scene_shadow_snapshot_reuse_face_mask,"
+        << "reflection_probe_captured_scene_shadow_snapshot_probe_scene_index,"
+        << "reflection_probe_captured_scene_shadow_snapshot_ready,"
+        << "reflection_probe_captured_scene_shadow_snapshot_camera_independent,"
+        << "reflection_probe_captured_scene_shadow_snapshot_enabled,"
+        << "reflection_probe_captured_scene_shadow_snapshot_fallback_active,"
         << "reflection_probe_captured_scene_last_captured_face,"
         << "reflection_probe_captured_scene_rasterized_geometry,"
         << "reflection_probe_captured_scene_gpu_resources_allocated,"
