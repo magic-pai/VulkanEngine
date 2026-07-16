@@ -3163,6 +3163,13 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.localShadowPointFaceTileCount = 0u;
     resource.audit.localShadowSpotTileCount = 0u;
     resource.audit.localShadowRectTileCount = 0u;
+    resource.audit.localShadowRequestedTileCount = 0u;
+    resource.audit.localShadowDroppedTileCount = 0u;
+    resource.audit.localShadowRectRequestedTileCount = 0u;
+    resource.audit.localShadowRectMaximumTileCount = 0u;
+    resource.audit.localShadowRectExtraSampleTileCount = 0u;
+    resource.audit.localShadowRectBudgetLimitedSampleTileCount = 0u;
+    resource.audit.localShadowRectDroppedTileCount = 0u;
     resource.audit.localShadowMapTileSize = 0u;
     resource.audit.localShadowFaceMask = 0u;
     resource.audit.localShadowSupportedKindMask = 0u;
@@ -3255,6 +3262,20 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
             previousAudit.localShadowPointFaceTileCount;
         audit.localShadowSpotTileCount = previousAudit.localShadowSpotTileCount;
         audit.localShadowRectTileCount = previousAudit.localShadowRectTileCount;
+        audit.localShadowRequestedTileCount =
+            previousAudit.localShadowRequestedTileCount;
+        audit.localShadowDroppedTileCount =
+            previousAudit.localShadowDroppedTileCount;
+        audit.localShadowRectRequestedTileCount =
+            previousAudit.localShadowRectRequestedTileCount;
+        audit.localShadowRectMaximumTileCount =
+            previousAudit.localShadowRectMaximumTileCount;
+        audit.localShadowRectExtraSampleTileCount =
+            previousAudit.localShadowRectExtraSampleTileCount;
+        audit.localShadowRectBudgetLimitedSampleTileCount =
+            previousAudit.localShadowRectBudgetLimitedSampleTileCount;
+        audit.localShadowRectDroppedTileCount =
+            previousAudit.localShadowRectDroppedTileCount;
         audit.localShadowMapTileSize = previousAudit.localShadowMapTileSize;
         audit.localShadowFaceMask = previousAudit.localShadowFaceMask;
         audit.localShadowSupportedKindMask =
@@ -3562,6 +3583,13 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneLocalShadow(
     u32 pointFaceTileCount,
     u32 spotTileCount,
     u32 rectTileCount,
+    u32 requestedTileCount,
+    u32 droppedTileCount,
+    u32 rectRequestedTileCount,
+    u32 rectMaximumTileCount,
+    u32 rectExtraSampleTileCount,
+    u32 rectBudgetLimitedSampleTileCount,
+    u32 rectDroppedTileCount,
     bool requested,
     bool ready,
     bool cameraIndependent,
@@ -3584,6 +3612,14 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneLocalShadow(
     audit.localShadowPointFaceTileCount += pointFaceTileCount;
     audit.localShadowSpotTileCount += spotTileCount;
     audit.localShadowRectTileCount += rectTileCount;
+    audit.localShadowRequestedTileCount += requestedTileCount;
+    audit.localShadowDroppedTileCount += droppedTileCount;
+    audit.localShadowRectRequestedTileCount += rectRequestedTileCount;
+    audit.localShadowRectMaximumTileCount += rectMaximumTileCount;
+    audit.localShadowRectExtraSampleTileCount += rectExtraSampleTileCount;
+    audit.localShadowRectBudgetLimitedSampleTileCount +=
+        rectBudgetLimitedSampleTileCount;
+    audit.localShadowRectDroppedTileCount += rectDroppedTileCount;
     audit.localShadowMapTileSize = std::max(audit.localShadowMapTileSize, mapTileSize);
     audit.localShadowFaceMask |= ready ? (1u << face) : 0u;
     audit.localShadowSupportedKindMask |= supportedKindMask;
@@ -3596,10 +3632,12 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneLocalShadow(
         audit.localShadowPassCount >= 6u &&
         audit.localShadowDrawCount > 0u &&
         audit.localShadowTileCount > 0u &&
-        audit.localShadowRectTileCount == 0u &&
         audit.localShadowCameraIndependent &&
-        audit.localShadowSupportedKindMask == 0x3u &&
-        audit.localShadowSuppressedKindMask == 0x4u;
+        (audit.localShadowSupportedKindMask & 0x3u) == 0x3u &&
+        (audit.localShadowSupportedKindMask |
+         audit.localShadowSuppressedKindMask) == 0x7u &&
+        (audit.localShadowSupportedKindMask &
+         audit.localShadowSuppressedKindMask) == 0u;
 }
 
 void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(

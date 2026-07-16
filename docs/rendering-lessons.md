@@ -1527,3 +1527,35 @@ Validation:
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `197 pass / 0 warn / 0 fail`.
 - The completed LightingShowcase probe reports 48 local tile passes: point/spot/rect `36/12/0`, 360 draw submissions, 1024-pixel tiles, `0x3F` face coverage, camera independence, and producer probe index 0.
 - User accepted the single real `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Captured Rect Lights Need The Same Budgeted Surface Samples As Main Shadows
+
+Symptom:
+- Captured reflections had point and spot occlusion, but rect lights remained direct-lit because the capture path deliberately excluded their multi-sample tiles.
+
+False leads:
+- Reusing the main camera's completed rect tiles during capture.
+- Adding a single center rect projection to the probe path and relying on filtering to hide the resulting hard block.
+
+Cause:
+- The capture-local tile builder was restricted to point and spot lights, even though the main path already had an importance-ranked two/four-sample rect area-shadow budget and shader resolve.
+
+Control test:
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-ReflectionCaptureHealth.ps1 -OutputDirectory tmp\reflection_capture_rect_area_health_retry -SkipBuild -Strict`.
+- In the normal LightingShowcase lane require rect tiles, requested/max budget accounting, zero rect drops, support mask `0x7`, suppression mask `0`, and all six capture faces.
+- In the `rect-capture-disabled` lane set `SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF=1` and require rect tiles/requested/dropped all zero with masks `0x3/0x4`.
+
+Fix:
+- Reuse the rect sample budget and surface-view-projection policy when building each transient capture-local tile set; retain no main-camera cache state.
+- Reserve point/spot tiles first, then allocate rect extra samples by importance within the capture atlas capacity.
+- Add passive CSV/ImGui audit fields for requested, maximum, granted-extra, budget-limited, and dropped rect tiles.
+
+Prevention:
+- A probe capture must use the same light-kind sampling policy as its main shading consumer, or explicitly declare the kind as suppressed.
+- Area-shadow quality changes require both a normal budget-accounting lane and a type-specific disabled control; an image alone cannot prove the fallback contract.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `231 pass / 0 warn / 0 fail`.
+- Completed LightingShowcase capture reported 192 local tile passes: point/spot/rect `36/12/144`, rect requested/maximum `144/192`, extra/budget-limited `48/48`, no drops, tile size 1024, and `0x3F` coverage.
+- User accepted the single real `SelfEngineLightingShowcase` visual window.

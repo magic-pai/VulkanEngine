@@ -5606,6 +5606,21 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.localShadowSpotTileCount;
     frameStats.reflectionProbe.capturedSceneLocalShadowRectTileCount =
         capturedSceneAudit.localShadowRectTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowRequestedTileCount =
+        capturedSceneAudit.localShadowRequestedTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowDroppedTileCount =
+        capturedSceneAudit.localShadowDroppedTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowRectRequestedTileCount =
+        capturedSceneAudit.localShadowRectRequestedTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowRectMaximumTileCount =
+        capturedSceneAudit.localShadowRectMaximumTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowRectExtraSampleTileCount =
+        capturedSceneAudit.localShadowRectExtraSampleTileCount;
+    frameStats.reflectionProbe
+        .capturedSceneLocalShadowRectBudgetLimitedSampleTileCount =
+        capturedSceneAudit.localShadowRectBudgetLimitedSampleTileCount;
+    frameStats.reflectionProbe.capturedSceneLocalShadowRectDroppedTileCount =
+        capturedSceneAudit.localShadowRectDroppedTileCount;
     frameStats.reflectionProbe.capturedSceneLocalShadowMapTileSize =
         capturedSceneAudit.localShadowMapTileSize;
     frameStats.reflectionProbe.capturedSceneLocalShadowFaceMask =
@@ -12519,19 +12534,19 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         m_ShadowFramebuffer != nullptr &&
         m_ShadowGraphicsPipeline != nullptr &&
         m_ReflectionCaptureMaterialDescriptorSets != nullptr;
+    const bool captureRectShadowEnabled =
+        !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF");
     const LocalShadowTileSet captureLocalShadowTiles = BuildLocalShadowTiles(
         lights,
         captureShadowCommands,
         m_LocalShadowAtlas != nullptr ? m_LocalShadowAtlas->TileCapacity() : 0u,
         nullptr,
-        false
+        captureRectShadowEnabled
     );
     const bool captureLocalShadowRequested =
         m_ShadowSettings.enabled &&
         !captureShadowCommands.empty() &&
-        captureLocalShadowTiles.assignedCount > 0u &&
-        (captureLocalShadowTiles.pointLightCount > 0u ||
-         captureLocalShadowTiles.spotLightCount > 0u);
+        captureLocalShadowTiles.assignedCount > 0u;
     const bool captureLocalShadowAvailable = captureLocalShadowRequested &&
         m_LocalShadowAtlas != nullptr &&
         m_LocalShadowFramebuffer != nullptr &&
@@ -12550,8 +12565,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     (void)UpdateEnvironmentDescriptorSets(m_DescriptorSets.get(), nullptr, imageIndex);
     const FrameLightConstants lightConstants = lights.Constants();
     // Capture uses transient shadow resources and never reads the main camera's
-    // tile cache. Point and spot tiles are rebuilt per cubemap face; rect area
-    // shadows remain deliberately unsupported until their sample budget exists.
+    // tile cache. Each face rebuilds point, spot, and budgeted rect-area tiles.
     UpdateDirectionalShadowCascadeBuffer(
         imageIndex,
         captureDirectionalShadows,
@@ -12600,6 +12614,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     u32 captureLocalShadowPointFaceTileCount = 0u;
     u32 captureLocalShadowSpotTileCount = 0u;
     u32 captureLocalShadowRectTileCount = 0u;
+    u32 captureLocalShadowRectRequestedTileCount = 0u;
     const u32 captureLocalShadowTileCount = std::min<u32>(
         captureLocalShadowTiles.assignedCount,
         static_cast<u32>(captureLocalShadowTiles.tiles.size())
@@ -12621,6 +12636,21 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             break;
         }
     }
+    const u32 captureLocalLightCount = std::min<u32>(
+        lights.localCount,
+        static_cast<u32>(lights.localLights.size())
+    );
+    for (u32 index = 0u; index < captureLocalLightCount; ++index) {
+        if (lights.localLights[index].kind == RendererLightKind::Rect) {
+            captureLocalShadowRectRequestedTileCount +=
+                captureLocalShadowTiles.requestedTilesByLocalLight[index];
+        }
+    }
+    const u32 captureLocalShadowRectDroppedTileCount =
+        captureLocalShadowRectRequestedTileCount > captureLocalShadowRectTileCount
+            ? captureLocalShadowRectRequestedTileCount -
+                  captureLocalShadowRectTileCount
+            : 0u;
 
     VkCommandBufferAllocateInfo allocateInfo{};
     allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -12780,11 +12810,18 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         captureLocalShadowPointFaceTileCount,
         captureLocalShadowSpotTileCount,
         captureLocalShadowRectTileCount,
+        captureLocalShadowTiles.requestedCount,
+        captureLocalShadowTiles.droppedCount,
+        captureLocalShadowRectRequestedTileCount,
+        captureLocalShadowTiles.rectTiles,
+        captureLocalShadowTiles.rectShadowExtraSampleTiles,
+        captureLocalShadowTiles.rectShadowBudgetLimitedSampleTiles,
+        captureLocalShadowRectDroppedTileCount,
         captureLocalShadowRequested,
         localShadowFaceReady,
         true,
-        0x3u,
-        0x4u
+        captureRectShadowEnabled ? 0x7u : 0x3u,
+        captureRectShadowEnabled ? 0x0u : 0x4u
     );
 
     m_ReflectionProbeResources.CompleteGpuCapturedSceneFace(

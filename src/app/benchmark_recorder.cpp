@@ -604,6 +604,13 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneLocalShadowPointFaceTileCount << ','
         << reflectionProbe.capturedSceneLocalShadowSpotTileCount << ','
         << reflectionProbe.capturedSceneLocalShadowRectTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRequestedTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowDroppedTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectRequestedTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectMaximumTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectExtraSampleTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectBudgetLimitedSampleTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectDroppedTileCount << ','
         << reflectionProbe.capturedSceneLocalShadowMapTileSize << ','
         << reflectionProbe.capturedSceneLocalShadowFaceMask << ','
         << reflectionProbe.capturedSceneLocalShadowSupportedKindMask << ','
@@ -1600,6 +1607,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_local_shadow_point_face_tile_count,"
         << "reflection_probe_captured_scene_local_shadow_spot_tile_count,"
         << "reflection_probe_captured_scene_local_shadow_rect_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_requested_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_dropped_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_requested_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_maximum_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_extra_sample_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_budget_limited_sample_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count,"
         << "reflection_probe_captured_scene_local_shadow_map_tile_size,"
         << "reflection_probe_captured_scene_local_shadow_face_mask,"
         << "reflection_probe_captured_scene_local_shadow_supported_kind_mask,"

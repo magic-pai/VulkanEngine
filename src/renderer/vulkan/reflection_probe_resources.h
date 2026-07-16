@@ -172,6 +172,13 @@ struct CapturedSceneCaptureAudit {
     u32 localShadowPointFaceTileCount = 0;
     u32 localShadowSpotTileCount = 0;
     u32 localShadowRectTileCount = 0;
+    u32 localShadowRequestedTileCount = 0;
+    u32 localShadowDroppedTileCount = 0;
+    u32 localShadowRectRequestedTileCount = 0;
+    u32 localShadowRectMaximumTileCount = 0;
+    u32 localShadowRectExtraSampleTileCount = 0;
+    u32 localShadowRectBudgetLimitedSampleTileCount = 0;
+    u32 localShadowRectDroppedTileCount = 0;
     u32 localShadowMapTileSize = 0;
     u32 localShadowFaceMask = 0;
     u32 localShadowSupportedKindMask = 0;
@@ -265,6 +272,13 @@ public:
         u32 pointFaceTileCount,
         u32 spotTileCount,
         u32 rectTileCount,
+        u32 requestedTileCount,
+        u32 droppedTileCount,
+        u32 rectRequestedTileCount,
+        u32 rectMaximumTileCount,
+        u32 rectExtraSampleTileCount,
+        u32 rectBudgetLimitedSampleTileCount,
+        u32 rectDroppedTileCount,
         bool requested,
         bool ready,
         bool cameraIndependent,

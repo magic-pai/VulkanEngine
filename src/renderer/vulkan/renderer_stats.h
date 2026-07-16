@@ -387,6 +387,13 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneLocalShadowPointFaceTileCount = 0;
     u32 capturedSceneLocalShadowSpotTileCount = 0;
     u32 capturedSceneLocalShadowRectTileCount = 0;
+    u32 capturedSceneLocalShadowRequestedTileCount = 0;
+    u32 capturedSceneLocalShadowDroppedTileCount = 0;
+    u32 capturedSceneLocalShadowRectRequestedTileCount = 0;
+    u32 capturedSceneLocalShadowRectMaximumTileCount = 0;
+    u32 capturedSceneLocalShadowRectExtraSampleTileCount = 0;
+    u32 capturedSceneLocalShadowRectBudgetLimitedSampleTileCount = 0;
+    u32 capturedSceneLocalShadowRectDroppedTileCount = 0;
     u32 capturedSceneLocalShadowMapTileSize = 0;
     u32 capturedSceneLocalShadowFaceMask = 0;
     u32 capturedSceneLocalShadowSupportedKindMask = 0;

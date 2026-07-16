@@ -287,6 +287,13 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_local_shadow_point_face_tile_count",
         "reflection_probe_captured_scene_local_shadow_spot_tile_count",
         "reflection_probe_captured_scene_local_shadow_rect_tile_count",
+        "reflection_probe_captured_scene_local_shadow_requested_tile_count",
+        "reflection_probe_captured_scene_local_shadow_dropped_tile_count",
+        "reflection_probe_captured_scene_local_shadow_rect_requested_tile_count",
+        "reflection_probe_captured_scene_local_shadow_rect_maximum_tile_count",
+        "reflection_probe_captured_scene_local_shadow_rect_extra_sample_tile_count",
+        "reflection_probe_captured_scene_local_shadow_rect_budget_limited_sample_tile_count",
+        "reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count",
         "reflection_probe_captured_scene_local_shadow_map_tile_size",
         "reflection_probe_captured_scene_local_shadow_face_mask",
         "reflection_probe_captured_scene_local_shadow_supported_kind_mask",
@@ -418,13 +425,15 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "capture-shadow" -Name "capture-side shadow keeps its producer identity" `
         -Passed ($metrics["reflection_probe_captured_scene_directional_shadow_probe_scene_index"].max -ge 0) `
         -Actual $metrics["reflection_probe_captured_scene_directional_shadow_probe_scene_index"].max -Expected ">= 0"
+    $expectedLocalShadowSupportedKinds = if ($Mode -eq "rect-off") { 3 } else { 7 }
+    $expectedLocalShadowSuppressedKinds = if ($Mode -eq "rect-off") { 4 } else { 0 }
     Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "capture-local shadow kind contract is explicit" `
         -Passed (
-            $metrics["reflection_probe_captured_scene_local_shadow_supported_kind_mask"].max -eq 3 -and
-            $metrics["reflection_probe_captured_scene_local_shadow_suppressed_kind_mask"].max -eq 4
+            $metrics["reflection_probe_captured_scene_local_shadow_supported_kind_mask"].max -eq $expectedLocalShadowSupportedKinds -and
+            $metrics["reflection_probe_captured_scene_local_shadow_suppressed_kind_mask"].max -eq $expectedLocalShadowSuppressedKinds
         ) `
         -Actual "supported=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_local_shadow_supported_kind_mask'].max, 16)),suppressed=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_local_shadow_suppressed_kind_mask'].max, 16))" `
-        -Expected "supported=0x3 (point+spot), suppressed=0x4 (rect)"
+        -Expected "supported=0x$([Convert]::ToString($expectedLocalShadowSupportedKinds, 16)),suppressed=0x$([Convert]::ToString($expectedLocalShadowSuppressedKinds, 16))"
     if ($Mode -eq "multi") {
         Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "LightingShowcase requests capture-side local shadows" `
             -Passed ($metrics["reflection_probe_captured_scene_local_shadow_requested"].max -eq 1) `
@@ -443,9 +452,19 @@ function New-ReflectionCaptureReport {
             ) `
             -Actual "draws=$($metrics['reflection_probe_captured_scene_local_shadow_draw_count'].max),point=$($metrics['reflection_probe_captured_scene_local_shadow_point_face_tile_count'].max),spot=$($metrics['reflection_probe_captured_scene_local_shadow_spot_tile_count'].max)" `
             -Expected "all > 0"
-        Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "rect capture tiles remain deliberately suppressed" `
-            -Passed ($metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -eq 0) `
-            -Actual $metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -Expected 0
+        Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "rect area lights receive capture-local sample tiles" `
+            -Passed ($metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -Expected "> 0"
+        Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "rect capture budget accounts for every assigned tile" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_requested_tile_count"].max -ge
+                    $metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -and
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_maximum_tile_count"].max -ge
+                    $metrics["reflection_probe_captured_scene_local_shadow_rect_requested_tile_count"].max -and
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count"].max -eq 0
+            ) `
+            -Actual "assigned=$($metrics['reflection_probe_captured_scene_local_shadow_rect_tile_count'].max),requested=$($metrics['reflection_probe_captured_scene_local_shadow_rect_requested_tile_count'].max),maximum=$($metrics['reflection_probe_captured_scene_local_shadow_rect_maximum_tile_count'].max),dropped=$($metrics['reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count'].max)" `
+            -Expected "assigned <= requested <= maximum, dropped=0"
         Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "capture-local atlas covers all faces independently" `
             -Passed (
                 $metrics["reflection_probe_captured_scene_local_shadow_face_mask"].max -eq 63 -and
@@ -454,6 +473,17 @@ function New-ReflectionCaptureReport {
             ) `
             -Actual "faces=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_local_shadow_face_mask'].max, 16)),camera=$($metrics['reflection_probe_captured_scene_local_shadow_camera_independent'].max),probe=$($metrics['reflection_probe_captured_scene_local_shadow_probe_scene_index'].max)" `
             -Expected "faces=0x3F,camera=1,probe>=0"
+    }
+    if ($Mode -eq "rect-off") {
+        Add-BooleanCheck -Checks $checks -Area "capture-local-shadow" -Name "rect capture-shadow fallback is explicit" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_local_shadow_ready"].max -eq 1 -and
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_tile_count"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_requested_tile_count"].max -eq 0 -and
+                $metrics["reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count"].max -eq 0
+            ) `
+            -Actual "ready=$($metrics['reflection_probe_captured_scene_local_shadow_ready'].max),assigned=$($metrics['reflection_probe_captured_scene_local_shadow_rect_tile_count'].max),requested=$($metrics['reflection_probe_captured_scene_local_shadow_rect_requested_tile_count'].max),dropped=$($metrics['reflection_probe_captured_scene_local_shadow_rect_dropped_tile_count'].max)" `
+            -Expected "ready=1, rect tiles/requested/dropped=0"
     }
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "GPU capture draws real scene geometry" `
         -Passed ($metrics["reflection_probe_captured_scene_capture_draw_count"].max -gt 0) `
@@ -467,7 +497,7 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "sampled diffuse irradiance map matches its producer probe" `
         -Passed ($metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -gt 0) `
         -Actual $metrics["reflection_probe_selected_captured_scene_diffuse_irradiance_map_matches_active_mask"].max -Expected "non-zero mask"
-    $captureUploadEvidence = if ($Mode -eq "multi") {
+    $captureUploadEvidence = if ($Mode -eq "multi" -or $Mode -eq "rect-off") {
         $metrics["reflection_probe_captured_scene_upload_count"].max
     } else {
         $metrics["reflection_probe_captured_scene_upload_count"].min
@@ -649,6 +679,7 @@ $managedKeys = @(
     "SE_REFLECTION_PROBE_REFRESH_POLICY",
     "SE_REFLECTION_PROBE_FORCE_REFRESH",
     "SE_REFLECTION_PROBE_SCENE_DIRTY",
+    "SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_AUTO_EXIT_FRAMES",
@@ -720,6 +751,16 @@ $laneSpecs = @(
             SE_BENCHMARK_SCENE = "lighting-showcase"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "rect-capture-disabled"
+        mode = "rect-off"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF = "1"
         }
     }
 )
