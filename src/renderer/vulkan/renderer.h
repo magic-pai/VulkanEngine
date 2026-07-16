@@ -673,7 +673,8 @@ private:
         const FrameLightSet& lights,
         std::span<const RenderCommand> shadowCommands,
         u32 atlasTileCapacity,
-        const LocalShadowCacheState* cacheState
+        const LocalShadowCacheState* cacheState,
+        bool includeRectLights = true
     ) const;
     std::span<const RenderCommand> ShadowRenderCommands() const;
     const VulkanDescriptorSets* ShadowDescriptorSets() const;

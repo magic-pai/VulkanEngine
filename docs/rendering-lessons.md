@@ -1496,3 +1496,34 @@ Validation:
 - `Test-LightingShowcaseCeilingLightsHealth.ps1 -SkipBuild -Strict` passed `10 pass / 0 fail` with point/spot/rect/total `1/2/8/11`, shadow tiles `32/32/0`, and point/spot footprints `6/2`.
 - `Test-LocalShadowAttributionHealth.ps1 -SkipBuild -Strict` passed `170 pass / 0 warn / 0 fail` across slots 0-10; slots 0-2 report point/spot/spot with `6/1/1` assigned tiles.
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `182 pass / 0 warn / 0 fail`; user accepted the Lighting Showcase visual result.
+
+## 2026-07-16 - Captured Probes Need Transient Point And Spot Shadow Atlases
+
+Symptom:
+- Captured-scene reflections had probe-local directional shadowing, but point and spot lights were direct-lit without their occluders because capture cleared the local-shadow tile buffer.
+
+False leads:
+- Sampling the main camera's local-shadow atlas during cubemap capture.
+- Reusing the main local-shadow cache state because its tile image already exists for the current swapchain image.
+
+Cause:
+- Main local-shadow tiles are camera-frame resources produced later in the frame and their cache keys encode main-frame state. They are neither spatially valid nor lifecycle-safe for an earlier per-probe cubemap face.
+
+Control test:
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-ReflectionCaptureHealth.ps1 -OutputDirectory tmp\reflection_capture_local_point_spot_health -SkipBuild -Strict`.
+- In the LightingShowcase lane require capture-local kind masks `0x3/0x4`, nonzero point and spot tile counts, zero rect tiles, a `0x3F` face mask, camera independence, and a valid probe identity.
+
+Fix:
+- Build a fresh point/spot-only `LocalShadowTileSet` from the full caster queue for every cubemap face, with no cache state.
+- Clear and render the transient local atlas immediately before the face shading pass, upload its tile UBO, and bind the atlas through the capture-only material descriptors.
+- Keep rectangle lights directly lit but explicitly record them as capture-shadow suppressed until a separate multi-sample area-shadow budget is implemented.
+
+Prevention:
+- Never reuse a main-camera local-shadow atlas or cache for an offscreen probe capture without an explicit per-probe spatial and lifecycle contract.
+- When a capture feature supports only a subset of light kinds, publish supported and suppressed masks in CSV/ImGui and make the health gate assert both.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `197 pass / 0 warn / 0 fail`.
+- The completed LightingShowcase probe reports 48 local tile passes: point/spot/rect `36/12/0`, 360 draw submissions, 1024-pixel tiles, `0x3F` face coverage, camera independence, and producer probe index 0.
+- User accepted the single real `SelfEngineLightingShowcase` visual window.

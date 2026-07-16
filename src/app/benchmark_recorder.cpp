@@ -595,6 +595,21 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneDirectionalShadowCameraIndependent << ','
         << reflectionProbe.capturedSceneDirectionalShadowLocalTilesSuppressed << ','
         << reflectionProbe.capturedSceneDirectionalShadowProbeSceneIndex << ','
+        << reflectionProbe.capturedSceneLocalShadowRequested << ','
+        << reflectionProbe.capturedSceneLocalShadowReady << ','
+        << reflectionProbe.capturedSceneLocalShadowPassCount << ','
+        << reflectionProbe.capturedSceneLocalShadowDrawCount << ','
+        << reflectionProbe.capturedSceneLocalShadowCasterCount << ','
+        << reflectionProbe.capturedSceneLocalShadowTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowPointFaceTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowSpotTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowRectTileCount << ','
+        << reflectionProbe.capturedSceneLocalShadowMapTileSize << ','
+        << reflectionProbe.capturedSceneLocalShadowFaceMask << ','
+        << reflectionProbe.capturedSceneLocalShadowSupportedKindMask << ','
+        << reflectionProbe.capturedSceneLocalShadowSuppressedKindMask << ','
+        << reflectionProbe.capturedSceneLocalShadowCameraIndependent << ','
+        << reflectionProbe.capturedSceneLocalShadowProbeSceneIndex << ','
         << reflectionProbe.capturedSceneLastCapturedFace << ','
         << reflectionProbe.capturedSceneRasterizedGeometry << ','
         << reflectionProbe.capturedSceneGpuResourcesAllocated << ','
@@ -1576,6 +1591,21 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_directional_shadow_camera_independent,"
         << "reflection_probe_captured_scene_directional_shadow_local_tiles_suppressed,"
         << "reflection_probe_captured_scene_directional_shadow_probe_scene_index,"
+        << "reflection_probe_captured_scene_local_shadow_requested,"
+        << "reflection_probe_captured_scene_local_shadow_ready,"
+        << "reflection_probe_captured_scene_local_shadow_pass_count,"
+        << "reflection_probe_captured_scene_local_shadow_draw_count,"
+        << "reflection_probe_captured_scene_local_shadow_caster_count,"
+        << "reflection_probe_captured_scene_local_shadow_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_point_face_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_spot_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_rect_tile_count,"
+        << "reflection_probe_captured_scene_local_shadow_map_tile_size,"
+        << "reflection_probe_captured_scene_local_shadow_face_mask,"
+        << "reflection_probe_captured_scene_local_shadow_supported_kind_mask,"
+        << "reflection_probe_captured_scene_local_shadow_suppressed_kind_mask,"
+        << "reflection_probe_captured_scene_local_shadow_camera_independent,"
+        << "reflection_probe_captured_scene_local_shadow_probe_scene_index,"
         << "reflection_probe_captured_scene_last_captured_face,"
         << "reflection_probe_captured_scene_rasterized_geometry,"
         << "reflection_probe_captured_scene_gpu_resources_allocated,"

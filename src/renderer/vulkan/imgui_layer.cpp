@@ -2870,6 +2870,23 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneDirectionalShadowLocalTilesSuppressed
     );
     ImGui::Text(
+        "Captured local shadow: requested/ready %u/%u, pass/draw/casters %u/%u/%u, tiles point/spot/rect %u/%u/%u, tile map %u, faces 0x%X, kinds 0x%X/0x%X, probe %d, camera independent %u",
+        stats.reflectionProbe.capturedSceneLocalShadowRequested,
+        stats.reflectionProbe.capturedSceneLocalShadowReady,
+        stats.reflectionProbe.capturedSceneLocalShadowPassCount,
+        stats.reflectionProbe.capturedSceneLocalShadowDrawCount,
+        stats.reflectionProbe.capturedSceneLocalShadowCasterCount,
+        stats.reflectionProbe.capturedSceneLocalShadowPointFaceTileCount,
+        stats.reflectionProbe.capturedSceneLocalShadowSpotTileCount,
+        stats.reflectionProbe.capturedSceneLocalShadowRectTileCount,
+        stats.reflectionProbe.capturedSceneLocalShadowMapTileSize,
+        stats.reflectionProbe.capturedSceneLocalShadowFaceMask,
+        stats.reflectionProbe.capturedSceneLocalShadowSupportedKindMask,
+        stats.reflectionProbe.capturedSceneLocalShadowSuppressedKindMask,
+        stats.reflectionProbe.capturedSceneLocalShadowProbeSceneIndex,
+        stats.reflectionProbe.capturedSceneLocalShadowCameraIndependent
+    );
+    ImGui::Text(
         "Reflection probe sampled mips: [%u %u %u %u]",
         stats.reflectionProbe.selectedCaptureMipCounts[0],
         stats.reflectionProbe.selectedCaptureMipCounts[1],

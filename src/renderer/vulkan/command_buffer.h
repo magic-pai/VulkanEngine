@@ -92,6 +92,16 @@ struct ReflectionCaptureDirectionalShadowDrawStats {
     u64 pushConstantByteCount = 0;
 };
 
+struct ReflectionCaptureLocalShadowDrawStats {
+    u32 tilePassCount = 0;
+    u32 drawCount = 0;
+    u32 meshBindCount = 0;
+    u32 bonePaletteDescriptorBindCount = 0;
+    u32 bonePaletteFallbackDescriptorBindCount = 0;
+    u32 pushConstantUpdateCount = 0;
+    u64 pushConstantByteCount = 0;
+};
+
 // Shared forward-material path for a one-face reflection probe capture pass.
 ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
     VkCommandBuffer commandBuffer,
@@ -118,6 +128,23 @@ RecordReflectionCaptureDirectionalShadow(
     std::span<const RenderCommand> shadowRenderCommands,
     std::size_t imageIndex,
     const glm::mat4& lightViewProjection,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady
+);
+
+// Records a freshly cleared local-light atlas for a reflection-capture face.
+// This path deliberately never consumes the main camera's tile cache.
+ReflectionCaptureLocalShadowDrawStats
+RecordReflectionCaptureLocalShadows(
+    VkCommandBuffer commandBuffer,
+    const VulkanShadowRenderPass& shadowRenderPass,
+    const VulkanGraphicsPipeline& shadowGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedShadowGraphicsPipeline,
+    const VulkanShadowFramebuffer& localShadowFramebuffer,
+    const VulkanDescriptorSets& shadowDescriptorSets,
+    const LocalShadowTileSet& localShadowTiles,
+    std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
+    std::size_t imageIndex,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady
 );

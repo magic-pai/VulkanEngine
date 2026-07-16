@@ -1807,6 +1807,95 @@ RecordReflectionCaptureDirectionalShadow(
     return stats;
 }
 
+ReflectionCaptureLocalShadowDrawStats
+RecordReflectionCaptureLocalShadows(
+    VkCommandBuffer commandBuffer,
+    const VulkanShadowRenderPass& shadowRenderPass,
+    const VulkanGraphicsPipeline& shadowGraphicsPipeline,
+    const VulkanGraphicsPipeline* doubleSidedShadowGraphicsPipeline,
+    const VulkanShadowFramebuffer& localShadowFramebuffer,
+    const VulkanDescriptorSets& shadowDescriptorSets,
+    const LocalShadowTileSet& localShadowTiles,
+    std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
+    std::size_t imageIndex,
+    VkDescriptorSet bonePaletteFallbackDescriptorSet,
+    u32 bonePaletteFallbackDescriptorReady
+) {
+    ReflectionCaptureLocalShadowDrawStats stats{};
+    const u32 assignedTileCount = std::min<u32>(
+        localShadowTiles.assignedCount,
+        static_cast<u32>(localShadowTiles.tiles.size())
+    );
+    if (assignedTileCount == 0u) {
+        return stats;
+    }
+
+    VkClearValue clearValue{};
+    clearValue.depthStencil = { 1.0f, 0u };
+    VkRenderPassBeginInfo renderPassInfo{};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = shadowRenderPass.Handle();
+    renderPassInfo.framebuffer = localShadowFramebuffer.Handle(imageIndex);
+    renderPassInfo.renderArea.offset = { 0, 0 };
+    renderPassInfo.renderArea.extent = localShadowFramebuffer.Extent();
+    renderPassInfo.clearValueCount = 1u;
+    renderPassInfo.pClearValues = &clearValue;
+    vkCmdBeginRenderPass(
+        commandBuffer,
+        &renderPassInfo,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    const VkExtent2D atlasExtent = localShadowFramebuffer.Extent();
+    const u32 tileColumns = std::max(localShadowTiles.tileColumns, 1u);
+    const VkExtent2D tileExtent{
+        localShadowTiles.tileSize > 0u
+            ? localShadowTiles.tileSize
+            : std::max(atlasExtent.width / tileColumns, 1u),
+        localShadowTiles.tileSize > 0u
+            ? localShadowTiles.tileSize
+            : std::max(atlasExtent.height / tileColumns, 1u)
+    };
+    for (u32 tileSetIndex = 0u;
+         tileSetIndex < assignedTileCount;
+         ++tileSetIndex) {
+        const LocalShadowTile& tile = localShadowTiles.tiles[tileSetIndex];
+        const u32 tileX = tile.tileIndex % tileColumns;
+        const u32 tileY = tile.tileIndex / tileColumns;
+        const VkOffset2D tileOffset{
+            static_cast<i32>(tileX * tileExtent.width),
+            static_cast<i32>(tileY * tileExtent.height)
+        };
+        const std::span<const RenderCommand> tileRenderCommands =
+            tileSetIndex < localShadowTileRenderCommands.size()
+                ? localShadowTileRenderCommands[tileSetIndex]
+                : std::span<const RenderCommand>{};
+        DrawShadowCommands(
+            commandBuffer,
+            shadowGraphicsPipeline,
+            doubleSidedShadowGraphicsPipeline,
+            shadowDescriptorSets,
+            tileRenderCommands,
+            imageIndex,
+            tile.viewProjection,
+            bonePaletteFallbackDescriptorSet,
+            bonePaletteFallbackDescriptorReady,
+            tileOffset,
+            tileExtent,
+            stats.meshBindCount,
+            stats.bonePaletteDescriptorBindCount,
+            stats.bonePaletteFallbackDescriptorBindCount,
+            stats.pushConstantUpdateCount,
+            stats.pushConstantByteCount
+        );
+        ++stats.tilePassCount;
+        stats.drawCount += static_cast<u32>(tileRenderCommands.size());
+    }
+
+    vkCmdEndRenderPass(commandBuffer);
+    return stats;
+}
+
 VulkanCommandBuffer::VulkanCommandBuffer(
     const VulkanDevice& device,
     const VulkanCommandPool& commandPool,

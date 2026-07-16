@@ -165,6 +165,18 @@ struct CapturedSceneCaptureAudit {
     u32 directionalShadowMapSize = 0;
     u32 directionalShadowFaceMask = 0;
     i32 directionalShadowProbeSceneIndex = -1;
+    u32 localShadowPassCount = 0;
+    u32 localShadowDrawCount = 0;
+    u32 localShadowCasterCount = 0;
+    u32 localShadowTileCount = 0;
+    u32 localShadowPointFaceTileCount = 0;
+    u32 localShadowSpotTileCount = 0;
+    u32 localShadowRectTileCount = 0;
+    u32 localShadowMapTileSize = 0;
+    u32 localShadowFaceMask = 0;
+    u32 localShadowSupportedKindMask = 0;
+    u32 localShadowSuppressedKindMask = 0;
+    i32 localShadowProbeSceneIndex = -1;
     u32 lastCapturedFace = 0;
     bool resourceReady = false;
     bool refreshRequested = false;
@@ -179,6 +191,9 @@ struct CapturedSceneCaptureAudit {
     bool directionalShadowReady = false;
     bool directionalShadowCameraIndependent = false;
     bool directionalShadowLocalTilesSuppressed = false;
+    bool localShadowRequested = false;
+    bool localShadowReady = false;
+    bool localShadowCameraIndependent = false;
 };
 
 class VulkanReflectionProbeResources {
@@ -238,6 +253,23 @@ public:
         bool ready,
         bool cameraIndependent,
         bool localTilesSuppressed
+    );
+    void RecordGpuCapturedSceneLocalShadow(
+        i32 probeSceneIndex,
+        u32 face,
+        u32 mapTileSize,
+        u32 passCount,
+        u32 drawCount,
+        u32 casterCount,
+        u32 tileCount,
+        u32 pointFaceTileCount,
+        u32 spotTileCount,
+        u32 rectTileCount,
+        bool requested,
+        bool ready,
+        bool cameraIndependent,
+        u32 supportedKindMask,
+        u32 suppressedKindMask
     );
     void CompleteGpuCapturedSceneFace(
         i32 probeSceneIndex,
