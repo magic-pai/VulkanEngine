@@ -62,6 +62,8 @@ struct CapturedReflectionProbeSceneSample {
     f32 intensity = 1.0f;
     f32 ambientStrength = 0.12f;
     f32 directionalIntensity = 0.0f;
+    u32 localLightSignature = 0;
+    u32 affectedLocalLightCount = 0;
     u32 signature = 0;
 };
 
@@ -129,8 +131,16 @@ struct CapturedSceneRefreshRequest {
     u64 lightRevision = 0;
     u64 renderRevision = 0;
     u32 captureSignature = 0;
+    u32 localLightSignature = 0;
+    u32 geometrySignature = 0;
+    u32 affectedLocalLightCount = 0;
+    u32 affectedRenderableCount = 0;
+    u32 refreshPriority = 0;
+    u32 minimumRefreshIntervalFrames = 0;
+    u64 schedulerFrame = 0;
     bool forceRefresh = false;
     bool sceneDirtyOverride = false;
+    bool selectiveInvalidationEnabled = true;
 };
 
 struct CapturedSceneCaptureAudit {
@@ -146,6 +156,15 @@ struct CapturedSceneCaptureAudit {
     u64 membershipRevision = 0;
     u64 lightRevision = 0;
     u64 renderRevision = 0;
+    u64 schedulerFrame = 0;
+    u64 lastRefreshCompletedFrame = 0;
+    u32 localLightSignature = 0;
+    u32 geometrySignature = 0;
+    u32 affectedLocalLightCount = 0;
+    u32 affectedRenderableCount = 0;
+    u32 refreshPriority = 0;
+    u32 minimumRefreshIntervalFrames = 0;
+    u32 refreshDeferredCount = 0;
     i32 probeSceneIndex = -1;
     u32 facesRendered = 0;
     u32 facesPending = 0;
@@ -213,6 +232,8 @@ struct CapturedSceneCaptureAudit {
     bool shadowSnapshotCameraIndependent = false;
     bool shadowSnapshotEnabled = false;
     bool shadowSnapshotFallbackActive = false;
+    bool selectiveInvalidationEnabled = false;
+    bool refreshDeferredByBudget = false;
 };
 
 class VulkanReflectionProbeResources {
@@ -315,7 +336,8 @@ public:
         u32 drawCount,
         u32 visibleCount,
         u32 culledCount,
-        bool captureComplete
+        bool captureComplete,
+        u64 schedulerFrame
     );
     void FailGpuCapturedSceneRefresh(i32 probeSceneIndex);
     void Release();
@@ -401,6 +423,8 @@ public:
     VkFormat CapturedSceneFormat(i32 probeSceneIndex) const;
     u32 CapturedSceneUploadCount() const;
     u32 CapturedSceneRefreshCheckCount() const;
+    u32 CapturedSceneLocalityIgnoredLightRevisionCount() const;
+    u32 CapturedSceneLocalityIgnoredGeometryRevisionCount() const;
     u32 CapturedSceneSignature() const;
     const CapturedSceneCaptureAudit& CapturedSceneAudit() const;
     const CapturedSceneCaptureAudit& CapturedSceneAudit(i32 probeSceneIndex) const;
@@ -437,6 +461,10 @@ private:
         u64 membershipRevision = 0;
         u64 lightRevision = 0;
         u64 renderRevision = 0;
+        u64 lastRefreshCompletedFrame = 0;
+        u32 localLightSignature = 0;
+        u32 geometrySignature = 0;
+        u32 refreshDeferredCount = 0;
         u32 uploadCount = 0;
         u32 refreshCheckCount = 0;
         CapturedSceneRefreshReason lastRefreshReason =

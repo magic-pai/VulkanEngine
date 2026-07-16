@@ -2966,6 +2966,29 @@ void DrawPerformanceStats(const RendererStats& stats) {
         )
     );
     ImGui::Text(
+        "Captured scene selective refresh: %s, scheduler/completed %llu/%llu, min interval %u, deferred %u (%s), priority %u",
+        stats.reflectionProbe.capturedSceneSelectiveInvalidationEnabled ? "on" : "off",
+        static_cast<unsigned long long>(
+            stats.reflectionProbe.capturedSceneSchedulerFrame
+        ),
+        static_cast<unsigned long long>(
+            stats.reflectionProbe.capturedSceneLastRefreshCompletedFrame
+        ),
+        stats.reflectionProbe.capturedSceneMinimumRefreshIntervalFrames,
+        stats.reflectionProbe.capturedSceneRefreshDeferredCount,
+        stats.reflectionProbe.capturedSceneRefreshDeferredByBudget ? "yes" : "no",
+        stats.reflectionProbe.capturedSceneRefreshPriority
+    );
+    ImGui::Text(
+        "Captured scene influence: lights/renderables %u/%u, signatures 0x%X/0x%X, ignored global light/geometry %u/%u",
+        stats.reflectionProbe.capturedSceneAffectedLocalLightCount,
+        stats.reflectionProbe.capturedSceneAffectedRenderableCount,
+        stats.reflectionProbe.capturedSceneLocalLightSignature,
+        stats.reflectionProbe.capturedSceneGeometrySignature,
+        stats.reflectionProbe.capturedSceneLocalityIgnoredLightRevisionCount,
+        stats.reflectionProbe.capturedSceneLocalityIgnoredGeometryRevisionCount
+    );
+    ImGui::Text(
         "Reflection probe spatial policy: box projection %s, parallax %s, influence mode %u",
         stats.reflectionProbe.boxProjectionEnabled ? "on" : "off",
         stats.reflectionProbe.parallaxCorrectionEnabled ? "on" : "off",

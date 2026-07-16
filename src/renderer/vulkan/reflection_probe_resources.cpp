@@ -2395,6 +2395,18 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     audit.membershipRevision = refreshRequest.membershipRevision;
     audit.lightRevision = refreshRequest.lightRevision;
     audit.renderRevision = refreshRequest.renderRevision;
+    audit.schedulerFrame = refreshRequest.schedulerFrame;
+    audit.lastRefreshCompletedFrame = resource->lastRefreshCompletedFrame;
+    audit.localLightSignature = refreshRequest.localLightSignature;
+    audit.geometrySignature = refreshRequest.geometrySignature;
+    audit.affectedLocalLightCount = refreshRequest.affectedLocalLightCount;
+    audit.affectedRenderableCount = refreshRequest.affectedRenderableCount;
+    audit.refreshPriority = refreshRequest.refreshPriority;
+    audit.minimumRefreshIntervalFrames =
+        refreshRequest.minimumRefreshIntervalFrames;
+    audit.refreshDeferredCount = resource->refreshDeferredCount;
+    audit.selectiveInvalidationEnabled =
+        refreshRequest.selectiveInvalidationEnabled;
     audit.resourceReady = resourceReady;
     audit.rasterizedGeometry = false;
 
@@ -2402,16 +2414,30 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
         audit.refreshReason = CapturedSceneRefreshReason::Initial;
         audit.refreshRequested = true;
     } else {
-        if (refreshRequest.membershipRevision != resource->membershipRevision) {
+        const bool geometryChanged =
+            refreshRequest.geometrySignature != resource->geometrySignature;
+        const bool localLightsChanged =
+            refreshRequest.localLightSignature != resource->localLightSignature;
+        const bool membershipChanged =
+            refreshRequest.membershipRevision != resource->membershipRevision;
+        const bool renderChanged =
+            refreshRequest.renderRevision != resource->renderRevision;
+        const bool lightChanged =
+            refreshRequest.lightRevision != resource->lightRevision;
+        if (membershipChanged &&
+            (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
             audit.dirtyMask |= CapturedSceneDirtyMembership;
         }
-        if (refreshRequest.lightRevision != resource->lightRevision) {
+        if (lightChanged &&
+            (!refreshRequest.selectiveInvalidationEnabled || localLightsChanged)) {
             audit.dirtyMask |= CapturedSceneDirtyLight;
         }
-        if (refreshRequest.renderRevision != resource->renderRevision) {
+        if (renderChanged &&
+            (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
             audit.dirtyMask |= CapturedSceneDirtyRender;
         }
-        if (sceneSample.signature != resource->radianceSignature) {
+        if (refreshRequest.captureSignature != resource->signature &&
+            audit.dirtyMask == CapturedSceneDirtyNone) {
             audit.dirtyMask |= CapturedSceneDirtyContent;
         }
         if (refreshRequest.sceneDirtyOverride) {
@@ -2447,6 +2473,23 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
         }
     }
 
+    const bool budgetDeferrable = audit.refreshRequested &&
+        !refreshRequest.forceRefresh &&
+        refreshRequest.refreshPolicy !=
+            RendererReflectionProbeRefreshPolicy::Forced &&
+        !refreshRequest.sceneDirtyOverride &&
+        resource->lastRefreshCompletedFrame > 0u &&
+        refreshRequest.minimumRefreshIntervalFrames > 0u &&
+        refreshRequest.schedulerFrame >= resource->lastRefreshCompletedFrame &&
+        refreshRequest.schedulerFrame - resource->lastRefreshCompletedFrame <
+            refreshRequest.minimumRefreshIntervalFrames;
+    if (budgetDeferrable) {
+        audit.refreshRequested = false;
+        audit.refreshDeferredByBudget = true;
+        ++resource->refreshDeferredCount;
+        audit.refreshDeferredCount = resource->refreshDeferredCount;
+    }
+
     if (!audit.refreshRequested) {
         resource->audit = audit;
         return;
@@ -2471,8 +2514,12 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     resource->membershipRevision = refreshRequest.membershipRevision;
     resource->lightRevision = refreshRequest.lightRevision;
     resource->renderRevision = refreshRequest.renderRevision;
+    resource->localLightSignature = refreshRequest.localLightSignature;
+    resource->geometrySignature = refreshRequest.geometrySignature;
+    resource->lastRefreshCompletedFrame = refreshRequest.schedulerFrame;
     resource->activeBackend = CapturedSceneCaptureBackend::AnalyticCpu;
     ++resource->uploadCount;
+    audit.lastRefreshCompletedFrame = resource->lastRefreshCompletedFrame;
     audit.resourceReady = true;
     audit.refreshPerformed = true;
     resource->lastRefreshReason = audit.refreshReason;
@@ -3057,6 +3104,16 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
     audit.membershipRevision = refreshRequest.membershipRevision;
     audit.lightRevision = refreshRequest.lightRevision;
     audit.renderRevision = refreshRequest.renderRevision;
+    audit.schedulerFrame = refreshRequest.schedulerFrame;
+    audit.lastRefreshCompletedFrame = resource.lastRefreshCompletedFrame;
+    audit.localLightSignature = refreshRequest.localLightSignature;
+    audit.geometrySignature = refreshRequest.geometrySignature;
+    audit.affectedLocalLightCount = refreshRequest.affectedLocalLightCount;
+    audit.affectedRenderableCount = refreshRequest.affectedRenderableCount;
+    audit.refreshPriority = refreshRequest.refreshPriority;
+    audit.minimumRefreshIntervalFrames = refreshRequest.minimumRefreshIntervalFrames;
+    audit.refreshDeferredCount = resource.refreshDeferredCount;
+    audit.selectiveInvalidationEnabled = refreshRequest.selectiveInvalidationEnabled;
     audit.gpuResourcesAllocated =
         resource.targetImage != nullptr &&
         m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE;
@@ -3075,16 +3132,30 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
         return true;
     }
 
-    if (refreshRequest.membershipRevision != resource.membershipRevision) {
+    const bool geometryChanged =
+        refreshRequest.geometrySignature != resource.geometrySignature;
+    const bool localLightsChanged =
+        refreshRequest.localLightSignature != resource.localLightSignature;
+    const bool membershipChanged =
+        refreshRequest.membershipRevision != resource.membershipRevision;
+    const bool renderChanged =
+        refreshRequest.renderRevision != resource.renderRevision;
+    const bool lightChanged =
+        refreshRequest.lightRevision != resource.lightRevision;
+    if (membershipChanged &&
+        (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
         audit.dirtyMask |= CapturedSceneDirtyMembership;
     }
-    if (refreshRequest.lightRevision != resource.lightRevision) {
+    if (lightChanged &&
+        (!refreshRequest.selectiveInvalidationEnabled || localLightsChanged)) {
         audit.dirtyMask |= CapturedSceneDirtyLight;
     }
-    if (refreshRequest.renderRevision != resource.renderRevision) {
+    if (renderChanged &&
+        (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
         audit.dirtyMask |= CapturedSceneDirtyRender;
     }
-    if (refreshRequest.captureSignature != resource.signature) {
+    if (refreshRequest.captureSignature != resource.signature &&
+        audit.dirtyMask == CapturedSceneDirtyNone) {
         audit.dirtyMask |= CapturedSceneDirtyContent;
     }
     if (refreshRequest.sceneDirtyOverride) {
@@ -3188,6 +3259,7 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.shadowSnapshotCameraIndependent = false;
     resource.audit.shadowSnapshotEnabled = false;
     resource.audit.shadowSnapshotFallbackActive = false;
+    resource.audit.refreshDeferredByBudget = false;
     resource.audit.rasterizedGeometry = true;
     resource.audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
 }
@@ -3219,6 +3291,20 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         audit.membershipRevision = resource->refreshRequest.membershipRevision;
         audit.lightRevision = resource->refreshRequest.lightRevision;
         audit.renderRevision = resource->refreshRequest.renderRevision;
+        audit.schedulerFrame = refreshRequest.schedulerFrame;
+        audit.lastRefreshCompletedFrame = resource->lastRefreshCompletedFrame;
+        audit.localLightSignature = resource->refreshRequest.localLightSignature;
+        audit.geometrySignature = resource->refreshRequest.geometrySignature;
+        audit.affectedLocalLightCount =
+            resource->refreshRequest.affectedLocalLightCount;
+        audit.affectedRenderableCount =
+            resource->refreshRequest.affectedRenderableCount;
+        audit.refreshPriority = resource->refreshRequest.refreshPriority;
+        audit.minimumRefreshIntervalFrames =
+            resource->refreshRequest.minimumRefreshIntervalFrames;
+        audit.refreshDeferredCount = resource->refreshDeferredCount;
+        audit.selectiveInvalidationEnabled =
+            resource->refreshRequest.selectiveInvalidationEnabled;
         audit.probeSceneIndex = probeSceneIndex;
         audit.resourceReady = resource->activeImage != nullptr;
         audit.gpuResourcesAllocated = true;
@@ -3230,8 +3316,30 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         return true;
     }
 
+    const bool refreshRequested = CapturedSceneRefreshRequested(
+        *resource,
+        refreshRequest,
+        audit
+    );
+    const bool budgetDeferrable = refreshRequested &&
+        !refreshRequest.forceRefresh &&
+        refreshRequest.refreshPolicy !=
+            RendererReflectionProbeRefreshPolicy::Forced &&
+        !refreshRequest.sceneDirtyOverride &&
+        resource->lastRefreshCompletedFrame > 0u &&
+        refreshRequest.minimumRefreshIntervalFrames > 0u &&
+        refreshRequest.schedulerFrame >= resource->lastRefreshCompletedFrame &&
+        refreshRequest.schedulerFrame - resource->lastRefreshCompletedFrame <
+            refreshRequest.minimumRefreshIntervalFrames;
+    if (budgetDeferrable) {
+        audit.refreshRequested = false;
+        audit.refreshDeferredByBudget = true;
+        ++resource->refreshDeferredCount;
+        audit.refreshDeferredCount = resource->refreshDeferredCount;
+    }
+
     const CapturedSceneCaptureAudit previousAudit = resource->audit;
-    if (!CapturedSceneRefreshRequested(*resource, refreshRequest, audit)) {
+    if (!audit.refreshRequested) {
         audit.backend = CapturedSceneCaptureBackend::RasterizedGpu;
         audit.rasterizedGeometry = true;
         audit.facesRendered = previousAudit.facesRendered;
@@ -3722,7 +3830,8 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     u32 drawCount,
     u32 visibleCount,
     u32 culledCount,
-    bool captureComplete
+    bool captureComplete,
+    u64 schedulerFrame
 ) {
     CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
@@ -3758,6 +3867,9 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->membershipRevision = resource->refreshRequest.membershipRevision;
     resource->lightRevision = resource->refreshRequest.lightRevision;
     resource->renderRevision = resource->refreshRequest.renderRevision;
+    resource->localLightSignature = resource->refreshRequest.localLightSignature;
+    resource->geometrySignature = resource->refreshRequest.geometrySignature;
+    resource->lastRefreshCompletedFrame = schedulerFrame;
     resource->activeBackend = CapturedSceneCaptureBackend::RasterizedGpu;
     ++resource->uploadCount;
     resource->lastRefreshReason = resource->audit.refreshReason;
@@ -3765,6 +3877,8 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.resourceReady = true;
     resource->audit.refreshPerformed = true;
     resource->audit.refreshRequested = false;
+    resource->audit.refreshDeferredByBudget = false;
+    resource->audit.lastRefreshCompletedFrame = schedulerFrame;
     resource->audit.gpuCaptureInProgress = false;
     resource->audit.mipChainReady = true;
     resource->audit.mipGenerationCount = 1u;
@@ -4329,6 +4443,34 @@ u32 VulkanReflectionProbeResources::CapturedSceneRefreshCheckCount() const {
     for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
         (void)sceneIndex;
         count += resource.refreshCheckCount;
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneLocalityIgnoredLightRevisionCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        if (resource.audit.selectiveInvalidationEnabled &&
+            resource.audit.lightRevision != resource.lightRevision &&
+            resource.audit.localLightSignature == resource.localLightSignature) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneLocalityIgnoredGeometryRevisionCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        const bool globalGeometryChanged =
+            resource.audit.membershipRevision != resource.membershipRevision ||
+            resource.audit.renderRevision != resource.renderRevision;
+        if (resource.audit.selectiveInvalidationEnabled && globalGeometryChanged &&
+            resource.audit.geometrySignature == resource.geometrySignature) {
+            ++count;
+        }
     }
     return count;
 }

@@ -641,6 +641,7 @@ private:
         const RendererReflectionProbe& probe,
         u32 face
     ) const;
+    std::span<const RenderCommand> ReflectionCaptureInfluenceCommands();
     FrameReflectionProbeSet BuildFrameReflectionProbeSet(
         const FrameMatrices* matrices
     ) const;
@@ -730,6 +731,7 @@ private:
     RenderQueue m_OverlayRenderQueue;
     RenderQueue m_ShadowRenderQueue;
     RenderQueue m_ReflectionCaptureRenderQueue;
+    RenderQueue m_ReflectionCaptureInfluenceRenderQueue;
     std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
@@ -840,6 +842,7 @@ private:
     VulkanReflectionProbeResources m_ReflectionProbeResources;
     i32 m_ReflectionCaptureRoundRobinSceneIndex = -1;
     i32 m_ReflectionCaptureActiveSceneIndex = -1;
+    u64 m_ReflectionCaptureSchedulerFrame = 0;
     ReflectionCaptureShadowSnapshot m_ReflectionCaptureShadowSnapshot{};
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxTexture;
     std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxFallbackTexture;

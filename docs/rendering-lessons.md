@@ -1594,3 +1594,38 @@ Validation:
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `280 pass / 0 warn / 0 fail` across static, moving-light, moving-object, camera-invariant, LightingShowcase multi-probe, rect-disabled, and snapshot-disabled lanes.
 - Normal completed captures report one shadow snapshot build, five reuse faces, five saved directional passes, and LightingShowcase saved 160 local tile passes / 2060 local draws; the disabled control reports six directional passes and no snapshot reuse.
 - User accepted the single real `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Captured Probes Must Filter Global Dirty Revisions By Influence
+
+Symptom:
+- Any scene light or render revision previously caused every captured-scene probe to refresh, even when the changed light or object could not affect that probe.
+- The six-face capture scheduler had no per-probe cooldown, so repeated local changes could continually re-enter the capture budget.
+
+False leads:
+- Treating a global `Scene3D` revision as a sufficient per-probe invalidation contract.
+- Tuning the LightingShowcase probe order or a scene-specific refresh interval.
+
+Cause:
+- Captured probe resources tracked only global membership, light, and render revisions. They had no probe-local representation of influenced lights or renderables.
+
+Control test:
+- `SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES=64` with a moving light must defer refreshes without an additional completed upload.
+- The Debug-only `SE_REFLECTION_CAPTURE_LOCALITY_CONTROL=1` grid lane adds a distant captured probe; a local moving light must advance the global revision while the distant probe remains locally clean.
+- `SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF=1` restores the auditable global invalidation fallback.
+
+Fix:
+- Compute per-probe local-light and geometry signatures from conservative influence bounds, then only treat changed global revisions as dirty when their matching local signature changed.
+- Prioritize pending probes by influence score, serialize an active six-face snapshot, and enforce a configurable minimum refresh interval with force/scene-dirty overrides exempted.
+- Publish scheduler frame, completion frame, signatures, affected counts, priority, cooldown/defer state, and locality-bypass counts through CSV and ImGui.
+
+Prevention:
+- A global scene revision is a candidate invalidation signal, never proof that every spatial cache must rebuild.
+- Any cache refresh budget must expose both the defer decision and an explicit disabled fallback in Debug data.
+- Use a spatially separated control resource before accepting locality logic; a single showcase probe cannot prove it.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and both signed binaries verified valid.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_capture_selective_refresh_final` passed `413 pass / 0 warn / 0 fail`.
+- Budget control: interval `64`, deferred-count delta `11`, deferred flag `1`, upload delta `0`.
+- Locality control: two probe resources, ignored-light-revision count `1`; disabled-selective fallback recorded two additional uploads.
+- User accepted the single normal `SelfEngineLightingShowcase` visual window.

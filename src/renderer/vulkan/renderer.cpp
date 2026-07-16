@@ -3124,8 +3124,31 @@ CapturedReflectionProbeLightSample CapturedReflectionProbeLightSampleFor(
     return sample;
 }
 
+f32 ReflectionProbeCaptureDistance(const RendererReflectionProbe& probe) {
+    return std::max(
+        24.0f,
+        std::max(probe.radius * 2.5f, glm::length(probe.boxExtents) * 2.25f)
+    );
+}
+
+bool LocalLightMayInfluenceReflectionProbe(
+    const RendererLocalLight& light,
+    const RendererReflectionProbe& probe
+) {
+    const f32 sourceRadius = std::max({
+        light.radius,
+        light.width * 0.5f,
+        light.height * 0.5f,
+        0.1f
+    });
+    const f32 reach = ReflectionProbeCaptureDistance(probe) + sourceRadius;
+    const glm::vec3 delta = light.position - probe.center;
+    return glm::dot(delta, delta) <= reach * reach;
+}
+
 std::vector<CapturedReflectionProbeLightSample> CapturedReflectionProbeLights(
-    const FrameLightSet& lights
+    const FrameLightSet& lights,
+    const RendererReflectionProbe& probe
 ) {
     std::vector<CapturedReflectionProbeLightSample> samples;
     samples.reserve(std::min<std::size_t>(
@@ -3139,6 +3162,9 @@ std::vector<CapturedReflectionProbeLightSample> CapturedReflectionProbeLights(
     for (std::size_t index = 0; index < count; ++index) {
         const RendererLocalLight& light = lights.localLights[index];
         if (light.intensity <= 0.0001f || light.radius <= 0.0001f) {
+            continue;
+        }
+        if (!LocalLightMayInfluenceReflectionProbe(light, probe)) {
             continue;
         }
         samples.push_back(CapturedReflectionProbeLightSampleFor(light));
@@ -3172,6 +3198,80 @@ u64 HashCapturedLightSample(
     seed = HashCombine(seed, FloatBits(light.height));
     seed = HashCombine(seed, light.kind);
     return seed;
+}
+
+struct CapturedReflectionProbeGeometrySample {
+    u32 signature = 0;
+    u32 affectedRenderableCount = 0;
+};
+
+CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
+    const RendererReflectionProbe& probe,
+    std::span<const RenderCommand> commands
+) {
+    CapturedReflectionProbeGeometrySample sample{};
+    u64 signature = 0x2fdb9a9f90ca7f23ull;
+    const f32 captureDistance = ReflectionProbeCaptureDistance(probe);
+    for (const RenderCommand& command : commands) {
+        if (!SphereIntersectsAabb(
+                probe.center,
+                captureDistance,
+                command.worldBounds
+            )) {
+            continue;
+        }
+        signature = HashShadowCommand(signature, command);
+        ++sample.affectedRenderableCount;
+    }
+    signature = HashCombine(signature, sample.affectedRenderableCount);
+    sample.signature = static_cast<u32>(signature ^ (signature >> 32u));
+    if (sample.signature == 0u) {
+        sample.signature = 1u;
+    }
+    return sample;
+}
+
+u32 ReflectionCaptureRefreshPriority(
+    const RendererReflectionProbe& probe,
+    const CapturedReflectionProbeSceneSample& lightSample,
+    const CapturedReflectionProbeGeometrySample& geometrySample,
+    bool forceRefresh
+) {
+    const f32 influenceSize = std::max(
+        probe.radius,
+        glm::length(probe.boxExtents)
+    );
+    const f32 score =
+        std::max(probe.intensity, 0.0f) * 1024.0f +
+        influenceSize * 64.0f +
+        static_cast<f32>(lightSample.affectedLocalLightCount) * 8.0f +
+        static_cast<f32>(geometrySample.affectedRenderableCount);
+    const u32 priority = static_cast<u32>(std::clamp(
+        score,
+        0.0f,
+        static_cast<f32>(std::numeric_limits<u32>::max() - 1024u)
+    ));
+    return forceRefresh ? priority + 1024u : priority;
+}
+
+u32 ReflectionCaptureMinimumRefreshFramesFromEnvironment() {
+    const std::string value = ReadEnvironmentString(
+        "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES"
+    );
+    if (value.empty()) {
+        return 12u;
+    }
+
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
+    if (end == value.c_str()) {
+        return 12u;
+    }
+    return std::min<u32>(static_cast<u32>(parsed), 3600u);
+}
+
+bool ReflectionCaptureSelectiveInvalidationEnabled() {
+    return !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF");
 }
 
 CapturedReflectionProbeSceneSample CapturedReflectionProbeSceneSampleFor(
@@ -3217,9 +3317,15 @@ CapturedReflectionProbeSceneSample CapturedReflectionProbeSceneSampleFor(
     for (const CapturedReflectionProbeLightSample& light : lightSamples) {
         signature = HashCapturedLightSample(signature, light);
     }
-    sample.signature = static_cast<u32>(
+    sample.localLightSignature = static_cast<u32>(
         signature ^ (signature >> 32u)
     );
+    if (sample.localLightSignature == 0u) {
+        sample.localLightSignature = 1u;
+    }
+    sample.affectedLocalLightCount = static_cast<u32>(lightSamples.size());
+    signature = HashCombine(signature, sample.localLightSignature);
+    sample.signature = static_cast<u32>(signature ^ (signature >> 32u));
     if (sample.signature == 0u) {
         sample.signature = 1u;
     }
@@ -3228,24 +3334,46 @@ CapturedReflectionProbeSceneSample CapturedReflectionProbeSceneSampleFor(
 
 CapturedSceneRefreshRequest CapturedSceneRefreshRequestFor(
     const Scene3D& scene,
+    const RendererReflectionProbe& probe,
     const CapturedReflectionProbeSceneSample& sample,
+    const CapturedReflectionProbeGeometrySample& geometrySample,
     RendererReflectionProbeRefreshPolicy refreshPolicy,
     bool forceRefresh,
-    bool sceneDirtyOverride
+    bool sceneDirtyOverride,
+    u64 schedulerFrame
 ) {
     CapturedSceneRefreshRequest request{};
     request.refreshPolicy = refreshPolicy;
     request.membershipRevision = scene.MembershipRevision();
     request.lightRevision = scene.LightRevision();
     request.renderRevision = scene.RenderRevision();
+    request.localLightSignature = sample.localLightSignature;
+    request.geometrySignature = geometrySample.signature;
+    request.affectedLocalLightCount = sample.affectedLocalLightCount;
+    request.affectedRenderableCount = geometrySample.affectedRenderableCount;
+    request.refreshPriority = ReflectionCaptureRefreshPriority(
+        probe,
+        sample,
+        geometrySample,
+        forceRefresh
+    );
+    request.minimumRefreshIntervalFrames =
+        ReflectionCaptureMinimumRefreshFramesFromEnvironment();
+    request.schedulerFrame = schedulerFrame;
     request.forceRefresh = forceRefresh;
     request.sceneDirtyOverride = sceneDirtyOverride;
+    request.selectiveInvalidationEnabled =
+        ReflectionCaptureSelectiveInvalidationEnabled();
 
     u64 signature = 0x13d9e7f1b4a8c625ull;
     signature = HashCombine(signature, sample.signature);
-    signature = HashCombine(signature, request.membershipRevision);
-    signature = HashCombine(signature, request.lightRevision);
-    signature = HashCombine(signature, request.renderRevision);
+    signature = HashCombine(signature, request.localLightSignature);
+    signature = HashCombine(signature, request.geometrySignature);
+    if (!request.selectiveInvalidationEnabled) {
+        signature = HashCombine(signature, request.membershipRevision);
+        signature = HashCombine(signature, request.lightRevision);
+        signature = HashCombine(signature, request.renderRevision);
+    }
     request.captureSignature = static_cast<u32>(signature ^ (signature >> 32u));
     if (request.captureSignature == 0u) {
         request.captureSignature = 1u;
@@ -5802,6 +5930,32 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.lightRevision;
     frameStats.reflectionProbe.capturedSceneRenderRevision =
         capturedSceneAudit.renderRevision;
+    frameStats.reflectionProbe.capturedSceneSchedulerFrame =
+        capturedSceneAudit.schedulerFrame;
+    frameStats.reflectionProbe.capturedSceneLastRefreshCompletedFrame =
+        capturedSceneAudit.lastRefreshCompletedFrame;
+    frameStats.reflectionProbe.capturedSceneLocalLightSignature =
+        capturedSceneAudit.localLightSignature;
+    frameStats.reflectionProbe.capturedSceneGeometrySignature =
+        capturedSceneAudit.geometrySignature;
+    frameStats.reflectionProbe.capturedSceneAffectedLocalLightCount =
+        capturedSceneAudit.affectedLocalLightCount;
+    frameStats.reflectionProbe.capturedSceneAffectedRenderableCount =
+        capturedSceneAudit.affectedRenderableCount;
+    frameStats.reflectionProbe.capturedSceneRefreshPriority =
+        capturedSceneAudit.refreshPriority;
+    frameStats.reflectionProbe.capturedSceneMinimumRefreshIntervalFrames =
+        capturedSceneAudit.minimumRefreshIntervalFrames;
+    frameStats.reflectionProbe.capturedSceneRefreshDeferredCount =
+        capturedSceneAudit.refreshDeferredCount;
+    frameStats.reflectionProbe.capturedSceneSelectiveInvalidationEnabled =
+        capturedSceneAudit.selectiveInvalidationEnabled ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneRefreshDeferredByBudget =
+        capturedSceneAudit.refreshDeferredByBudget ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneLocalityIgnoredLightRevisionCount =
+        m_ReflectionProbeResources.CapturedSceneLocalityIgnoredLightRevisionCount();
+    frameStats.reflectionProbe.capturedSceneLocalityIgnoredGeometryRevisionCount =
+        m_ReflectionProbeResources.CapturedSceneLocalityIgnoredGeometryRevisionCount();
     const bool reflectionProbeCubemapReady = selectedCapturedSceneProbe
         ? capturedSceneCubemapReady
         : LocalReflectionProbeCubemapReady();
@@ -13086,12 +13240,37 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         drawStats.drawCount,
         cullingStats.visible,
         cullingStats.culled,
-        captureComplete
+        captureComplete,
+        m_ReflectionCaptureSchedulerFrame
     );
     if (captureComplete) {
         ResetReflectionCaptureShadowSnapshot();
     }
     return true;
+}
+
+std::span<const RenderCommand> VulkanRenderer::ReflectionCaptureInfluenceCommands() {
+    m_ReflectionCaptureInfluenceRenderQueue.Clear();
+    if (m_RenderQueueBuilder) {
+        RenderQueueCacheStats cacheStats{};
+        m_RenderQueueBuilder(
+            m_ReflectionCaptureInfluenceRenderQueue,
+            RenderQueueContext{ nullptr, nullptr, &cacheStats, nullptr, nullptr }
+        );
+    } else if (m_MainScene3D != nullptr) {
+        RenderQueueBuildOptions options{};
+        options.sceneIdentity = m_MainScene3D;
+        options.sceneMembershipRevision = m_MainScene3D->MembershipRevision();
+        options.sceneRenderRevision = m_MainScene3D->RenderRevision();
+        options.useSceneRevisions = true;
+        m_ReflectionCaptureInfluenceRenderQueue.BuildFromScene3D(
+            m_RenderResources,
+            m_MainScene3D->Renderables(),
+            m_MainScene3D->SelectedRenderable(),
+            options
+        );
+    }
+    return m_ReflectionCaptureInfluenceRenderQueue.Commands();
 }
 
 void VulkanRenderer::PrepareReflectionProbeCaptureResources(
@@ -13115,8 +13294,7 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
         EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_REFRESH");
     const bool sceneDirtyOverride =
         EnvironmentFlagEnabled("SE_REFLECTION_PROBE_SCENE_DIRTY");
-    const std::vector<CapturedReflectionProbeLightSample> capturedLightSamples =
-        CapturedReflectionProbeLights(lights);
+    ++m_ReflectionCaptureSchedulerFrame;
     std::vector<RendererReflectionProbe> sceneCapturedProbes;
 
     std::span<const ReflectionProbe3D> sceneProbes =
@@ -13170,6 +13348,9 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
         return;
     }
 
+    const std::span<const RenderCommand> influenceCommands =
+        ReflectionCaptureInfluenceCommands();
+
     std::sort(
         sceneCapturedProbes.begin(),
         sceneCapturedProbes.end(),
@@ -13184,19 +13365,26 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
     pendingGpuCaptures.reserve(sceneCapturedProbes.size());
 
     for (const RendererReflectionProbe& probe : sceneCapturedProbes) {
+        const std::vector<CapturedReflectionProbeLightSample> capturedLightSamples =
+            CapturedReflectionProbeLights(lights, probe);
         const CapturedReflectionProbeSceneSample sceneSample =
             CapturedReflectionProbeSceneSampleFor(
                 probe,
                 lights,
                 capturedLightSamples
             );
+        const CapturedReflectionProbeGeometrySample geometrySample =
+            CapturedReflectionProbeGeometrySampleFor(probe, influenceCommands);
         const CapturedSceneRefreshRequest refreshRequest =
             CapturedSceneRefreshRequestFor(
                 *m_MainScene3D,
+                probe,
                 sceneSample,
+                geometrySample,
                 probe.refreshPolicy,
                 forceRefresh,
-                sceneDirtyOverride
+                sceneDirtyOverride,
+                m_ReflectionCaptureSchedulerFrame
             );
         if (analyticBackendRequested ||
             !m_ReflectionProbeResources.EnsureGpuCapturedSceneResources(
@@ -13236,6 +13424,21 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
         return;
     }
 
+    std::stable_sort(
+        pendingGpuCaptures.begin(),
+        pendingGpuCaptures.end(),
+        [this](const RendererReflectionProbe& left,
+               const RendererReflectionProbe& right) {
+            const CapturedSceneCaptureAudit& leftAudit =
+                m_ReflectionProbeResources.CapturedSceneAudit(left.sceneIndex);
+            const CapturedSceneCaptureAudit& rightAudit =
+                m_ReflectionProbeResources.CapturedSceneAudit(right.sceneIndex);
+            if (leftAudit.refreshPriority == rightAudit.refreshPriority) {
+                return left.sceneIndex < right.sceneIndex;
+            }
+            return leftAudit.refreshPriority > rightAudit.refreshPriority;
+        }
+    );
     const auto activeCapture = std::find_if(
         pendingGpuCaptures.begin(),
         pendingGpuCaptures.end(),

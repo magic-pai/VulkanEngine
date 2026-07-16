@@ -724,6 +724,25 @@ bool BenchmarkPartialLocalShadowCacheRequested() {
         value == "YES";
 }
 
+#if !defined(NDEBUG)
+bool BenchmarkReflectionCaptureLocalityControlRequested() {
+    const std::string value = ReadEnvironmentString(
+        "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL"
+    );
+    return value == "1" ||
+        value == "true" ||
+        value == "TRUE" ||
+        value == "on" ||
+        value == "ON" ||
+        value == "yes" ||
+        value == "YES";
+}
+#else
+constexpr bool BenchmarkReflectionCaptureLocalityControlRequested() {
+    return false;
+}
+#endif
+
 bool BenchmarkConstantEmissiveMaterialRequested() {
     const std::string value = ReadEnvironmentString("SE_BENCHMARK_CONSTANT_EMISSIVE_MATERIAL");
     return value == "1" ||
@@ -1963,6 +1982,22 @@ void BuildBenchmarkGridScene(se::Scene3D& scene, int gridSize) {
             authoredAssetId,
             DefaultReflectionProbeRefreshPolicy(baseProbeCaptureSource)
         );
+        if (capturedSceneProbeRequested &&
+            BenchmarkReflectionCaptureLocalityControlRequested()) {
+            scene.CreateReflectionProbe(
+                "Benchmark Distant Locality Control Probe",
+                { 64.0f, 1.2f, 0.0f },
+                4.5f,
+                { 3.0f, 2.6f, 3.0f },
+                { 0.82f, 0.88f, 1.0f },
+                0.9f,
+                0.55f,
+                1.5f,
+                se::ReflectionProbeCaptureSource::CapturedScene,
+                {},
+                se::ReflectionProbeRefreshPolicy::SceneDirty
+            );
+        }
         if (multiProbeRequested || overflowProbeRequested || mixedSourceProbeRequested) {
             const se::ReflectionProbeCaptureSource warmProbeCaptureSource =
                 mixedSourceProbeRequested

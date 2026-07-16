@@ -345,7 +345,20 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_radiance_signature",
         "reflection_probe_captured_scene_membership_revision",
         "reflection_probe_captured_scene_light_revision",
-        "reflection_probe_captured_scene_render_revision"
+        "reflection_probe_captured_scene_render_revision",
+        "reflection_probe_captured_scene_scheduler_frame",
+        "reflection_probe_captured_scene_last_refresh_completed_frame",
+        "reflection_probe_captured_scene_local_light_signature",
+        "reflection_probe_captured_scene_geometry_signature",
+        "reflection_probe_captured_scene_affected_local_light_count",
+        "reflection_probe_captured_scene_affected_renderable_count",
+        "reflection_probe_captured_scene_refresh_priority",
+        "reflection_probe_captured_scene_minimum_refresh_interval_frames",
+        "reflection_probe_captured_scene_refresh_deferred_count",
+        "reflection_probe_captured_scene_selective_invalidation_enabled",
+        "reflection_probe_captured_scene_refresh_deferred_by_budget",
+        "reflection_probe_captured_scene_locality_ignored_light_revision_count",
+        "reflection_probe_captured_scene_locality_ignored_geometry_revision_count"
     )
     $metrics = @{}
     foreach ($column in $columns) {
@@ -361,6 +374,13 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "contract" -Name "framegraph validation" `
         -Passed ($metrics["framegraph_validation_issues"].max -eq 0) `
         -Actual $metrics["framegraph_validation_issues"].max -Expected 0
+    $selectiveExpected = if ($Mode -eq "selective-fallback") { 0 } else { 1 }
+    Add-BooleanCheck -Checks $checks -Area "selective-refresh" -Name "selective invalidation mode is explicit" `
+        -Passed ($metrics["reflection_probe_captured_scene_selective_invalidation_enabled"].max -eq $selectiveExpected) `
+        -Actual $metrics["reflection_probe_captured_scene_selective_invalidation_enabled"].max -Expected $selectiveExpected
+    Add-BooleanCheck -Checks $checks -Area "selective-refresh" -Name "capture refresh priority resolves" `
+        -Passed ($metrics["reflection_probe_captured_scene_refresh_priority"].max -gt 0) `
+        -Actual $metrics["reflection_probe_captured_scene_refresh_priority"].max -Expected "> 0"
     Add-BooleanCheck -Checks $checks -Area "contract" -Name "captured-scene source selected" `
         -Passed (Test-AnyValue -Rows $rows -Name "reflection_probe_capture_source_type" -Expected 3) `
         -Actual $metrics["reflection_probe_capture_source_type"].max -Expected 3
@@ -597,6 +617,44 @@ function New-ReflectionCaptureReport {
             -Actual "build=$($metrics['reflection_probe_captured_scene_shadow_snapshot_build_count'].max),ready=$($metrics['reflection_probe_captured_scene_shadow_snapshot_ready'].max)" `
             -Expected "build=1,ready=1"
     }
+    "budget" {
+        Add-BooleanCheck -Checks $checks -Area "budget" -Name "moving light advances the scene revision" `
+            -Passed ($metrics["reflection_probe_captured_scene_light_revision"].delta -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_light_revision"].delta -Expected "> 0"
+        Add-BooleanCheck -Checks $checks -Area "budget" -Name "minimum refresh interval is applied" `
+            -Passed ($metrics["reflection_probe_captured_scene_minimum_refresh_interval_frames"].max -eq 64) `
+            -Actual $metrics["reflection_probe_captured_scene_minimum_refresh_interval_frames"].max -Expected 64
+        Add-BooleanCheck -Checks $checks -Area "budget" -Name "cooldown defers refresh work" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_refresh_deferred_count"].delta -gt 0 -and
+                $metrics["reflection_probe_captured_scene_refresh_deferred_by_budget"].max -eq 1
+            ) `
+            -Actual "count delta=$($metrics['reflection_probe_captured_scene_refresh_deferred_count'].delta),flag=$($metrics['reflection_probe_captured_scene_refresh_deferred_by_budget'].max)" `
+            -Expected "count delta > 0, flag=1"
+        Add-BooleanCheck -Checks $checks -Area "budget" -Name "cooldown prevents an additional completed upload" `
+            -Passed ($metrics["reflection_probe_captured_scene_upload_count"].delta -eq 0) `
+            -Actual $metrics["reflection_probe_captured_scene_upload_count"].delta -Expected 0
+    }
+    "locality" {
+        Add-BooleanCheck -Checks $checks -Area "locality" -Name "near and distant probe resources allocate" `
+            -Passed ($metrics["reflection_probe_captured_scene_probe_resource_count"].max -ge 2) `
+            -Actual $metrics["reflection_probe_captured_scene_probe_resource_count"].max -Expected ">= 2"
+        Add-BooleanCheck -Checks $checks -Area "locality" -Name "moving light advances the global revision" `
+            -Passed ($metrics["reflection_probe_captured_scene_light_revision"].delta -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_light_revision"].delta -Expected "> 0"
+        Add-BooleanCheck -Checks $checks -Area "locality" -Name "out-of-range probe ignores the global light revision" `
+            -Passed ($metrics["reflection_probe_captured_scene_locality_ignored_light_revision_count"].max -ge 1) `
+            -Actual $metrics["reflection_probe_captured_scene_locality_ignored_light_revision_count"].max -Expected ">= 1"
+    }
+    "selective-fallback" {
+        Add-BooleanCheck -Checks $checks -Area "fallback" -Name "global fallback receives moving-light invalidation" `
+            -Passed (
+                $metrics["reflection_probe_captured_scene_light_revision"].delta -gt 0 -and
+                $metrics["reflection_probe_captured_scene_upload_count"].delta -gt 0
+            ) `
+            -Actual "light=$($metrics['reflection_probe_captured_scene_light_revision'].delta),uploads=$($metrics['reflection_probe_captured_scene_upload_count'].delta)" `
+            -Expected "both > 0"
+    }
     "object" {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "render revision advances" `
             -Passed ($metrics["reflection_probe_captured_scene_render_revision"].delta -gt 0) `
@@ -735,6 +793,9 @@ $managedKeys = @(
     "SE_REFLECTION_PROBE_SCENE_DIRTY",
     "SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF",
     "SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF",
+    "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES",
+    "SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF",
+    "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_AUTO_EXIT_FRAMES",
@@ -776,6 +837,7 @@ $laneSpecs = @(
             SE_SCENE_REFLECTION_PROBE = "1"
             SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
             SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE = "1"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "0"
         }
     },
     [pscustomobject]@{
@@ -786,6 +848,44 @@ $laneSpecs = @(
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
             SE_BENCHMARK_OBJECT_MOTION = "orbit"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "0"
+        }
+    },
+    [pscustomobject]@{
+        name = "refresh-budget-cooldown"
+        mode = "budget"
+        environment = @{
+            SE_BENCHMARK_SCENE = "grid"
+            SE_BENCHMARK_GRID_SIZE = "4"
+            SE_SCENE_REFLECTION_PROBE = "1"
+            SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
+            SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE = "1"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "64"
+        }
+    },
+    [pscustomobject]@{
+        name = "selective-locality-control"
+        mode = "locality"
+        environment = @{
+            SE_BENCHMARK_SCENE = "grid"
+            SE_BENCHMARK_GRID_SIZE = "4"
+            SE_SCENE_REFLECTION_PROBE = "1"
+            SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
+            SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE = "1"
+            SE_REFLECTION_CAPTURE_LOCALITY_CONTROL = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "selective-refresh-fallback"
+        mode = "selective-fallback"
+        environment = @{
+            SE_BENCHMARK_SCENE = "grid"
+            SE_BENCHMARK_GRID_SIZE = "4"
+            SE_SCENE_REFLECTION_PROBE = "1"
+            SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
+            SE_BENCHMARK_PARTIAL_LOCAL_SHADOW_CACHE = "1"
+            SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES = "0"
+            SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF = "1"
         }
     },
     [pscustomobject]@{
