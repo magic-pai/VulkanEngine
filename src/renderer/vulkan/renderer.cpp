@@ -2555,6 +2555,26 @@ ReflectionProbeFilteringSettingsFromEnvironment() {
     return settings;
 }
 
+CapturedReflectionProbeFilteringSettings
+CapturedReflectionProbeFilteringSettingsFromEnvironment() {
+    const std::string value = LowerAscii(
+        ReadEnvironmentString("SE_REFLECTION_CAPTURE_FILTER_QUALITY")
+    );
+    CapturedReflectionProbeFilteringSettings settings{};
+    if (value == "off" || value == "0" || value == "fallback") {
+        settings.quality = CapturedReflectionProbeFilterQuality::Off;
+    } else if (value == "low" || value == "1") {
+        settings.quality = CapturedReflectionProbeFilterQuality::Low;
+    } else if (value == "high" || value == "3") {
+        settings.quality = CapturedReflectionProbeFilterQuality::High;
+    } else if (value == "ultra" || value == "4") {
+        settings.quality = CapturedReflectionProbeFilterQuality::Ultra;
+    } else if (value == "medium" || value == "2" || value.empty()) {
+        settings.quality = CapturedReflectionProbeFilterQuality::Medium;
+    }
+    return settings;
+}
+
 std::optional<f32> EnvironmentFloatOverride(const char* name) {
     const std::string value = ReadEnvironmentString(name);
     if (value.empty()) {
@@ -3338,6 +3358,7 @@ CapturedSceneRefreshRequest CapturedSceneRefreshRequestFor(
     const CapturedReflectionProbeSceneSample& sample,
     const CapturedReflectionProbeGeometrySample& geometrySample,
     RendererReflectionProbeRefreshPolicy refreshPolicy,
+    CapturedReflectionProbeFilteringSettings capturedFilteringSettings,
     bool forceRefresh,
     bool sceneDirtyOverride,
     u64 schedulerFrame
@@ -3369,6 +3390,10 @@ CapturedSceneRefreshRequest CapturedSceneRefreshRequestFor(
     signature = HashCombine(signature, sample.signature);
     signature = HashCombine(signature, request.localLightSignature);
     signature = HashCombine(signature, request.geometrySignature);
+    signature = HashCombine(
+        signature,
+        static_cast<u32>(capturedFilteringSettings.quality)
+    );
     if (!request.selectiveInvalidationEnabled) {
         signature = HashCombine(signature, request.membershipRevision);
         signature = HashCombine(signature, request.lightRevision);
@@ -5696,6 +5721,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.ggxPrefilterDispatchCount;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterSampleCount =
         capturedSceneAudit.ggxPrefilterSampleCount;
+    frameStats.reflectionProbe.capturedSceneGgxPrefilterQuality =
+        capturedSceneAudit.ggxPrefilterQuality;
     frameStats.reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount =
         capturedSceneAudit.diffuseIrradianceDispatchCount;
     frameStats.reflectionProbe.capturedSceneDiffuseIrradianceSampleCount =
@@ -5840,6 +5867,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.mipChainReady ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterReady =
         capturedSceneAudit.ggxPrefilterReady ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneGgxPrefilterFallbackActive =
+        capturedSceneAudit.ggxPrefilterFallbackActive ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneDiffuseIrradianceReady =
         capturedSceneAudit.diffuseIrradianceReady ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneProbeSceneIndex =
@@ -12966,6 +12995,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     const RendererReflectionProbe& probe
 ) {
     constexpr std::size_t kReflectionCaptureDescriptorIndex = 0u;
+    const CapturedReflectionProbeFilteringSettings captureFilteringSettings =
+        CapturedReflectionProbeFilteringSettingsFromEnvironment();
     (void)imageIndex;
     if (!m_ReflectionProbeResources.GpuCapturedSceneRefreshPending(
             probe.sceneIndex
@@ -13368,7 +13399,8 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         if (captureComplete) {
             m_ReflectionProbeResources.RecordGpuCapturedSceneMipGeneration(
                 probe.sceneIndex,
-                commandBuffer
+                commandBuffer,
+                captureFilteringSettings
             );
             m_ReflectionProbeResources.RecordGpuCapturedSceneDiffuseIrradiance(
                 probe.sceneIndex,
@@ -13557,6 +13589,8 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
         refreshPolicyOverride = ReflectionProbeRefreshPolicyOverrideFromEnvironment();
     const AuthoredReflectionProbeFilteringSettings filteringSettings =
         ReflectionProbeFilteringSettingsFromEnvironment();
+    const CapturedReflectionProbeFilteringSettings capturedFilteringSettings =
+        CapturedReflectionProbeFilteringSettingsFromEnvironment();
     const bool forceRefresh =
         EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_REFRESH");
     const bool sceneDirtyOverride =
@@ -13649,6 +13683,7 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
                 sceneSample,
                 geometrySample,
                 probe.refreshPolicy,
+                capturedFilteringSettings,
                 forceRefresh,
                 sceneDirtyOverride,
                 m_ReflectionCaptureSchedulerFrame

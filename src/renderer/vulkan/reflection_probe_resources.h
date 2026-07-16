@@ -36,6 +36,43 @@ enum class AuthoredReflectionProbeFilterQuality : u32 {
     Ultra = 3
 };
 
+enum class CapturedReflectionProbeFilterQuality : u32 {
+    Off = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Ultra = 4
+};
+
+constexpr u32 CapturedReflectionProbeGgxSampleCount(
+    CapturedReflectionProbeFilterQuality quality
+) {
+    switch (quality) {
+    case CapturedReflectionProbeFilterQuality::Off:
+        return 1u;
+    case CapturedReflectionProbeFilterQuality::Low:
+        return 16u;
+    case CapturedReflectionProbeFilterQuality::High:
+        return 128u;
+    case CapturedReflectionProbeFilterQuality::Ultra:
+        return 256u;
+    case CapturedReflectionProbeFilterQuality::Medium:
+        return 64u;
+    }
+    return 64u;
+}
+
+constexpr bool CapturedReflectionProbeGgxPrefilterEnabled(
+    CapturedReflectionProbeFilterQuality quality
+) {
+    return quality != CapturedReflectionProbeFilterQuality::Off;
+}
+
+struct CapturedReflectionProbeFilteringSettings {
+    CapturedReflectionProbeFilterQuality quality =
+        CapturedReflectionProbeFilterQuality::Medium;
+};
+
 struct AuthoredReflectionProbeFilteringSettings {
     AuthoredReflectionProbeFilterQuality quality =
         AuthoredReflectionProbeFilterQuality::Medium;
@@ -175,6 +212,7 @@ struct CapturedSceneCaptureAudit {
     u32 mipGenerationCount = 0;
     u32 ggxPrefilterDispatchCount = 0;
     u32 ggxPrefilterSampleCount = 0;
+    u32 ggxPrefilterQuality = 0;
     u32 diffuseIrradianceDispatchCount = 0;
     u32 diffuseIrradianceSampleCount = 0;
     u32 diffuseIrradianceFaceSize = 0;
@@ -225,6 +263,7 @@ struct CapturedSceneCaptureAudit {
     bool gpuCaptureInProgress = false;
     bool mipChainReady = false;
     bool ggxPrefilterReady = false;
+    bool ggxPrefilterFallbackActive = false;
     bool diffuseIrradianceReady = false;
     bool directionalShadowRequested = false;
     bool directionalShadowReady = false;
@@ -284,8 +323,9 @@ public:
     VkExtent2D GpuCapturedSceneExtent(i32 probeSceneIndex) const;
     void RecordGpuCapturedSceneMipGeneration(
         i32 probeSceneIndex,
-        VkCommandBuffer commandBuffer
-    ) const;
+        VkCommandBuffer commandBuffer,
+        CapturedReflectionProbeFilteringSettings filteringSettings
+    );
     void RecordGpuCapturedSceneDiffuseIrradiance(
         i32 probeSceneIndex,
         VkCommandBuffer commandBuffer
@@ -468,6 +508,7 @@ private:
         VkImageView diffuseIrradianceArrayView = VK_NULL_HANDLE;
         VkDescriptorSet diffuseIrradianceDescriptorSet = VK_NULL_HANDLE;
         CapturedSceneRefreshRequest refreshRequest{};
+        CapturedReflectionProbeFilteringSettings filteringSettings{};
         CapturedSceneCaptureBackend activeBackend = CapturedSceneCaptureBackend::None;
         u32 signature = 0;
         u32 radianceSignature = 0;

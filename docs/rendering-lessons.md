@@ -1664,3 +1664,35 @@ Validation:
 - Reuse control recorded a persistent hit with shadow build `0`, directional depth pass `0`, and local depth pass `0`; disabled control reported zero persistent resources.
 - Three-probe LightingShowcase reported capacity/resources/evictions `2/2/1`, with two distinct slot owners and nonzero input signatures.
 - User accepted the single normal `SelfEngineLightingShowcase` visual window.
+
+## 2026-07-16 - Captured Radiance Filtering Needs An Explicit Quality And Fallback Contract
+
+Symptom:
+- GPU-captured probes always used a hidden 64-sample GGX constant, so visual quality and refresh cost could not be selected or audited.
+- Turning the convolution off naively would leave roughness-selected mip levels undefined or unsafe to sample.
+
+False leads:
+- Raising the cubemap face resolution to compensate for stochastic GGX sample quality.
+- Treating a generated mip count as proof that every mip has a valid roughness-filtering contract.
+
+Cause:
+- The capture prefilter compute pass received a fixed sample count and exported only a dispatch count. The probe refresh signature did not contain the filtering configuration.
+
+Control test:
+- `SE_REFLECTION_CAPTURE_FILTER_QUALITY=high` must resolve to quality `3`, `128` samples, eight mip dispatches, and no fallback in LightingShowcase.
+- `SE_REFLECTION_CAPTURE_FILTER_QUALITY=off` must resolve to quality `0`, a one-sample direct-radiance mip fallback, eight dispatches, a ready mip chain, and explicit fallback state in default Forward3D.
+
+Fix:
+- Add scene-independent `Off/Low/Medium/High/Ultra` captured-radiance presets with sample budgets `1/16/64/128/256`; default Medium preserves the prior 64-sample result.
+- Include the resolved preset in the capture signature so a quality change schedules a new capture.
+- Generate direct-radiance mips for Off rather than exposing uninitialized roughness LODs, and publish quality, samples, dispatches, readiness, and fallback state through CSV and ImGui.
+
+Prevention:
+- Any roughness-mip producer must publish both its filter quality and its valid fallback path; mip count alone is insufficient evidence.
+- Quality controls belong to the renderer contract and refresh signature, never to an individual showcase scene.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and both signed binaries verified valid.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_capture_filter_quality` passed `578 pass / 0 warn / 0 fail`.
+- Default Medium reported `quality/samples/dispatches = 2/64/8`; LightingShowcase High reported `3/128/8` across three probe resources; Off reported `0/1/8`, mip ready `1`, GGX ready `0`, fallback `1`.
+- User accepted the single normal `SelfEngineLightingShowcase` visual window.

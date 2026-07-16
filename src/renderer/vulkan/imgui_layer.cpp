@@ -2841,6 +2841,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedCapturedSceneDuplicateActiveViewMask
     );
     ImGui::Text(
+        "Captured GGX prefilter: quality %u, samples %u, dispatches %u, ready/fallback %u/%u",
+        stats.reflectionProbe.capturedSceneGgxPrefilterQuality,
+        stats.reflectionProbe.capturedSceneGgxPrefilterSampleCount,
+        stats.reflectionProbe.capturedSceneGgxPrefilterDispatchCount,
+        stats.reflectionProbe.capturedSceneGgxPrefilterReady,
+        stats.reflectionProbe.capturedSceneGgxPrefilterFallbackActive
+    );
+    ImGui::Text(
         "Captured diffuse irradiance: %s, dispatches %u, samples %u, face %u",
         stats.reflectionProbe.capturedSceneDiffuseIrradianceReady ? "ready" : "pending",
         stats.reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount,

@@ -582,6 +582,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneMipGenerationCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
+        << reflectionProbe.capturedSceneGgxPrefilterQuality << ','
         << reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount << ','
         << reflectionProbe.capturedSceneDiffuseIrradianceSampleCount << ','
         << reflectionProbe.capturedSceneDiffuseIrradianceFaceSize << ','
@@ -649,6 +650,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneGpuCaptureInProgress << ','
         << reflectionProbe.capturedSceneMipChainReady << ','
         << reflectionProbe.capturedSceneGgxPrefilterReady << ','
+        << reflectionProbe.capturedSceneGgxPrefilterFallbackActive << ','
         << reflectionProbe.capturedSceneDiffuseIrradianceReady << ','
         << reflectionProbe.capturedSceneProbeSceneIndex << ','
         << reflectionProbe.selectedCapturedSceneMapMatchesActiveMask << ','
@@ -1624,6 +1626,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_mip_generation_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
+        << "reflection_probe_captured_scene_ggx_prefilter_quality,"
         << "reflection_probe_captured_scene_diffuse_irradiance_dispatch_count,"
         << "reflection_probe_captured_scene_diffuse_irradiance_sample_count,"
         << "reflection_probe_captured_scene_diffuse_irradiance_face_size,"
@@ -1691,6 +1694,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_gpu_capture_in_progress,"
         << "reflection_probe_captured_scene_mip_chain_ready,"
         << "reflection_probe_captured_scene_ggx_prefilter_ready,"
+        << "reflection_probe_captured_scene_ggx_prefilter_fallback_active,"
         << "reflection_probe_captured_scene_diffuse_irradiance_ready,"
         << "reflection_probe_captured_scene_probe_scene_index,"
         << "reflection_probe_selected_captured_scene_map_matches_active_mask,"

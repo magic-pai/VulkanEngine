@@ -286,6 +286,7 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_mip_generation_count",
         "reflection_probe_captured_scene_ggx_prefilter_dispatch_count",
         "reflection_probe_captured_scene_ggx_prefilter_sample_count",
+        "reflection_probe_captured_scene_ggx_prefilter_quality",
         "reflection_probe_captured_scene_diffuse_irradiance_dispatch_count",
         "reflection_probe_captured_scene_diffuse_irradiance_sample_count",
         "reflection_probe_captured_scene_diffuse_irradiance_face_size",
@@ -353,6 +354,7 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_gpu_capture_in_progress",
         "reflection_probe_captured_scene_mip_chain_ready",
         "reflection_probe_captured_scene_ggx_prefilter_ready",
+        "reflection_probe_captured_scene_ggx_prefilter_fallback_active",
         "reflection_probe_captured_scene_diffuse_irradiance_ready",
         "reflection_probe_captured_scene_probe_scene_index",
         "reflection_probe_selected_captured_scene_map_matches_active_mask",
@@ -440,15 +442,38 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "six faces reach a completed mip chain" `
         -Passed ($metrics["reflection_probe_captured_scene_mip_chain_ready"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_mip_chain_ready"].max -Expected 1
-    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GPU GGX prefilter completes" `
-        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_ready"].max -eq 1) `
-        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_ready"].max -Expected 1
+    $expectedCapturedFilterQuality = if ($Mode -eq "filter-off") {
+        0
+    } elseif ($Mode -eq "filter-high") {
+        3
+    } else {
+        2
+    }
+    $expectedCapturedFilterSamples = if ($Mode -eq "filter-off") {
+        1
+    } elseif ($Mode -eq "filter-high") {
+        128
+    } else {
+        64
+    }
+    $expectedCapturedFilterReady = if ($Mode -eq "filter-off") { 0 } else { 1 }
+    $expectedCapturedFilterFallback = if ($Mode -eq "filter-off") { 1 } else { 0 }
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance filter quality resolves" `
+        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -eq $expectedCapturedFilterQuality) `
+        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -Expected $expectedCapturedFilterQuality
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance filter sample budget resolves" `
+        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -eq $expectedCapturedFilterSamples) `
+        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -Expected $expectedCapturedFilterSamples
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance filter readiness/fallback is explicit" `
+        -Passed (
+            $metrics["reflection_probe_captured_scene_ggx_prefilter_ready"].max -eq $expectedCapturedFilterReady -and
+            $metrics["reflection_probe_captured_scene_ggx_prefilter_fallback_active"].max -eq $expectedCapturedFilterFallback
+        ) `
+        -Actual "ready/fallback=$($metrics['reflection_probe_captured_scene_ggx_prefilter_ready'].max)/$($metrics['reflection_probe_captured_scene_ggx_prefilter_fallback_active'].max)" `
+        -Expected "$expectedCapturedFilterReady/$expectedCapturedFilterFallback"
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GPU GGX prefilter records mip dispatches" `
         -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_dispatch_count"].max -gt 0) `
         -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_dispatch_count"].max -Expected "> 0"
-    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GPU GGX prefilter has a sample budget" `
-        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -ge 32) `
-        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_sample_count"].max -Expected ">= 32"
     Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance completes" `
         -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -Expected 1
@@ -884,6 +909,7 @@ $managedKeys = @(
     "SE_REFLECTION_CAPTURE_RECT_SHADOWS_OFF",
     "SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF",
     "SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF",
+    "SE_REFLECTION_CAPTURE_FILTER_QUALITY",
     "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES",
     "SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF",
     "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL",
@@ -946,6 +972,26 @@ $laneSpecs = @(
             SE_BENCHMARK_WARMUP_FRAMES = "0"
             SE_BENCHMARK_FRAMES = "18"
             SE_AUTO_EXIT_FRAMES = "26"
+        }
+    },
+    [pscustomobject]@{
+        name = "capture-filter-high"
+        mode = "filter-high"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_CAPTURE_FILTER_QUALITY = "high"
+        }
+    },
+    [pscustomobject]@{
+        name = "capture-filter-fallback"
+        mode = "filter-off"
+        environment = @{
+            SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "default"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_CAPTURE_FILTER_QUALITY = "off"
         }
     },
     [pscustomobject]@{

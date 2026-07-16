@@ -365,6 +365,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneMipGenerationCount = 0;
     u32 capturedSceneGgxPrefilterDispatchCount = 0;
     u32 capturedSceneGgxPrefilterSampleCount = 0;
+    u32 capturedSceneGgxPrefilterQuality = 0;
     u32 capturedSceneDiffuseIrradianceDispatchCount = 0;
     u32 capturedSceneDiffuseIrradianceSampleCount = 0;
     u32 capturedSceneDiffuseIrradianceFaceSize = 0;
@@ -433,6 +434,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneGpuCaptureInProgress = 0;
     u32 capturedSceneMipChainReady = 0;
     u32 capturedSceneGgxPrefilterReady = 0;
+    u32 capturedSceneGgxPrefilterFallbackActive = 0;
     u32 capturedSceneDiffuseIrradianceReady = 0;
     i32 capturedSceneProbeSceneIndex = -1;
     u32 selectedCapturedSceneMapMatchesActiveMask = 0;

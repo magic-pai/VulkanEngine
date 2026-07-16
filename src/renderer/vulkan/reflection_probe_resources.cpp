@@ -41,7 +41,6 @@ constexpr u32 kCapturedSceneCubemapFaceSize = 256u;
 constexpr u32 kCapturedSceneMaxLightSamples = 16u;
 constexpr std::size_t kMaxCapturedSceneProbeResourceCount = 4u;
 constexpr VkFormat kGpuCapturedSceneFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-constexpr u32 kGpuCapturedSceneGgxSampleCount = 64u;
 constexpr u32 kGpuCapturedSceneDiffuseIrradianceFaceSize = 32u;
 constexpr u32 kGpuCapturedSceneDiffuseIrradianceSampleCount = 64u;
 
@@ -3119,7 +3118,18 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
         m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE;
     audit.mipChainReady = resourceReady &&
         resource.activeBackend == CapturedSceneCaptureBackend::RasterizedGpu;
-    audit.ggxPrefilterReady = audit.mipChainReady;
+    audit.ggxPrefilterQuality = static_cast<u32>(
+        resource.filteringSettings.quality
+    );
+    audit.ggxPrefilterSampleCount = CapturedReflectionProbeGgxSampleCount(
+        resource.filteringSettings.quality
+    );
+    audit.ggxPrefilterFallbackActive =
+        !CapturedReflectionProbeGgxPrefilterEnabled(
+            resource.filteringSettings.quality
+        );
+    audit.ggxPrefilterReady = audit.mipChainReady &&
+        !audit.ggxPrefilterFallbackActive;
     audit.diffuseIrradianceReady =
         resource.activeDiffuseIrradianceImage != nullptr &&
         resource.activeDiffuseIrradianceImage->View() != VK_NULL_HANDLE &&
@@ -3210,7 +3220,9 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.mipGenerationCount = 0u;
     resource.audit.ggxPrefilterDispatchCount = 0u;
     resource.audit.ggxPrefilterSampleCount = 0u;
+    resource.audit.ggxPrefilterQuality = 0u;
     resource.audit.ggxPrefilterReady = false;
+    resource.audit.ggxPrefilterFallbackActive = false;
     resource.audit.diffuseIrradianceDispatchCount = 0u;
     resource.audit.diffuseIrradianceSampleCount = 0u;
     resource.audit.diffuseIrradianceFaceSize = 0u;
@@ -3359,7 +3371,10 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         audit.ggxPrefilterDispatchCount =
             previousAudit.ggxPrefilterDispatchCount;
         audit.ggxPrefilterSampleCount = previousAudit.ggxPrefilterSampleCount;
+        audit.ggxPrefilterQuality = previousAudit.ggxPrefilterQuality;
         audit.ggxPrefilterReady = previousAudit.ggxPrefilterReady;
+        audit.ggxPrefilterFallbackActive =
+            previousAudit.ggxPrefilterFallbackActive;
         audit.diffuseIrradianceDispatchCount =
             previousAudit.diffuseIrradianceDispatchCount;
         audit.diffuseIrradianceSampleCount =
@@ -3508,9 +3523,10 @@ VkExtent2D VulkanReflectionProbeResources::GpuCapturedSceneExtent(
 
 void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     i32 probeSceneIndex,
-    VkCommandBuffer commandBuffer
-) const {
-    const CapturedSceneProbeResource* resource =
+    VkCommandBuffer commandBuffer,
+    CapturedReflectionProbeFilteringSettings filteringSettings
+) {
+    CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
     if (resource == nullptr || resource->targetImage == nullptr ||
         commandBuffer == VK_NULL_HANDLE) {
@@ -3523,6 +3539,14 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         resource->prefilterDescriptorSets.size() != mipCount - 1u) {
         return;
     }
+
+    resource->filteringSettings = filteringSettings;
+    const bool ggxPrefilterEnabled = CapturedReflectionProbeGgxPrefilterEnabled(
+        filteringSettings.quality
+    );
+    const u32 sampleCount = CapturedReflectionProbeGgxSampleCount(
+        filteringSettings.quality
+    );
 
     RecordImageBarrier(
         commandBuffer,
@@ -3563,12 +3587,15 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         struct PrefilterPushConstants {
             f32 roughness = 0.0f;
             u32 mipExtent = 1u;
-            u32 sampleCount = kGpuCapturedSceneGgxSampleCount;
+            u32 sampleCount = 1u;
             u32 reserved = 0u;
         } constants;
-        constants.roughness = static_cast<f32>(mip) /
-            static_cast<f32>(std::max(1u, mipCount - 1u));
+        constants.roughness = ggxPrefilterEnabled
+            ? static_cast<f32>(mip) /
+                static_cast<f32>(std::max(1u, mipCount - 1u))
+            : 0.0f;
         constants.mipExtent = std::max(1u, kCapturedSceneCubemapFaceSize >> mip);
+        constants.sampleCount = sampleCount;
         vkCmdBindDescriptorSets(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -3923,8 +3950,18 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
         resource->activeImage != nullptr
             ? resource->activeImage->MipLevels() - 1u
             : 0u;
-    resource->audit.ggxPrefilterSampleCount = kGpuCapturedSceneGgxSampleCount;
-    resource->audit.ggxPrefilterReady = true;
+    resource->audit.ggxPrefilterSampleCount = CapturedReflectionProbeGgxSampleCount(
+        resource->filteringSettings.quality
+    );
+    resource->audit.ggxPrefilterQuality = static_cast<u32>(
+        resource->filteringSettings.quality
+    );
+    resource->audit.ggxPrefilterFallbackActive =
+        !CapturedReflectionProbeGgxPrefilterEnabled(
+            resource->filteringSettings.quality
+        );
+    resource->audit.ggxPrefilterReady =
+        !resource->audit.ggxPrefilterFallbackActive;
     resource->audit.diffuseIrradianceDispatchCount = 1u;
     resource->audit.diffuseIrradianceSampleCount =
         kGpuCapturedSceneDiffuseIrradianceSampleCount;
