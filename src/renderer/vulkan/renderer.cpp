@@ -2950,12 +2950,63 @@ RendererReflectionProbe ClampReflectionProbe(RendererReflectionProbe probe) {
 }
 
 bool ReflectionProbeBoxProjectionEnabled(const RendererReflectionProbe& probe) {
-    return probe.captureSource !=
-            RendererReflectionProbeCaptureSource::CapturedScene &&
-        probe.sceneOwned &&
+    return probe.sceneOwned &&
         probe.boxExtents.x > 0.01f &&
         probe.boxExtents.y > 0.01f &&
         probe.boxExtents.z > 0.01f;
+}
+
+struct ReflectionProbeBoxProjectionRayResult {
+    glm::vec3 direction{ 0.0f, 1.0f, 0.0f };
+    f32 hitDistance = 0.0f;
+    bool hit = false;
+    bool directionChanged = false;
+};
+
+ReflectionProbeBoxProjectionRayResult ReflectionProbeBoxProjectDirection(
+    const RendererReflectionProbe& probe,
+    glm::vec3 direction,
+    glm::vec3 worldPosition
+) {
+    ReflectionProbeBoxProjectionRayResult result{};
+    if (glm::dot(direction, direction) <= 0.0001f) {
+        direction = { 0.0f, 1.0f, 0.0f };
+    } else {
+        direction = glm::normalize(direction);
+    }
+    result.direction = direction;
+    if (!ReflectionProbeBoxProjectionEnabled(probe)) {
+        return result;
+    }
+
+    const glm::vec3 extents = glm::max(probe.boxExtents, glm::vec3(0.001f));
+    const glm::vec3 localPosition = worldPosition - probe.center;
+    glm::vec3 safeDirection = direction;
+    for (i32 axis = 0; axis < 3; ++axis) {
+        if (std::abs(safeDirection[axis]) < 0.0001f) {
+            safeDirection[axis] = safeDirection[axis] < 0.0f
+                ? -0.0001f
+                : 0.0001f;
+        }
+    }
+    const glm::vec3 tMin = (-extents - localPosition) / safeDirection;
+    const glm::vec3 tMax = (extents - localPosition) / safeDirection;
+    const glm::vec3 tFar = glm::max(tMin, tMax);
+    const f32 hitDistance = std::min(tFar.x, std::min(tFar.y, tFar.z));
+    if (!std::isfinite(hitDistance) || hitDistance <= 0.0001f ||
+        hitDistance > 100000.0f) {
+        return result;
+    }
+
+    const glm::vec3 hitLocal = localPosition + direction * hitDistance;
+    if (glm::dot(hitLocal, hitLocal) <= 0.0001f) {
+        return result;
+    }
+    result.direction = glm::normalize(hitLocal);
+    result.hitDistance = hitDistance;
+    result.hit = true;
+    result.directionChanged = glm::dot(result.direction, direction) < 0.9999f;
+    return result;
 }
 
 f32 ReflectionProbeBoxWeight(
@@ -3671,6 +3722,14 @@ void WriteFrameReflectionProbeStats(
     stats.authoredCubemapDiffuseLobeEnergy = 0.0f;
     stats.selectedProbeMask = frameProbes.selectedProbeMask;
     stats.selectedBoxProjectionMask = frameProbes.selectedBoxProjectionMask;
+    stats.selectedCapturedSceneBoxProjectionMask =
+        frameProbes.selectedCapturedSceneBoxProjectionMask;
+    stats.selectedBoxProjectionRayHitMask =
+        frameProbes.selectedBoxProjectionRayHitMask;
+    stats.selectedBoxProjectionDirectionChangedMask =
+        frameProbes.selectedBoxProjectionDirectionChangedMask;
+    stats.selectedBoxProjectionOutsideFallbackMask =
+        frameProbes.selectedBoxProjectionOutsideFallbackMask;
     stats.selectedSceneOwnedMask = frameProbes.selectedSceneOwnedMask;
     stats.selectedPositiveInfluenceMask =
         frameProbes.selectedPositiveInfluenceMask;
@@ -6695,7 +6754,7 @@ void VulkanRenderer::DrawFrame() {
             frameStats.reflectionProbe.capturedScenePlaceholderAllocatedCount > 0,
             frameStats.reflectionProbe.capturedScenePlaceholderReadyCount,
             frameStats.reflectionProbe.capturedSceneInvalidatedCount,
-            frameStats.reflectionProbe.captureResourceReady > 0,
+            frameStats.reflectionProbe.selectedCubemapSamplingCount > 0,
             frameStats.reflectionProbe.localCubemapFormat,
             frameStats.reflectionProbe.localCubemapFaceSize,
             frameStats.reflectionProbe.localCubemapMipCount,
@@ -11874,6 +11933,10 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
                 }
                 if (ReflectionProbeBoxProjectionEnabled(selected.probe)) {
                     probes.selectedBoxProjectionMask |= 1u << index;
+                    if (selected.probe.captureSource ==
+                        RendererReflectionProbeCaptureSource::CapturedScene) {
+                        probes.selectedCapturedSceneBoxProjectionMask |= 1u << index;
+                    }
                 }
                 if (selected.blendWeight > 0.0001f) {
                     probes.selectedPositiveInfluenceMask |= 1u << index;
@@ -12064,6 +12127,63 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             if ((probes.selectedBoxProjectionMask & ~probes.selectedProbeMask) != 0u) {
                 probes.spatialContractFailureMask |= 1u << 2u;
             }
+#if !defined(NDEBUG)
+            constexpr glm::vec3 kBoxProjectionInsideOffset{
+                0.21f,
+                -0.13f,
+                0.17f
+            };
+            constexpr glm::vec3 kBoxProjectionInsideDirection{
+                0.72f,
+                0.31f,
+                0.62f
+            };
+            constexpr glm::vec3 kBoxProjectionOutsideDirection{
+                0.61f,
+                0.39f,
+                0.69f
+            };
+            for (u32 index = 0; index < probes.selectedProbeCount; ++index) {
+                const RendererReflectionProbe& probe = probes.selectedProbes[index];
+                if (!ReflectionProbeBoxProjectionEnabled(probe)) {
+                    continue;
+                }
+                const glm::vec3 extents = glm::max(
+                    probe.boxExtents,
+                    glm::vec3(0.001f)
+                );
+                const ReflectionProbeBoxProjectionRayResult insideResult =
+                    ReflectionProbeBoxProjectDirection(
+                        probe,
+                        kBoxProjectionInsideDirection,
+                        probe.center + extents * kBoxProjectionInsideOffset
+                    );
+                const ReflectionProbeBoxProjectionRayResult outsideResult =
+                    ReflectionProbeBoxProjectDirection(
+                        probe,
+                        kBoxProjectionOutsideDirection,
+                        probe.center + extents * 1.5f
+                    );
+                if (insideResult.hit) {
+                    probes.selectedBoxProjectionRayHitMask |= 1u << index;
+                }
+                if (insideResult.directionChanged) {
+                    probes.selectedBoxProjectionDirectionChangedMask |= 1u << index;
+                }
+                if (!outsideResult.hit) {
+                    probes.selectedBoxProjectionOutsideFallbackMask |= 1u << index;
+                }
+            }
+            const u32 expectedBoxProjectionMask = probes.selectedBoxProjectionMask;
+            if ((probes.selectedBoxProjectionRayHitMask & expectedBoxProjectionMask) !=
+                    expectedBoxProjectionMask ||
+                (probes.selectedBoxProjectionDirectionChangedMask &
+                    expectedBoxProjectionMask) != expectedBoxProjectionMask ||
+                (probes.selectedBoxProjectionOutsideFallbackMask &
+                    expectedBoxProjectionMask) != expectedBoxProjectionMask) {
+                probes.spatialContractFailureMask |= 1u << 4u;
+            }
+#endif
             probes.spatialContractValid =
                 probes.spatialContractFailureMask == 0u;
 

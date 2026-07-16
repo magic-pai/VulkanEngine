@@ -3027,9 +3027,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.influenceMode
     );
     ImGui::Text(
-        "Reflection blend masks: selected 0x%X, box 0x%X, scene 0x%X, influence 0x%X, normalized %.3f err %.5f, contract %s fail 0x%X duplicate 0x%X mip-ready 0x%X, fallback %u, weights [%.3f %.3f %.3f %.3f]",
+        "Reflection blend masks: selected 0x%X, box 0x%X captured-box 0x%X, hit/change/outside 0x%X/0x%X/0x%X, scene 0x%X, influence 0x%X, normalized %.3f err %.5f, contract %s fail 0x%X duplicate 0x%X mip-ready 0x%X, fallback %u, weights [%.3f %.3f %.3f %.3f]",
         stats.reflectionProbe.selectedProbeMask,
         stats.reflectionProbe.selectedBoxProjectionMask,
+        stats.reflectionProbe.selectedCapturedSceneBoxProjectionMask,
+        stats.reflectionProbe.selectedBoxProjectionRayHitMask,
+        stats.reflectionProbe.selectedBoxProjectionDirectionChangedMask,
+        stats.reflectionProbe.selectedBoxProjectionOutsideFallbackMask,
         stats.reflectionProbe.selectedSceneOwnedMask,
         stats.reflectionProbe.selectedPositiveInfluenceMask,
         stats.reflectionProbe.normalizedBlendWeightSum,

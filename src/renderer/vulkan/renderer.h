@@ -292,6 +292,10 @@ struct FrameReflectionProbeSet {
     u32 selectedDiffuseIrradianceLobeCount = 0;
     u32 selectedProbeMask = 0;
     u32 selectedBoxProjectionMask = 0;
+    u32 selectedCapturedSceneBoxProjectionMask = 0;
+    u32 selectedBoxProjectionRayHitMask = 0;
+    u32 selectedBoxProjectionDirectionChangedMask = 0;
+    u32 selectedBoxProjectionOutsideFallbackMask = 0;
     u32 selectedSceneOwnedMask = 0;
     u32 selectedPositiveInfluenceMask = 0;
     u32 selectedProbeDuplicateIndexMask = 0;

@@ -515,6 +515,10 @@ struct RendererReflectionProbeStats {
     i32 selectedProbeIndex = -1;
     u32 selectedProbeMask = 0;
     u32 selectedBoxProjectionMask = 0;
+    u32 selectedCapturedSceneBoxProjectionMask = 0;
+    u32 selectedBoxProjectionRayHitMask = 0;
+    u32 selectedBoxProjectionDirectionChangedMask = 0;
+    u32 selectedBoxProjectionOutsideFallbackMask = 0;
     u32 selectedSceneOwnedMask = 0;
     u32 selectedPositiveInfluenceMask = 0;
     u32 blendWeightNormalizationFallbackCount = 0;

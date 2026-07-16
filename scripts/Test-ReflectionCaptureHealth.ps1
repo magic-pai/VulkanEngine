@@ -397,6 +397,10 @@ function New-ReflectionCaptureReport {
         "reflection_probe_normalized_blend_weight_error",
         "reflection_probe_selected_probe_mask",
         "reflection_probe_selected_box_projection_mask",
+        "reflection_probe_selected_captured_scene_box_projection_mask",
+        "reflection_probe_selected_box_projection_ray_hit_mask",
+        "reflection_probe_selected_box_projection_direction_changed_mask",
+        "reflection_probe_selected_box_projection_outside_fallback_mask",
         "reflection_probe_selected_probe_duplicate_index_mask",
         "reflection_probe_selected_capture_mip_ready_mask",
         "reflection_probe_spatial_contract_failure_mask",
@@ -917,6 +921,34 @@ function New-ReflectionCaptureReport {
             -Passed ($metrics["reflection_probe_max_blend_weight"].delta -gt 0.0001) `
             -Actual $metrics["reflection_probe_max_blend_weight"].delta -Expected "> 0.0001"
     }
+    "parallax" {
+        $expectedBoxMask = 7
+        Add-BooleanCheck -Checks $checks -Area "parallax" -Name "captured probes enable box projection" `
+            -Passed (
+                (($metrics["reflection_probe_selected_box_projection_mask"].max -band $expectedBoxMask) -eq $expectedBoxMask) -and
+                (($metrics["reflection_probe_selected_captured_scene_box_projection_mask"].max -band $expectedBoxMask) -eq $expectedBoxMask)
+            ) `
+            -Actual "box=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_box_projection_mask'].max, 16)),captured=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_captured_scene_box_projection_mask'].max, 16))" `
+            -Expected "box/captured mask includes 0x7"
+        Add-BooleanCheck -Checks $checks -Area "parallax" -Name "box-projection reference rays hit and change direction" `
+            -Passed (
+                (($metrics["reflection_probe_selected_box_projection_ray_hit_mask"].max -band $expectedBoxMask) -eq $expectedBoxMask) -and
+                (($metrics["reflection_probe_selected_box_projection_direction_changed_mask"].max -band $expectedBoxMask) -eq $expectedBoxMask)
+            ) `
+            -Actual "hit=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_box_projection_ray_hit_mask'].max, 16)),changed=0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_box_projection_direction_changed_mask'].max, 16))" `
+            -Expected "hit/changed mask includes 0x7"
+        Add-BooleanCheck -Checks $checks -Area "parallax" -Name "outward box rays use explicit fallback" `
+            -Passed (($metrics["reflection_probe_selected_box_projection_outside_fallback_mask"].max -band $expectedBoxMask) -eq $expectedBoxMask) `
+            -Actual "0x$([Convert]::ToString([int]$metrics['reflection_probe_selected_box_projection_outside_fallback_mask'].max, 16))" `
+            -Expected "fallback mask includes 0x7"
+        Add-BooleanCheck -Checks $checks -Area "parallax" -Name "parallax traversal advances camera time and blends" `
+            -Passed (
+                $metrics["benchmark_camera_motion_time_seconds"].max -gt 0.0 -and
+                $metrics["reflection_probe_max_blend_weight"].delta -gt 0.0001
+            ) `
+            -Actual "camera=$($metrics['benchmark_camera_motion_time_seconds'].max),blend delta=$($metrics['reflection_probe_max_blend_weight'].delta)" `
+            -Expected "camera > 0, blend delta > 0.0001"
+    }
     }
 
     $passCount = @($checks | Where-Object { $_.status -eq "pass" }).Count
@@ -1152,6 +1184,23 @@ $laneSpecs = @(
     [pscustomobject]@{
         name = "spatial-blend-traversal"
         mode = "spatial"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_BENCHMARK_CAMERA_MOTION = "1"
+            SE_BENCHMARK_CAMERA_MOTION_SPEED = "5.0"
+            SE_BENCHMARK_CAMERA_MOTION_YAW = "1.35"
+            SE_BENCHMARK_CAMERA_MOTION_PITCH = "0.18"
+            SE_BENCHMARK_CAMERA_MOTION_DISTANCE = "4.5"
+            SE_BENCHMARK_WARMUP_FRAMES = "8"
+            SE_BENCHMARK_FRAMES = "60"
+            SE_AUTO_EXIT_FRAMES = "74"
+        }
+    },
+    [pscustomobject]@{
+        name = "box-parallax-traversal"
+        mode = "parallax"
         environment = @{
             SE_BENCHMARK_SCENE = "lighting-showcase"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"

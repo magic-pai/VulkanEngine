@@ -1,5 +1,29 @@
 # SelfEngine AAA Rendering Pipeline Plan
 
+## Latest Completed Slice
+
+Captured-probe box-parallax is complete. Box projection now applies to every
+scene-owned probe with valid box extents, including `CapturedScene` resources.
+Debug builds run a CPU slab-ray reference audit that mirrors the shader's
+inside-hit, changed-direction, and outside-fallback behavior; CSV/ImGui publish
+the matching masks. The strict `box-parallax-traversal` lane traverses three
+captured LightingShowcase volumes and requires every mask to contain `0x7`.
+
+This slice also fixed a FrameGraph producer-consumer mismatch: a selected
+captured probe could sample `SceneReflectionProbeCubemap` while registration
+looked only at the first selected probe's readiness. Registration now follows
+the selected cubemap sampling set, and benchmark CSV retains stable first-issue
+names for future diagnosis.
+`Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_probe_parallax`
+passes `741 pass / 0 warn / 0 fail`; final parallax masks are
+`0x7/0x7/0x7/0x7`, spatial failure is `0`, and FrameGraph validation issues are
+`0`. User accepted the normal LightingShowcase visual result.
+
+Next visible reflection-quality module: hierarchical SSR with temporal
+accumulation, rejection, denoise, and explicit reflection-probe fallback.
+Finer captured-probe dirty-region extraction remains a separate scheduling
+optimization.
+
 ## Goal
 
 Bring SelfEngine from the current lean Forward 3D renderer toward a complete mainstream PC/console AAA rendering stack first. The current execution priority is renderer capability completion. Do not schedule new UE5 scene parsing, Unreal automation, project browser, bridge-manifest expansion, or UE viewport-parity work while the renderer gaps below remain open.

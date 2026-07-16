@@ -2,6 +2,39 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-16 - Captured Probe Parallax Must Share The FrameGraph Sampling Contract
+
+Symptom:
+- Captured-scene probes had shader box-projection support but were excluded by the CPU enable predicate, so captured reflections used uncorrected directions.
+- The strict capture health lanes reported a missing `SceneReflectionProbeCubemap` reference even while a selected captured probe was sampled.
+
+False leads:
+- Treating the first selected probe's `captureResourceReady` value as a summary of every selected probe.
+- Relying on a plausible static reflection image instead of testing rays within and outside each probe box.
+
+Cause:
+- `ReflectionProbeBoxProjectionEnabled` rejected the `CapturedScene` source despite box projection being a scene-owned spatial property.
+- FrameGraph resource registration followed the top local probe readiness, while the consumer was enabled by the selected cubemap sampling set; multi-probe selection made the two conditions disagree.
+
+Control test:
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_probe_parallax`.
+- The `box-parallax-traversal` lane must report captured-box, ray-hit, direction-changed, and outside-fallback masks containing `0x7`, with zero spatial and FrameGraph validation failures.
+
+Fix:
+- Enable box projection for every scene-owned probe with nontrivial box extents.
+- Add a Debug-only CPU slab-ray audit that mirrors the shader behavior and publish the masks in CSV/ImGui.
+- Register `SceneReflectionProbeCubemap` whenever the selected sampling set can consume it, and retain the first FrameGraph issue's stable names in benchmark CSV for diagnosis.
+
+Prevention:
+- A FrameGraph resource producer and every consumer must resolve their active state from the same per-frame contract; never summarize a multi-resource selection with a single legacy probe field.
+- Spatial reflection changes require deterministic inside, changed-direction, and outside-fallback data evidence before visual acceptance.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed; both development signatures verified valid.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_probe_parallax` passed `741 pass / 0 warn / 0 fail`.
+- Final parallax masks were `0x7/0x7/0x7/0x7`; spatial failure and FrameGraph validation issue counts were `0`.
+- User accepted the single normal `SelfEngineLightingShowcase` visual window.
+
 ## 2026-07-07 - Local Light Tile Split Lines
 
 Symptom:

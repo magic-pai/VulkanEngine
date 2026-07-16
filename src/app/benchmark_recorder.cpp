@@ -223,6 +223,21 @@ void BenchmarkRecorder::RecordFrame(
         << stats.frameGraph.validation.unusedPhysicalResourceCount << ','
         << stats.frameGraph.validation.writeOnlyRoadmapResourceCount << ','
         << stats.frameGraph.validation.activePassWritesPlannedResourceCount << ','
+        << (stats.frameGraph.validation.issues.empty()
+                ? 0u
+                : static_cast<u32>(stats.frameGraph.validation.issues.front().kind)) << ','
+        << (stats.frameGraph.validation.issues.empty()
+                ? 0u
+                : stats.frameGraph.validation.issues.front().passId) << ','
+        << (stats.frameGraph.validation.issues.empty()
+                ? 0u
+                : stats.frameGraph.validation.issues.front().resourceId) << ','
+        << '"' << (stats.frameGraph.validation.issues.empty()
+                ? std::string_view{}
+                : stats.frameGraph.validation.issues.front().passName) << "\","
+        << '"' << (stats.frameGraph.validation.issues.empty()
+                ? std::string_view{}
+                : stats.frameGraph.validation.issues.front().resourceName) << "\","
         << stats.frameGraph.references.readCount << ','
         << stats.frameGraph.references.writeCount << ','
         << stats.frameGraph.references.readSampledCount << ','
@@ -768,6 +783,10 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.blendWeightNormalizationFallbackCount << ','
         << reflectionProbe.selectedProbeMask << ','
         << reflectionProbe.selectedBoxProjectionMask << ','
+        << reflectionProbe.selectedCapturedSceneBoxProjectionMask << ','
+        << reflectionProbe.selectedBoxProjectionRayHitMask << ','
+        << reflectionProbe.selectedBoxProjectionDirectionChangedMask << ','
+        << reflectionProbe.selectedBoxProjectionOutsideFallbackMask << ','
         << reflectionProbe.selectedSceneOwnedMask << ','
         << reflectionProbe.selectedPositiveInfluenceMask << ','
         << reflectionProbe.selectedProbeDuplicateIndexMask << ','
@@ -1388,6 +1407,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "framegraph_validation_unused_physical_resources,"
         << "framegraph_validation_write_only_roadmap_resources,"
         << "framegraph_validation_active_writes_planned_resources,"
+        << "framegraph_validation_first_issue_kind,"
+        << "framegraph_validation_first_issue_pass_id,"
+        << "framegraph_validation_first_issue_resource_id,"
+        << "framegraph_validation_first_issue_pass_name,"
+        << "framegraph_validation_first_issue_resource_name,"
         << "framegraph_read_refs,framegraph_write_refs,"
         << "framegraph_read_sampled_refs,framegraph_read_attachment_refs,"
         << "framegraph_write_color_refs,framegraph_write_depth_refs,"
@@ -1819,6 +1843,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_blend_weight_normalization_fallback_count,"
         << "reflection_probe_selected_probe_mask,"
         << "reflection_probe_selected_box_projection_mask,"
+        << "reflection_probe_selected_captured_scene_box_projection_mask,"
+        << "reflection_probe_selected_box_projection_ray_hit_mask,"
+        << "reflection_probe_selected_box_projection_direction_changed_mask,"
+        << "reflection_probe_selected_box_projection_outside_fallback_mask,"
         << "reflection_probe_selected_scene_owned_mask,"
         << "reflection_probe_selected_positive_influence_mask,"
         << "reflection_probe_selected_probe_duplicate_index_mask,"

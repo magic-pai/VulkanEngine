@@ -114,10 +114,27 @@ struct RenderFrameGraphValidationIssue {
     RenderFrameGraphValidationIssueKind kind =
         RenderFrameGraphValidationIssueKind::MissingResourceRef;
     u32 passId = 0;
-    std::string_view passName;
+    std::string passName;
     u32 resourceId = 0;
-    std::string_view resourceName;
+    std::string resourceName;
     bool writeRef = false;
+
+    RenderFrameGraphValidationIssue() = default;
+
+    RenderFrameGraphValidationIssue(
+        RenderFrameGraphValidationIssueKind issueKind,
+        u32 issuePassId,
+        std::string_view issuePassName,
+        u32 issueResourceId,
+        std::string_view issueResourceName,
+        bool issueWriteRef
+    )
+        : kind(issueKind),
+          passId(issuePassId),
+          passName(issuePassName),
+          resourceId(issueResourceId),
+          resourceName(issueResourceName),
+          writeRef(issueWriteRef) {}
 };
 
 struct RenderFrameGraphBarrierTransition {
