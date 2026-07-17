@@ -458,6 +458,22 @@ void BenchmarkRecorder::RecordFrame(
         << shadowCascades.directionalReceiveEnabled << ','
         << shadowCascades.stableSnappingEnabled << ','
         << shadowCascades.quality << ','
+        << shadowCascades.budgetContractVersion << ','
+        << shadowCascades.budgetResourceContractValid << ','
+        << shadowCascades.budgetFallbackReason << ','
+        << shadowCascades.budgetSwapchainImageCount << ','
+        << shadowCascades.budgetGenerationMaxPasses << ','
+        << shadowCascades.budgetDirectionalReceiverSamples << ','
+        << shadowCascades.budgetPointProjectionSamples << ','
+        << shadowCascades.budgetSpotProjectionSamples << ','
+        << shadowCascades.budgetRectProjectionSamples << ','
+        << shadowCascades.budgetRectProjectionCount << ','
+        << shadowCascades.budgetContactSamples << ','
+        << shadowCascades.budgetGpuGenerationScope << ','
+        << shadowCascades.budgetLegacyDepthBytes << ','
+        << shadowCascades.budgetDirectionalDepthBytes << ','
+        << shadowCascades.budgetLocalDepthBytes << ','
+        << shadowCascades.budgetMainDepthBytes << ','
         << shadowCascades.pcfKernelRadius << ','
         << shadowCascades.pcssStrength << ','
         << shadowCascades.pcssEnabled << ','
@@ -1595,6 +1611,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_cascade_configured_count,shadow_cascade_active_count,"
         << "shadow_directional_receive_enabled,"
         << "shadow_cascade_stable_snapping,shadow_quality,"
+        << "shadow_budget_contract_version,shadow_budget_resource_contract_valid,"
+        << "shadow_budget_fallback_reason,shadow_budget_swapchain_images,"
+        << "shadow_budget_generation_max_passes,"
+        << "shadow_budget_directional_receiver_samples,"
+        << "shadow_budget_point_projection_samples,"
+        << "shadow_budget_spot_projection_samples,"
+        << "shadow_budget_rect_projection_samples,shadow_budget_rect_projection_count,"
+        << "shadow_budget_contact_samples,shadow_budget_gpu_generation_scope,"
+        << "shadow_budget_legacy_depth_bytes,shadow_budget_directional_depth_bytes,"
+        << "shadow_budget_local_depth_bytes,shadow_budget_main_depth_bytes,"
         << "shadow_pcf_kernel_radius,shadow_pcss_strength,"
         << "directional_shadow_pcss_enabled,directional_shadow_pcss_blocker_samples,"
         << "directional_shadow_pcss_filter_samples,"

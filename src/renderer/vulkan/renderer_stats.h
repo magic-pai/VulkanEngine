@@ -83,6 +83,22 @@ struct RendererDrawStats {
 };
 
 struct RendererShadowCascadeStats {
+    u32 budgetContractVersion = 0;
+    u32 budgetResourceContractValid = 0;
+    u32 budgetFallbackReason = 0;
+    u32 budgetSwapchainImageCount = 0;
+    u32 budgetGenerationMaxPasses = 0;
+    u32 budgetDirectionalReceiverSamples = 0;
+    u32 budgetPointProjectionSamples = 0;
+    u32 budgetSpotProjectionSamples = 0;
+    u32 budgetRectProjectionSamples = 0;
+    u32 budgetRectProjectionCount = 0;
+    u32 budgetContactSamples = 0;
+    u32 budgetGpuGenerationScope = 0;
+    u64 budgetLegacyDepthBytes = 0;
+    u64 budgetDirectionalDepthBytes = 0;
+    u64 budgetLocalDepthBytes = 0;
+    u64 budgetMainDepthBytes = 0;
     u32 quality = 0;
     u32 configuredCount = 0;
     u32 activeCount = 0;

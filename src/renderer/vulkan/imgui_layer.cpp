@@ -407,6 +407,31 @@ void DrawShadowDiagnostics(const RendererStats& stats) {
         cascades.casterDepthBiasSlope
     );
     ImGui::Text(
+        "Shadow budget v%u: resources %s, fallback %u, images %u, max passes %u",
+        cascades.budgetContractVersion,
+        cascades.budgetResourceContractValid != 0u ? "valid" : "invalid",
+        cascades.budgetFallbackReason,
+        cascades.budgetSwapchainImageCount,
+        cascades.budgetGenerationMaxPasses
+    );
+    ImGui::Text(
+        "Receiver samples: directional %u, point/spot/rect %u/%u/%u x%u, contact %u",
+        cascades.budgetDirectionalReceiverSamples,
+        cascades.budgetPointProjectionSamples,
+        cascades.budgetSpotProjectionSamples,
+        cascades.budgetRectProjectionSamples,
+        cascades.budgetRectProjectionCount,
+        cascades.budgetContactSamples
+    );
+    constexpr double kBytesPerMiB = 1024.0 * 1024.0;
+    ImGui::Text(
+        "Logical shadow depth: %.1f MiB (legacy %.1f / CSM %.1f / local %.1f)",
+        static_cast<double>(cascades.budgetMainDepthBytes) / kBytesPerMiB,
+        static_cast<double>(cascades.budgetLegacyDepthBytes) / kBytesPerMiB,
+        static_cast<double>(cascades.budgetDirectionalDepthBytes) / kBytesPerMiB,
+        static_cast<double>(cascades.budgetLocalDepthBytes) / kBytesPerMiB
+    );
+    ImGui::Text(
         "Splits: %.2f / %.2f / %.2f / %.2f",
         cascades.splitDepths[0],
         cascades.splitDepths[1],

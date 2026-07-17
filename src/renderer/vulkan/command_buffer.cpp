@@ -2177,16 +2177,13 @@ void VulkanCommandBuffer::Record(
     if (gpuTimer != nullptr) {
         gpuTimer->ResetFrame(commandBuffer, imageIndex);
         gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::FrameStart);
+        gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowStart);
     }
 
     if (shadowRenderPass != nullptr &&
         shadowGraphicsPipeline != nullptr &&
         shadowFramebuffer != nullptr &&
         shadowDescriptorSets != nullptr) {
-        if (gpuTimer != nullptr) {
-            gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowStart);
-        }
-
         VkClearValue shadowClearValue{};
         shadowClearValue.depthStencil = { 1.0f, 0 };
 
@@ -2245,12 +2242,6 @@ void VulkanCommandBuffer::Record(
 
         vkCmdEndRenderPass(commandBuffer);
 
-        if (gpuTimer != nullptr) {
-            gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowEnd);
-        }
-    } else if (gpuTimer != nullptr) {
-        gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowStart);
-        gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowEnd);
     }
 
     if (shadowRenderPass != nullptr &&
@@ -2471,6 +2462,10 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    if (gpuTimer != nullptr) {
+        gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowEnd);
     }
 
     if (gBufferRenderPass != nullptr && gBufferFramebuffer != nullptr) {

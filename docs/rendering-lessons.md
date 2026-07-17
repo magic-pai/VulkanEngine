@@ -197,6 +197,41 @@ Validation:
 - `Test-Forward3DShadowRegression.ps1 -SkipBuild` captured eight animated rows and preserved off-camera shadow-caster coverage.
 - In the single full-screen 2560x1440 DLSS Performance LightingShowcase window, the user reported that the overall result looked coherent with no obvious remaining artifacts.
 
+## 2026-07-17 - Shadow Quality Tiers Need Auditable Cost Contracts
+
+Symptom:
+- Low/Medium/High/Ultra produced different images and resource sizes, but there was no single contract proving what each tier cost or whether a scene actually resolved the requested tier.
+- `gpu_shadow_ms` covered only the legacy shadow pass, and the old health check incorrectly required the High/Ultra 2x2 rectangle-light projection pattern in Low/Medium.
+
+False leads:
+- Counting receiver-side PCSS samples inside shadow-map generation time; receiver filtering runs in the lighting pass and must remain a separate budget.
+- Requiring every scene to use the same contact-shadow samples; LightingShowcase explicitly disables contact shadows while retaining the Ultra resource tier.
+- Reporting logical depth-image bytes as Vulkan allocator usage; image extent, format, and swapchain image count do not include driver allocation overhead or alignment.
+
+Cause:
+- Quality settings, allocated resources, shader sample ceilings, and GPU timestamps were observable through unrelated fields with no versioned producer-to-consumer budget contract.
+- The timestamp end marker was written after the legacy pass instead of after legacy, CSM, and local depth generation.
+
+Control test:
+- Run `scripts/Test-ShadowQualityBudget.ps1 -SkipBuild -Strict`. It exercises all four Forward3D tiers plus LightingShowcase Low and unoverridden default Ultra.
+- Resource dimensions and logical bytes must match across scenes for the same tier; scene-owned effect opt-outs may reduce samples only to an explicit disabled state.
+
+Fix:
+- Add shadow budget contract version, resource validity/fallback, swapchain image count, maximum generation passes, directional/local/contact sample ceilings, and logical legacy/CSM/local depth bytes to RendererStats, CSV, and Shadow Debug.
+- Move the GPU shadow timestamp boundaries around all three depth-generation paths while leaving receiver PCSS in main-lighting timing.
+- Make the four-tier health gate exact, monotonic, cross-scene, and strict; Low/Medium use the intended axial two-projection rectangle pattern and High/Ultra use the 2x2 four-projection pattern.
+
+Prevention:
+- Keep generation cost, receiver sampling cost, and logical resource footprint as separate named budgets.
+- A quality tier is complete only when its resolved settings, resources, fallback, and cost telemetry are data-tested in structurally different scenes.
+- Treat scene-owned disabled effects as explicit bounded opt-outs, not as evidence that the engine tier silently changed.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- Forward3D four-tier health passed `251 pass / 0 warn / 0 fail`; the cross-scene budget gate passed `71 / 0 / 0`.
+- Logical shadow depth budgets were `96 / 540 / 1392 / 1392 MiB`; measured Forward3D generation averages were approximately `0.050 / 0.078 / 0.144 / 0.144 ms` on the RTX 5070 Ti.
+- LightingShowcase without a quality override resolved `Ultra (4)`, and the user accepted the single full-screen visual window with no visible regression.
+
 ## 2026-07-07 - Local Light Tile Split Lines
 
 Symptom:

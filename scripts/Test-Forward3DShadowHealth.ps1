@@ -250,6 +250,8 @@ function New-ShadowHealthReport {
     }
 
     $columns = @(
+        "gpu_available",
+        "gpu_shadow_ms",
         "framegraph_validation_issues",
         "framegraph_validation_missing_resource_refs",
         "framegraph_validation_read_before_first_write",
@@ -264,14 +266,39 @@ function New-ShadowHealthReport {
         "main_culled",
         "main_visible",
         "shadow_visible",
+        "shadow_quality",
+        "shadow_budget_contract_version",
+        "shadow_budget_resource_contract_valid",
+        "shadow_budget_fallback_reason",
+        "shadow_budget_swapchain_images",
+        "shadow_budget_generation_max_passes",
+        "shadow_budget_directional_receiver_samples",
+        "shadow_budget_point_projection_samples",
+        "shadow_budget_spot_projection_samples",
+        "shadow_budget_rect_projection_samples",
+        "shadow_budget_rect_projection_count",
+        "shadow_budget_contact_samples",
+        "shadow_budget_gpu_generation_scope",
+        "shadow_budget_legacy_depth_bytes",
+        "shadow_budget_directional_depth_bytes",
+        "shadow_budget_local_depth_bytes",
+        "shadow_budget_main_depth_bytes",
         "shadow_cascade_active_count",
         "shadow_cascade_atlas_allocated",
+        "shadow_cascade_atlas_tile_size",
+        "shadow_cascade_atlas_width",
+        "shadow_cascade_atlas_height",
+        "shadow_cascade_atlas_capacity",
         "shadow_cascade_atlas_passes",
         "shadow_cascade_atlas_draws",
         "shadow_cascade_receiver_guard",
         "shadow_pcf_kernel_radius",
         "shadow_pcss_strength",
         "local_shadow_atlas_allocated",
+        "local_shadow_atlas_tile_size",
+        "local_shadow_atlas_width",
+        "local_shadow_atlas_height",
+        "local_shadow_atlas_capacity",
         "local_shadow_rect_light_count",
         "local_shadow_requested_tiles",
         "local_shadow_assigned_tiles",
@@ -318,6 +345,84 @@ function New-ShadowHealthReport {
         high = 6
         ultra = 8
     }
+    $expectedQualityId = @{
+        low = 1
+        medium = 2
+        high = 3
+        ultra = 4
+    }
+    $expectedCsmTileSize = @{
+        low = 1024
+        medium = 2048
+        high = 4096
+        ultra = 4096
+    }
+    $expectedLocalTileSize = @{
+        low = 512
+        medium = 1024
+        high = 1024
+        ultra = 1024
+    }
+    $expectedLocalAtlasWidth = @{
+        low = 2048
+        medium = 5120
+        high = 6144
+        ultra = 6144
+    }
+    $expectedLocalAtlasHeight = @{
+        low = 1536
+        medium = 5120
+        high = 6144
+        ultra = 6144
+    }
+    $expectedLocalCapacity = @{
+        low = 12
+        medium = 24
+        high = 32
+        ultra = 32
+    }
+    $expectedDirectionalSamples = @{
+        low = 9
+        medium = 9
+        high = 9
+        ultra = 28
+    }
+    $expectedPointSamples = @{
+        low = 9
+        medium = 18
+        high = 25
+        ultra = 34
+    }
+    $expectedSpotSamples = @{
+        low = 9
+        medium = 18
+        high = 25
+        ultra = 34
+    }
+    $expectedRectSamples = @{
+        low = 18
+        medium = 18
+        high = 34
+        ultra = 34
+    }
+    $expectedRectProjectionCount = @{
+        low = 2
+        medium = 2
+        high = 4
+        ultra = 4
+    }
+    $expectedRectPattern = @{
+        low = 0
+        medium = 0
+        high = 1
+        ultra = 1
+    }
+    $expectedUnusedPhysicalResources = @{
+        low = 1
+        medium = 0
+        high = 0
+        ultra = 0
+    }
 
     Add-Check -Checks $checks -Area "run" -Name "captured frame rows" `
         -Status ($(if ($rows.Count -gt 0) { "pass" } else { "fail" })) `
@@ -336,28 +441,118 @@ function New-ShadowHealthReport {
     Add-MaxCheck -Checks $checks -Metrics $metrics -Column "framegraph_validation_write_only_roadmap_resources" `
         -Area "framegraph" -Name "roadmap resources are not write-only active leftovers" -Maximum 0 -MissingStatus "warn"
 
-    $unusedPhysical = $metrics["framegraph_validation_unused_physical_resources"]
-    if ($unusedPhysical.present) {
-        $unusedStatus = if ($null -ne $unusedPhysical.max -and [double]$unusedPhysical.max -le 0) { "pass" } else { "warn" }
-        Add-Check -Checks $checks -Area "framegraph" -Name "unused physical resources are only a hygiene warning" `
-            -Status $unusedStatus -Actual $unusedPhysical.max -Expected "<= 0 for a fully tidy graph"
-    } else {
-        Add-Check -Checks $checks -Area "framegraph" -Name "unused physical resource signal exists" `
-            -Status "warn" -Actual "missing:framegraph_validation_unused_physical_resources" `
-            -Expected "CSV column present"
-    }
+    Add-EqualityCheck -Checks $checks -Metrics $metrics `
+        -Column "framegraph_validation_unused_physical_resources" `
+        -Area "framegraph" -Name "quality profile has the expected physical-resource hygiene state" `
+        -Expected $expectedUnusedPhysicalResources[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics `
+        -Column "framegraph_validation_issues" `
+        -Area "framegraph" -Name "aggregate issues contain no unexpected category" `
+        -Expected $expectedUnusedPhysicalResources[$Quality] -MissingStatus "fail"
 
-    $validationIssues = $metrics["framegraph_validation_issues"]
-    if ($validationIssues.present) {
-        $validationStatus = if ($null -ne $validationIssues.max -and [double]$validationIssues.max -le 0) { "pass" } else { "warn" }
-        Add-Check -Checks $checks -Area "framegraph" -Name "aggregate validation issue count" `
-            -Status $validationStatus -Actual $validationIssues.max `
-            -Expected "0 preferred; see typed framegraph checks for severity"
-    } else {
-        Add-Check -Checks $checks -Area "framegraph" -Name "aggregate validation issue count signal exists" `
-            -Status "warn" -Actual "missing:framegraph_validation_issues" `
-            -Expected "CSV column present"
-    }
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_quality" `
+        -Area "budget" -Name "resolved shadow quality id" `
+        -Expected $expectedQualityId[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_contract_version" `
+        -Area "budget" -Name "shadow budget contract version" -Expected 1 -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_resource_contract_valid" `
+        -Area "budget" -Name "shadow resource budget contract is valid" -Expected 1 -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_fallback_reason" `
+        -Area "budget" -Name "shadow budget needs no fallback" -Expected 0 -MissingStatus "fail"
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_swapchain_images" `
+        -Area "budget" -Name "shadow resources cover swapchain images" -Minimum 1 -MissingStatus "fail"
+
+    $expectedGenerationPasses = 1 + $expectedCascades[$Quality] + $expectedLocalCapacity[$Quality]
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_generation_max_passes" `
+        -Area "budget" -Name "maximum depth-generation pass budget" `
+        -Expected $expectedGenerationPasses -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_directional_receiver_samples" `
+        -Area "budget" -Name "directional receiver sample budget" `
+        -Expected $expectedDirectionalSamples[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_point_projection_samples" `
+        -Area "budget" -Name "point-light projection sample budget" `
+        -Expected $expectedPointSamples[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_spot_projection_samples" `
+        -Area "budget" -Name "spot-light projection sample budget" `
+        -Expected $expectedSpotSamples[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_rect_projection_samples" `
+        -Area "budget" -Name "rect-light projection sample budget" `
+        -Expected $expectedRectSamples[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_rect_projection_count" `
+        -Area "budget" -Name "rect-light projection count budget" `
+        -Expected $expectedRectProjectionCount[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_contact_samples" `
+        -Area "budget" -Name "contact-shadow sample budget" `
+        -Expected $expectedContactSteps[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_gpu_generation_scope" `
+        -Area "budget" -Name "GPU shadow timer uses the complete generation scope" `
+        -Expected 1 -MissingStatus "fail"
+
+    $expectedCsmExtent = 2 * $expectedCsmTileSize[$Quality]
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_atlas_tile_size" `
+        -Area "budget" -Name "CSM tile resolution" `
+        -Expected $expectedCsmTileSize[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_atlas_width" `
+        -Area "budget" -Name "CSM atlas width" -Expected $expectedCsmExtent -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_atlas_height" `
+        -Area "budget" -Name "CSM atlas height" -Expected $expectedCsmExtent -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_atlas_capacity" `
+        -Area "budget" -Name "CSM atlas capacity" -Expected 4 -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "local_shadow_atlas_tile_size" `
+        -Area "budget" -Name "local shadow tile resolution" `
+        -Expected $expectedLocalTileSize[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "local_shadow_atlas_width" `
+        -Area "budget" -Name "local shadow atlas width" `
+        -Expected $expectedLocalAtlasWidth[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "local_shadow_atlas_height" `
+        -Area "budget" -Name "local shadow atlas height" `
+        -Expected $expectedLocalAtlasHeight[$Quality] -MissingStatus "fail"
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "local_shadow_atlas_capacity" `
+        -Area "budget" -Name "local shadow atlas capacity" `
+        -Expected $expectedLocalCapacity[$Quality] -MissingStatus "fail"
+
+    $memoryContractRows = @(
+        $rows | Where-Object {
+            $images = Get-Number -Row $_ -Name "shadow_budget_swapchain_images"
+            $legacyBytes = Get-Number -Row $_ -Name "shadow_budget_legacy_depth_bytes"
+            $directionalBytes = Get-Number -Row $_ -Name "shadow_budget_directional_depth_bytes"
+            $localBytes = Get-Number -Row $_ -Name "shadow_budget_local_depth_bytes"
+            $mainBytes = Get-Number -Row $_ -Name "shadow_budget_main_depth_bytes"
+            $csmWidth = Get-Number -Row $_ -Name "shadow_cascade_atlas_width"
+            $csmHeight = Get-Number -Row $_ -Name "shadow_cascade_atlas_height"
+            $localWidth = Get-Number -Row $_ -Name "local_shadow_atlas_width"
+            $localHeight = Get-Number -Row $_ -Name "local_shadow_atlas_height"
+            $mapSize = Get-Number -Row $_ -Name "shadow_cascade_atlas_tile_size"
+            $validTexelSizes = @(2.0, 4.0, 8.0)
+            if ($images -le 0 -or $mapSize -le 0 -or $csmWidth -le 0 -or
+                $csmHeight -le 0 -or $localWidth -le 0 -or $localHeight -le 0) {
+                return $true
+            }
+            $legacyTexelBytes = $legacyBytes / ($mapSize * $mapSize * $images)
+            $directionalTexelBytes = $directionalBytes / ($csmWidth * $csmHeight * $images)
+            $localTexelBytes = $localBytes / ($localWidth * $localHeight * $images)
+            return $mainBytes -ne ($legacyBytes + $directionalBytes + $localBytes) -or
+                $validTexelSizes -notcontains $legacyTexelBytes -or
+                $validTexelSizes -notcontains $directionalTexelBytes -or
+                $validTexelSizes -notcontains $localTexelBytes
+        }
+    )
+    Add-Check -Checks $checks -Area "budget" -Name "logical depth memory is dimension-derived and sums exactly" `
+        -Status ($(if ($memoryContractRows.Count -eq 0) { "pass" } else { "fail" })) `
+        -Actual "invalidRows=$($memoryContractRows.Count)" -Expected "0"
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_budget_main_depth_bytes" `
+        -Area "budget" -Name "logical shadow depth memory budget is nonzero" `
+        -Minimum 1 -MissingStatus "fail"
+
+    $invalidGpuTimingRows = @(
+        $rows | Where-Object {
+            (Get-Number -Row $_ -Name "gpu_available") -ne 1 -or
+            (Get-Number -Row $_ -Name "gpu_shadow_ms") -le 0
+        }
+    )
+    Add-Check -Checks $checks -Area "budget" -Name "GPU generation timing is available and nonzero" `
+        -Status ($(if ($invalidGpuTimingRows.Count -eq 0) { "pass" } else { "fail" })) `
+        -Actual "invalidRows=$($invalidGpuTimingRows.Count)" -Expected "0"
 
     Add-MinCheck -Checks $checks -Metrics $metrics -Column "runtime_import_animation_playback_changed_bone_palette_entry_count" `
         -Area "animated casters" -Name "skinned animation changes the shadow input" -Minimum 1
@@ -429,13 +624,15 @@ function New-ShadowHealthReport {
     $rectLightCount = $metrics["local_shadow_rect_light_count"]
     $rectSamplePattern = $metrics["local_shadow_rect_sample_pattern"]
     if ($rectLightCount.present -and [double]$rectLightCount.max -gt 0) {
-        $patternStatus = if ($rectSamplePattern.present -and [double]$rectSamplePattern.max -eq 1) {
+        $patternStatus = if ($rectSamplePattern.present -and
+            [double]$rectSamplePattern.max -eq $expectedRectPattern[$Quality]) {
             "pass"
         } else {
             "fail"
         }
-        Add-Check -Checks $checks -Area "local shadows" -Name "rect local shadows use 2x2 surface sample pattern" `
-            -Status $patternStatus -Actual $rectSamplePattern.max -Expected "1 when rect local lights exist"
+        Add-Check -Checks $checks -Area "local shadows" -Name "rect local shadows use the quality-tier sample pattern" `
+            -Status $patternStatus -Actual $rectSamplePattern.max `
+            -Expected $expectedRectPattern[$Quality]
     } else {
         Add-Check -Checks $checks -Area "local shadows" -Name "rect local shadow pattern check" `
             -Status "warn" -Actual "rectLightCount=$($rectLightCount.max)" `
@@ -550,9 +747,59 @@ foreach ($quality in $requestedQualities) {
     $qualityIndex++
 }
 
-$totalPass = @($reports | ForEach-Object { $_.passCount } | Measure-Object -Sum).Sum
-$totalWarn = @($reports | ForEach-Object { $_.warnCount } | Measure-Object -Sum).Sum
-$totalFail = @($reports | ForEach-Object { $_.failCount } | Measure-Object -Sum).Sum
+$matrixChecks = [System.Collections.Generic.List[object]]::new()
+$qualityRank = @{
+    low = 1
+    medium = 2
+    high = 3
+    ultra = 4
+}
+$orderedReports = @($reports | Sort-Object { $qualityRank[$_.quality] })
+$monotonicColumns = @(
+    "shadow_cascade_atlas_tile_size",
+    "local_shadow_atlas_tile_size",
+    "local_shadow_atlas_capacity",
+    "shadow_budget_generation_max_passes",
+    "shadow_budget_directional_receiver_samples",
+    "shadow_budget_point_projection_samples",
+    "shadow_budget_spot_projection_samples",
+    "shadow_budget_rect_projection_samples",
+    "shadow_budget_rect_projection_count",
+    "shadow_budget_contact_samples",
+    "shadow_budget_main_depth_bytes"
+)
+foreach ($column in $monotonicColumns) {
+    $values = @(
+        foreach ($report in $orderedReports) {
+            [pscustomobject]@{
+                quality = $report.quality
+                value = $report.metrics.columns[$column].max
+            }
+        }
+    )
+    $decreases = @(
+        for ($index = 1; $index -lt $values.Count; ++$index) {
+            if ($null -eq $values[$index - 1].value -or
+                $null -eq $values[$index].value -or
+                [double]$values[$index].value -lt [double]$values[$index - 1].value) {
+                "$($values[$index - 1].quality)->$($values[$index].quality)"
+            }
+        }
+    )
+    $actual = $values | ForEach-Object { "$($_.quality)=$($_.value)" }
+    Add-Check -Checks $matrixChecks -Area "quality matrix" `
+        -Name "$column is monotonic" `
+        -Status ($(if ($decreases.Count -eq 0) { "pass" } else { "fail" })) `
+        -Actual ($actual -join ", ") -Expected "non-decreasing by quality" `
+        -Detail ($(if ($decreases.Count -gt 0) { "decreases: $($decreases -join ', ')" } else { "" }))
+}
+
+$totalPass = @($reports | ForEach-Object { $_.passCount } | Measure-Object -Sum).Sum +
+    @($matrixChecks | Where-Object { $_.status -eq "pass" }).Count
+$totalWarn = @($reports | ForEach-Object { $_.warnCount } | Measure-Object -Sum).Sum +
+    @($matrixChecks | Where-Object { $_.status -eq "warn" }).Count
+$totalFail = @($reports | ForEach-Object { $_.failCount } | Measure-Object -Sum).Sum +
+    @($matrixChecks | Where-Object { $_.status -eq "fail" }).Count
 $overall = if ([int]$totalFail -gt 0) {
     "fail"
 } elseif ([int]$totalWarn -gt 0) {
@@ -569,6 +816,7 @@ $summary = [pscustomobject]@{
     passCount = [int]$totalPass
     warnCount = [int]$totalWarn
     failCount = [int]$totalFail
+    qualityMatrixChecks = @($matrixChecks)
     reports = @($reports)
 }
 

@@ -1147,6 +1147,48 @@ inline constexpr u32 kRectAreaShadowMaxSampleTileCount = 4u;
 inline constexpr f32 kRectAreaShadowSampleOffset = 0.57735f;
 inline constexpr u32 kRectAreaShadowPatternAxis = 0u;
 inline constexpr u32 kRectAreaShadowPatternSurface2x2 = 1u;
+inline constexpr u32 kShadowQualityBudgetContractVersion = 1u;
+
+u32 DepthFormatLogicalBytesPerTexel(VkFormat format) {
+    switch (format) {
+    case VK_FORMAT_D16_UNORM:
+        return 2u;
+    case VK_FORMAT_X8_D24_UNORM_PACK32:
+    case VK_FORMAT_D32_SFLOAT:
+    case VK_FORMAT_D16_UNORM_S8_UINT:
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+        return 4u;
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        return 8u;
+    default:
+        return 0u;
+    }
+}
+
+u64 ShadowDepthLogicalBytes(
+    VkExtent2D extent,
+    VkFormat format,
+    std::size_t imageCount
+) {
+    return static_cast<u64>(extent.width) * static_cast<u64>(extent.height) *
+        static_cast<u64>(DepthFormatLogicalBytesPerTexel(format)) *
+        static_cast<u64>(imageCount);
+}
+
+u32 LocalShadowProjectionSampleBudget(
+    const VulkanLocalShadowFilterSettings& filter,
+    bool forceBlockerSearch
+) {
+    const u32 kernelRadius = std::clamp<u32>(filter.pcfKernelRadius, 0u, 2u);
+    if (kernelRadius == 0u) {
+        return 1u;
+    }
+
+    const u32 kernelWidth = kernelRadius * 2u + 1u;
+    const u32 filterSamples = kernelWidth * kernelWidth;
+    const bool blockerSearch = forceBlockerSearch || filter.pcssStrength > 0.0001f;
+    return filterSamples + (blockerSearch ? 9u : 0u);
+}
 
 u32 LocalShadowAtlasTileSizeFor(const VulkanShadowSettings& settings) {
     if (settings.quality == VulkanShadowQuality::Low) {
@@ -5773,6 +5815,37 @@ void VulkanRenderer::DrawFrame() {
             ? frameStats.shadowCascades.pcssBlockerSampleCount +
                 frameStats.shadowCascades.pcssFilterSampleCount
             : frameStats.shadowCascades.filterSampleCount;
+    frameStats.shadowCascades.budgetContractVersion =
+        kShadowQualityBudgetContractVersion;
+    frameStats.shadowCascades.budgetDirectionalReceiverSamples =
+        frameStats.shadowCascades.filterMaxDepthSamples;
+    frameStats.shadowCascades.budgetPointProjectionSamples =
+        LocalShadowProjectionSampleBudget(
+            m_ShadowSettings.pointLocalShadowFilter,
+            false
+        );
+    frameStats.shadowCascades.budgetSpotProjectionSamples =
+        LocalShadowProjectionSampleBudget(
+            m_ShadowSettings.spotLocalShadowFilter,
+            false
+        );
+    frameStats.shadowCascades.budgetRectProjectionSamples =
+        LocalShadowProjectionSampleBudget(
+            m_ShadowSettings.rectLocalShadowFilter,
+            true
+        );
+    frameStats.shadowCascades.budgetRectProjectionCount =
+        RectShadowMaxSampleTileCountFor(m_ShadowSettings);
+    frameStats.shadowCascades.budgetContactSamples =
+        std::clamp<u32>(m_ShadowSettings.contactShadowSteps, 0u, 32u);
+    frameStats.shadowCascades.budgetGenerationMaxPasses =
+        (m_ShadowSettings.enabled ? 1u : 0u) +
+        frameStats.shadowCascades.configuredCount +
+        LocalShadowAtlasTileCapacityFor(m_ShadowSettings);
+    // gpu_shadow_ms covers legacy, CSM, and local depth generation after the
+    // command-buffer timestamp boundary fix. Receiver filtering stays in the
+    // lighting/main timing and is represented by the sample budget above.
+    frameStats.shadowCascades.budgetGpuGenerationScope = 1u;
     frameStats.shadowCascades.filterReceiverBiasExtentTexels =
         std::clamp(m_ShadowSettings.directionalFilterReceiverBiasExtentTexels, 0.0f, 4.0f);
     frameStats.shadowCascades.receiverPlaneBiasScale =
@@ -6435,6 +6508,12 @@ void VulkanRenderer::DrawFrame() {
             m_DirectionalShadowCascadeAtlas->TileRows();
         frameStats.shadowCascades.atlasCascadeCapacity =
             m_DirectionalShadowCascadeAtlas->CascadeCapacity();
+        frameStats.shadowCascades.budgetDirectionalDepthBytes =
+            ShadowDepthLogicalBytes(
+                cascadeAtlasExtent,
+                m_DirectionalShadowCascadeAtlas->Format(),
+                m_DirectionalShadowCascadeAtlas->Count()
+            );
     }
     if (m_LocalShadowAtlas != nullptr) {
         const VkExtent2D localAtlasExtent = m_LocalShadowAtlas->Extent();
@@ -6445,6 +6524,12 @@ void VulkanRenderer::DrawFrame() {
         frameStats.localShadowAtlas.tileColumns = m_LocalShadowAtlas->TileColumns();
         frameStats.localShadowAtlas.tileRows = m_LocalShadowAtlas->TileRows();
         frameStats.localShadowAtlas.tileCapacity = m_LocalShadowAtlas->TileCapacity();
+        frameStats.shadowCascades.budgetLocalDepthBytes =
+            ShadowDepthLogicalBytes(
+                localAtlasExtent,
+                m_LocalShadowAtlas->Format(),
+                m_LocalShadowAtlas->Count()
+            );
         frameStats.localShadowAtlas.shadowableLocalLights =
             localShadowTiles.pointLightCount +
             localShadowTiles.spotLightCount +
@@ -6544,6 +6629,50 @@ void VulkanRenderer::DrawFrame() {
         frameStats.localShadowAtlas.debugLightIndex =
             m_ShadowSettings.debugLocalShadowLightIndex;
     }
+    const u32 swapchainImageCount = m_Swapchain != nullptr
+        ? static_cast<u32>(m_Swapchain->Images().size())
+        : 0u;
+    frameStats.shadowCascades.budgetSwapchainImageCount = swapchainImageCount;
+    if (m_ShadowMap != nullptr) {
+        frameStats.shadowCascades.budgetLegacyDepthBytes =
+            ShadowDepthLogicalBytes(
+                m_ShadowMap->Extent(),
+                m_ShadowMap->Format(),
+                m_ShadowMap->Count()
+            );
+    }
+    frameStats.shadowCascades.budgetMainDepthBytes =
+        frameStats.shadowCascades.budgetLegacyDepthBytes +
+        frameStats.shadowCascades.budgetDirectionalDepthBytes +
+        frameStats.shadowCascades.budgetLocalDepthBytes;
+
+    u32 shadowBudgetFallbackReason = 0u;
+    if (m_ShadowMap == nullptr || m_DirectionalShadowCascadeAtlas == nullptr ||
+        m_LocalShadowAtlas == nullptr || swapchainImageCount == 0u) {
+        shadowBudgetFallbackReason = 1u;
+    } else if (m_ShadowMap->Count() != swapchainImageCount ||
+        m_DirectionalShadowCascadeAtlas->Count() != swapchainImageCount ||
+        m_LocalShadowAtlas->Count() != swapchainImageCount) {
+        shadowBudgetFallbackReason = 2u;
+    } else if (m_ShadowMap->Extent().width != m_ShadowSettings.mapSize ||
+        m_ShadowMap->Extent().height != m_ShadowSettings.mapSize) {
+        shadowBudgetFallbackReason = 3u;
+    } else if (m_DirectionalShadowCascadeAtlas->TileSize() !=
+        m_ShadowSettings.mapSize) {
+        shadowBudgetFallbackReason = 4u;
+    } else if (m_LocalShadowAtlas->TileSize() !=
+            LocalShadowAtlasTileSizeFor(m_ShadowSettings) ||
+        m_LocalShadowAtlas->TileCapacity() !=
+            LocalShadowAtlasTileCapacityFor(m_ShadowSettings)) {
+        shadowBudgetFallbackReason = 5u;
+    } else if (frameStats.shadowCascades.budgetLegacyDepthBytes == 0u ||
+        frameStats.shadowCascades.budgetDirectionalDepthBytes == 0u ||
+        frameStats.shadowCascades.budgetLocalDepthBytes == 0u) {
+        shadowBudgetFallbackReason = 6u;
+    }
+    frameStats.shadowCascades.budgetFallbackReason = shadowBudgetFallbackReason;
+    frameStats.shadowCascades.budgetResourceContractValid =
+        shadowBudgetFallbackReason == 0u ? 1u : 0u;
     WriteLocalShadowAttributionStats(
         frameStats.localShadowAtlas,
         frameLightSet,

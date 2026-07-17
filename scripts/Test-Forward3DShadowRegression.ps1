@@ -104,6 +104,7 @@ $managedKeys = @(
     "SE_LOCAL_SHADOW_ONLY_LIGHT_INDEX",
     "SE_CONTACT_SHADOW_STRENGTH",
     "SE_SSAO_STRENGTH",
+    "SE_ENABLE_GPU_TIMESTAMPS",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_AUTO_EXIT_FRAMES",
@@ -177,6 +178,7 @@ try {
     [Environment]::SetEnvironmentVariable("SE_LOCAL_SHADOW_ONLY_LIGHT_INDEX", $null, "Process")
     [Environment]::SetEnvironmentVariable("SE_CONTACT_SHADOW_STRENGTH", $null, "Process")
     [Environment]::SetEnvironmentVariable("SE_SSAO_STRENGTH", $null, "Process")
+    [Environment]::SetEnvironmentVariable("SE_ENABLE_GPU_TIMESTAMPS", "1", "Process")
     [Environment]::SetEnvironmentVariable("SE_BENCHMARK_WARMUP_FRAMES", [string]$WarmupFrames, "Process")
     [Environment]::SetEnvironmentVariable("SE_BENCHMARK_FRAMES", [string]$CaptureFrames, "Process")
     [Environment]::SetEnvironmentVariable("SE_AUTO_EXIT_FRAMES", [string]$AutoExitFrames, "Process")
