@@ -10,12 +10,15 @@
 
 namespace se {
 
+inline constexpr f32 kDefaultDirectionalLightAngularRadiusRadians = 0.00464258f;
+
 struct DirectionalLight3D {
     std::string name;
     glm::vec3 direction{ -0.45f, -0.82f, -0.35f };
     f32 intensity = 0.78f;
     f32 ambient = 0.22f;
     f32 specular = 0.24f;
+    f32 angularRadiusRadians = kDefaultDirectionalLightAngularRadiusRadians;
     bool enabled = true;
 };
 
@@ -140,7 +143,8 @@ public:
         glm::vec3 direction,
         f32 intensity,
         f32 ambient,
-        f32 specular
+        f32 specular,
+        f32 angularRadiusRadians = kDefaultDirectionalLightAngularRadiusRadians
     );
     void Clear();
     void Update(f32 deltaSeconds);

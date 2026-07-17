@@ -83,8 +83,10 @@ struct RendererDrawStats {
 };
 
 struct RendererShadowCascadeStats {
+    u32 quality = 0;
     u32 configuredCount = 0;
     u32 activeCount = 0;
+    u32 directionalReceiveEnabled = 0;
     u32 stableSnappingEnabled = 0;
     u32 atlasAllocated = 0;
     u32 atlasTileSize = 0;
@@ -94,7 +96,32 @@ struct RendererShadowCascadeStats {
     u32 atlasTileRows = 0;
     u32 atlasCascadeCapacity = 0;
     u32 pcfKernelRadius = 0;
+    u32 filterMode = 0;
+    u32 filterSampleCount = 0;
+    u32 filterKernelWidth = 0;
+    u32 filterMaxDepthSamples = 0;
+    u32 filterHardwareCompareEnabled = 0;
+    u32 filterFallbackReason = 0;
+    u32 receiverPlaneBiasEnabled = 0;
+    u32 normalOffsetBiasEnabled = 0;
+    u32 slopeOffsetBiasEnabled = 0;
+    u32 casterDepthBiasEnabled = 0;
+    u32 pcssEnabled = 0;
+    u32 pcssBlockerSampleCount = 0;
+    u32 pcssFilterSampleCount = 0;
+    u32 pcssRawDepthSamplerReady = 0;
+    u32 pcssFallbackReason = 0;
     f32 pcssStrength = 0.0f;
+    f32 pcssSearchRadiusTexels = 0.0f;
+    f32 pcssMaxPenumbraTexels = 0.0f;
+    f32 pcssLightAngularRadiusRadians = 0.0f;
+    f32 filterReceiverBiasExtentTexels = 0.0f;
+    f32 receiverPlaneBiasScale = 0.0f;
+    f32 normalOffsetBiasTexels = 0.0f;
+    f32 slopeOffsetBiasTexels = 0.0f;
+    f32 casterDepthBiasConstant = 0.0f;
+    f32 casterDepthBiasClamp = 0.0f;
+    f32 casterDepthBiasSlope = 0.0f;
     f32 splitLambda = 0.0f;
     f32 maxDistance = 0.0f;
     f32 blendRatio = 0.0f;
@@ -110,6 +137,7 @@ struct RendererShadowCascadeStats {
     f32 farDepth = 0.0f;
     std::array<f32, kMaxDirectionalShadowCascades> splitDepths{};
     std::array<f32, kMaxDirectionalShadowCascades> texelWorldSizes{};
+    std::array<f32, kMaxDirectionalShadowCascades> lightDepthWorldSpans{};
 };
 
 struct RendererLocalShadowAtlasStats {

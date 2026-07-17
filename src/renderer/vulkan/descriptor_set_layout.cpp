@@ -284,7 +284,15 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
     localShadowSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     localShadowSamplerLayoutBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 13> bindings = {
+    VkDescriptorSetLayoutBinding shadowRawDepthSamplerLayoutBinding{};
+    shadowRawDepthSamplerLayoutBinding.binding = 13;
+    shadowRawDepthSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowRawDepthSamplerLayoutBinding.descriptorCount = 1;
+    shadowRawDepthSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shadowRawDepthSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
         albedoSamplerLayoutBinding,
         colorMapSamplerLayoutBinding,
         cubemapSamplerLayoutBinding,
@@ -297,7 +305,8 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
         clearcoatSamplerLayoutBinding,
         transmissionSamplerLayoutBinding,
         clearcoatRoughnessSamplerLayoutBinding,
-        localShadowSamplerLayoutBinding
+        localShadowSamplerLayoutBinding,
+        shadowRawDepthSamplerLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

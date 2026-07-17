@@ -102,6 +102,13 @@ struct ReflectionCaptureLocalShadowDrawStats {
     u64 pushConstantByteCount = 0;
 };
 
+struct ShadowDepthBiasControls {
+    bool enabled = false;
+    f32 constantFactor = 0.0f;
+    f32 clamp = 0.0f;
+    f32 slopeFactor = 0.0f;
+};
+
 // Shared forward-material path for a one-face reflection probe capture pass.
 ReflectionCaptureDrawStats RecordReflectionCaptureCommands(
     VkCommandBuffer commandBuffer,
@@ -128,6 +135,7 @@ RecordReflectionCaptureDirectionalShadow(
     std::span<const RenderCommand> shadowRenderCommands,
     std::size_t imageIndex,
     const glm::mat4& lightViewProjection,
+    const ShadowDepthBiasControls& shadowDepthBias,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady
 );
@@ -145,6 +153,7 @@ RecordReflectionCaptureLocalShadows(
     const LocalShadowTileSet& localShadowTiles,
     std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
     std::size_t imageIndex,
+    const ShadowDepthBiasControls& shadowDepthBias,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady
 );
@@ -189,6 +198,7 @@ public:
         const LocalShadowTileSet* localShadowTiles = nullptr,
         std::span<const std::span<const RenderCommand>> directionalShadowCascadeRenderCommands = {},
         std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands = {},
+        ShadowDepthBiasControls shadowDepthBias = {},
         bool skipCachedLocalShadowTiles = false,
         const VulkanHdrRenderPass* hdrRenderPass = nullptr,
         const VulkanHdrFramebuffer* hdrFramebuffer = nullptr,

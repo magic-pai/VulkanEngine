@@ -358,7 +358,7 @@ void VulkanMaterialDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 13);
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -479,18 +479,24 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
             const std::size_t descriptorIndex = materialIndex * m_SetsPerMaterial + imageIndex;
 
             VkDescriptorImageInfo shadowImageInfo{};
+            VkDescriptorImageInfo shadowRawDepthImageInfo{};
             if (cascadeAtlas != nullptr) {
                 shadowImageInfo.imageLayout = cascadeAtlas->Layout();
                 shadowImageInfo.imageView = cascadeAtlas->View(imageIndex);
                 shadowImageInfo.sampler = cascadeAtlas->Sampler();
+                shadowRawDepthImageInfo = shadowImageInfo;
+                shadowRawDepthImageInfo.sampler = cascadeAtlas->RawDepthSampler();
             } else if (shadowMap != nullptr) {
                 shadowImageInfo.imageLayout = shadowMap->Layout();
                 shadowImageInfo.imageView = shadowMap->View(imageIndex);
                 shadowImageInfo.sampler = shadowMap->Sampler();
+                shadowRawDepthImageInfo = shadowImageInfo;
+                shadowRawDepthImageInfo.sampler = shadowMap->RawDepthSampler();
             } else {
                 shadowImageInfo.imageLayout = material.AlbedoTexture().Layout();
                 shadowImageInfo.imageView = material.AlbedoTexture().View();
                 shadowImageInfo.sampler = material.Sampler().Handle();
+                shadowRawDepthImageInfo = shadowImageInfo;
             }
 
             VkDescriptorImageInfo localShadowImageInfo{};
@@ -504,7 +510,7 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
                 localShadowImageInfo.sampler = material.Sampler().Handle();
             }
 
-            std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
+            std::array<VkWriteDescriptorSet, 14> descriptorWrites{};
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = m_DescriptorSets[descriptorIndex];
             descriptorWrites[0].dstBinding = 0;
@@ -609,6 +615,15 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
             descriptorWrites[12].descriptorCount = 1;
             descriptorWrites[12].pImageInfo = &localShadowImageInfo;
 
+            descriptorWrites[13].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[13].dstSet = m_DescriptorSets[descriptorIndex];
+            descriptorWrites[13].dstBinding = 13;
+            descriptorWrites[13].dstArrayElement = 0;
+            descriptorWrites[13].descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[13].descriptorCount = 1;
+            descriptorWrites[13].pImageInfo = &shadowRawDepthImageInfo;
+
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(descriptorWrites.size()),
@@ -703,7 +718,7 @@ void VulkanGBufferDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 13);
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -743,7 +758,7 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
     }
 
     for (std::size_t index = 0; index < count; ++index) {
-        std::array<VkDescriptorImageInfo, 13> imageInfos{};
+        std::array<VkDescriptorImageInfo, 14> imageInfos{};
         imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         imageInfos[0].imageView = renderTargets.GBufferAlbedoView(index);
         imageInfos[0].sampler = sampler.Handle();
@@ -788,7 +803,19 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
             imageInfos[12] = imageInfos[0];
         }
 
-        std::array<VkWriteDescriptorSet, 13> descriptorWrites{};
+        if (cascadeAtlas != nullptr) {
+            imageInfos[13].imageLayout = cascadeAtlas->Layout();
+            imageInfos[13].imageView = cascadeAtlas->View(index);
+            imageInfos[13].sampler = cascadeAtlas->RawDepthSampler();
+        } else if (shadowMap != nullptr) {
+            imageInfos[13].imageLayout = shadowMap->Layout();
+            imageInfos[13].imageView = shadowMap->View(index);
+            imageInfos[13].sampler = shadowMap->RawDepthSampler();
+        } else {
+            imageInfos[13] = imageInfos[0];
+        }
+
+        std::array<VkWriteDescriptorSet, 14> descriptorWrites{};
         for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
             descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[binding].dstSet = m_DescriptorSets[index];
@@ -892,7 +919,7 @@ void VulkanHdrDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 13);
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1116,7 +1143,7 @@ void VulkanBloomDescriptorSets::CreateDescriptorPool(
     const std::size_t setCount = swapchainCount * mipCount * 2;
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(setCount * 13);
+    poolSizes[0].descriptorCount = static_cast<u32>(setCount * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1324,7 +1351,7 @@ void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 13);
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

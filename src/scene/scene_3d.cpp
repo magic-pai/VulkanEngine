@@ -213,7 +213,8 @@ DirectionalLight3D& Scene3D::SetPrimaryDirectionalLight(
     glm::vec3 direction,
     f32 intensity,
     f32 ambient,
-    f32 specular
+    f32 specular,
+    f32 angularRadiusRadians
 ) {
     if (glm::dot(direction, direction) <= 0.0001f) {
         direction = { -0.45f, -0.82f, -0.35f };
@@ -227,6 +228,7 @@ DirectionalLight3D& Scene3D::SetPrimaryDirectionalLight(
         std::max(intensity, 0.0f),
         std::max(ambient, 0.0f),
         std::max(specular, 0.0f),
+        std::clamp(angularRadiusRadians, 0.0f, 0.05f),
         true
     };
 
@@ -237,6 +239,10 @@ DirectionalLight3D& Scene3D::SetPrimaryDirectionalLight(
         std::abs(m_PrimaryDirectionalLight->intensity - nextLight.intensity) > 0.0001f ||
         std::abs(m_PrimaryDirectionalLight->ambient - nextLight.ambient) > 0.0001f ||
         std::abs(m_PrimaryDirectionalLight->specular - nextLight.specular) > 0.0001f ||
+        std::abs(
+            m_PrimaryDirectionalLight->angularRadiusRadians -
+            nextLight.angularRadiusRadians
+        ) > 0.000001f ||
         m_PrimaryDirectionalLight->enabled != nextLight.enabled;
 
     m_PrimaryDirectionalLight = std::move(nextLight);

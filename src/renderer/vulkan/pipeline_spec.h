@@ -37,6 +37,7 @@ struct PipelineSpec {
     std::array<ColorBlendMode, 8> colorBlendModes{};
     bool supportsInstancing = false;
     bool dynamicViewportScissor = false;
+    bool dynamicDepthBias = false;
     VkExtent2D fixedExtent{};
 
     static PipelineSpec Default2D(

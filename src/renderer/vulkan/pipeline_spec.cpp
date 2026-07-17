@@ -237,6 +237,7 @@ PipelineSpec PipelineSpec::ShadowDepth(std::string vertexShaderPath, VkExtent2D 
     spec.hasColorAttachment = false;
     spec.colorAttachmentCount = 0;
     spec.dynamicViewportScissor = true;
+    spec.dynamicDepthBias = true;
     spec.fixedExtent = extent;
     return spec;
 }

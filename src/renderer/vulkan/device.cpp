@@ -76,6 +76,7 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = physicalDevice.Features().samplerAnisotropy;
     deviceFeatures.independentBlend = physicalDevice.Features().independentBlend;
+    deviceFeatures.depthBiasClamp = physicalDevice.Features().depthBiasClamp;
 
     const std::vector<const char*> enabledExtensions =
         EnabledVulkanDeviceExtensionsForPhysicalDevice(physicalDevice.Handle());

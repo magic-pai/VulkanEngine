@@ -455,9 +455,36 @@ void BenchmarkRecorder::RecordFrame(
         << draw.shadowCulled << ','
         << shadowCascades.configuredCount << ','
         << shadowCascades.activeCount << ','
+        << shadowCascades.directionalReceiveEnabled << ','
         << shadowCascades.stableSnappingEnabled << ','
+        << shadowCascades.quality << ','
         << shadowCascades.pcfKernelRadius << ','
         << shadowCascades.pcssStrength << ','
+        << shadowCascades.pcssEnabled << ','
+        << shadowCascades.pcssBlockerSampleCount << ','
+        << shadowCascades.pcssFilterSampleCount << ','
+        << shadowCascades.pcssRawDepthSamplerReady << ','
+        << shadowCascades.pcssFallbackReason << ','
+        << shadowCascades.pcssSearchRadiusTexels << ','
+        << shadowCascades.pcssMaxPenumbraTexels << ','
+        << shadowCascades.pcssLightAngularRadiusRadians << ','
+        << shadowCascades.filterMode << ','
+        << shadowCascades.filterSampleCount << ','
+        << shadowCascades.filterKernelWidth << ','
+        << shadowCascades.filterMaxDepthSamples << ','
+        << shadowCascades.filterHardwareCompareEnabled << ','
+        << shadowCascades.filterReceiverBiasExtentTexels << ','
+        << shadowCascades.filterFallbackReason << ','
+        << shadowCascades.receiverPlaneBiasEnabled << ','
+        << shadowCascades.receiverPlaneBiasScale << ','
+        << shadowCascades.normalOffsetBiasEnabled << ','
+        << shadowCascades.normalOffsetBiasTexels << ','
+        << shadowCascades.slopeOffsetBiasEnabled << ','
+        << shadowCascades.slopeOffsetBiasTexels << ','
+        << shadowCascades.casterDepthBiasEnabled << ','
+        << shadowCascades.casterDepthBiasConstant << ','
+        << shadowCascades.casterDepthBiasClamp << ','
+        << shadowCascades.casterDepthBiasSlope << ','
         << shadowCascades.splitLambda << ','
         << shadowCascades.blendRatio << ','
         << shadowCascades.fadeRatio << ','
@@ -875,6 +902,10 @@ void BenchmarkRecorder::RecordFrame(
         << shadowCascades.texelWorldSizes[1] << ','
         << shadowCascades.texelWorldSizes[2] << ','
         << shadowCascades.texelWorldSizes[3] << ','
+        << shadowCascades.lightDepthWorldSpans[0] << ','
+        << shadowCascades.lightDepthWorldSpans[1] << ','
+        << shadowCascades.lightDepthWorldSpans[2] << ','
+        << shadowCascades.lightDepthWorldSpans[3] << ','
         << shadowCascades.atlasAllocated << ','
         << shadowCascades.atlasTileSize << ','
         << shadowCascades.atlasWidth << ','
@@ -1562,7 +1593,26 @@ void BenchmarkRecorder::WriteHeader() {
         << "main_skinned_conservative_bounds,shadow_skinned_conservative_bounds,"
         << "main_visible,main_culled,overlay_visible,overlay_culled,shadow_visible,shadow_culled,"
         << "shadow_cascade_configured_count,shadow_cascade_active_count,"
-        << "shadow_cascade_stable_snapping,shadow_pcf_kernel_radius,shadow_pcss_strength,"
+        << "shadow_directional_receive_enabled,"
+        << "shadow_cascade_stable_snapping,shadow_quality,"
+        << "shadow_pcf_kernel_radius,shadow_pcss_strength,"
+        << "directional_shadow_pcss_enabled,directional_shadow_pcss_blocker_samples,"
+        << "directional_shadow_pcss_filter_samples,"
+        << "directional_shadow_pcss_raw_depth_sampler_ready,"
+        << "directional_shadow_pcss_fallback_reason,"
+        << "directional_shadow_pcss_search_radius_texels,"
+        << "directional_shadow_pcss_max_penumbra_texels,"
+        << "directional_shadow_pcss_light_angular_radius_radians,"
+        << "directional_shadow_filter_mode,directional_shadow_filter_samples,"
+        << "directional_shadow_filter_kernel_width,directional_shadow_filter_max_depth_samples,"
+        << "directional_shadow_filter_hardware_compare_enabled,"
+        << "directional_shadow_filter_receiver_bias_extent_texels,"
+        << "directional_shadow_filter_fallback_reason,"
+        << "shadow_receiver_plane_bias_enabled,shadow_receiver_plane_bias_scale,"
+        << "shadow_normal_offset_bias_enabled,shadow_normal_offset_bias_texels,"
+        << "shadow_slope_offset_bias_enabled,shadow_slope_offset_bias_texels,"
+        << "shadow_caster_depth_bias_enabled,shadow_caster_depth_bias_constant,"
+        << "shadow_caster_depth_bias_clamp,shadow_caster_depth_bias_slope,"
         << "shadow_cascade_split_lambda,"
         << "shadow_cascade_blend_ratio,shadow_cascade_fade_ratio,"
         << "shadow_cascade_receiver_guard,"
@@ -1901,6 +1951,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_cascade_split2,shadow_cascade_split3,"
         << "shadow_cascade_texel0,shadow_cascade_texel1,"
         << "shadow_cascade_texel2,shadow_cascade_texel3,"
+        << "shadow_cascade_light_depth_span0,shadow_cascade_light_depth_span1,"
+        << "shadow_cascade_light_depth_span2,shadow_cascade_light_depth_span3,"
         << "shadow_cascade_atlas_allocated,shadow_cascade_atlas_tile_size,"
         << "shadow_cascade_atlas_width,shadow_cascade_atlas_height,"
         << "shadow_cascade_atlas_tile_columns,shadow_cascade_atlas_tile_rows,"

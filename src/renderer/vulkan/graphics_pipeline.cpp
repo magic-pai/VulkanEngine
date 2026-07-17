@@ -246,7 +246,7 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = spec.cullMode;
     rasterizer.frontFace = spec.frontFace;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasEnable = spec.dynamicDepthBias ? VK_TRUE : VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -334,13 +334,18 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     colorBlending.blendConstants[2] = 0.0f;
     colorBlending.blendConstants[3] = 0.0f;
 
-    const std::array<VkDynamicState, 2> dynamicStates{
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
+    std::array<VkDynamicState, 3> dynamicStates{};
+    u32 dynamicStateCount = 0u;
+    if (spec.dynamicViewportScissor) {
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_VIEWPORT;
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
+    }
+    if (spec.dynamicDepthBias) {
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+    }
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<u32>(dynamicStates.size());
+    dynamicState.dynamicStateCount = dynamicStateCount;
     dynamicState.pDynamicStates = dynamicStates.data();
 
     VkDescriptorSetLayout bonePaletteDescriptorSetLayout = VK_NULL_HANDLE;
@@ -397,7 +402,7 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = spec.dynamicViewportScissor ? &dynamicState : nullptr;
+    pipelineInfo.pDynamicState = dynamicStateCount > 0u ? &dynamicState : nullptr;
     pipelineInfo.layout = m_PipelineLayout;
     pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = 0;

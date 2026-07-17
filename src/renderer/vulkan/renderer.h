@@ -187,6 +187,7 @@ struct RendererDirectionalLight {
     f32 intensity = 0.78f;
     f32 ambient = 0.22f;
     f32 specular = 0.24f;
+    f32 angularRadiusRadians = 0.00464258f;
 };
 
 struct RendererLocalLight {
@@ -369,6 +370,7 @@ struct DirectionalShadowCascade {
     f32 farDepth = 0.0f;
     f32 splitDepth = 0.0f;
     f32 texelWorldSize = 0.0f;
+    f32 lightDepthWorldSpan = 0.0f;
 };
 
 struct DirectionalShadowCascadeSet {
@@ -383,6 +385,7 @@ struct DirectionalShadowCascadeSet {
     f32 maxDistance = 0.0f;
     f32 nearDepth = 0.0f;
     f32 farDepth = 0.0f;
+    f32 lightAngularRadiusRadians = 0.00464258f;
 };
 
 inline constexpr std::size_t kMaxLocalShadowTiles = 64;

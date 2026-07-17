@@ -31,6 +31,7 @@ public:
     VkImageView View() const;
     VkImageView View(std::size_t index) const;
     VkSampler Sampler() const;
+    VkSampler RawDepthSampler() const;
     VkImageLayout Layout() const;
     std::size_t Count() const;
 
@@ -58,6 +59,7 @@ private:
     VkDevice m_Device = VK_NULL_HANDLE;
     std::vector<std::unique_ptr<VulkanImage>> m_Images;
     VkSampler m_Sampler = VK_NULL_HANDLE;
+    VkSampler m_RawDepthSampler = VK_NULL_HANDLE;
     VkFormat m_Format = VK_FORMAT_UNDEFINED;
     VkExtent2D m_Extent{ kSize, kSize };
 };

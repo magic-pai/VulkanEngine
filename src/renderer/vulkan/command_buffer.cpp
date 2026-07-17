@@ -641,6 +641,7 @@ void DrawShadowCommands(
     std::span<const RenderCommand> shadowRenderCommands,
     std::size_t imageIndex,
     const glm::mat4& lightViewProjection,
+    const ShadowDepthBiasControls& shadowDepthBias,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady,
     VkOffset2D viewportOffset,
@@ -664,6 +665,12 @@ void DrawShadowCommands(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipeline.Handle()
+        );
+        vkCmdSetDepthBias(
+            commandBuffer,
+            shadowDepthBias.enabled ? shadowDepthBias.constantFactor : 0.0f,
+            shadowDepthBias.enabled ? shadowDepthBias.clamp : 0.0f,
+            shadowDepthBias.enabled ? shadowDepthBias.slopeFactor : 0.0f
         );
 
         const VkDescriptorSet descriptorSet = shadowDescriptorSets.Handle(imageIndex);
@@ -1760,6 +1767,7 @@ RecordReflectionCaptureDirectionalShadow(
     std::span<const RenderCommand> shadowRenderCommands,
     std::size_t imageIndex,
     const glm::mat4& lightViewProjection,
+    const ShadowDepthBiasControls& shadowDepthBias,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady
 ) {
@@ -1791,6 +1799,7 @@ RecordReflectionCaptureDirectionalShadow(
         shadowRenderCommands,
         imageIndex,
         lightViewProjection,
+        shadowDepthBias,
         bonePaletteFallbackDescriptorSet,
         bonePaletteFallbackDescriptorReady,
         { 0, 0 },
@@ -1818,6 +1827,7 @@ RecordReflectionCaptureLocalShadows(
     const LocalShadowTileSet& localShadowTiles,
     std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
     std::size_t imageIndex,
+    const ShadowDepthBiasControls& shadowDepthBias,
     VkDescriptorSet bonePaletteFallbackDescriptorSet,
     u32 bonePaletteFallbackDescriptorReady
 ) {
@@ -1878,6 +1888,7 @@ RecordReflectionCaptureLocalShadows(
             tileRenderCommands,
             imageIndex,
             tile.viewProjection,
+            shadowDepthBias,
             bonePaletteFallbackDescriptorSet,
             bonePaletteFallbackDescriptorReady,
             tileOffset,
@@ -1984,6 +1995,7 @@ void VulkanCommandBuffer::Record(
     const LocalShadowTileSet* localShadowTiles,
     std::span<const std::span<const RenderCommand>> directionalShadowCascadeRenderCommands,
     std::span<const std::span<const RenderCommand>> localShadowTileRenderCommands,
+    ShadowDepthBiasControls shadowDepthBias,
     bool skipCachedLocalShadowTiles,
     const VulkanHdrRenderPass* hdrRenderPass,
     const VulkanHdrFramebuffer* hdrFramebuffer,
@@ -2211,6 +2223,7 @@ void VulkanCommandBuffer::Record(
             shadowRenderCommands,
             imageIndex,
             legacyLightViewProjection,
+            shadowDepthBias,
             gBufferBonePaletteFallbackDescriptorSet,
             gBufferBonePaletteFallbackDescriptorReady,
             { 0, 0 },
@@ -2301,6 +2314,7 @@ void VulkanCommandBuffer::Record(
                 cascadeRenderCommands,
                 imageIndex,
                 directionalShadowCascades->cascades[cascadeIndex].viewProjection,
+                shadowDepthBias,
                 gBufferBonePaletteFallbackDescriptorSet,
                 gBufferBonePaletteFallbackDescriptorReady,
                 tileOffset,
@@ -2429,6 +2443,7 @@ void VulkanCommandBuffer::Record(
                 tileRenderCommands,
                 imageIndex,
                 tile.viewProjection,
+                shadowDepthBias,
                 gBufferBonePaletteFallbackDescriptorSet,
                 gBufferBonePaletteFallbackDescriptorReady,
                 tileOffset,

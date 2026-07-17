@@ -138,7 +138,20 @@ struct DirectionalShadowCascadeBufferObject {
     alignas(16) glm::vec4 cascadeInfo{ 0.0f };
     alignas(16) glm::vec4 splitDepths{ 0.0f };
     alignas(16) glm::vec4 texelWorldSizes{ 0.0f };
+    alignas(16) glm::vec4 lightDepthWorldSpans{ 0.0f };
     alignas(16) glm::vec4 cascadeBlendControls{ 0.0f };
+    // x: receiver-plane depth bias scale; y: normal offset in cascade texels;
+    // z: bounded light-direction slope offset in cascade texels.
+    alignas(16) glm::vec4 receiverPlaneBiasControls{ 0.0f };
+    // x: filter mode, y: hardware comparison tap count, z: tent kernel width,
+    // w: conservative receiver-plane bias extent in cascade texels.
+    alignas(16) glm::vec4 directionalFilterControls{ 0.0f };
+    // x: strength, y: blocker samples, z: filter samples,
+    // w: maximum penumbra radius in cascade texels.
+    alignas(16) glm::vec4 directionalPcssControls{ 0.0f };
+    // x: blocker-search radius in texels, y: light angular radius in radians,
+    // z: raw-depth sampler readiness, w: fallback reason.
+    alignas(16) glm::vec4 directionalPcssGeometry{ 0.0f };
     alignas(16) glm::mat4 fallbackViewProjection{ 1.0f };
     alignas(16) std::array<glm::mat4, kMaxDirectionalShadowCascades> viewProjections{};
 };
@@ -251,7 +264,7 @@ static_assert(
 
 static_assert(
     sizeof(DirectionalShadowCascadeBufferObject) ==
-        sizeof(glm::vec4) * 4 +
+        sizeof(glm::vec4) * 9 +
         sizeof(glm::mat4) * (1 + kMaxDirectionalShadowCascades),
     "DirectionalShadowCascadeBufferObject layout must match the shader storage buffer"
 );

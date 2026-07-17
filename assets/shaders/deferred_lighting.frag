@@ -95,7 +95,12 @@ layout(std430, set = 0, binding = 4) readonly buffer DirectionalShadowCascades {
     vec4 cascadeInfo;
     vec4 splitDepths;
     vec4 texelWorldSizes;
+    vec4 lightDepthWorldSpans;
     vec4 cascadeBlendControls;
+    vec4 receiverPlaneBiasControls;
+    vec4 directionalFilterControls;
+    vec4 directionalPcssControls;
+    vec4 directionalPcssGeometry;
     mat4 fallbackViewProjection;
     mat4 viewProjections[4];
 } shadowCascades;
@@ -145,7 +150,8 @@ layout(set = 1, binding = 2) uniform sampler2D gBufferMaterial;
 layout(set = 1, binding = 3) uniform sampler2D gBufferVelocity;
 layout(set = 1, binding = 4) uniform sampler2D sceneDepth;
 layout(set = 1, binding = 5) uniform sampler2D gBufferEmissive;
-layout(set = 1, binding = 6) uniform sampler2D shadowSampler;
+layout(set = 1, binding = 6) uniform sampler2DShadow shadowSampler;
+layout(set = 1, binding = 13) uniform sampler2D shadowRawDepthSampler;
 layout(set = 1, binding = 7) uniform sampler2D gBufferMaterialAux;
 layout(set = 1, binding = 12) uniform sampler2D localShadowSampler;
 
@@ -1769,6 +1775,84 @@ int ProjectShadowCascade(
     return 0;
 }
 
+vec3 DirectionalShadowReceiverPosition(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int cascadeIndex
+) {
+    float normalOffsetTexels = clamp(
+        shadowCascades.receiverPlaneBiasControls.y,
+        0.0,
+        4.0
+    );
+    float slopeOffsetTexels = clamp(
+        shadowCascades.receiverPlaneBiasControls.z,
+        0.0,
+        2.0
+    );
+    if ((normalOffsetTexels <= 0.0001 && slopeOffsetTexels <= 0.0001) ||
+        cascadeIndex < 0 || cascadeIndex >= ActiveShadowCascadeCount()) {
+        return worldPosition;
+    }
+
+    float texelWorldSize = max(shadowCascades.texelWorldSizes[cascadeIndex], 0.0);
+    float normalLengthSquared = dot(normal, normal);
+    float lightLengthSquared = dot(lightDir, lightDir);
+    if (texelWorldSize <= 0.0 ||
+        normalLengthSquared <= 0.0000001 || lightLengthSquared <= 0.0000001) {
+        return worldPosition;
+    }
+
+    vec3 unitNormal = normal * inversesqrt(normalLengthSquared);
+    vec3 unitLightDir = lightDir * inversesqrt(lightLengthSquared);
+    float cosAlpha = clamp(dot(unitNormal, unitLightDir), 0.0, 1.0);
+    float sinAlpha = sqrt(max(1.0 - cosAlpha * cosAlpha, 0.0));
+    float tanAlpha = sinAlpha / max(cosAlpha, 0.0001);
+    return worldPosition +
+        unitNormal * (normalOffsetTexels * texelWorldSize * sinAlpha) +
+        unitLightDir * (slopeOffsetTexels * texelWorldSize * min(tanAlpha, 2.0));
+}
+
+const int MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES = 16;
+
+float DirectionalShadowHash12(vec2 value) {
+    vec3 hash = fract(vec3(value.xyx) * 0.1031);
+    hash += dot(hash, hash.yzx + 33.33);
+    return fract((hash.x + hash.y) * hash.z);
+}
+
+vec2 DirectionalShadowPoissonOffset(int sampleIndex) {
+    const vec2 offsets[MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES] = vec2[](
+        vec2(0.14383161, -0.14100790), vec2(-0.81544232, -0.87912464),
+        vec2(0.97484398, 0.75648379), vec2(-0.81409955, 0.91437590),
+        vec2(0.44323325, -0.97511554), vec2(-0.94201624, -0.39906216),
+        vec2(0.79197514, 0.19090188), vec2(-0.24188840, 0.99706507),
+        vec2(-0.09418410, -0.92938870), vec2(0.34495938, 0.29387760),
+        vec2(0.53742981, -0.47373420), vec2(-0.26496911, -0.41893023),
+        vec2(-0.38277543, 0.27676845), vec2(-0.91588581, 0.45771432),
+        vec2(0.94558609, -0.76890725), vec2(0.19984126, 0.78641367)
+    );
+    return offsets[clamp(sampleIndex, 0, MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES - 1)];
+}
+
+float DirectionalShadowStablePoissonAngle(
+    vec2 shadowUv,
+    vec2 cascadeTexelSize,
+    int cascadeIndex
+) {
+    return mod(0.754877666 + float(cascadeIndex) * 2.39996323, 6.28318530718);
+}
+
+vec2 RotateDirectionalShadowPoissonOffset(vec2 offset, float angle) {
+    float sinAngle = sin(angle);
+    float cosAngle = cos(angle);
+    return vec2(
+        offset.x * cosAngle - offset.y * sinAngle,
+        offset.x * sinAngle + offset.y * cosAngle
+    );
+}
+
 bool SampleShadowCascadeVisibility(
     vec3 worldPosition,
     vec3 normal,
@@ -1940,6 +2024,7 @@ float ContactShadowVisibility(
     return 1.0 - clamp(occlusion * strength * grazingBoost, 0.0, 1.0);
 }
 
+#if 0 // Replaced by hardware-comparison optimized tent PCF below.
 bool SampleShadowCascadeVisibility(
     vec3 worldPosition,
     vec3 normal,
@@ -1967,24 +2052,103 @@ bool SampleShadowCascadeVisibility(
     float biasMin = max(frame.shadowControls.z, 0.0);
     float biasSlope = max(frame.shadowControls.w, 0.0);
     float bias = max(biasSlope * (1.0 - dot(normal, lightDir)), biasMin);
+    float receiverPlaneBiasScale = clamp(
+        shadowCascades.receiverPlaneBiasControls.x,
+        0.0,
+        4.0
+    );
+    vec2 shadowUvDx = dFdx(shadowUv);
+    vec2 shadowUvDy = dFdy(shadowUv);
+    float depthDx = dFdx(currentDepth);
+    float depthDy = dFdy(currentDepth);
+    float receiverPlaneDeterminant =
+        shadowUvDx.x * shadowUvDy.y - shadowUvDx.y * shadowUvDy.x;
+    vec2 receiverPlaneGradient = vec2(0.0);
+    if (abs(receiverPlaneDeterminant) > 0.0000001) {
+        receiverPlaneGradient = vec2(
+            (shadowUvDy.y * depthDx - shadowUvDx.y * depthDy) /
+                receiverPlaneDeterminant,
+            (shadowUvDx.x * depthDy - shadowUvDy.x * depthDx) /
+                receiverPlaneDeterminant
+        );
+    }
+    float cascadeUvPerAtlasUv = singleShadowMap ? 1.0 : 2.0;
+    vec2 cascadeTexelSize = texelSize * cascadeUvPerAtlasUv;
     int kernelRadius = clamp(int(shadowCascades.cascadeBlendControls.z + 0.5), 0, 2);
     float pcssStrength = clamp(shadowCascades.cascadeBlendControls.w, 0.0, 1.0);
+    int filterMode = clamp(
+        int(shadowCascades.directionalFilterControls.x + 0.5),
+        0,
+        1
+    );
+    bool useStablePoisson = filterMode == 1;
+    int poissonSampleCount = clamp(
+        int(shadowCascades.directionalFilterControls.y + 0.5),
+        4,
+        MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES
+    );
+    int blockerSampleCount = clamp(
+        int(shadowCascades.directionalFilterControls.z + 0.5),
+        4,
+        MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES
+    );
+    float poissonAngle = DirectionalShadowStablePoissonAngle(
+        shadowUv,
+        cascadeTexelSize,
+        cascadeIndex
+    );
     float filterRadius = pcfRadius;
     if (pcssStrength > 0.0001 && kernelRadius > 0) {
         float blockerDepthSum = 0.0;
         int blockerCount = 0;
         float searchRadius = max(pcfRadius, 1.0) * (1.0 + pcssStrength);
-        for (int x = -1; x <= 1; ++x) {
-            for (int y = -1; y <= 1; ++y) {
+        if (useStablePoisson) {
+            for (int sampleIndex = 0;
+                sampleIndex < MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES;
+                ++sampleIndex) {
+                if (sampleIndex >= blockerSampleCount) {
+                    break;
+                }
+                vec2 sampleOffset = RotateDirectionalShadowPoissonOffset(
+                    DirectionalShadowPoissonOffset(sampleIndex),
+                    poissonAngle
+                );
                 vec2 blockerUv = clamp(
-                    atlasUv + vec2(x, y) * texelSize * searchRadius,
+                    atlasUv + sampleOffset * texelSize * searchRadius,
                     tileOrigin + texelSize,
                     tileMax - texelSize
                 );
                 float blockerDepth = texture(shadowSampler, blockerUv).r;
-                if (currentDepth - bias > blockerDepth) {
+                vec2 cascadeOffset =
+                    sampleOffset * texelSize * searchRadius * cascadeUvPerAtlasUv;
+                float receiverPlaneBias = receiverPlaneBiasScale * dot(
+                    abs(receiverPlaneGradient),
+                    max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+                );
+                if (currentDepth - bias - receiverPlaneBias > blockerDepth) {
                     blockerDepthSum += blockerDepth;
                     ++blockerCount;
+                }
+            }
+        } else {
+            for (int x = -1; x <= 1; ++x) {
+                for (int y = -1; y <= 1; ++y) {
+                    vec2 blockerUv = clamp(
+                        atlasUv + vec2(x, y) * texelSize * searchRadius,
+                        tileOrigin + texelSize,
+                        tileMax - texelSize
+                    );
+                    float blockerDepth = texture(shadowSampler, blockerUv).r;
+                    vec2 cascadeOffset =
+                        vec2(x, y) * texelSize * searchRadius * cascadeUvPerAtlasUv;
+                    float receiverPlaneBias = receiverPlaneBiasScale * dot(
+                        abs(receiverPlaneGradient),
+                        max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+                    );
+                    if (currentDepth - bias - receiverPlaneBias > blockerDepth) {
+                        blockerDepthSum += blockerDepth;
+                        ++blockerCount;
+                    }
                 }
             }
         }
@@ -2001,31 +2165,369 @@ bool SampleShadowCascadeVisibility(
     }
 
     float shadow = 0.0;
-    int sampleCount = 0;
-    for (int x = -2; x <= 2; ++x) {
-        if (abs(x) > kernelRadius) {
-            continue;
-        }
-        for (int y = -2; y <= 2; ++y) {
-            if (abs(y) > kernelRadius) {
-                continue;
+    float filterWeightSum = 0.0;
+    if (useStablePoisson) {
+        float filterExtent = filterRadius * float(max(kernelRadius, 1));
+        for (int sampleIndex = 0;
+            sampleIndex < MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES;
+            ++sampleIndex) {
+            if (sampleIndex >= poissonSampleCount) {
+                break;
             }
+            vec2 sampleOffset = RotateDirectionalShadowPoissonOffset(
+                DirectionalShadowPoissonOffset(sampleIndex),
+                poissonAngle
+            );
             vec2 sampleUv = clamp(
-                atlasUv + vec2(x, y) * texelSize * filterRadius,
+                atlasUv + sampleOffset * texelSize * filterExtent,
                 tileOrigin + texelSize,
                 tileMax - texelSize
             );
-            float closestDepth = texture(
-                shadowSampler,
-                sampleUv
-            ).r;
-            shadow += currentDepth - bias > closestDepth ? 1.0 : 0.0;
-            ++sampleCount;
+            float closestDepth = texture(shadowSampler, sampleUv).r;
+            vec2 cascadeOffset =
+                sampleOffset * texelSize * filterExtent * cascadeUvPerAtlasUv;
+            float receiverPlaneBias = receiverPlaneBiasScale * dot(
+                abs(receiverPlaneGradient),
+                max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+            );
+            shadow += (currentDepth - bias - receiverPlaneBias > closestDepth ? 1.0 : 0.0);
+            filterWeightSum += 1.0;
+        }
+    } else {
+        for (int x = -2; x <= 2; ++x) {
+            if (abs(x) > kernelRadius) {
+                continue;
+            }
+            for (int y = -2; y <= 2; ++y) {
+                if (abs(y) > kernelRadius) {
+                    continue;
+                }
+                vec2 sampleUv = clamp(
+                    atlasUv + vec2(x, y) * texelSize * filterRadius,
+                    tileOrigin + texelSize,
+                    tileMax - texelSize
+                );
+                float closestDepth = texture(shadowSampler, sampleUv).r;
+                vec2 cascadeOffset =
+                    vec2(x, y) * texelSize * filterRadius * cascadeUvPerAtlasUv;
+                float receiverPlaneBias = receiverPlaneBiasScale * dot(
+                    abs(receiverPlaneGradient),
+                    max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+                );
+                float filterWeight = float(kernelRadius + 1 - abs(x)) *
+                    float(kernelRadius + 1 - abs(y));
+                shadow += (currentDepth - bias - receiverPlaneBias > closestDepth ? 1.0 : 0.0) *
+                    filterWeight;
+                filterWeightSum += filterWeight;
+            }
         }
     }
 
-    float occlusion = shadow / max(float(sampleCount), 1.0);
+    float occlusion = shadow / max(filterWeightSum, 1.0);
     visibility = 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    return true;
+}
+
+#endif
+
+vec2 ClampShadowAtlasSampleUv(vec2 atlasUv, int cascadeIndex, vec2 texelSize) {
+    if (shadowCascades.cascadeInfo.w < -0.5) {
+        return clamp(atlasUv, texelSize, vec2(1.0) - texelSize);
+    }
+    vec2 tileMin = vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
+    vec2 tileMax = tileMin + vec2(0.5);
+    return clamp(atlasUv, tileMin + texelSize, tileMax - texelSize);
+}
+
+bool SampleDirectionalPcssVisibility(
+    vec2 atlasUv,
+    vec2 texelSize,
+    vec2 cascadeTexelSize,
+    float currentDepth,
+    float baseBias,
+    vec2 receiverPlaneGradient,
+    float receiverPlaneBiasScale,
+    int cascadeIndex,
+    out float pcssVisibility,
+    out float pcssBlend
+) {
+    pcssVisibility = 1.0;
+    pcssBlend = 0.0;
+    float strength = clamp(shadowCascades.directionalPcssControls.x, 0.0, 1.0);
+    int blockerSampleCount = clamp(
+        int(shadowCascades.directionalPcssControls.y + 0.5),
+        0,
+        MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES
+    );
+    int filterSampleCount = clamp(
+        int(shadowCascades.directionalPcssControls.z + 0.5),
+        0,
+        MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES
+    );
+    float maxPenumbraTexels = clamp(
+        shadowCascades.directionalPcssControls.w,
+        0.0,
+        16.0
+    );
+    float searchRadiusTexels = clamp(
+        shadowCascades.directionalPcssGeometry.x,
+        0.0,
+        16.0
+    );
+    float lightAngularRadius = clamp(
+        shadowCascades.directionalPcssGeometry.y,
+        0.0,
+        0.05
+    );
+    if (strength <= 0.0001 || blockerSampleCount <= 0 ||
+        filterSampleCount <= 0 || maxPenumbraTexels <= 2.0 ||
+        searchRadiusTexels <= 0.0 || lightAngularRadius <= 0.0 ||
+        shadowCascades.directionalPcssGeometry.z < 0.5 ||
+        shadowCascades.directionalPcssGeometry.w > 0.5) {
+        return false;
+    }
+
+    float depthWorldSpan = max(shadowCascades.lightDepthWorldSpans[cascadeIndex], 0.0);
+    float texelWorldSize = max(shadowCascades.texelWorldSizes[cascadeIndex], 0.0);
+    if (depthWorldSpan <= 0.0 || texelWorldSize <= 0.0) {
+        return false;
+    }
+
+    float poissonAngle = DirectionalShadowStablePoissonAngle(
+        atlasUv,
+        cascadeTexelSize,
+        cascadeIndex
+    );
+    float blockerDepthSum = 0.0;
+    int blockerCount = 0;
+    for (int sampleIndex = 0;
+        sampleIndex < MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES;
+        ++sampleIndex) {
+        if (sampleIndex >= blockerSampleCount) {
+            break;
+        }
+        vec2 sampleOffset = RotateDirectionalShadowPoissonOffset(
+            DirectionalShadowPoissonOffset(sampleIndex),
+            poissonAngle
+        );
+        vec2 sampleUv = ClampShadowAtlasSampleUv(
+            atlasUv + sampleOffset * texelSize * searchRadiusTexels,
+            cascadeIndex,
+            texelSize
+        );
+        vec2 cascadeOffset = sampleOffset * cascadeTexelSize * searchRadiusTexels;
+        float sampleReceiverBias = receiverPlaneBiasScale * dot(
+            abs(receiverPlaneGradient),
+            max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+        );
+        float sampleComparisonDepth = clamp(
+            currentDepth - baseBias - sampleReceiverBias,
+            0.0,
+            1.0
+        );
+        float blockerDepth = textureLod(shadowRawDepthSampler, sampleUv, 0.0).r;
+        if (sampleComparisonDepth > blockerDepth + 0.000001) {
+            blockerDepthSum += blockerDepth;
+            ++blockerCount;
+        }
+    }
+    if (blockerCount == 0) {
+        return false;
+    }
+
+    float averageBlockerDepth = blockerDepthSum / float(blockerCount);
+    float receiverDepth = clamp(currentDepth - baseBias, 0.0, 1.0);
+    float blockerSeparationWorld = max(
+        receiverDepth - averageBlockerDepth,
+        0.0
+    ) * depthWorldSpan;
+    float penumbraWorld = blockerSeparationWorld * tan(lightAngularRadius) * strength;
+    float filterRadiusTexels = clamp(
+        2.0 + penumbraWorld / texelWorldSize,
+        2.0,
+        maxPenumbraTexels
+    );
+    pcssBlend = smoothstep(2.0, min(3.0, maxPenumbraTexels), filterRadiusTexels);
+
+    float visibilitySum = 0.0;
+    for (int sampleIndex = 0;
+        sampleIndex < MAX_DIRECTIONAL_SHADOW_POISSON_SAMPLES;
+        ++sampleIndex) {
+        if (sampleIndex >= filterSampleCount) {
+            break;
+        }
+        vec2 sampleOffset = RotateDirectionalShadowPoissonOffset(
+            DirectionalShadowPoissonOffset(sampleIndex),
+            poissonAngle
+        );
+        vec2 sampleUv = ClampShadowAtlasSampleUv(
+            atlasUv + sampleOffset * texelSize * filterRadiusTexels,
+            cascadeIndex,
+            texelSize
+        );
+        vec2 cascadeOffset = sampleOffset * cascadeTexelSize * filterRadiusTexels;
+        float sampleReceiverBias = receiverPlaneBiasScale * dot(
+            abs(receiverPlaneGradient),
+            max(abs(cascadeOffset), cascadeTexelSize * 0.5)
+        );
+        float sampleComparisonDepth = clamp(
+            currentDepth - baseBias - sampleReceiverBias,
+            0.0,
+            1.0
+        );
+        visibilitySum += texture(
+            shadowSampler,
+            vec3(sampleUv, sampleComparisonDepth)
+        );
+    }
+    pcssVisibility = visibilitySum / float(filterSampleCount);
+    return true;
+}
+
+bool SampleShadowCascadeVisibility(
+    vec3 worldPosition,
+    vec3 normal,
+    vec3 lightDir,
+    int cascadeIndex,
+    out float visibility
+) {
+    visibility = 1.0;
+    vec2 shadowUv = vec2(0.0);
+    float currentDepth = 1.0;
+    vec3 shadowReceiverPosition = DirectionalShadowReceiverPosition(
+        worldPosition,
+        normal,
+        lightDir,
+        cascadeIndex
+    );
+    if (ProjectShadowCascade(
+            shadowReceiverPosition,
+            cascadeIndex,
+            shadowUv,
+            currentDepth) != 0) {
+        return false;
+    }
+
+    bool singleShadowMap = shadowCascades.cascadeInfo.w < -0.5;
+    vec2 tileOrigin = singleShadowMap
+        ? vec2(0.0)
+        : vec2(float(cascadeIndex % 2), float(cascadeIndex / 2)) * 0.5;
+    vec2 tileMax = singleShadowMap ? vec2(1.0) : tileOrigin + vec2(0.5);
+    vec2 atlasUv = singleShadowMap ? shadowUv : tileOrigin + shadowUv * 0.5;
+    vec2 texelSize = 1.0 / vec2(textureSize(shadowSampler, 0));
+    float bias = max(
+        max(frame.shadowControls.w, 0.0) * (1.0 - dot(normal, lightDir)),
+        max(frame.shadowControls.z, 0.0)
+    );
+    vec2 shadowUvDx = dFdx(shadowUv);
+    vec2 shadowUvDy = dFdy(shadowUv);
+    float depthDx = dFdx(currentDepth);
+    float depthDy = dFdy(currentDepth);
+    float determinant = shadowUvDx.x * shadowUvDy.y - shadowUvDx.y * shadowUvDy.x;
+    vec2 receiverPlaneGradient = vec2(0.0);
+    if (abs(determinant) > 0.0000001) {
+        receiverPlaneGradient = vec2(
+            (shadowUvDy.y * depthDx - shadowUvDx.y * depthDy) / determinant,
+            (shadowUvDx.x * depthDy - shadowUvDy.x * depthDx) / determinant
+        );
+    }
+    float cascadeUvPerAtlasUv = singleShadowMap ? 1.0 : 2.0;
+    vec2 cascadeTexelSize = texelSize * cascadeUvPerAtlasUv;
+    int filterMode = clamp(int(shadowCascades.directionalFilterControls.x + 0.5), 0, 1);
+    int kernelWidth = clamp(int(shadowCascades.directionalFilterControls.z + 0.5), 3, 5);
+    kernelWidth = kernelWidth >= 5 ? 5 : 3;
+    float receiverBiasExtent = clamp(shadowCascades.directionalFilterControls.w, 0.0, 4.0);
+    float receiverPlaneBiasScale = clamp(
+        shadowCascades.receiverPlaneBiasControls.x,
+        0.0,
+        4.0
+    );
+    float receiverPlaneBias = receiverPlaneBiasScale * dot(
+        abs(receiverPlaneGradient),
+        cascadeTexelSize * receiverBiasExtent
+    );
+    float comparisonDepth = clamp(currentDepth - bias - receiverPlaneBias, 0.0, 1.0);
+    float pcssVisibility = 1.0;
+    float pcssBlend = 0.0;
+    bool pcssResolved = SampleDirectionalPcssVisibility(
+        atlasUv,
+        texelSize,
+        cascadeTexelSize,
+        currentDepth,
+        bias,
+        receiverPlaneGradient,
+        receiverPlaneBiasScale,
+        cascadeIndex,
+        pcssVisibility,
+        pcssBlend
+    );
+    float filteredVisibility = 0.0;
+
+    if (filterMode == 1 && kernelWidth == 5) {
+        // The optimized offsets are relative to the lower texel center, not
+        // the continuous lookup coordinate. Aligning here preserves the
+        // symmetric 1-3-4-3-1 tent footprint at texel centers.
+        vec2 texelPosition = atlasUv / texelSize - vec2(0.5);
+        vec2 baseTexel = floor(texelPosition);
+        vec2 subTexel = fract(texelPosition);
+        vec2 baseAtlasUv = (baseTexel + vec2(0.5)) * texelSize;
+        float uw[3] = float[](4.0 - 3.0 * subTexel.x, 7.0, 1.0 + 3.0 * subTexel.x);
+        float vw[3] = float[](4.0 - 3.0 * subTexel.y, 7.0, 1.0 + 3.0 * subTexel.y);
+        float u[3] = float[](
+            (3.0 - 2.0 * subTexel.x) / uw[0] - 2.0,
+            (3.0 + subTexel.x) / uw[1],
+            subTexel.x / uw[2] + 2.0
+        );
+        float v[3] = float[](
+            (3.0 - 2.0 * subTexel.y) / vw[0] - 2.0,
+            (3.0 + subTexel.y) / vw[1],
+            subTexel.y / vw[2] + 2.0
+        );
+        for (int x = 0; x < 3; ++x) {
+            for (int y = 0; y < 3; ++y) {
+                vec2 sampleUv = clamp(
+                    baseAtlasUv + vec2(u[x], v[y]) * texelSize,
+                    tileOrigin + texelSize,
+                    tileMax - texelSize
+                );
+                filteredVisibility += texture(
+                    shadowSampler,
+                    vec3(sampleUv, comparisonDepth)
+                ) * uw[x] * vw[y];
+            }
+        }
+        filteredVisibility /= 144.0;
+    } else {
+        float weightSum = 0.0;
+        for (int x = -1; x <= 1; ++x) {
+            for (int y = -1; y <= 1; ++y) {
+                float weight = filterMode == 1
+                    ? float(2 - abs(x)) * float(2 - abs(y))
+                    : 1.0;
+                vec2 sampleUv = clamp(
+                    atlasUv + vec2(x, y) * texelSize,
+                    tileOrigin + texelSize,
+                    tileMax - texelSize
+                );
+                filteredVisibility += texture(
+                    shadowSampler,
+                    vec3(sampleUv, comparisonDepth)
+                ) * weight;
+                weightSum += weight;
+            }
+        }
+        filteredVisibility /= max(weightSum, 1.0);
+    }
+
+    if (pcssResolved) {
+        filteredVisibility = mix(filteredVisibility, pcssVisibility, pcssBlend);
+    }
+
+    visibility = mix(
+        1.0 - clamp(frame.shadowControls.y, 0.0, 1.0),
+        1.0,
+        filteredVisibility
+    );
     return true;
 }
 

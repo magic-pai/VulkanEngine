@@ -3122,10 +3122,10 @@ se::RuntimeModelLoadResult LoadDefaultSceneSkinnedFbx(
 
 void ApplyLightingShowcaseRendererSettings(se::VulkanRenderer& renderer) {
     se::VulkanShadowSettings& shadow = renderer.ShadowSettings();
-    se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::High);
+    se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::Ultra);
     shadow.ambientStrength = 0.10f;
     shadow.strength = 1.0f;
-    shadow.pcssStrength = 0.30f;
+    shadow.pcssStrength = 1.0f;
     shadow.localPcssStrength = 0.24f;
     shadow.contactShadowStrength = 0.0f;
     shadow.contactShadowLength = 0.0f;
@@ -3181,7 +3181,7 @@ void ApplyForward3DRendererSettings(se::VulkanRenderer& renderer) {
     if (Forward3DProductionShadowProfileRequested()) {
         se::ApplyForward3DProductionShadowPreset(shadow);
     } else {
-        se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::High);
+        se::ApplyShadowQualityPreset(shadow, se::VulkanShadowQuality::Ultra);
     }
 }
 
@@ -3325,12 +3325,78 @@ void ApplyForward3DLocalShadowEnvironmentOverrides(se::VulkanShadowSettings& sha
     }
 }
 
+void ApplyForward3DDirectionalShadowEnvironmentOverrides(
+    se::VulkanShadowSettings& shadow
+) {
+    (void)ApplyEnvironmentF32Override(
+        shadow.pcssStrength,
+        "SE_SHADOW_PCSS_STRENGTH",
+        0.0f,
+        1.0f
+    );
+    if (EnvironmentFlagEnabled("SE_DIRECTIONAL_PCSS_OFF")) {
+        shadow.pcssStrength = 0.0f;
+    }
+    (void)ApplyEnvironmentU32Override(
+        shadow.directionalPcssBlockerSampleCount,
+        "SE_DIRECTIONAL_PCSS_BLOCKER_SAMPLES",
+        0u,
+        16u
+    );
+    (void)ApplyEnvironmentU32Override(
+        shadow.directionalPcssFilterSampleCount,
+        "SE_DIRECTIONAL_PCSS_FILTER_SAMPLES",
+        0u,
+        16u
+    );
+    (void)ApplyEnvironmentF32Override(
+        shadow.directionalPcssSearchRadiusTexels,
+        "SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS",
+        0.0f,
+        16.0f
+    );
+    (void)ApplyEnvironmentF32Override(
+        shadow.directionalPcssMaxPenumbraTexels,
+        "SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS",
+        0.0f,
+        16.0f
+    );
+
+    se::u32 filterMode = static_cast<se::u32>(shadow.directionalFilterMode);
+    if (ApplyEnvironmentU32Override(
+            filterMode,
+            "SE_DIRECTIONAL_SHADOW_FILTER_MODE",
+            0u,
+            1u
+        )) {
+        shadow.directionalFilterMode = static_cast<se::VulkanDirectionalShadowFilterMode>(
+            filterMode
+        );
+    }
+    shadow.directionalFilterSampleCount = 9u;
+    (void)ApplyEnvironmentU32Override(
+        shadow.directionalFilterKernelWidth,
+        "SE_DIRECTIONAL_SHADOW_FILTER_KERNEL_WIDTH",
+        3u,
+        5u
+    );
+    shadow.directionalFilterKernelWidth =
+        shadow.directionalFilterKernelWidth >= 5u ? 5u : 3u;
+    (void)ApplyEnvironmentF32Override(
+        shadow.directionalFilterReceiverBiasExtentTexels,
+        "SE_DIRECTIONAL_SHADOW_FILTER_RECEIVER_BIAS_EXTENT_TEXELS",
+        0.0f,
+        4.0f
+    );
+}
+
 void ApplyForward3DEnvironmentShadowDefaults(se::VulkanRenderer& renderer) {
     se::VulkanShadowSettings& shadow = renderer.ShadowSettings();
     if (Forward3DProductionShadowProfileRequested()) {
         se::ApplyForward3DShadowProductionOverrides(shadow);
     }
     ApplyForward3DLocalShadowEnvironmentOverrides(shadow);
+    ApplyForward3DDirectionalShadowEnvironmentOverrides(shadow);
 
     if (!ReadEnvironmentString("SE_SHADOW_CASCADE_MAX_DISTANCE").empty()) {
         shadow.cascadeMaxDistance = std::clamp(

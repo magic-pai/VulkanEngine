@@ -2,7 +2,21 @@ param(
     [string]$ExecutablePath = "build\Debug\SelfEngineForward3D.exe",
     [string]$OutputDirectory = "out\csm_stability",
     [ValidateSet("low", "medium", "high", "ultra")]
-    [string]$ShadowQuality = "high",
+    [string]$ShadowQuality = "ultra",
+    [ValidateSet("production", "legacy")]
+    [string]$DirectionalShadowFilter = "production",
+    [ValidateRange(0.0, 4.0)]
+    [double]$DirectionalNormalOffsetBiasTexels = 2.0,
+    [ValidateRange(0.0, 2.0)]
+    [double]$DirectionalSlopeOffsetBiasTexels = 0.5,
+    [ValidateRange(-1.0, 1.0)]
+    [double]$DirectionalPcssStrength = -1.0,
+    [ValidateRange(0.0, 2000.0)]
+    [double]$CascadeMaxDistanceOverride = 0.0,
+    [switch]$UseConfiguredNormalOffsetDefault,
+    [switch]$UseConfiguredSlopeOffsetDefault,
+    [switch]$UseConfiguredShadowQualityDefault,
+    [double]$ExpectedCascadeMaxDistance = 0.0,
     [int]$WarmupFrames = 2,
     [int]$CaptureFrames = 8,
     [int]$AutoExitFrames = 14,
@@ -368,6 +382,34 @@ function New-CsmStabilityReport {
         "shadow_cascade_configured_count",
         "shadow_cascade_active_count",
         "shadow_cascade_stable_snapping",
+        "shadow_quality",
+        "shadow_pcf_kernel_radius",
+        "shadow_pcss_strength",
+        "directional_shadow_pcss_enabled",
+        "directional_shadow_pcss_blocker_samples",
+        "directional_shadow_pcss_filter_samples",
+        "directional_shadow_pcss_raw_depth_sampler_ready",
+        "directional_shadow_pcss_fallback_reason",
+        "directional_shadow_pcss_search_radius_texels",
+        "directional_shadow_pcss_max_penumbra_texels",
+        "directional_shadow_pcss_light_angular_radius_radians",
+        "directional_shadow_filter_mode",
+        "directional_shadow_filter_samples",
+        "directional_shadow_filter_kernel_width",
+        "directional_shadow_filter_max_depth_samples",
+        "directional_shadow_filter_hardware_compare_enabled",
+        "directional_shadow_filter_receiver_bias_extent_texels",
+        "directional_shadow_filter_fallback_reason",
+        "shadow_receiver_plane_bias_enabled",
+        "shadow_receiver_plane_bias_scale",
+        "shadow_normal_offset_bias_enabled",
+        "shadow_normal_offset_bias_texels",
+        "shadow_slope_offset_bias_enabled",
+        "shadow_slope_offset_bias_texels",
+        "shadow_caster_depth_bias_enabled",
+        "shadow_caster_depth_bias_constant",
+        "shadow_caster_depth_bias_clamp",
+        "shadow_caster_depth_bias_slope",
         "shadow_cascade_split_lambda",
         "shadow_cascade_blend_ratio",
         "shadow_cascade_fade_ratio",
@@ -383,6 +425,10 @@ function New-CsmStabilityReport {
         "shadow_cascade_texel1",
         "shadow_cascade_texel2",
         "shadow_cascade_texel3",
+        "shadow_cascade_light_depth_span0",
+        "shadow_cascade_light_depth_span1",
+        "shadow_cascade_light_depth_span2",
+        "shadow_cascade_light_depth_span3",
         "shadow_cascade_atlas_allocated",
         "shadow_cascade_atlas_tile_size",
         "shadow_cascade_atlas_width",
@@ -402,7 +448,27 @@ function New-CsmStabilityReport {
     }
 
     $expectedCascades = Get-ExpectedCascadeCount -Quality $Quality
-    $expectedDistance = Get-ExpectedCascadeDistance -Quality $Quality
+    $expectedDistance = if ($ExpectedCascadeMaxDistance -gt 0.0) {
+        $ExpectedCascadeMaxDistance
+    } else {
+        Get-ExpectedCascadeDistance -Quality $Quality
+    }
+    $expectedFilterMode = if ($DirectionalShadowFilter -eq "production") { 1 } else { 0 }
+    $expectedFilterFallback = if ($DirectionalShadowFilter -eq "production") { 0 } else { 1 }
+    $expectedFilterKernelWidth = if ($Quality -in @("high", "ultra")) { 5 } else { 3 }
+    $expectedQuality = @{ low = 1; medium = 2; high = 3; ultra = 4 }[$Quality]
+    $expectedPcssStrength = if ($DirectionalPcssStrength -ge 0.0) {
+        $DirectionalPcssStrength
+    } elseif ($Quality -eq "ultra") {
+        1.0
+    } else {
+        0.0
+    }
+    $expectedPcssEnabled = if ($Quality -eq "ultra" -and $expectedPcssStrength -gt 0.0001) {
+        1.0
+    } else {
+        0.0
+    }
 
     Add-Check -Checks $checks -Area "run" -Name "captured frame rows" `
         -Status ($(if ($rows.Count -gt 0) { "pass" } else { "fail" })) `
@@ -444,6 +510,96 @@ function New-CsmStabilityReport {
         -Area "csm" -Name "active cascade count stays stable" -MaximumDelta 0
     Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_stable_snapping" `
         -Area "csm" -Name "stable cascade snapping is enabled" -Minimum 1
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_quality" `
+        -Area "csm" -Name "resolved shadow quality matches the requested tier" `
+        -Expected $expectedQuality -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_mode" `
+        -Area "filter" -Name "directional shadow filter mode matches lane" `
+        -Expected $expectedFilterMode -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_samples" `
+        -Area "filter" -Name "directional filter resolves the optimized hardware tap budget" `
+        -Expected 9 -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_kernel_width" `
+        -Area "filter" -Name "directional filter kernel width matches quality" `
+        -Expected $expectedFilterKernelWidth -Tolerance 0.001
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_hardware_compare_enabled" `
+        -Area "filter" -Name "directional filter uses hardware comparison sampling" -Minimum 1
+    $filterSamples = if ($expectedPcssEnabled -gt 0.5) { 28.0 } else {
+        $metrics["directional_shadow_filter_samples"].max
+    }
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_max_depth_samples" `
+        -Area "filter" -Name "directional filter depth-sample budget matches the active algorithm" `
+        -Expected $filterSamples -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_fallback_reason" `
+        -Area "filter" -Name "directional filter fallback state matches lane" `
+        -Expected $expectedFilterFallback -Tolerance 0.001
+    if ($DirectionalShadowFilter -eq "production") {
+        Add-MinCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_filter_receiver_bias_extent_texels" `
+            -Area "filter" -Name "production filter resolves a bounded receiver-plane extent" -Minimum 0.001
+    }
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_pcss_strength" `
+        -Area "pcss" -Name "directional PCSS strength matches the requested control" `
+        -Expected $expectedPcssStrength -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "directional_shadow_pcss_enabled" `
+        -Area "pcss" -Name "blocker-search PCSS activation matches the quality tier" `
+        -Expected $expectedPcssEnabled -Tolerance 0.001
+    if ($expectedPcssEnabled -gt 0.5) {
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_blocker_samples" -Area "pcss" `
+            -Name "Ultra blocker-search sample budget" -Expected 12 -Tolerance 0.001
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_filter_samples" -Area "pcss" `
+            -Name "Ultra variable-penumbra filter sample budget" -Expected 16 -Tolerance 0.001
+        Add-MinCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_raw_depth_sampler_ready" -Area "pcss" `
+            -Name "raw directional depth sampler is bound" -Minimum 1
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_fallback_reason" -Area "pcss" `
+            -Name "Ultra PCSS has no runtime fallback" -Expected 0 -Tolerance 0.001
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_search_radius_texels" -Area "pcss" `
+            -Name "Ultra blocker search radius" -Expected 8 -Tolerance 0.001
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_max_penumbra_texels" -Area "pcss" `
+            -Name "Ultra maximum penumbra radius" -Expected 8 -Tolerance 0.001
+        Add-MinCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_light_angular_radius_radians" -Area "pcss" `
+            -Name "scene directional light exposes a physical angular radius" -Minimum 0.0001
+        foreach ($cascadeIndex in 0..($expectedCascades - 1)) {
+            Add-MinCheck -Checks $checks -Metrics $metrics `
+                -Column "shadow_cascade_light_depth_span$cascadeIndex" -Area "pcss" `
+                -Name "cascade $cascadeIndex has a world-space light depth span" -Minimum 0.001
+        }
+    } else {
+        Add-MinCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_fallback_reason" -Area "pcss" `
+            -Name "disabled PCSS reports an explicit fallback reason" -Minimum 1
+    }
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_receiver_plane_bias_enabled" `
+        -Area "csm" -Name "receiver-plane bias path is enabled" -Minimum 1
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_receiver_plane_bias_scale" `
+        -Area "csm" -Name "receiver-plane bias scale resolves to the production default" `
+        -Expected 1.0 -Tolerance 0.001
+    $expectedNormalOffsetEnabled = if ($DirectionalNormalOffsetBiasTexels -gt 0.0001) { 1.0 } else { 0.0 }
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_normal_offset_bias_enabled" `
+        -Area "csm" -Name "normal-offset receiver path matches the requested control" `
+        -Expected $expectedNormalOffsetEnabled -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_normal_offset_bias_texels" `
+        -Area "csm" -Name "normal-offset receiver scale resolves in cascade texels" `
+        -Expected $DirectionalNormalOffsetBiasTexels -Tolerance 0.001
+    $expectedSlopeOffsetEnabled = if ($DirectionalSlopeOffsetBiasTexels -gt 0.0001) { 1.0 } else { 0.0 }
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_slope_offset_bias_enabled" `
+        -Area "csm" -Name "slope-offset receiver path matches the requested control" `
+        -Expected $expectedSlopeOffsetEnabled -Tolerance 0.001
+    Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_slope_offset_bias_texels" `
+        -Area "csm" -Name "slope-offset receiver scale resolves in cascade texels" `
+        -Expected $DirectionalSlopeOffsetBiasTexels -Tolerance 0.001
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_caster_depth_bias_enabled" `
+        -Area "csm" -Name "caster depth-bias path is enabled" -Minimum 1
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_caster_depth_bias_constant" `
+        -Area "csm" -Name "caster depth-bias constant is positive" -Minimum 0.001
+    Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_caster_depth_bias_slope" `
+        -Area "csm" -Name "caster depth-bias slope is positive" -Minimum 0.001
     Add-MinCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_receiver_guard" `
         -Area "csm" -Name "receiver UV guard protects split-line coverage" -Minimum 0.25
     Add-ApproxCheck -Checks $checks -Metrics $metrics -Column "shadow_cascade_max_distance" `
@@ -506,9 +662,9 @@ function New-CsmStabilityReport {
             Add-Check -Checks $checks -Area "motion" -Name "moving split $i has no sudden jump" `
                 -Status ($(if ($splitMetric.present -and $null -ne $splitMetric.maxStepRel -and [double]$splitMetric.maxStepRel -le 0.01) { "pass" } else { "fail" })) `
                 -Actual $splitMetric.maxStepRel -Expected "<= 0.01 relative per captured frame"
-            Add-Check -Checks $checks -Area "motion" -Name "moving texel $i has no sudden jump" `
-                -Status ($(if ($texelMetric.present -and $null -ne $texelMetric.maxStepRel -and [double]$texelMetric.maxStepRel -le 0.35) { "pass" } else { "fail" })) `
-                -Actual $texelMetric.maxStepRel -Expected "<= 0.35 relative per captured frame"
+            Add-Check -Checks $checks -Area "motion" -Name "stable projection keeps moving texel $i scale invariant" `
+                -Status ($(if ($texelMetric.present -and $null -ne $texelMetric.maxStepRel -and [double]$texelMetric.maxStepRel -le 0.00001) { "pass" } else { "fail" })) `
+                -Actual $texelMetric.maxStepRel -Expected "<= 0.00001 relative per captured frame"
         }
     } else {
         Add-RangeStableCheck -Checks $checks -Metrics $metrics -Column "benchmark_camera_motion_time_seconds" `
@@ -544,6 +700,21 @@ function New-CsmStabilityReport {
             present = $texel.present
             min = $texel.min
             max = $texel.max
+            normalOffsetMaxWorldMin = if ($null -ne $texel.min) {
+                [double]$texel.min * $DirectionalNormalOffsetBiasTexels
+            } else {
+                $null
+            }
+            normalOffsetMaxWorldMax = if ($null -ne $texel.max) {
+                [double]$texel.max * $DirectionalNormalOffsetBiasTexels
+            } else {
+                $null
+            }
+            slopeOffsetMaxWorldMax = if ($null -ne $texel.max) {
+                [double]$texel.max * $DirectionalSlopeOffsetBiasTexels * 2.0
+            } else {
+                $null
+            }
             delta = $texel.delta
             maxStepAbs = $texel.maxStepAbs
             maxStepRel = $texel.maxStepRel
@@ -576,6 +747,27 @@ function New-CsmStabilityReport {
             activeCascadeCount = $metrics["shadow_cascade_active_count"]
             configuredCascadeCount = $metrics["shadow_cascade_configured_count"]
             receiverGuard = $metrics["shadow_cascade_receiver_guard"]
+            receiverPlaneBiasScale = $metrics["shadow_receiver_plane_bias_scale"]
+            normalOffsetBiasEnabled = $metrics["shadow_normal_offset_bias_enabled"]
+            normalOffsetBiasTexels = $metrics["shadow_normal_offset_bias_texels"]
+            slopeOffsetBiasEnabled = $metrics["shadow_slope_offset_bias_enabled"]
+            slopeOffsetBiasTexels = $metrics["shadow_slope_offset_bias_texels"]
+            shadowQuality = $metrics["shadow_quality"]
+            pcssStrength = $metrics["shadow_pcss_strength"]
+            pcssEnabled = $metrics["directional_shadow_pcss_enabled"]
+            pcssBlockerSamples = $metrics["directional_shadow_pcss_blocker_samples"]
+            pcssFilterSamples = $metrics["directional_shadow_pcss_filter_samples"]
+            pcssRawDepthSamplerReady =
+                $metrics["directional_shadow_pcss_raw_depth_sampler_ready"]
+            pcssFallbackReason = $metrics["directional_shadow_pcss_fallback_reason"]
+            filterMode = $metrics["directional_shadow_filter_mode"]
+            filterSamples = $metrics["directional_shadow_filter_samples"]
+            filterKernelWidth = $metrics["directional_shadow_filter_kernel_width"]
+            filterMaxDepthSamples = $metrics["directional_shadow_filter_max_depth_samples"]
+            filterHardwareCompareEnabled = $metrics["directional_shadow_filter_hardware_compare_enabled"]
+            filterFallbackReason = $metrics["directional_shadow_filter_fallback_reason"]
+            casterDepthBiasConstant = $metrics["shadow_caster_depth_bias_constant"]
+            casterDepthBiasSlope = $metrics["shadow_caster_depth_bias_slope"]
             atlasDraws = $metrics["shadow_cascade_atlas_draws"]
             shadowVisible = $metrics["shadow_visible"]
             splits = @($splitSummaries)
@@ -613,6 +805,15 @@ $managedKeys = @(
     "SE_FORWARD3D_DEBUG_DEFAULT_SCENE",
     "SE_FORWARD3D_SHADOW_PROFILE",
     "SE_SHADOW_QUALITY",
+    "SE_DIRECTIONAL_SHADOW_FILTER_MODE",
+    "SE_DIRECTIONAL_SHADOW_FILTER_KERNEL_WIDTH",
+    "SE_DIRECTIONAL_SHADOW_FILTER_RECEIVER_BIAS_EXTENT_TEXELS",
+    "SE_SHADOW_PCSS_STRENGTH",
+    "SE_DIRECTIONAL_PCSS_OFF",
+    "SE_DIRECTIONAL_PCSS_BLOCKER_SAMPLES",
+    "SE_DIRECTIONAL_PCSS_FILTER_SAMPLES",
+    "SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS",
+    "SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS",
     "SE_FORWARD3D_AA_MODE",
     "SE_RENDER_VIEW",
     "SE_GLOBAL_IBL_QUALITY",
@@ -632,6 +833,10 @@ $managedKeys = @(
     "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
     "SE_SHADOW_REGRESSION_CAMERA_CONTROLS",
     "SE_SHADOW_REGRESSION_RECT_LIGHT_ONLY",
+    "SE_DIRECTIONAL_RECEIVER_PLANE_BIAS_SCALE",
+    "SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS",
+    "SE_DIRECTIONAL_SLOPE_OFFSET_BIAS_TEXELS",
+    "SE_SHADOW_CASCADE_MAX_DISTANCE",
     "SE_CAMERA_FREEZE",
     "SE_FREEZE_CAMERA",
     "SE_SCENE_UPDATE_FREEZE",
@@ -648,6 +853,8 @@ $managedKeys = @(
     "SE_BENCHMARK_CSV"
 )
 
+$directionalShadowFilterMode = if ($DirectionalShadowFilter -eq "production") { "1" } else { "0" }
+
 $laneSpecs = @(
     [pscustomobject]@{
         name = "static-shadow-regression"
@@ -662,7 +869,38 @@ $laneSpecs = @(
             SE_BENCHMARK_SCENE = "shadow-regression"
             SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "shadow-regression"
             SE_FORWARD3D_SHADOW_PROFILE = "production"
-            SE_SHADOW_QUALITY = $ShadowQuality
+            SE_SHADOW_QUALITY = $(
+                if ($UseConfiguredShadowQualityDefault) { $null } else { $ShadowQuality }
+            )
+            SE_SHADOW_PCSS_STRENGTH = $(
+                if ($DirectionalPcssStrength -ge 0.0) {
+                    [string]$DirectionalPcssStrength
+                } else {
+                    $null
+                }
+            )
+            SE_DIRECTIONAL_SHADOW_FILTER_MODE = $directionalShadowFilterMode
+            SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS = $(
+                if ($UseConfiguredNormalOffsetDefault) {
+                    $null
+                } else {
+                    [string]$DirectionalNormalOffsetBiasTexels
+                }
+            )
+            SE_DIRECTIONAL_SLOPE_OFFSET_BIAS_TEXELS = $(
+                if ($UseConfiguredSlopeOffsetDefault) {
+                    $null
+                } else {
+                    [string]$DirectionalSlopeOffsetBiasTexels
+                }
+            )
+            SE_SHADOW_CASCADE_MAX_DISTANCE = $(
+                if ($CascadeMaxDistanceOverride -gt 0.0) {
+                    [string]$CascadeMaxDistanceOverride
+                } else {
+                    $null
+                }
+            )
             SE_FORWARD3D_AA_MODE = "taa"
             SE_RENDER_VIEW = "lit"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
@@ -685,7 +923,38 @@ $laneSpecs = @(
             SE_BENCHMARK_SCENE = $null
             SE_FORWARD3D_DEBUG_DEFAULT_SCENE = "default"
             SE_FORWARD3D_SHADOW_PROFILE = "production"
-            SE_SHADOW_QUALITY = $ShadowQuality
+            SE_SHADOW_QUALITY = $(
+                if ($UseConfiguredShadowQualityDefault) { $null } else { $ShadowQuality }
+            )
+            SE_SHADOW_PCSS_STRENGTH = $(
+                if ($DirectionalPcssStrength -ge 0.0) {
+                    [string]$DirectionalPcssStrength
+                } else {
+                    $null
+                }
+            )
+            SE_DIRECTIONAL_SHADOW_FILTER_MODE = $directionalShadowFilterMode
+            SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS = $(
+                if ($UseConfiguredNormalOffsetDefault) {
+                    $null
+                } else {
+                    [string]$DirectionalNormalOffsetBiasTexels
+                }
+            )
+            SE_DIRECTIONAL_SLOPE_OFFSET_BIAS_TEXELS = $(
+                if ($UseConfiguredSlopeOffsetDefault) {
+                    $null
+                } else {
+                    [string]$DirectionalSlopeOffsetBiasTexels
+                }
+            )
+            SE_SHADOW_CASCADE_MAX_DISTANCE = $(
+                if ($CascadeMaxDistanceOverride -gt 0.0) {
+                    [string]$CascadeMaxDistanceOverride
+                } else {
+                    $null
+                }
+            )
             SE_FORWARD3D_AA_MODE = "taa"
             SE_RENDER_VIEW = "lit"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
@@ -777,6 +1046,15 @@ $summary = [pscustomobject]@{
     executable = $resolvedExecutable
     outputDirectory = $resolvedOutput
     shadowQuality = $ShadowQuality
+    directionalShadowFilter = $DirectionalShadowFilter
+    directionalNormalOffsetBiasTexels = $DirectionalNormalOffsetBiasTexels
+    directionalSlopeOffsetBiasTexels = $DirectionalSlopeOffsetBiasTexels
+    directionalPcssStrength = $DirectionalPcssStrength
+    cascadeMaxDistanceOverride = $CascadeMaxDistanceOverride
+    useConfiguredNormalOffsetDefault = [bool]$UseConfiguredNormalOffsetDefault
+    useConfiguredSlopeOffsetDefault = [bool]$UseConfiguredSlopeOffsetDefault
+    useConfiguredShadowQualityDefault = [bool]$UseConfiguredShadowQualityDefault
+    expectedCascadeMaxDistance = $ExpectedCascadeMaxDistance
     verdict = $overall
     passCount = [int]$totalPass
     warnCount = [int]$totalWarn

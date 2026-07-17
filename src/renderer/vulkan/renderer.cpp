@@ -912,36 +912,128 @@ bool CameraSliceCornersFromMatrices(
     return true;
 }
 
+bool StableCascadeSphereFromMatrices(
+    const FrameMatrices& matrices,
+    f32 nearDepth,
+    f32 farDepth,
+    glm::vec3& center,
+    f32& radius
+) {
+    const f32 projectionX = std::abs(matrices.proj[0][0]);
+    const f32 projectionY = std::abs(matrices.proj[1][1]);
+    if (projectionX <= 0.000001f || projectionY <= 0.000001f ||
+        nearDepth <= 0.0f || farDepth <= nearDepth) {
+        return false;
+    }
+
+    const f32 tanHalfFovX = 1.0f / projectionX;
+    const f32 tanHalfFovY = 1.0f / projectionY;
+    const f32 tanHalfFovDiagonalSquared =
+        tanHalfFovX * tanHalfFovX + tanHalfFovY * tanHalfFovY;
+    f32 centerDepth = 0.5f * (nearDepth + farDepth) *
+        (1.0f + tanHalfFovDiagonalSquared);
+    centerDepth = std::min(centerDepth, farDepth);
+    const f32 axialDistance = farDepth - centerDepth;
+    radius = std::sqrt(
+        farDepth * farDepth * tanHalfFovDiagonalSquared +
+        axialDistance * axialDistance
+    );
+
+    const glm::mat4 inverseView = glm::inverse(matrices.view);
+    const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
+    glm::vec3 cameraForward = -glm::vec3(inverseView[2]);
+    if (glm::dot(cameraForward, cameraForward) <= 0.000001f) {
+        return false;
+    }
+    cameraForward = glm::normalize(cameraForward);
+    center = cameraPosition + cameraForward * centerDepth;
+    return std::isfinite(radius) && radius > 0.0f;
+}
+
 glm::mat4 LightViewProjectionForCascade(
     std::span<const RenderCommand> renderCommands,
     const FrameLightSet& lights,
     const std::array<glm::vec3, 8>& frustumCorners,
     bool stableSnappingEnabled,
     u32 mapSize,
-    f32* texelWorldSize
+    f32* texelWorldSize,
+    f32* lightDepthWorldSpan,
+    const FrameMatrices* cameraMatrices,
+    f32 cascadeNearDepth,
+    f32 cascadeFarDepth
 ) {
     const glm::vec3 lightDirection = NormalizedDirectionalLightDirection(lights);
-    glm::vec3 cascadeBoundsMin{ std::numeric_limits<f32>::max() };
-    glm::vec3 cascadeBoundsMax{ std::numeric_limits<f32>::lowest() };
+    glm::vec3 center{ 0.0f };
     for (const glm::vec3& worldPoint : frustumCorners) {
-        IncludePoint(worldPoint, cascadeBoundsMin, cascadeBoundsMax);
+        center += worldPoint;
+    }
+    center /= static_cast<f32>(frustumCorners.size());
+
+    f32 cascadeRadius = kShadowMinHalfExtent;
+    for (const glm::vec3& worldPoint : frustumCorners) {
+        cascadeRadius = std::max(cascadeRadius, glm::length(worldPoint - center));
+    }
+    if (stableSnappingEnabled && cameraMatrices != nullptr) {
+        glm::vec3 analyticCenter{ 0.0f };
+        f32 analyticRadius = 0.0f;
+        if (StableCascadeSphereFromMatrices(
+                *cameraMatrices,
+                cascadeNearDepth,
+                cascadeFarDepth,
+                analyticCenter,
+                analyticRadius)) {
+            center = analyticCenter;
+            cascadeRadius = std::max(analyticRadius, kShadowMinHalfExtent);
+        }
+    }
+    auto quantizeStableExtent = [](f32 extent) {
+        constexpr f32 kQuantizationUnits = 16.0f;
+        constexpr f32 kBoundaryTolerance = 0.001f;
+        return std::ceil(
+            extent * kQuantizationUnits - kBoundaryTolerance
+        ) / kQuantizationUnits;
+    };
+    if (stableSnappingEnabled) {
+        // Valient-style stable CSM: quantizing a rotation-invariant sphere fit
+        // prevents the orthographic scale from breathing as the camera turns.
+        cascadeRadius = quantizeStableExtent(cascadeRadius);
     }
 
-    const glm::vec3 center = (cascadeBoundsMin + cascadeBoundsMax) * 0.5f;
-    const glm::vec3 cascadeExtent = cascadeBoundsMax - cascadeBoundsMin;
-    const f32 cascadeRadius = std::max(
-        glm::length(cascadeExtent) * 0.5f,
-        kShadowMinHalfExtent
-    );
-
     const glm::vec3 lightForward = glm::normalize(lightDirection);
-    const glm::vec3 eye = center - lightForward * (cascadeRadius + kShadowDepthPadding);
     glm::vec3 up{ 0.0f, 1.0f, 0.0f };
     if (std::abs(glm::dot(lightForward, up)) > 0.95f) {
         up = { 0.0f, 0.0f, 1.0f };
     }
 
-    const glm::mat4 view = glm::lookAt(eye, center, up);
+    const f32 receiverGuardRatio = ShadowCascadeReceiverGuardRatio();
+    f32 stableHalfExtent = 0.0f;
+    f32 stableTexelSize = 0.0f;
+    glm::vec3 viewCenter = center;
+    if (stableSnappingEnabled) {
+        stableHalfExtent = quantizeStableExtent(
+            cascadeRadius * (1.0f + receiverGuardRatio)
+        );
+        if (mapSize > 0u) {
+            stableTexelSize = (stableHalfExtent * 2.0f) / static_cast<f32>(mapSize);
+        }
+
+        if (stableTexelSize > 0.0f) {
+            const glm::vec3 lightRight = glm::normalize(glm::cross(lightForward, up));
+            const glm::vec3 lightUp = glm::normalize(glm::cross(lightRight, lightForward));
+            const f32 centerRight = glm::dot(center, lightRight);
+            const f32 centerUp = glm::dot(center, lightUp);
+            const f32 snappedRight = std::round(centerRight / stableTexelSize) *
+                stableTexelSize;
+            const f32 snappedUp = std::round(centerUp / stableTexelSize) *
+                stableTexelSize;
+            viewCenter += lightRight * (snappedRight - centerRight);
+            viewCenter += lightUp * (snappedUp - centerUp);
+        }
+    }
+
+    const glm::vec3 eye =
+        viewCenter - lightForward * (cascadeRadius + kShadowDepthPadding);
+    const glm::mat4 view = glm::lookAt(eye, viewCenter, up);
     glm::vec3 lightBoundsMin{ std::numeric_limits<f32>::max() };
     glm::vec3 lightBoundsMax{ std::numeric_limits<f32>::lowest() };
     for (const glm::vec3& worldPoint : frustumCorners) {
@@ -965,49 +1057,36 @@ glm::mat4 LightViewProjectionForCascade(
         }
     }
 
-    const f32 xPadding = std::max(
-        (lightBoundsMax.x - lightBoundsMin.x) * kShadowPaddingRatio,
-        0.35f
-    );
-    const f32 yPadding = std::max(
-        (lightBoundsMax.y - lightBoundsMin.y) * kShadowPaddingRatio,
-        0.35f
-    );
-    lightBoundsMin.x -= xPadding;
-    lightBoundsMax.x += xPadding;
-    lightBoundsMin.y -= yPadding;
-    lightBoundsMax.y += yPadding;
     lightBoundsMin.z -= kShadowDepthPadding;
     lightBoundsMax.z += kShadowDepthPadding;
-
-    ExpandRangeAroundCenter(lightBoundsMin.x, lightBoundsMax.x, kShadowMinHalfExtent);
-    ExpandRangeAroundCenter(lightBoundsMin.y, lightBoundsMax.y, kShadowMinHalfExtent);
-    const f32 receiverGuardRatio = ShadowCascadeReceiverGuardRatio();
-    ExpandRangeByRatio(lightBoundsMin.x, lightBoundsMax.x, receiverGuardRatio);
-    ExpandRangeByRatio(lightBoundsMin.y, lightBoundsMax.y, receiverGuardRatio);
     if (stableSnappingEnabled) {
-        const f32 halfExtent = std::max(
-            (lightBoundsMax.x - lightBoundsMin.x) * 0.5f,
-            (lightBoundsMax.y - lightBoundsMin.y) * 0.5f
+        lightBoundsMin.x = -stableHalfExtent;
+        lightBoundsMax.x = stableHalfExtent;
+        lightBoundsMin.y = -stableHalfExtent;
+        lightBoundsMax.y = stableHalfExtent;
+    } else {
+        const f32 xPadding = std::max(
+            (lightBoundsMax.x - lightBoundsMin.x) * kShadowPaddingRatio,
+            0.35f
         );
-        const f32 centerX = (lightBoundsMin.x + lightBoundsMax.x) * 0.5f;
-        const f32 centerY = (lightBoundsMin.y + lightBoundsMax.y) * 0.5f;
-        lightBoundsMin.x = centerX - halfExtent;
-        lightBoundsMax.x = centerX + halfExtent;
-        lightBoundsMin.y = centerY - halfExtent;
-        lightBoundsMax.y = centerY + halfExtent;
+        const f32 yPadding = std::max(
+            (lightBoundsMax.y - lightBoundsMin.y) * kShadowPaddingRatio,
+            0.35f
+        );
+        lightBoundsMin.x -= xPadding;
+        lightBoundsMax.x += xPadding;
+        lightBoundsMin.y -= yPadding;
+        lightBoundsMax.y += yPadding;
+        ExpandRangeAroundCenter(lightBoundsMin.x, lightBoundsMax.x, kShadowMinHalfExtent);
+        ExpandRangeAroundCenter(lightBoundsMin.y, lightBoundsMax.y, kShadowMinHalfExtent);
+        ExpandRangeByRatio(lightBoundsMin.x, lightBoundsMax.x, receiverGuardRatio);
+        ExpandRangeByRatio(lightBoundsMin.y, lightBoundsMax.y, receiverGuardRatio);
     }
 
-    f32 texelSize = 0.0f;
-    if (mapSize > 0) {
+    f32 texelSize = stableSnappingEnabled ? stableTexelSize : 0.0f;
+    if (!stableSnappingEnabled && mapSize > 0u) {
         texelSize = (lightBoundsMax.x - lightBoundsMin.x) /
             static_cast<f32>(mapSize);
-    }
-    if (stableSnappingEnabled && texelSize > 0.0f) {
-        lightBoundsMin.x = std::floor(lightBoundsMin.x / texelSize) * texelSize;
-        lightBoundsMin.y = std::floor(lightBoundsMin.y / texelSize) * texelSize;
-        lightBoundsMax.x = std::ceil(lightBoundsMax.x / texelSize) * texelSize;
-        lightBoundsMax.y = std::ceil(lightBoundsMax.y / texelSize) * texelSize;
     }
     if (texelWorldSize != nullptr) {
         *texelWorldSize = texelSize;
@@ -1015,6 +1094,9 @@ glm::mat4 LightViewProjectionForCascade(
 
     const f32 nearPlane = std::max(0.01f, -lightBoundsMax.z);
     const f32 farPlane = std::max(nearPlane + 0.1f, -lightBoundsMin.z);
+    if (lightDepthWorldSpan != nullptr) {
+        *lightDepthWorldSpan = farPlane - nearPlane;
+    }
     glm::mat4 projection = glm::ortho(
         lightBoundsMin.x,
         lightBoundsMax.x,
@@ -1038,9 +1120,12 @@ RendererShadowCascadeStats ShadowCascadeStatsFor(
     stats.maxDistance = cascades.maxDistance;
     stats.nearDepth = cascades.nearDepth;
     stats.farDepth = cascades.farDepth;
+    stats.pcssLightAngularRadiusRadians = cascades.lightAngularRadiusRadians;
     for (u32 index = 0; index < std::min<u32>(cascades.activeCount, kMaxDirectionalShadowCascades); ++index) {
         stats.splitDepths[index] = cascades.cascades[index].splitDepth;
         stats.texelWorldSizes[index] = cascades.cascades[index].texelWorldSize;
+        stats.lightDepthWorldSpans[index] =
+            cascades.cascades[index].lightDepthWorldSpan;
     }
 
     return stats;
@@ -3384,6 +3469,10 @@ CapturedReflectionProbeSceneSample CapturedReflectionProbeSceneSampleFor(
     signature = HashVec3(signature, lights.primaryDirectional.direction);
     signature = HashCombine(signature, FloatBits(lights.primaryDirectional.intensity));
     signature = HashCombine(signature, FloatBits(lights.primaryDirectional.ambient));
+    signature = HashCombine(
+        signature,
+        FloatBits(lights.primaryDirectional.angularRadiusRadians)
+    );
     signature = HashCombine(signature, static_cast<u64>(lightSamples.size()));
     for (const CapturedReflectionProbeLightSample& light : lightSamples) {
         signature = HashCapturedLightSample(signature, light);
@@ -4365,6 +4454,11 @@ bool ApplySceneDirectionalLight(
     lights.primaryDirectional.intensity = std::max(directionalLight->intensity, 0.0f);
     lights.primaryDirectional.ambient = std::max(directionalLight->ambient, 0.0f);
     lights.primaryDirectional.specular = std::max(directionalLight->specular, 0.0f);
+    lights.primaryDirectional.angularRadiusRadians = std::clamp(
+        directionalLight->angularRadiusRadians,
+        0.0f,
+        0.05f
+    );
     lights.directionalCount = 1;
     return true;
 }
@@ -5605,10 +5699,104 @@ void VulkanRenderer::DrawFrame() {
             m_BonePaletteFallbackDescriptorSet->Ready() != 0u
     );
     frameStats.shadowCascades = ShadowCascadeStatsFor(directionalShadowCascades);
+    frameStats.shadowCascades.quality = static_cast<u32>(m_ShadowSettings.quality);
+    frameStats.shadowCascades.directionalReceiveEnabled =
+        m_ShadowSettings.directionalShadowReceiveEnabled ? 1u : 0u;
     frameStats.shadowCascades.pcfKernelRadius =
         std::clamp<u32>(m_ShadowSettings.pcfKernelRadius, 0u, 2u);
+    frameStats.shadowCascades.filterMode = static_cast<u32>(
+        m_ShadowSettings.directionalFilterMode
+    );
+    frameStats.shadowCascades.filterSampleCount = std::clamp<u32>(
+        m_ShadowSettings.directionalFilterSampleCount,
+        0u,
+        16u
+    );
+    frameStats.shadowCascades.filterKernelWidth = std::clamp<u32>(
+        m_ShadowSettings.directionalFilterKernelWidth,
+        0u,
+        5u
+    );
+    frameStats.shadowCascades.filterHardwareCompareEnabled = 1u;
+    frameStats.shadowCascades.filterFallbackReason =
+        m_ShadowSettings.directionalFilterMode ==
+                VulkanDirectionalShadowFilterMode::HardwareBoxPcf
+            ? 1u
+            : 0u;
     frameStats.shadowCascades.pcssStrength =
         std::clamp(m_ShadowSettings.pcssStrength, 0.0f, 1.0f);
+    frameStats.shadowCascades.pcssBlockerSampleCount = std::clamp<u32>(
+        m_ShadowSettings.directionalPcssBlockerSampleCount,
+        0u,
+        16u
+    );
+    frameStats.shadowCascades.pcssFilterSampleCount = std::clamp<u32>(
+        m_ShadowSettings.directionalPcssFilterSampleCount,
+        0u,
+        16u
+    );
+    frameStats.shadowCascades.pcssSearchRadiusTexels = std::clamp(
+        m_ShadowSettings.directionalPcssSearchRadiusTexels,
+        0.0f,
+        16.0f
+    );
+    frameStats.shadowCascades.pcssMaxPenumbraTexels = std::clamp(
+        m_ShadowSettings.directionalPcssMaxPenumbraTexels,
+        0.0f,
+        16.0f
+    );
+    const bool pcssRawDepthSamplerReady =
+        (m_DirectionalShadowCascadeAtlas != nullptr &&
+            m_DirectionalShadowCascadeAtlas->RawDepthSampler() != VK_NULL_HANDLE) ||
+        (m_ShadowMap != nullptr && m_ShadowMap->RawDepthSampler() != VK_NULL_HANDLE);
+    frameStats.shadowCascades.pcssRawDepthSamplerReady =
+        pcssRawDepthSamplerReady ? 1u : 0u;
+    const bool pcssControlsValid =
+        frameStats.shadowCascades.pcssBlockerSampleCount > 0u &&
+        frameStats.shadowCascades.pcssFilterSampleCount > 0u &&
+        frameStats.shadowCascades.pcssSearchRadiusTexels > 0.0f &&
+        frameStats.shadowCascades.pcssMaxPenumbraTexels > 0.0f &&
+        frameStats.shadowCascades.pcssLightAngularRadiusRadians > 0.0f;
+    frameStats.shadowCascades.pcssEnabled =
+        frameStats.shadowCascades.pcssStrength > 0.0001f &&
+        pcssRawDepthSamplerReady && pcssControlsValid
+            ? 1u
+            : 0u;
+    frameStats.shadowCascades.pcssFallbackReason =
+        frameStats.shadowCascades.pcssEnabled != 0u
+            ? 0u
+            : (frameStats.shadowCascades.pcssStrength <= 0.0001f
+                ? 1u
+                : (!pcssRawDepthSamplerReady ? 2u : 3u));
+    frameStats.shadowCascades.filterMaxDepthSamples =
+        frameStats.shadowCascades.pcssEnabled != 0u
+            ? frameStats.shadowCascades.pcssBlockerSampleCount +
+                frameStats.shadowCascades.pcssFilterSampleCount
+            : frameStats.shadowCascades.filterSampleCount;
+    frameStats.shadowCascades.filterReceiverBiasExtentTexels =
+        std::clamp(m_ShadowSettings.directionalFilterReceiverBiasExtentTexels, 0.0f, 4.0f);
+    frameStats.shadowCascades.receiverPlaneBiasScale =
+        std::clamp(m_ShadowSettings.directionalReceiverPlaneBiasScale, 0.0f, 4.0f);
+    frameStats.shadowCascades.receiverPlaneBiasEnabled =
+        frameStats.shadowCascades.receiverPlaneBiasScale > 0.0001f ? 1u : 0u;
+    frameStats.shadowCascades.normalOffsetBiasTexels =
+        std::clamp(m_ShadowSettings.directionalNormalOffsetBiasTexels, 0.0f, 4.0f);
+    frameStats.shadowCascades.normalOffsetBiasEnabled =
+        frameStats.shadowCascades.normalOffsetBiasTexels > 0.0001f ? 1u : 0u;
+    frameStats.shadowCascades.slopeOffsetBiasTexels =
+        std::clamp(m_ShadowSettings.directionalSlopeOffsetBiasTexels, 0.0f, 2.0f);
+    frameStats.shadowCascades.slopeOffsetBiasEnabled =
+        frameStats.shadowCascades.slopeOffsetBiasTexels > 0.0001f ? 1u : 0u;
+    frameStats.shadowCascades.casterDepthBiasEnabled =
+        m_ShadowSettings.casterDepthBiasEnabled ? 1u : 0u;
+    frameStats.shadowCascades.casterDepthBiasConstant =
+        std::clamp(m_ShadowSettings.casterDepthBiasConstant, 0.0f, 262144.0f);
+    frameStats.shadowCascades.casterDepthBiasClamp =
+        m_PhysicalDevice.Features().depthBiasClamp
+            ? std::clamp(m_ShadowSettings.casterDepthBiasClamp, 0.0f, 0.05f)
+            : 0.0f;
+    frameStats.shadowCascades.casterDepthBiasSlope =
+        std::clamp(m_ShadowSettings.casterDepthBiasSlope, 0.0f, 16.0f);
     frameStats.shadowCascades.blendRatio =
         std::clamp(m_ShadowSettings.cascadeBlendRatio, 0.0f, 0.25f);
     frameStats.shadowCascades.fadeRatio =
@@ -6967,6 +7155,14 @@ void VulkanRenderer::DrawFrame() {
         imageIndex < m_DlssMaskInputsInitialized.size()
             ? m_DlssMaskInputsInitialized[imageIndex]
             : false;
+    const ShadowDepthBiasControls shadowDepthBias{
+        m_ShadowSettings.casterDepthBiasEnabled,
+        std::clamp(m_ShadowSettings.casterDepthBiasConstant, 0.0f, 262144.0f),
+        m_PhysicalDevice.Features().depthBiasClamp
+            ? std::clamp(m_ShadowSettings.casterDepthBiasClamp, 0.0f, 0.05f)
+            : 0.0f,
+        std::clamp(m_ShadowSettings.casterDepthBiasSlope, 0.0f, 16.0f)
+    };
     m_CommandBuffer->Record(
         imageIndex,
         *m_RenderPass,
@@ -6998,6 +7194,7 @@ void VulkanRenderer::DrawFrame() {
             localShadowTileCommandSpans.data(),
             localShadowTileCommandSpanCount
         ),
+        shadowDepthBias,
         localShadowTiles.cacheSkippedTiles == localShadowTiles.assignedCount &&
             localShadowTiles.assignedCount > 0,
         m_HdrRenderPass.get(),
@@ -9605,6 +9802,59 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
         m_ShadowSettings.pcssStrength =
             std::clamp(*shadowPcssStrength, 0.0f, 1.0f);
     }
+    if (EnvironmentFlagEnabled("SE_DIRECTIONAL_PCSS_OFF")) {
+        m_ShadowSettings.pcssStrength = 0.0f;
+    }
+    if (const std::optional<f32> blockerSamples =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_BLOCKER_SAMPLES")) {
+        m_ShadowSettings.directionalPcssBlockerSampleCount = std::clamp(
+            static_cast<u32>(*blockerSamples + 0.5f),
+            0u,
+            16u
+        );
+    }
+    if (const std::optional<f32> filterSamples =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_FILTER_SAMPLES")) {
+        m_ShadowSettings.directionalPcssFilterSampleCount = std::clamp(
+            static_cast<u32>(*filterSamples + 0.5f),
+            0u,
+            16u
+        );
+    }
+    if (const std::optional<f32> searchRadius =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS")) {
+        m_ShadowSettings.directionalPcssSearchRadiusTexels =
+            std::clamp(*searchRadius, 0.0f, 16.0f);
+    }
+    if (const std::optional<f32> maxPenumbra =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS")) {
+        m_ShadowSettings.directionalPcssMaxPenumbraTexels =
+            std::clamp(*maxPenumbra, 0.0f, 16.0f);
+    }
+    if (const std::optional<f32> directionalFilterMode =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_SHADOW_FILTER_MODE")) {
+        m_ShadowSettings.directionalFilterMode = static_cast<VulkanDirectionalShadowFilterMode>(
+            std::clamp(static_cast<i32>(*directionalFilterMode + 0.5f), 0, 1)
+        );
+    }
+    if (const std::optional<f32> directionalFilterKernelWidth =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_SHADOW_FILTER_KERNEL_WIDTH")) {
+        m_ShadowSettings.directionalFilterKernelWidth = std::clamp(
+            static_cast<u32>(*directionalFilterKernelWidth + 0.5f),
+            3u,
+            5u
+        );
+        m_ShadowSettings.directionalFilterKernelWidth =
+            m_ShadowSettings.directionalFilterKernelWidth >= 5u ? 5u : 3u;
+    }
+    if (const std::optional<f32> directionalFilterReceiverBiasExtent =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_SHADOW_FILTER_RECEIVER_BIAS_EXTENT_TEXELS")) {
+        m_ShadowSettings.directionalFilterReceiverBiasExtentTexels = std::clamp(
+            *directionalFilterReceiverBiasExtent,
+            0.0f,
+            4.0f
+        );
+    }
     if (const std::optional<f32> shadowBiasMin =
             EnvironmentFloatOverride("SE_SHADOW_BIAS_MIN")) {
         m_ShadowSettings.biasMin = std::clamp(*shadowBiasMin, 0.0f, 0.02f);
@@ -9612,6 +9862,40 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (const std::optional<f32> shadowBiasSlope =
             EnvironmentFloatOverride("SE_SHADOW_BIAS_SLOPE")) {
         m_ShadowSettings.biasSlope = std::clamp(*shadowBiasSlope, 0.0f, 0.05f);
+    }
+    if (const std::optional<bool> casterDepthBiasEnabled =
+            EnvironmentFlagOverride("SE_SHADOW_CASTER_DEPTH_BIAS_ENABLED")) {
+        m_ShadowSettings.casterDepthBiasEnabled = *casterDepthBiasEnabled;
+    }
+    if (const std::optional<f32> casterDepthBiasConstant =
+            EnvironmentFloatOverride("SE_SHADOW_CASTER_DEPTH_BIAS_CONSTANT")) {
+        m_ShadowSettings.casterDepthBiasConstant =
+            std::clamp(*casterDepthBiasConstant, 0.0f, 262144.0f);
+    }
+    if (const std::optional<f32> casterDepthBiasClamp =
+            EnvironmentFloatOverride("SE_SHADOW_CASTER_DEPTH_BIAS_CLAMP")) {
+        m_ShadowSettings.casterDepthBiasClamp =
+            std::clamp(*casterDepthBiasClamp, 0.0f, 0.05f);
+    }
+    if (const std::optional<f32> casterDepthBiasSlope =
+            EnvironmentFloatOverride("SE_SHADOW_CASTER_DEPTH_BIAS_SLOPE")) {
+        m_ShadowSettings.casterDepthBiasSlope =
+            std::clamp(*casterDepthBiasSlope, 0.0f, 16.0f);
+    }
+    if (const std::optional<f32> receiverPlaneBiasScale =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_RECEIVER_PLANE_BIAS_SCALE")) {
+        m_ShadowSettings.directionalReceiverPlaneBiasScale =
+            std::clamp(*receiverPlaneBiasScale, 0.0f, 4.0f);
+    }
+    if (const std::optional<f32> normalOffsetBiasTexels =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS")) {
+        m_ShadowSettings.directionalNormalOffsetBiasTexels =
+            std::clamp(*normalOffsetBiasTexels, 0.0f, 4.0f);
+    }
+    if (const std::optional<f32> slopeOffsetBiasTexels =
+            EnvironmentFloatOverride("SE_DIRECTIONAL_SLOPE_OFFSET_BIAS_TEXELS")) {
+        m_ShadowSettings.directionalSlopeOffsetBiasTexels =
+            std::clamp(*slopeOffsetBiasTexels, 0.0f, 2.0f);
     }
     std::optional<bool> directionalShadowReceive =
         EnvironmentFlagOverride("SE_DIRECTIONAL_SHADOW_RECEIVE");
@@ -11721,13 +12005,67 @@ void VulkanRenderer::UpdateDirectionalShadowCascadeBuffer(
         static_cast<f32>(std::clamp<u32>(m_ShadowSettings.pcfKernelRadius, 0u, 2u)),
         std::clamp(m_ShadowSettings.pcssStrength, 0.0f, 1.0f)
     );
+    cascadeData.receiverPlaneBiasControls = glm::vec4(
+        std::clamp(m_ShadowSettings.directionalReceiverPlaneBiasScale, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.directionalNormalOffsetBiasTexels, 0.0f, 4.0f),
+        std::clamp(m_ShadowSettings.directionalSlopeOffsetBiasTexels, 0.0f, 2.0f),
+        0.0f
+    );
+    cascadeData.directionalFilterControls = glm::vec4(
+        static_cast<f32>(m_ShadowSettings.directionalFilterMode),
+        static_cast<f32>(std::clamp<u32>(m_ShadowSettings.directionalFilterSampleCount, 0u, 16u)),
+        static_cast<f32>(std::clamp<u32>(m_ShadowSettings.directionalFilterKernelWidth, 0u, 5u)),
+        std::clamp(m_ShadowSettings.directionalFilterReceiverBiasExtentTexels, 0.0f, 4.0f)
+    );
+    const f32 pcssStrength = std::clamp(m_ShadowSettings.pcssStrength, 0.0f, 1.0f);
+    const u32 pcssBlockerSamples = std::clamp<u32>(
+        m_ShadowSettings.directionalPcssBlockerSampleCount,
+        0u,
+        16u
+    );
+    const u32 pcssFilterSamples = std::clamp<u32>(
+        m_ShadowSettings.directionalPcssFilterSampleCount,
+        0u,
+        16u
+    );
+    const f32 pcssSearchRadius = std::clamp(
+        m_ShadowSettings.directionalPcssSearchRadiusTexels,
+        0.0f,
+        16.0f
+    );
+    const f32 pcssMaxPenumbra = std::clamp(
+        m_ShadowSettings.directionalPcssMaxPenumbraTexels,
+        0.0f,
+        16.0f
+    );
+    const bool pcssRawDepthReady = cascades.activeCount > 0u;
+    const bool pcssControlsValid = pcssBlockerSamples > 0u &&
+        pcssFilterSamples > 0u && pcssSearchRadius > 0.0f &&
+        pcssMaxPenumbra > 0.0f && cascades.lightAngularRadiusRadians > 0.0f;
+    const u32 pcssFallbackReason =
+        pcssStrength <= 0.0001f
+            ? 1u
+            : (!pcssRawDepthReady ? 2u : (!pcssControlsValid ? 3u : 0u));
+    cascadeData.directionalPcssControls = glm::vec4(
+        pcssStrength,
+        static_cast<f32>(pcssBlockerSamples),
+        static_cast<f32>(pcssFilterSamples),
+        pcssMaxPenumbra
+    );
+    cascadeData.directionalPcssGeometry = glm::vec4(
+        pcssSearchRadius,
+        std::clamp(cascades.lightAngularRadiusRadians, 0.0f, 0.05f),
+        pcssRawDepthReady ? 1.0f : 0.0f,
+        static_cast<f32>(pcssFallbackReason)
+    );
     cascadeData.fallbackViewProjection = fallbackLightViewProjection;
     for (u32 index = 0; index < kMaxDirectionalShadowCascades; ++index) {
         cascadeData.viewProjections[index] = cascades.cascades[index].viewProjection;
         cascadeData.splitDepths[index] = cascades.cascades[index].splitDepth;
         cascadeData.texelWorldSizes[index] = cascades.cascades[index].texelWorldSize;
+        cascadeData.lightDepthWorldSpans[index] =
+            cascades.cascades[index].lightDepthWorldSpan;
     }
-    cascadeData.texelWorldSizes.w = cascades.maxDistance;
 
     m_DirectionalShadowCascadeBuffer->Update(imageIndex, cascadeData);
 }
@@ -12723,6 +13061,11 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
     cascadeSet.stableSnappingEnabled = m_ShadowSettings.stableCascades;
     cascadeSet.splitLambda = std::clamp(m_ShadowSettings.cascadeSplitLambda, 0.0f, 1.0f);
     cascadeSet.maxDistance = std::max(m_ShadowSettings.cascadeMaxDistance, 0.0f);
+    cascadeSet.lightAngularRadiusRadians = std::clamp(
+        lights.primaryDirectional.angularRadiusRadians,
+        0.0f,
+        0.05f
+    );
 
     f32 nearDepth = 0.0f;
     f32 farDepth = 0.0f;
@@ -12764,7 +13107,11 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
             corners,
             cascadeSet.stableSnappingEnabled,
             std::max(m_ShadowSettings.mapSize, 1u),
-            &cascade.texelWorldSize
+            &cascade.texelWorldSize,
+            &cascade.lightDepthWorldSpan,
+            matrices,
+            previousSplit,
+            splitDepth
         );
         ++cascadeSet.activeCount;
         previousSplit = splitDepth;
@@ -12816,6 +13163,11 @@ VulkanRenderer::BuildReflectionCaptureDirectionalShadow(
     cascadeSet.maxDistance = captureDistance;
     cascadeSet.nearDepth = 0.0f;
     cascadeSet.farDepth = captureDistance;
+    cascadeSet.lightAngularRadiusRadians = std::clamp(
+        lights.primaryDirectional.angularRadiusRadians,
+        0.0f,
+        0.05f
+    );
     DirectionalShadowCascade& cascade = cascadeSet.cascades[0];
     cascade.nearDepth = 0.0f;
     cascade.farDepth = captureDistance;
@@ -12826,7 +13178,11 @@ VulkanRenderer::BuildReflectionCaptureDirectionalShadow(
         corners,
         cascadeSet.stableSnappingEnabled,
         std::max(mapSize, 1u),
-        &cascade.texelWorldSize
+        &cascade.texelWorldSize,
+        &cascade.lightDepthWorldSpan,
+        nullptr,
+        0.0f,
+        captureDistance
     );
     return cascadeSet;
 }
@@ -13548,6 +13904,14 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     ReflectionCaptureDrawStats drawStats{};
     ReflectionCaptureDirectionalShadowDrawStats directionalShadowDrawStats{};
     ReflectionCaptureLocalShadowDrawStats localShadowDrawStats{};
+    const ShadowDepthBiasControls shadowDepthBias{
+        m_ShadowSettings.casterDepthBiasEnabled,
+        std::clamp(m_ShadowSettings.casterDepthBiasConstant, 0.0f, 262144.0f),
+        m_PhysicalDevice.Features().depthBiasClamp
+            ? std::clamp(m_ShadowSettings.casterDepthBiasClamp, 0.0f, 0.05f)
+            : 0.0f,
+        std::clamp(m_ShadowSettings.casterDepthBiasSlope, 0.0f, 16.0f)
+    };
     try {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -13567,6 +13931,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
                 captureShadowCommands,
                 kReflectionCaptureDescriptorIndex,
                 captureDirectionalShadows.cascades[0].viewProjection,
+                shadowDepthBias,
                 m_BonePaletteFallbackDescriptorSet != nullptr
                     ? m_BonePaletteFallbackDescriptorSet->Handle()
                     : VK_NULL_HANDLE,
@@ -13590,6 +13955,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
                     captureLocalShadowTileCommandSpanCount
                 ),
                 kReflectionCaptureDescriptorIndex,
+                shadowDepthBias,
                 m_BonePaletteFallbackDescriptorSet != nullptr
                     ? m_BonePaletteFallbackDescriptorSet->Handle()
                     : VK_NULL_HANDLE,

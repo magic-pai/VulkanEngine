@@ -370,12 +370,41 @@ void DrawShadowDiagnostics(const RendererStats& stats) {
         cascades.atlasTileRows
     );
     ImGui::Text(
-        "CSM filter: PCF %ux%u, PCSS %.3f, blend %.3f, fade %.3f",
+        "CSM filter: PCF %ux%u, PCSS %.3f, receiver-plane %.2f (%s), blend %.3f, fade %.3f",
         cascades.pcfKernelRadius * 2u + 1u,
         cascades.pcfKernelRadius * 2u + 1u,
         cascades.pcssStrength,
+        cascades.receiverPlaneBiasScale,
+        cascades.receiverPlaneBiasEnabled ? "on" : "off",
         cascades.blendRatio,
         cascades.fadeRatio
+    );
+    ImGui::Text(
+        "PCSS: %s, quality %u, blocker/filter %u/%u, raw %s, radius %.1f/%.1f, fallback %u",
+        cascades.pcssEnabled != 0u ? "on" : "off",
+        cascades.quality,
+        cascades.pcssBlockerSampleCount,
+        cascades.pcssFilterSampleCount,
+        cascades.pcssRawDepthSamplerReady != 0u ? "ready" : "missing",
+        cascades.pcssSearchRadiusTexels,
+        cascades.pcssMaxPenumbraTexels,
+        cascades.pcssFallbackReason
+    );
+    ImGui::Text(
+        "CSM production filter: %s, %u hardware taps, %ux%u kernel, %.1f receiver-bias texels%s",
+        cascades.filterMode == 1u ? "optimized tent" : "hardware box",
+        cascades.filterSampleCount,
+        cascades.filterKernelWidth,
+        cascades.filterKernelWidth,
+        cascades.filterReceiverBiasExtentTexels,
+        cascades.filterFallbackReason != 0u ? " (Debug fallback)" : ""
+    );
+    ImGui::Text(
+        "CSM caster bias: %s, constant %.0f ULP, clamp %.4f, slope %.2f",
+        cascades.casterDepthBiasEnabled ? "on" : "off",
+        cascades.casterDepthBiasConstant,
+        cascades.casterDepthBiasClamp,
+        cascades.casterDepthBiasSlope
     );
     ImGui::Text(
         "Splits: %.2f / %.2f / %.2f / %.2f",
@@ -1875,12 +1904,69 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
     ImGui::SliderFloat("Ambient shadow##Shadow", &settings.ambientStrength, 0.0f, 1.0f);
     ImGui::SliderFloat("Bias min##Shadow", &settings.biasMin, 0.0f, 0.006f, "%.5f");
     ImGui::SliderFloat("Bias slope##Shadow", &settings.biasSlope, 0.0f, 0.012f, "%.5f");
+    ImGui::Checkbox("Caster depth bias##Shadow", &settings.casterDepthBiasEnabled);
+    ImGui::SliderFloat(
+        "Caster bias constant##Shadow",
+        &settings.casterDepthBiasConstant,
+        0.0f,
+        262144.0f,
+        "%.0f ULP"
+    );
+    ImGui::SliderFloat(
+        "Caster bias slope##Shadow",
+        &settings.casterDepthBiasSlope,
+        0.0f,
+        16.0f,
+        "%.2f"
+    );
+    ImGui::SliderFloat(
+        "Caster bias clamp##Shadow",
+        &settings.casterDepthBiasClamp,
+        0.0f,
+        0.05f,
+        "%.4f"
+    );
+    ImGui::SliderFloat(
+        "Receiver-plane bias##Shadow",
+        &settings.directionalReceiverPlaneBiasScale,
+        0.0f,
+        4.0f,
+        "%.2f"
+    );
     ImGui::SliderFloat("PCF radius##Shadow", &settings.pcfRadius, 0.0f, 3.0f);
     int pcfKernelRadius = static_cast<int>(settings.pcfKernelRadius);
     if (ImGui::SliderInt("PCF kernel radius##Shadow", &pcfKernelRadius, 0, 2)) {
         settings.pcfKernelRadius = static_cast<u32>(std::clamp(pcfKernelRadius, 0, 2));
     }
     ImGui::SliderFloat("PCSS strength##Shadow", &settings.pcssStrength, 0.0f, 1.0f, "%.3f");
+    int pcssBlockerSamples = static_cast<int>(
+        settings.directionalPcssBlockerSampleCount
+    );
+    if (ImGui::SliderInt("PCSS blocker samples##Shadow", &pcssBlockerSamples, 0, 16)) {
+        settings.directionalPcssBlockerSampleCount = static_cast<u32>(
+            std::clamp(pcssBlockerSamples, 0, 16)
+        );
+    }
+    int pcssFilterSamples = static_cast<int>(settings.directionalPcssFilterSampleCount);
+    if (ImGui::SliderInt("PCSS filter samples##Shadow", &pcssFilterSamples, 0, 16)) {
+        settings.directionalPcssFilterSampleCount = static_cast<u32>(
+            std::clamp(pcssFilterSamples, 0, 16)
+        );
+    }
+    ImGui::SliderFloat(
+        "PCSS search radius##Shadow",
+        &settings.directionalPcssSearchRadiusTexels,
+        0.0f,
+        16.0f,
+        "%.2f texels"
+    );
+    ImGui::SliderFloat(
+        "PCSS max penumbra##Shadow",
+        &settings.directionalPcssMaxPenumbraTexels,
+        0.0f,
+        16.0f,
+        "%.2f texels"
+    );
     ImGui::SliderFloat("Cascade lambda##Shadow", &settings.cascadeSplitLambda, 0.0f, 1.0f);
     ImGui::SliderFloat("Cascade distance##Shadow", &settings.cascadeMaxDistance, 25.0f, 2000.0f);
     ImGui::SliderFloat("Cascade blend##Shadow", &settings.cascadeBlendRatio, 0.0f, 0.25f, "%.3f");

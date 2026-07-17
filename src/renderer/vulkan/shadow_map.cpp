@@ -42,6 +42,10 @@ VkSampler VulkanShadowMap::Sampler() const {
     return m_Sampler;
 }
 
+VkSampler VulkanShadowMap::RawDepthSampler() const {
+    return m_RawDepthSampler;
+}
+
 VkImageLayout VulkanShadowMap::Layout() const {
     return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 }
@@ -82,6 +86,10 @@ void VulkanShadowMap::Recreate(
 }
 
 void VulkanShadowMap::Release() {
+    if (m_RawDepthSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_Device, m_RawDepthSampler, nullptr);
+        m_RawDepthSampler = VK_NULL_HANDLE;
+    }
     if (m_Sampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_Device, m_Sampler, nullptr);
         m_Sampler = VK_NULL_HANDLE;
@@ -114,14 +122,29 @@ void VulkanShadowMap::CreateSampler(
         : 1.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.compareEnable = VK_TRUE;
+    samplerInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     samplerInfo.minLod = 0.0f;
     samplerInfo.maxLod = 0.0f;
 
     if (vkCreateSampler(device.Handle(), &samplerInfo, nullptr, &m_Sampler) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan shadow map sampler");
+    }
+
+
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    if (vkCreateSampler(
+            device.Handle(),
+            &samplerInfo,
+            nullptr,
+            &m_RawDepthSampler) != VK_SUCCESS) {
+        vkDestroySampler(device.Handle(), m_Sampler, nullptr);
+        m_Sampler = VK_NULL_HANDLE;
+        throw std::runtime_error("Failed to create Vulkan shadow raw-depth sampler");
     }
 }
 

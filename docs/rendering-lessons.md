@@ -35,6 +35,168 @@ Validation:
 - Final parallax masks were `0x7/0x7/0x7/0x7`; spatial failure and FrameGraph validation issue counts were `0`.
 - User accepted the single normal `SelfEngineLightingShowcase` visual window.
 
+## 2026-07-17 - Optimized Tent PCF Must Be Anchored To Texel Centers
+
+Symptom:
+- Directional 5x5 tent PCF made sphere self-shadow ripples and ground bands more visible even though hardware comparison sampling and the nine-tap budget were active.
+
+False leads:
+- Disabling receiver-plane bias; this made the ripples worse.
+- Treating nine optimized taps as inherently too sparse before verifying the reduction math.
+
+Cause:
+- The Castano nine-tap offsets were added to the continuous atlas UV. The derivation requires offsets relative to the lower texel center, so the runtime footprint was asymmetric and did not reconstruct the intended `1/3/4/3/1` tent weights.
+
+Control test:
+- `scripts/Test-DirectionalShadowTentMath.ps1 -Strict` reconstructs the hardware bilinear footprint and checks all four shader consumers.
+
+Fix:
+- Convert atlas UV to texel-center coordinates, derive the integer base texel and fractional phase there, and apply optimized offsets from that base in forward, deferred, GBuffer debug, and weighted-translucency paths.
+
+Prevention:
+- Every optimized hardware-PCF reduction needs an analytic footprint regression; matching tap count and normalization alone do not prove the kernel.
+
+Validation:
+- Math health reported corrected maximum weight error `0`; the old unaligned formula reports error `4`.
+- User reported that the visible directional-shadow ripples were clearly reduced.
+
+## 2026-07-17 - Stable CSM Requires Rotation-Invariant Projection Scale
+
+Symptom:
+- After fixing the tent kernel, directional shadows still flickered while the camera moved.
+
+False leads:
+- Further filter-radius or receiver-bias tuning.
+- Adding a floating-point epsilon to the existing corner-derived radius quantization; this moved the scale jumps between cascades instead of removing them.
+
+Cause:
+- The stable CSM path tightly fit light-space bounds reconstructed from moving frustum corners, then independently snapped min/max bounds. Camera rotation changed the orthographic scale, and boundary rounding changed it by whole quantization steps.
+- Forward3D moving-lane data showed all four cascade texel sizes changing by about `0.14%` per capture window.
+
+Control test:
+- The moving lane in `Test-CsmStabilityHealth.ps1` now requires each stable cascade texel size to remain invariant within `0.00001` relative change while benchmark camera motion advances.
+
+Fix:
+- Use a Valient-style stable cascade fit (Michal Valient, *Stable Rendering of Cascaded Shadow Maps*, ShaderX6): derive a rotation-invariant bounding sphere analytically from projection FOV and split depths, quantize its extent, and snap only the center in fixed light-space axes.
+- Keep the corner-derived sphere as the scene-independent fallback for captures without a player-camera projection.
+
+Prevention:
+- A `stable snapping` flag is not proof of stability. In fixed-FOV motion, orthographic scale must be constant; only the center may move in shadow-texel increments.
+- Prefer the stable sphere fit for production motion. Tight AABB fitting uses resolution more efficiently but requires temporal stabilization and is not the default fallback.
+
+Validation:
+- Forward3D and LightingShowcase CSM health both passed `116 pass / 0 warn / 0 fail`.
+- All four moving-lane texel-size deltas were exactly `0` in both real scenes.
+- `Test-Forward3DShadowRegression.ps1 -SkipBuild` passed with eight animated rows and preserved off-camera caster coverage.
+- The user confirmed that camera-motion shadow flicker disappeared in the full-screen real-scene window.
+
+## 2026-07-17 - Curved Directional Receivers Need Cascade-Texel Normal Offset
+
+Symptom:
+- Close-range showcase spheres showed structured directional-shadow ripples even after the tent-PCF footprint and cascade motion stability were corrected.
+
+False leads:
+- Point, spot, and rect-light shadow filtering: disabling all local shadow passes did not reduce the artifact.
+- Disabling all directional reception removed the artifact, but also removed valid directional shadows and was only an attribution control.
+- Increasing a global clip-depth bias or disabling sphere casters would be scene-specific and would risk detached or missing shadows.
+
+Cause:
+- Sphere casters sampled their own quantized CSM depth on curved receivers. Receiver-plane and raster depth bias did not provide a world-space separation tied to the selected cascade resolution.
+- The shader buffer also overwrote `texelWorldSizes.w` with max distance, so cascade 3 did not have a valid world-texel value available for a resolution-aware receiver offset.
+
+Control test:
+- With local shadows disabled and directional reception enabled, `SE_SHOWCASE_SPHERE_SHADOW_CASTERS_OFF=1` removed exactly seven sphere casters and the user reported that the ripple disappeared.
+- `SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS=0` is the generic receiver-path control; it changes the recorded bias state without changing caster count, CSM passes, or CSM draws.
+
+Fix:
+- Apply a receiver normal offset in all four directional-shadow consumers. The world offset is the selected cascade's texel size times a bounded texel scale times `sin(acos(saturate(NdotL)))`.
+- This follows the normal-offset bias used in production shadow implementations such as MJP's *A Sampling of Shadow Techniques* and Unity URP's `ApplyShadowBias`, while retaining the existing raster and receiver-plane depth biases for their separate roles.
+- Use `2.0` cascade texels as the enabled quality-tier default; keep `0` as the strict identity control and clamp explicit overrides to `0..4`.
+- Preserve all four `texelWorldSizes` components and expose the resolved normal-offset state through RendererStats, benchmark CSV, and `SE_DIRECTIONAL_NORMAL_OFFSET_BIAS_TEXELS`.
+
+Production budget:
+- The receiver offset adds no shadow-map samples and allocates no GPU resources. It adds bounded ALU work per sampled cascade.
+- Debug GPU timestamp queries were unavailable (`gpu_available=0`), so this slice does not claim a measured millisecond delta.
+
+Prevention:
+- Directional receiver bias must scale in cascade texels, not fixed world or clip units. Curved self-shadowing needs a normal-offset component; raising global depth bias is not an equivalent fix.
+- Keep all per-cascade world-texel values intact and assert the shader-facing bias state under both enabled and disabled controls.
+
+Validation:
+- `Test-DirectionalShadowNormalOffsetMath.ps1 -Strict` passed the bounded angle/texel math and all four shader contracts.
+- LightingShowcase and Forward3D CSM health each passed `120 pass / 0 warn / 0 fail`; the LightingShowcase disabled control also passed `120 / 0 / 0`.
+- Enabled versus disabled LightingShowcase data held at `19` casters, `4` CSM passes, `76` CSM draws, and `0` FrameGraph issues while only the normal-offset fields changed.
+- `Test-Forward3DShadowRegression.ps1 -SkipBuild` passed all eight animated rows.
+- In full-screen DLSS Performance validation, `1.0`, `1.5`, and `2.0` texels progressively reduced the curved self-shadow bands without visible detachment or leaking. At `2.0`, the user reported that a small residual remained only under careful extreme close-up inspection and selected it as the default.
+
+## 2026-07-17 - Grazing Receivers Need A Bounded Light-Direction Slope Offset
+
+Symptom:
+- A small structured band remained on close curved receivers after the normal offset fix. Raising near-cascade sampling density reduced it, but made the light-to-shadow transition unnaturally sharp and exposed stair-step aliasing on ground shadows.
+
+False leads:
+- Replacing the authored shading normal with a derivative geometric normal; the user reported essentially unchanged banding.
+- Reducing the LightingShowcase CSM coverage from `300m` to `60m`; cascade-zero density improved about `4.85x`, but the fixed 5x5 filter then covered too little world space and produced obvious transition aliasing.
+
+Cause:
+- The normal offset separated curved receivers along the surface normal, but the remaining grazing-angle depth error had no bounded light-direction component. Shadow-map quantization could still intersect the receiver near the self-shadow terminator.
+
+Control test:
+- Keep the scene-independent `300m` coverage, 5x5 tent PCF, and `2.0`-texel normal offset fixed. Change only `SE_DIRECTIONAL_SLOPE_OFFSET_BIAS_TEXELS` between `0` and `0.5`, with local-light shadows disabled for visual attribution.
+
+Fix:
+- Add a light-direction receiver offset scaled by cascade world-texel size and `tan(alpha)`, capped at `2x` before applying the configured texel scale. Use `0.5` texel as the enabled quality-tier default and retain `0` as the identity control.
+- Apply the same contract in forward, deferred, GBuffer debug, and weighted-translucency directional-shadow consumers.
+- This stays in the production receiver-bias family documented by MJP's *A Sampling of Shadow Techniques* and Unity's `ApplyShadowBias`; the project-specific tangent term is explicitly bounded instead of allowing unbounded grazing-angle displacement.
+
+Production budget:
+- The slope offset adds no shadow-map samples, passes, draws, or GPU resources. It adds bounded per-receiver ALU only; CSM work remains `4` passes and `76` draws in the accepted LightingShowcase lane.
+- Debug GPU timestamps were unavailable (`gpu_available=0`), so this slice does not claim a measured millisecond delta.
+
+Prevention:
+- Do not reduce global CSM coverage to hide close-range self-shadowing. Keep coverage, world-space filter width, and receiver bias as separate quality controls, and validate a receiver fix against both curved terminators and cast-shadow edges.
+
+Validation:
+- Offset math/static contracts passed, including independent normal/slope controls and finite bounded values.
+- LightingShowcase `300m` and Forward3D `60m` strict CSM lanes each passed `124 pass / 0 warn / 0 fail`; the LightingShowcase `0` identity control also passed `124 / 0 / 0`.
+- Enabled and disabled data preserved `19` casters, `4` CSM passes, `76` CSM draws, and zero FrameGraph issues.
+- In the single full-screen DLSS Performance window, the user reported that the discordant sphere shadow was essentially gone and the ground shadow no longer showed aliasing.
+
+## 2026-07-17 - Directional PCSS Needs World-Space Blocker Separation
+
+Symptom:
+- The stable optimized 5x5 tent filter removed structured aliasing, but every directional shadow retained nearly uniform softness instead of contact-hardening from a finite angular light.
+
+False leads:
+- Deriving penumbra size directly from normalized shadow depth; each cascade has a different light-space depth span, so the same physical separation would resolve to a different softness.
+- Rotating the Poisson pattern from frame-varying screen or camera data; this would trade structured edges for temporal shimmer.
+- Trusting the PCSS-off environment control before checking it after the Forward3D production profile had been applied.
+
+Cause:
+- Comparison sampling alone cannot recover blocker depth for a blocker search, and the cascade payload did not expose the world-space depth span needed to convert receiver/blocker separation consistently.
+- Forward3D reapplied production profile defaults after generic environment settings, which initially overwrote the PCSS-off control back to the Ultra value.
+
+Control test:
+- Run Ultra with its configured default, then rerun only with `SE_SHADOW_PCSS_STRENGTH=0`. The active path must report `12/16` blocker/filter samples and `28` maximum depth samples; the control must report disabled reason `1` and return to `9` tent-PCF samples.
+
+Fix:
+- Bind a non-comparison raw directional-depth sampler alongside the hardware comparison sampler and publish each cascade's world-space light-depth span.
+- Compute penumbra radius from world-space receiver/blocker separation and the scene directional light's angular radius, clamp it to the quality budget, and blend contact regions back to the accepted tent-PCF baseline.
+- Use a cascade-stable rotated Poisson pattern so camera motion does not change the noise pattern.
+- Reapply all directional PCSS environment controls after the Forward3D production profile resolves. Make Ultra the renderer, Forward3D, and LightingShowcase default while preserving explicit quality overrides.
+
+Prevention:
+- Variable-penumbra shadows need both comparison and raw-depth resource contracts; never infer physical distance from cascade-normalized depth alone.
+- Any scene/profile preset applied after generic environment settings must also preserve the subsystem's Debug isolation controls, and the disabled lane must assert actual shader cost rather than only a UI value.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed; all four affected SPIR-V shaders regenerated successfully.
+- `Test-DirectionalShadowPcssMath.ps1 -Strict` passed the world-space, bounded-penumbra, stable-pattern, descriptor, and four-shader contracts.
+- Final Forward3D Ultra health passed `152 pass / 0 warn / 0 fail`; LightingShowcase Ultra health passed `152 / 0 / 0`. Both reported quality `4`, PCSS active `1`, samples `12/16`, raw depth ready `1`, fallback `0`, maximum depth samples `28`, and zero FrameGraph issues.
+- The PCSS-off Forward3D control passed `132 / 0 / 0` and reported strength/active/fallback/max samples `0/0/1/9`.
+- `Test-Forward3DShadowRegression.ps1 -SkipBuild` captured eight animated rows and preserved off-camera shadow-caster coverage.
+- In the single full-screen 2560x1440 DLSS Performance LightingShowcase window, the user reported that the overall result looked coherent with no obvious remaining artifacts.
+
 ## 2026-07-07 - Local Light Tile Split Lines
 
 Symptom:
