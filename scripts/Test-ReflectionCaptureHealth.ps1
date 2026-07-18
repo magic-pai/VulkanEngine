@@ -207,6 +207,40 @@ function Test-AllMasksSubset {
     return $true
 }
 
+function Test-AllReceiverAuditWeightSums {
+    param(
+        [Parameter(Mandatory = $true)]$Rows,
+        [double]$Tolerance = 0.001
+    )
+
+    foreach ($row in $Rows) {
+        if ((Get-Number -Row $row -Name "reflection_probe_receiver_audit_requested") -ne 1) {
+            continue
+        }
+
+        $totalWeight = Get-Number -Row $row -Name "reflection_probe_receiver_audit_total_weight"
+        if ([double]::IsNaN($totalWeight) -or $totalWeight -le 0.0001) {
+            return $false
+        }
+
+        $rawWeightSum = 0.0
+        $normalizedWeightSum = 0.0
+        for ($index = 0; $index -lt 4; ++$index) {
+            $rawWeightSum += Get-Number -Row $row -Name "reflection_probe_receiver_audit_weight_$index"
+            $normalizedWeightSum += Get-Number -Row $row -Name "reflection_probe_receiver_audit_normalized_weight_$index"
+        }
+
+        if ([Math]::Abs($rawWeightSum - $totalWeight) -gt $Tolerance) {
+            return $false
+        }
+        if ([Math]::Abs($normalizedWeightSum - 1.0) -gt $Tolerance) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 function Test-AnyPersistentShadowCacheHit {
     param([Parameter(Mandatory = $true)]$Rows)
 
@@ -233,6 +267,7 @@ function New-ReflectionCaptureReport {
         [Parameter(Mandatory = $true)][string]$LaneName,
         [Parameter(Mandatory = $true)][string]$Mode,
         [Parameter(Mandatory = $true)][string]$CsvPath,
+        [hashtable]$Environment = @{},
         [AllowNull()]$RunError
     )
 
@@ -411,6 +446,37 @@ function New-ReflectionCaptureReport {
         "reflection_probe_selected_capture_mip_ready_mask",
         "reflection_probe_spatial_contract_failure_mask",
         "reflection_probe_spatial_contract_valid",
+        "reflection_probe_receiver_audit_requested",
+        "reflection_probe_receiver_audit_production_blend",
+        "reflection_probe_receiver_audit_independent_ibl_energy",
+        "reflection_probe_receiver_audit_position_x",
+        "reflection_probe_receiver_audit_position_y",
+        "reflection_probe_receiver_audit_position_z",
+        "reflection_probe_receiver_audit_direction_x",
+        "reflection_probe_receiver_audit_direction_y",
+        "reflection_probe_receiver_audit_direction_z",
+        "reflection_probe_receiver_audit_roughness",
+        "reflection_probe_receiver_audit_positive_weight_mask",
+        "reflection_probe_receiver_audit_ready_cubemap_mask",
+        "reflection_probe_receiver_audit_box_projection_hit_mask",
+        "reflection_probe_receiver_audit_dominant_slot",
+        "reflection_probe_receiver_audit_total_weight",
+        "reflection_probe_receiver_audit_local_coverage",
+        "reflection_probe_receiver_audit_dominant_normalized_weight",
+        "reflection_probe_receiver_audit_local_cubemap_weight",
+        "reflection_probe_receiver_audit_weight_0",
+        "reflection_probe_receiver_audit_weight_1",
+        "reflection_probe_receiver_audit_weight_2",
+        "reflection_probe_receiver_audit_weight_3",
+        "reflection_probe_receiver_audit_normalized_weight_0",
+        "reflection_probe_receiver_audit_normalized_weight_1",
+        "reflection_probe_receiver_audit_normalized_weight_2",
+        "reflection_probe_receiver_audit_normalized_weight_3",
+        "reflection_probe_receiver_audit_lod_0",
+        "reflection_probe_receiver_audit_lod_1",
+        "reflection_probe_receiver_audit_lod_2",
+        "reflection_probe_receiver_audit_lod_3",
+        "reflection_probe_captured_scene_neutral_tint_mask",
         "reflection_probe_captured_scene_upload_count",
         "reflection_probe_captured_scene_refresh_check_count",
         "reflection_probe_captured_scene_refresh_performed",
@@ -745,6 +811,145 @@ function New-ReflectionCaptureReport {
         -Passed ($captureUploadEvidence -ge 1) `
         -Actual $captureUploadEvidence -Expected ">= 1"
 
+    $receiverAuditExpected = (
+        $Environment.ContainsKey("SE_REFLECTION_RECEIVER_AUDIT") -and
+        "$($Environment['SE_REFLECTION_RECEIVER_AUDIT'])" -ne "0"
+    )
+    if (-not $receiverAuditExpected) {
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver audit remains opt-in" `
+            -Passed ($metrics["reflection_probe_receiver_audit_requested"].max -eq 0) `
+            -Actual $metrics["reflection_probe_receiver_audit_requested"].max -Expected 0
+    } else {
+        $legacyBlendExpected = (
+            $Environment.ContainsKey("SE_REFLECTION_PROBE_LEGACY_BLEND") -and
+            "$($Environment['SE_REFLECTION_PROBE_LEGACY_BLEND'])" -eq "1"
+        )
+        $expectedProductionBlend = if ($legacyBlendExpected) { 0 } else { 1 }
+        $legacyEnergyExpected = (
+            $Environment.ContainsKey("SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE") -and
+            "$($Environment['SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE'])" -eq "1"
+        )
+        $expectedIndependentEnergy = if ($legacyEnergyExpected) { 0 } else { 1 }
+        $receiverAuditPositiveWeightMask =
+            [int]$metrics["reflection_probe_receiver_audit_positive_weight_mask"].last
+        $receiverAuditReadyCubemapMask =
+            [int]$metrics["reflection_probe_receiver_audit_ready_cubemap_mask"].last
+        $receiverAuditBoxProjectionHitMask =
+            [int]$metrics["reflection_probe_receiver_audit_box_projection_hit_mask"].last
+        $receiverAuditRawWeights = @(
+            [double]$metrics["reflection_probe_receiver_audit_weight_0"].last,
+            [double]$metrics["reflection_probe_receiver_audit_weight_1"].last,
+            [double]$metrics["reflection_probe_receiver_audit_weight_2"].last,
+            [double]$metrics["reflection_probe_receiver_audit_weight_3"].last
+        )
+        $receiverAuditNormalizedWeights = @(
+            [double]$metrics["reflection_probe_receiver_audit_normalized_weight_0"].last,
+            [double]$metrics["reflection_probe_receiver_audit_normalized_weight_1"].last,
+            [double]$metrics["reflection_probe_receiver_audit_normalized_weight_2"].last,
+            [double]$metrics["reflection_probe_receiver_audit_normalized_weight_3"].last
+        )
+        $receiverAuditResolvedLods = @(
+            [double]$metrics["reflection_probe_receiver_audit_lod_0"].last,
+            [double]$metrics["reflection_probe_receiver_audit_lod_1"].last,
+            [double]$metrics["reflection_probe_receiver_audit_lod_2"].last,
+            [double]$metrics["reflection_probe_receiver_audit_lod_3"].last
+        )
+        $receiverAuditRawWeightSum =
+            [double]($receiverAuditRawWeights | Measure-Object -Sum).Sum
+        $receiverAuditNormalizedWeightSum =
+            [double]($receiverAuditNormalizedWeights | Measure-Object -Sum).Sum
+        $receiverAuditMaxLod =
+            [double]($receiverAuditResolvedLods | Measure-Object -Maximum).Maximum
+        $receiverAuditDirectionLength = [Math]::Sqrt(
+            [Math]::Pow([double]$metrics["reflection_probe_receiver_audit_direction_x"].last, 2.0) +
+            [Math]::Pow([double]$metrics["reflection_probe_receiver_audit_direction_y"].last, 2.0) +
+            [Math]::Pow([double]$metrics["reflection_probe_receiver_audit_direction_z"].last, 2.0)
+        )
+
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver audit is active" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_requested"].min -eq 1 -and
+                $metrics["reflection_probe_receiver_audit_requested"].max -eq 1
+            ) `
+            -Actual "$($metrics['reflection_probe_receiver_audit_requested'].min)..$($metrics['reflection_probe_receiver_audit_requested'].max)" `
+            -Expected "1..1"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver blend mode resolves" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_production_blend"].min -eq $expectedProductionBlend -and
+                $metrics["reflection_probe_receiver_audit_production_blend"].max -eq $expectedProductionBlend
+            ) `
+            -Actual "$($metrics['reflection_probe_receiver_audit_production_blend'].min)..$($metrics['reflection_probe_receiver_audit_production_blend'].max)" `
+            -Expected $expectedProductionBlend
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver IBL energy mode resolves" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_independent_ibl_energy"].min -eq $expectedIndependentEnergy -and
+                $metrics["reflection_probe_receiver_audit_independent_ibl_energy"].max -eq $expectedIndependentEnergy
+            ) `
+            -Actual "$($metrics['reflection_probe_receiver_audit_independent_ibl_energy'].min)..$($metrics['reflection_probe_receiver_audit_independent_ibl_energy'].max)" `
+            -Expected $expectedIndependentEnergy
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver audit input is normalized" `
+            -Passed (
+                [Math]::Abs($receiverAuditDirectionLength - 1.0) -le 0.001 -and
+                $metrics["reflection_probe_receiver_audit_roughness"].last -gt 0.0 -and
+                $metrics["reflection_probe_receiver_audit_roughness"].last -le 1.0
+            ) `
+            -Actual "dirLen=$receiverAuditDirectionLength,roughness=$($metrics['reflection_probe_receiver_audit_roughness'].last)" `
+            -Expected "unit direction,0<roughness<=1"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver local probe weights resolve" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_positive_weight_mask"].max -ne 0 -and
+                $metrics["reflection_probe_receiver_audit_total_weight"].min -gt 0.0 -and
+                $metrics["reflection_probe_receiver_audit_dominant_slot"].min -ge 0 -and
+                $metrics["reflection_probe_receiver_audit_dominant_normalized_weight"].min -gt 0.5
+            ) `
+            -Actual "mask=0x$([Convert]::ToString([int]$metrics['reflection_probe_receiver_audit_positive_weight_mask'].max, 16)),total=$($metrics['reflection_probe_receiver_audit_total_weight'].min)..$($metrics['reflection_probe_receiver_audit_total_weight'].max),dominant=$($metrics['reflection_probe_receiver_audit_dominant_slot'].min)..$($metrics['reflection_probe_receiver_audit_dominant_slot'].max),weight=$($metrics['reflection_probe_receiver_audit_dominant_normalized_weight'].min)..$($metrics['reflection_probe_receiver_audit_dominant_normalized_weight'].max)" `
+            -Expected "nonzero weights, dominant slot >=0 and >0.5"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "steady receiver weighted probes have cubemap resources" `
+            -Passed (
+                ($receiverAuditPositiveWeightMask -band (-bnot $receiverAuditReadyCubemapMask)) -eq 0
+            ) `
+            -Actual "last weighted=0x$([Convert]::ToString($receiverAuditPositiveWeightMask, 16)),ready=0x$([Convert]::ToString($receiverAuditReadyCubemapMask, 16))" `
+            -Expected "last weighted mask subset of ready mask"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver box-projected probes hit their volumes" `
+            -Passed (Test-AllMasksSubset -Rows $rows -SubsetName "reflection_probe_receiver_audit_positive_weight_mask" -SupersetName "reflection_probe_receiver_audit_box_projection_hit_mask") `
+            -Actual "last weighted=0x$([Convert]::ToString($receiverAuditPositiveWeightMask, 16)),hits=0x$([Convert]::ToString($receiverAuditBoxProjectionHitMask, 16))" `
+            -Expected "weighted mask subset of box-projection hit mask"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver weight fields are internally consistent" `
+            -Passed (Test-AllReceiverAuditWeightSums -Rows $rows) `
+            -Actual "last rawSum=$receiverAuditRawWeightSum,total=$($metrics['reflection_probe_receiver_audit_total_weight'].last),normalizedSum=$receiverAuditNormalizedWeightSum" `
+            -Expected "raw sum ~= total, normalized sum ~= 1"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver roughness resolves to filtered cubemap LODs" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_local_cubemap_weight"].min -gt 0.99 -and
+                $receiverAuditMaxLod -gt 0.0
+            ) `
+            -Actual "cubemapWeight=$($metrics['reflection_probe_receiver_audit_local_cubemap_weight'].min)..$($metrics['reflection_probe_receiver_audit_local_cubemap_weight'].max),lods=$($receiverAuditResolvedLods -join '/')" `
+            -Expected "cubemap weight > 0.99 and any lod > 0"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver local coverage stays bounded" `
+            -Passed (
+                $metrics["reflection_probe_receiver_audit_local_coverage"].max -gt 0.0 -and
+                $metrics["reflection_probe_receiver_audit_local_coverage"].min -ge 0.0 -and
+                $metrics["reflection_probe_receiver_audit_local_coverage"].max -le 1.0001
+            ) `
+            -Actual "$($metrics['reflection_probe_receiver_audit_local_coverage'].min)..$($metrics['reflection_probe_receiver_audit_local_coverage'].max)" `
+            -Expected "0 < coverage <= 1"
+        Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "captured probes use neutral receiver tint" `
+            -Passed ($metrics["reflection_probe_captured_scene_neutral_tint_mask"].max -ne 0) `
+            -Actual "0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_neutral_tint_mask'].max, 16))" `
+            -Expected "nonzero"
+
+        if ($Mode -eq "spatial" -or $Mode -eq "parallax") {
+            Add-BooleanCheck -Checks $checks -Area "receiver-audit" -Name "receiver traversal changes blend state" `
+                -Passed (
+                    $metrics["reflection_probe_receiver_audit_dominant_slot"].delta -gt 0 -or
+                    $metrics["reflection_probe_receiver_audit_total_weight"].delta -gt 0.0001 -or
+                    $metrics["reflection_probe_receiver_audit_local_coverage"].delta -gt 0.0001
+                ) `
+                -Actual "dominantDelta=$($metrics['reflection_probe_receiver_audit_dominant_slot'].delta),totalDelta=$($metrics['reflection_probe_receiver_audit_total_weight'].delta),coverageDelta=$($metrics['reflection_probe_receiver_audit_local_coverage'].delta)" `
+                -Expected "dominant slot, total weight, or coverage changes"
+        }
+    }
+
     switch ($Mode) {
     "static" {
         Add-BooleanCheck -Checks $checks -Area "policy" -Name "static capture is reused" `
@@ -1048,6 +1253,16 @@ $managedKeys = @(
     "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES",
     "SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF",
     "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL",
+    "SE_REFLECTION_RECEIVER_AUDIT",
+    "SE_REFLECTION_RECEIVER_AUDIT_X",
+    "SE_REFLECTION_RECEIVER_AUDIT_Y",
+    "SE_REFLECTION_RECEIVER_AUDIT_Z",
+    "SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_X",
+    "SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Y",
+    "SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Z",
+    "SE_REFLECTION_RECEIVER_AUDIT_ROUGHNESS",
+    "SE_REFLECTION_PROBE_LEGACY_BLEND",
+    "SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_AUTO_EXIT_FRAMES",
@@ -1068,6 +1283,17 @@ $commonEnvironment = @{
     SE_BENCHMARK_WARMUP_FRAMES = [string]$WarmupFrames
     SE_BENCHMARK_FRAMES = [string]$CaptureFrames
     SE_AUTO_EXIT_FRAMES = [string]$AutoExitFrames
+}
+
+$receiverAuditEnvironment = @{
+    SE_REFLECTION_RECEIVER_AUDIT = "1"
+    SE_REFLECTION_RECEIVER_AUDIT_X = "-2.15"
+    SE_REFLECTION_RECEIVER_AUDIT_Y = "0.18"
+    SE_REFLECTION_RECEIVER_AUDIT_Z = "0.15"
+    SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_X = "0.35"
+    SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Y = "0.18"
+    SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Z = "-0.92"
+    SE_REFLECTION_RECEIVER_AUDIT_ROUGHNESS = "0.24"
 }
 
 $laneSpecs = @(
@@ -1201,6 +1427,34 @@ $laneSpecs = @(
         }
     },
     [pscustomobject]@{
+        name = "receiver-audit-grid-camera"
+        mode = "camera"
+        environment = $receiverAuditEnvironment + @{
+            SE_BENCHMARK_SCENE = "grid"
+            SE_BENCHMARK_GRID_SIZE = "4"
+            SE_SCENE_REFLECTION_PROBE = "1"
+            SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_BENCHMARK_CAMERA_MOTION = "orbit"
+            SE_REFLECTION_CAPTURE_CAMERA_INVARIANT_CONTROL = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "receiver-audit-grid-legacy"
+        mode = "camera"
+        environment = $receiverAuditEnvironment + @{
+            SE_BENCHMARK_SCENE = "grid"
+            SE_BENCHMARK_GRID_SIZE = "4"
+            SE_SCENE_REFLECTION_PROBE = "1"
+            SE_SCENE_REFLECTION_PROBE_CAPTURED = "1"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_BENCHMARK_CAMERA_MOTION = "orbit"
+            SE_REFLECTION_CAPTURE_CAMERA_INVARIANT_CONTROL = "1"
+            SE_REFLECTION_PROBE_LEGACY_BLEND = "1"
+            SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE = "1"
+        }
+    },
+    [pscustomobject]@{
         name = "multi-probe-identity"
         mode = "multi"
         environment = @{
@@ -1212,7 +1466,7 @@ $laneSpecs = @(
     [pscustomobject]@{
         name = "spatial-blend-traversal"
         mode = "spatial"
-        environment = @{
+        environment = $receiverAuditEnvironment + @{
             SE_BENCHMARK_SCENE = "lighting-showcase"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
@@ -1229,7 +1483,7 @@ $laneSpecs = @(
     [pscustomobject]@{
         name = "box-parallax-traversal"
         mode = "parallax"
-        environment = @{
+        environment = $receiverAuditEnvironment + @{
             SE_BENCHMARK_SCENE = "lighting-showcase"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
@@ -1297,6 +1551,7 @@ foreach ($lane in $laneSpecs) {
         -LaneName $lane.name `
         -Mode $lane.mode `
         -CsvPath $csvPath `
+        -Environment $environment `
         -RunError $runError)) | Out-Null
 }
 

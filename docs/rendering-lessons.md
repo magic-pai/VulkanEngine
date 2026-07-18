@@ -2,6 +2,40 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - Reflection Receiver Gates Need Debug Builds And Steady-State Readiness
+
+Symptom:
+- `Test-ReflectionCaptureHealth.ps1` reported parallax/locality failures when run against Release-like staged executables, with box-projection reference masks at `0`.
+- The first receiver-audit gate also failed because early LightingShowcase traversal rows had positive receiver weights before every captured cubemap resource was ready.
+
+False leads:
+- Treating Release `0` masks as a reflection algorithm regression.
+- Requiring every captured frame to have all receiver cubemaps ready, even while the lane is intentionally exercising capture convergence.
+
+Cause:
+- Several reflection-capture diagnostics, including locality controls and box-projection reference-ray masks, are compiled only under `!NDEBUG`.
+- Receiver weights are valid spatial data before a captured probe finishes all faces and mips; the consumer-ready assertion must be evaluated on the steady producer/consumer state rather than transient warmup rows.
+
+Control test:
+- Copy the real Debug `.blocked1` binary into a trusted staging directory and run the reflection capture gate from that `!NDEBUG` executable.
+- Compare grid production, grid legacy, and LightingShowcase traversal receiver rows.
+
+Fix:
+- Extend `scripts\Test-ReflectionCaptureHealth.ps1` to import and validate the full `reflection_probe_receiver_audit_*` CSV contract.
+- Add receiver-audit grid production/legacy lanes plus LightingShowcase spatial/parallax traversal receiver checks.
+- Keep receiver audit opt-in by default and clean up all `SE_REFLECTION_RECEIVER_AUDIT*` and legacy blend environment variables per lane.
+- Check steady weighted-probe readiness against the final receiver row, while still checking weight sums and box-projection hit masks across receiver-audit rows.
+
+Prevention:
+- Run reflection-capture health gates that rely on locality or reference-ray diagnostics with a Debug/development executable, not Release.
+- Distinguish capture-convergence rows from steady-state producer/consumer assertions; otherwise data gates will flag valid warmup behavior as a rendering bug.
+- Receiver/probe blend changes must publish masks, weights, normalized sums, LODs, coverage, and legacy controls before visual review.
+
+Validation:
+- Debug build produced a real `.blocked1` binary; staged as `V:\SelfEngineRunDebugReceiverAudit\SelfEngineForward3D.exe`.
+- `scripts\Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -ExecutablePath V:\SelfEngineRunDebugReceiverAudit\SelfEngineForward3D.exe -OutputDirectory tmp\reflection_probe_receiver_audit_debug_v2` passed `953 pass / 0 warn / 0 fail`.
+- Receiver evidence included grid production masks `1/1/1`, grid legacy blend/energy `0/0`, LightingShowcase dominant slot `0..1`, final masks `3/7/7`, normalized sum `1`, and LODs `1.92/1.92/1.92/0`.
+
 ## 2026-07-19 - DLSS Jitter CSV Fields Follow The Inverse Projection Convention
 
 Symptom:
