@@ -2,7 +2,7 @@ param(
     [string]$ExecutablePath = "build\Debug\SelfEngineForward3D.exe",
     [string]$OutputDirectory = "out\shadow_health",
     [string]$ShadowQuality = "high",
-    [int]$WarmupFrames = 2,
+    [int]$WarmupFrames = 4,
     [int]$CaptureFrames = 8,
     [int]$AutoExitFrames = 14,
     [switch]$SkipBuild,
@@ -312,6 +312,30 @@ function New-ShadowHealthReport {
         "local_shadow_pcf_radius",
         "local_shadow_pcf_kernel_radius",
         "local_shadow_pcss_strength",
+        "local_shadow_filter_contract_version",
+        "local_shadow_production_filter_enabled",
+        "local_shadow_production_filter_ready",
+        "local_shadow_production_filter_active",
+        "local_shadow_production_filter_fallback_reason",
+        "local_shadow_comparison_sampler_ready",
+        "local_shadow_raw_depth_sampler_ready",
+        "local_shadow_tile_range_contract_valid",
+        "local_shadow_tile_range_invalid_lights",
+        "local_shadow_tile_range_max_tiles_per_light",
+        "local_shadow_filter_geometry_valid_tiles",
+        "local_shadow_filter_geometry_invalid_tiles",
+        "local_shadow_point_pcss_blocker_samples",
+        "local_shadow_point_pcss_filter_samples",
+        "local_shadow_point_pcss_search_radius_texels",
+        "local_shadow_point_pcss_max_penumbra_texels",
+        "local_shadow_spot_pcss_blocker_samples",
+        "local_shadow_spot_pcss_filter_samples",
+        "local_shadow_spot_pcss_search_radius_texels",
+        "local_shadow_spot_pcss_max_penumbra_texels",
+        "local_shadow_rect_pcss_blocker_samples",
+        "local_shadow_rect_pcss_filter_samples",
+        "local_shadow_rect_pcss_search_radius_texels",
+        "local_shadow_rect_pcss_max_penumbra_texels",
         "local_shadow_face_blend_strength",
         "local_shadow_rect_sample_pattern",
         "shadow_contact_strength",
@@ -388,22 +412,46 @@ function New-ShadowHealthReport {
         ultra = 28
     }
     $expectedPointSamples = @{
-        low = 9
-        medium = 18
-        high = 25
-        ultra = 34
+        low = 4
+        medium = 16
+        high = 20
+        ultra = 28
     }
     $expectedSpotSamples = @{
-        low = 9
-        medium = 18
-        high = 25
-        ultra = 34
+        low = 4
+        medium = 16
+        high = 20
+        ultra = 28
     }
     $expectedRectSamples = @{
-        low = 18
-        medium = 18
-        high = 34
-        ultra = 34
+        low = 4
+        medium = 16
+        high = 20
+        ultra = 28
+    }
+    $expectedLocalBlockerSamples = @{
+        low = 0
+        medium = 8
+        high = 8
+        ultra = 12
+    }
+    $expectedLocalFilterSamples = @{
+        low = 4
+        medium = 8
+        high = 12
+        ultra = 16
+    }
+    $expectedLocalSearchRadius = @{
+        low = 0.0
+        medium = 4.0
+        high = 6.0
+        ultra = 8.0
+    }
+    $expectedLocalMaxPenumbra = @{
+        low = 1.5
+        medium = 4.0
+        high = 6.0
+        ultra = 8.0
     }
     $expectedRectProjectionCount = @{
         low = 2
@@ -621,6 +669,62 @@ function New-ShadowHealthReport {
         -Area "local shadows" -Name "local PCF radius is reported" -Minimum 0.1
     Add-MinCheck -Checks $checks -Metrics $metrics -Column "local_shadow_face_blend_strength" `
         -Area "local shadows" -Name "point-face seam blend control is reported" -Minimum 0.1
+    Add-EqualityCheck -Checks $checks -Metrics $metrics -Column "local_shadow_filter_contract_version" `
+        -Area "local filter" -Name "local production filter contract version" `
+        -Expected 3 -MissingStatus "fail"
+    foreach ($column in @(
+        "local_shadow_production_filter_enabled",
+        "local_shadow_production_filter_ready",
+        "local_shadow_production_filter_active",
+        "local_shadow_comparison_sampler_ready",
+        "local_shadow_raw_depth_sampler_ready",
+        "local_shadow_tile_range_contract_valid"
+    )) {
+        Add-EqualityCheck -Checks $checks -Metrics $metrics -Column $column `
+            -Area "local filter" -Name "$column is active" `
+            -Expected 1 -MissingStatus "fail"
+    }
+    foreach ($column in @(
+        "local_shadow_production_filter_fallback_reason",
+        "local_shadow_tile_range_invalid_lights",
+        "local_shadow_filter_geometry_invalid_tiles"
+    )) {
+        Add-EqualityCheck -Checks $checks -Metrics $metrics -Column $column `
+            -Area "local filter" -Name "$column is zero" `
+            -Expected 0 -MissingStatus "fail"
+    }
+    Add-MaxCheck -Checks $checks -Metrics $metrics `
+        -Column "local_shadow_tile_range_max_tiles_per_light" `
+        -Area "local filter" -Name "per-light tile range stays shader-bounded" `
+        -Maximum 6 -MissingStatus "fail"
+    $invalidGeometryCoverageRows = @(
+        $rows | Where-Object {
+            (Get-Number -Row $_ -Name "local_shadow_filter_geometry_valid_tiles") -ne
+                (Get-Number -Row $_ -Name "local_shadow_assigned_tiles")
+        }
+    )
+    Add-Check -Checks $checks -Area "local filter" `
+        -Name "every assigned tile has valid projection geometry" `
+        -Status ($(if ($invalidGeometryCoverageRows.Count -eq 0) { "pass" } else { "fail" })) `
+        -Actual "invalidRows=$($invalidGeometryCoverageRows.Count)" -Expected "0"
+    foreach ($kind in @("point", "spot", "rect")) {
+        Add-EqualityCheck -Checks $checks -Metrics $metrics `
+            -Column "local_shadow_${kind}_pcss_blocker_samples" `
+            -Area "local filter" -Name "$kind blocker sample budget" `
+            -Expected $expectedLocalBlockerSamples[$Quality] -MissingStatus "fail"
+        Add-EqualityCheck -Checks $checks -Metrics $metrics `
+            -Column "local_shadow_${kind}_pcss_filter_samples" `
+            -Area "local filter" -Name "$kind filter sample budget" `
+            -Expected $expectedLocalFilterSamples[$Quality] -MissingStatus "fail"
+        Add-EqualityCheck -Checks $checks -Metrics $metrics `
+            -Column "local_shadow_${kind}_pcss_search_radius_texels" `
+            -Area "local filter" -Name "$kind blocker-search radius" `
+            -Expected $expectedLocalSearchRadius[$Quality] -MissingStatus "fail"
+        Add-EqualityCheck -Checks $checks -Metrics $metrics `
+            -Column "local_shadow_${kind}_pcss_max_penumbra_texels" `
+            -Area "local filter" -Name "$kind maximum penumbra radius" `
+            -Expected $expectedLocalMaxPenumbra[$Quality] -MissingStatus "fail"
+    }
     $rectLightCount = $metrics["local_shadow_rect_light_count"]
     $rectSamplePattern = $metrics["local_shadow_rect_sample_pattern"]
     if ($rectLightCount.present -and [double]$rectLightCount.max -gt 0) {

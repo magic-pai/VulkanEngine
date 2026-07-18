@@ -292,7 +292,50 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
     shadowRawDepthSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     shadowRawDepthSamplerLayoutBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
+    VkDescriptorSetLayoutBinding localShadowRawDepthSamplerLayoutBinding{};
+    localShadowRawDepthSamplerLayoutBinding.binding = 14;
+    localShadowRawDepthSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    localShadowRawDepthSamplerLayoutBinding.descriptorCount = 1;
+    localShadowRawDepthSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    localShadowRawDepthSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding ssrDepthPyramidSamplerLayoutBinding{};
+    ssrDepthPyramidSamplerLayoutBinding.binding = 15;
+    ssrDepthPyramidSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ssrDepthPyramidSamplerLayoutBinding.descriptorCount = 1;
+    ssrDepthPyramidSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ssrDepthPyramidSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding ssrSceneColorHistorySamplerLayoutBinding{};
+    ssrSceneColorHistorySamplerLayoutBinding.binding = 16;
+    ssrSceneColorHistorySamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ssrSceneColorHistorySamplerLayoutBinding.descriptorCount = 1;
+    ssrSceneColorHistorySamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ssrSceneColorHistorySamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding ssrResolvedSamplerLayoutBinding{};
+    ssrResolvedSamplerLayoutBinding.binding = 17;
+    ssrResolvedSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ssrResolvedSamplerLayoutBinding.descriptorCount = 1;
+    ssrResolvedSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ssrResolvedSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutBinding ssrHistoryMetadataSamplerLayoutBinding{};
+    ssrHistoryMetadataSamplerLayoutBinding.binding = 18;
+    ssrHistoryMetadataSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    ssrHistoryMetadataSamplerLayoutBinding.descriptorCount = 1;
+    ssrHistoryMetadataSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    ssrHistoryMetadataSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    const std::array<
+        VkDescriptorSetLayoutBinding,
+        kMaterialDescriptorCombinedImageSamplerCount
+    > bindings = {
         albedoSamplerLayoutBinding,
         colorMapSamplerLayoutBinding,
         cubemapSamplerLayoutBinding,
@@ -306,7 +349,12 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
         transmissionSamplerLayoutBinding,
         clearcoatRoughnessSamplerLayoutBinding,
         localShadowSamplerLayoutBinding,
-        shadowRawDepthSamplerLayoutBinding
+        shadowRawDepthSamplerLayoutBinding,
+        localShadowRawDepthSamplerLayoutBinding,
+        ssrDepthPyramidSamplerLayoutBinding,
+        ssrSceneColorHistorySamplerLayoutBinding,
+        ssrResolvedSamplerLayoutBinding,
+        ssrHistoryMetadataSamplerLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};
@@ -321,6 +369,118 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
             &m_DescriptorSetLayout
         ) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan material descriptor set layout");
+    }
+}
+
+VulkanHiZDescriptorSetLayout::VulkanHiZDescriptorSetLayout(
+    const VulkanDevice& device
+) : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanHiZDescriptorSetLayout::~VulkanHiZDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanHiZDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanHiZDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanHiZDescriptorSetLayout::CreateDescriptorSetLayout(
+    const VulkanDevice& device
+) {
+    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan Hi-Z descriptor set layout");
+    }
+}
+
+VulkanSsrReconstructionDescriptorSetLayout::
+VulkanSsrReconstructionDescriptorSetLayout(const VulkanDevice& device)
+    : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanSsrReconstructionDescriptorSetLayout::
+~VulkanSsrReconstructionDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanSsrReconstructionDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanSsrReconstructionDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanSsrReconstructionDescriptorSetLayout::CreateDescriptorSetLayout(
+    const VulkanDevice& device
+) {
+    std::array<VkDescriptorSetLayoutBinding, 16> bindings{};
+    for (u32 binding = 0; binding <= 10; ++binding) {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType =
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[binding].descriptorCount = 1;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    for (u32 binding = 11; binding <= 13; ++binding) {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        bindings[binding].descriptorCount = 1;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    bindings[14].binding = 14;
+    bindings[14].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[14].descriptorCount = 1;
+    bindings[14].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[15].binding = 15;
+    bindings[15].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[15].descriptorCount = 1;
+    bindings[15].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create Vulkan SSR reconstruction descriptor set layout"
+        );
     }
 }
 

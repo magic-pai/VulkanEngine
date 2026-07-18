@@ -208,7 +208,9 @@ public:
     SE_DISABLE_MOVE(VulkanSceneRenderTargets);
 
     VkImageView HdrSceneColorView(std::size_t index) const;
+    VkImageView HdrSceneColorAttachmentView(std::size_t index) const;
     VkImage HdrSceneColorImage(std::size_t index) const;
+    u32 HdrSceneColorMipLevels() const;
     VkImageView TemporalResolvedColorView(std::size_t index) const;
     VkImage TemporalResolvedColorImage(std::size_t index) const;
     VkImageView TemporalUpscaleOutputView(std::size_t index) const;
@@ -219,6 +221,14 @@ public:
     VkImage DlssTransparencyMaskImage(std::size_t index) const;
     VkImageView TemporalHistoryColorView(std::size_t index) const;
     VkImage TemporalHistoryColorImage(std::size_t index) const;
+    VkImageView SsrRawView(std::size_t index) const;
+    VkImage SsrRawImage(std::size_t index) const;
+    VkImageView SsrResolvedView(std::size_t index) const;
+    VkImage SsrResolvedImage(std::size_t index) const;
+    VkImageView SsrHistoryColorView(std::size_t index) const;
+    VkImage SsrHistoryColorImage(std::size_t index) const;
+    VkImageView SsrHistoryMetadataView(std::size_t index) const;
+    VkImage SsrHistoryMetadataImage(std::size_t index) const;
     VkImageView WeightedTranslucencyAccumView(std::size_t index) const;
     VkImageView WeightedTranslucencyRevealageView(std::size_t index) const;
     VkImage SceneDepthImage(std::size_t index) const;
@@ -236,6 +246,7 @@ public:
     VkFormat DlssBiasCurrentColorMaskFormat() const;
     VkFormat DlssTransparencyMaskFormat() const;
     VkFormat TemporalHistoryColorFormat() const;
+    VkFormat SsrReconstructionFormat() const;
     VkFormat WeightedTranslucencyAccumFormat() const;
     VkFormat WeightedTranslucencyRevealageFormat() const;
     VkFormat SceneDepthFormat() const;
@@ -258,6 +269,8 @@ public:
     void Release();
 
     static constexpr VkFormat kHdrSceneColorFormat =
+        VK_FORMAT_R16G16B16A16_SFLOAT;
+    static constexpr VkFormat kSsrReconstructionFormat =
         VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kDlssMaskFormat = VK_FORMAT_R8_UNORM;
     static constexpr VkFormat kWeightedTranslucencyAccumFormat =
@@ -284,7 +297,8 @@ private:
         VkImageUsageFlags usage,
         VkImageAspectFlags aspectFlags,
         std::vector<std::unique_ptr<VulkanImage>>& images,
-        const char* debugNamePrefix = nullptr
+        const char* debugNamePrefix = nullptr,
+        u32 mipLevels = 1u
     ) const;
     void CreateImageArrayForExtent(
         const VulkanDevice& device,
@@ -295,16 +309,22 @@ private:
         VkImageUsageFlags usage,
         VkImageAspectFlags aspectFlags,
         std::vector<std::unique_ptr<VulkanImage>>& images,
-        const char* debugNamePrefix = nullptr
+        const char* debugNamePrefix = nullptr,
+        u32 mipLevels = 1u
     ) const;
 
 private:
     std::vector<std::unique_ptr<VulkanImage>> m_HdrSceneColorImages;
+    std::vector<VkImageView> m_HdrSceneColorAttachmentViews;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalResolvedColorImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalUpscaleOutputImages;
     std::vector<std::unique_ptr<VulkanImage>> m_DlssBiasCurrentColorMaskImages;
     std::vector<std::unique_ptr<VulkanImage>> m_DlssTransparencyMaskImages;
     std::vector<std::unique_ptr<VulkanImage>> m_TemporalHistoryColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_SsrRawImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_SsrResolvedImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_SsrHistoryColorImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_SsrHistoryMetadataImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyAccumImages;
     std::vector<std::unique_ptr<VulkanImage>> m_WeightedTranslucencyRevealageImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SceneDepthImages;
@@ -314,8 +334,62 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialAuxImages;
+    VkDevice m_Device = VK_NULL_HANDLE;
     VkExtent2D m_DisplayExtent{};
     VkExtent2D m_Extent{};
+};
+
+inline constexpr u32 kSsrDepthPyramidMaxMipCount = 16;
+
+class VulkanDepthPyramid {
+public:
+    VulkanDepthPyramid(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanSwapchain& swapchain,
+        VkExtent2D extent
+    );
+    ~VulkanDepthPyramid();
+
+    SE_DISABLE_COPY(VulkanDepthPyramid);
+    SE_DISABLE_MOVE(VulkanDepthPyramid);
+
+    VkImage Image(std::size_t imageIndex) const;
+    VkImageView View(std::size_t imageIndex) const;
+    VkImageView MipView(std::size_t imageIndex, u32 mipIndex) const;
+    VkFormat Format() const;
+    VkExtent2D Extent() const;
+    VkExtent2D MipExtent(u32 mipIndex) const;
+    std::size_t Count() const;
+    u32 MipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanSwapchain& swapchain,
+        VkExtent2D extent
+    );
+    void Release();
+
+    static constexpr VkFormat kFormat = VK_FORMAT_R32_SFLOAT;
+
+private:
+    void CreateImages(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        std::size_t count,
+        VkExtent2D extent
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    std::vector<std::unique_ptr<VulkanImage>> m_Images;
+    std::vector<std::vector<VkImageView>> m_MipViews;
+    VkExtent2D m_Extent{};
+    u32 m_MipCount = 0;
 };
 
 inline constexpr u32 kBloomPyramidMipCount = 4;

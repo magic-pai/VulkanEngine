@@ -47,6 +47,22 @@ find_program(GLSLC_EXECUTABLE glslc
     REQUIRED
 )
 
+if(WIN32)
+    find_program(POWERSHELL_EXECUTABLE powershell REQUIRED)
+    find_program(SPIRV_DIS_EXECUTABLE spirv-dis
+        HINTS "$ENV{VULKAN_SDK}/Bin"
+        REQUIRED
+    )
+    find_program(SPIRV_AS_EXECUTABLE spirv-as
+        HINTS "$ENV{VULKAN_SDK}/Bin"
+        REQUIRED
+    )
+    find_program(SPIRV_VAL_EXECUTABLE spirv-val
+        HINTS "$ENV{VULKAN_SDK}/Bin"
+        REQUIRED
+    )
+endif()
+
 set(SHADER_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 
@@ -74,6 +90,11 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/auto_exposure_histogram.comp
     ${SHADER_SOURCE_DIR}/light_tile_cull.comp
     ${SHADER_SOURCE_DIR}/light_cluster_cull.comp
+      ${SHADER_SOURCE_DIR}/ssr_depth_pyramid.comp
+      ${SHADER_SOURCE_DIR}/ssr_trace.comp
+      ${SHADER_SOURCE_DIR}/ssr_temporal.comp
+      ${SHADER_SOURCE_DIR}/ssr_spatial.comp
+      ${SHADER_SOURCE_DIR}/ssr_diagnostics.comp
     ${SHADER_SOURCE_DIR}/reflection_probe_diffuse_irradiance.comp
     ${SHADER_SOURCE_DIR}/reflection_probe_prefilter.comp
     ${SHADER_SOURCE_DIR}/depth_prefill_3d.vert
@@ -82,17 +103,42 @@ set(SHADER_SOURCES
 )
 
 set(SHADER_OUTPUTS)
+set(LOCAL_SHADOW_CONSUMER_SHADERS
+    forward_3d.frag
+    deferred_lighting.frag
+    weighted_translucency_3d.frag
+)
 foreach(SHADER_SOURCE ${SHADER_SOURCES})
     get_filename_component(SHADER_FILE_NAME ${SHADER_SOURCE} NAME)
     set(SHADER_OUTPUT ${SHADER_OUTPUT_DIR}/${SHADER_FILE_NAME}.spv)
 
-    add_custom_command(
-        OUTPUT ${SHADER_OUTPUT}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
-        COMMAND ${GLSLC_EXECUTABLE} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
-        DEPENDS ${SHADER_SOURCE}
-        VERBATIM
-    )
+    if(WIN32 AND SHADER_FILE_NAME IN_LIST LOCAL_SHADOW_CONSUMER_SHADERS)
+        add_custom_command(
+            OUTPUT ${SHADER_OUTPUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+            COMMAND ${POWERSHELL_EXECUTABLE}
+                -NoProfile
+                -ExecutionPolicy Bypass
+                -File ${CMAKE_CURRENT_SOURCE_DIR}/scripts/Set-SpirvShadowFunctionControl.ps1
+                -InputPath ${SHADER_OUTPUT}
+                -SpirvDisPath ${SPIRV_DIS_EXECUTABLE}
+                -SpirvAsPath ${SPIRV_AS_EXECUTABLE}
+                -SpirvValPath ${SPIRV_VAL_EXECUTABLE}
+            DEPENDS
+                ${SHADER_SOURCE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/Set-SpirvShadowFunctionControl.ps1
+            VERBATIM
+        )
+    else()
+        add_custom_command(
+            OUTPUT ${SHADER_OUTPUT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+            COMMAND ${GLSLC_EXECUTABLE} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+            DEPENDS ${SHADER_SOURCE}
+            VERBATIM
+        )
+    endif()
 
     list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
 endforeach()

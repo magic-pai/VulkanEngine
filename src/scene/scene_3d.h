@@ -28,6 +28,7 @@ struct PointLight3D {
     f32 radius = 1.0f;
     glm::vec3 color{ 1.0f };
     f32 intensity = 1.0f;
+    f32 sourceRadius = 0.05f;
     bool enabled = true;
 };
 
@@ -40,6 +41,7 @@ struct SpotLight3D {
     f32 intensity = 1.0f;
     f32 innerConeDegrees = 18.0f;
     f32 outerConeDegrees = 28.0f;
+    f32 sourceRadius = 0.05f;
     bool enabled = true;
 };
 
@@ -101,7 +103,8 @@ public:
         glm::vec3 position,
         f32 radius,
         glm::vec3 color,
-        f32 intensity
+        f32 intensity,
+        f32 sourceRadius = 0.05f
     );
     SpotLight3D& CreateSpotLight(
         std::string name,
@@ -111,7 +114,8 @@ public:
         glm::vec3 color,
         f32 intensity,
         f32 innerConeDegrees,
-        f32 outerConeDegrees
+        f32 outerConeDegrees,
+        f32 sourceRadius = 0.05f
     );
     RectLight3D& CreateRectLight(
         std::string name,

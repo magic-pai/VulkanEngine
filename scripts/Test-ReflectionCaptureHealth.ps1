@@ -303,6 +303,12 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_capture_culled_count",
         "reflection_probe_captured_scene_capture_face_orientation_mask",
         "reflection_probe_captured_scene_mip_generation_count",
+        "reflection_probe_captured_scene_source_mip_generation_count",
+        "reflection_probe_captured_scene_source_mip_count",
+        "reflection_probe_captured_scene_source_mip_memory_bytes",
+        "reflection_probe_captured_scene_source_mip_chain_ready",
+        "reflection_probe_captured_scene_ggx_prefilter_source_image_separated",
+        "reflection_probe_captured_scene_ggx_prefilter_pdf_lod_enabled",
         "reflection_probe_captured_scene_ggx_prefilter_dispatch_count",
         "reflection_probe_captured_scene_ggx_prefilter_sample_count",
         "reflection_probe_captured_scene_ggx_prefilter_quality",
@@ -483,6 +489,22 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "six faces reach a completed mip chain" `
         -Passed ($metrics["reflection_probe_captured_scene_mip_chain_ready"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_mip_chain_ready"].max -Expected 1
+    $expectedSourceMipMemoryBytes = 4194288
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance builds a complete source mip chain" `
+        -Passed (
+            $metrics["reflection_probe_captured_scene_source_mip_generation_count"].max -eq 1 -and
+            $metrics["reflection_probe_captured_scene_source_mip_count"].max -eq 9 -and
+            $metrics["reflection_probe_captured_scene_source_mip_chain_ready"].max -eq 1
+        ) `
+        -Actual "builds/mips/ready=$($metrics['reflection_probe_captured_scene_source_mip_generation_count'].max)/$($metrics['reflection_probe_captured_scene_source_mip_count'].max)/$($metrics['reflection_probe_captured_scene_source_mip_chain_ready'].max)" `
+        -Expected "1/9/1"
+    Add-BooleanCheck -Checks $checks -Area "budget" -Name "captured radiance source mip memory is bounded" `
+        -Passed ($metrics["reflection_probe_captured_scene_source_mip_memory_bytes"].max -eq $expectedSourceMipMemoryBytes) `
+        -Actual $metrics["reflection_probe_captured_scene_source_mip_memory_bytes"].max `
+        -Expected $expectedSourceMipMemoryBytes
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GGX output never aliases its source image" `
+        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_source_image_separated"].max -eq 1) `
+        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_source_image_separated"].max -Expected 1
     $expectedCapturedFilterQuality = if ($Mode -eq "filter-off") {
         0
     } elseif ($Mode -eq "filter-high") {
@@ -499,6 +521,8 @@ function New-ReflectionCaptureReport {
     }
     $expectedCapturedFilterReady = if ($Mode -eq "filter-off") { 0 } else { 1 }
     $expectedCapturedFilterFallback = if ($Mode -eq "filter-off") { 1 } else { 0 }
+    $expectedPdfLodEnabled = if ($Mode -eq "filter-off") { 0 } else { 1 }
+    $expectedGgxDispatches = if ($Mode -eq "filter-off") { 0 } else { 8 }
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance filter quality resolves" `
         -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -eq $expectedCapturedFilterQuality) `
         -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -Expected $expectedCapturedFilterQuality
@@ -512,9 +536,13 @@ function New-ReflectionCaptureReport {
         ) `
         -Actual "ready/fallback=$($metrics['reflection_probe_captured_scene_ggx_prefilter_ready'].max)/$($metrics['reflection_probe_captured_scene_ggx_prefilter_fallback_active'].max)" `
         -Expected "$expectedCapturedFilterReady/$expectedCapturedFilterFallback"
-    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GPU GGX prefilter records mip dispatches" `
-        -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_dispatch_count"].max -gt 0) `
-        -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_dispatch_count"].max -Expected "> 0"
+    Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GGX PDF LOD and dispatch path resolve together" `
+        -Passed (
+            $metrics["reflection_probe_captured_scene_ggx_prefilter_pdf_lod_enabled"].max -eq $expectedPdfLodEnabled -and
+            $metrics["reflection_probe_captured_scene_ggx_prefilter_dispatch_count"].max -eq $expectedGgxDispatches
+        ) `
+        -Actual "pdf/dispatches=$($metrics['reflection_probe_captured_scene_ggx_prefilter_pdf_lod_enabled'].max)/$($metrics['reflection_probe_captured_scene_ggx_prefilter_dispatch_count'].max)" `
+        -Expected "$expectedPdfLodEnabled/$expectedGgxDispatches"
     Add-BooleanCheck -Checks $checks -Area "diffuse" -Name "GPU diffuse irradiance completes" `
         -Passed ($metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_diffuse_irradiance_ready"].max -Expected 1

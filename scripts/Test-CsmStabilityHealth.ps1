@@ -393,6 +393,9 @@ function New-CsmStabilityReport {
         "directional_shadow_pcss_search_radius_texels",
         "directional_shadow_pcss_max_penumbra_texels",
         "directional_shadow_pcss_light_angular_radius_radians",
+        "directional_shadow_pcss_grazing_fade_enabled",
+        "directional_shadow_pcss_grazing_fade_start",
+        "directional_shadow_pcss_grazing_fade_end",
         "directional_shadow_filter_mode",
         "directional_shadow_filter_samples",
         "directional_shadow_filter_kernel_width",
@@ -565,6 +568,15 @@ function New-CsmStabilityReport {
         Add-MinCheck -Checks $checks -Metrics $metrics `
             -Column "directional_shadow_pcss_light_angular_radius_radians" -Area "pcss" `
             -Name "scene directional light exposes a physical angular radius" -Minimum 0.0001
+        Add-MinCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_grazing_fade_enabled" -Area "pcss" `
+            -Name "PCSS grazing receiver fallback is enabled" -Minimum 1
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_grazing_fade_start" -Area "pcss" `
+            -Name "PCSS grazing fallback start resolves" -Expected 0.25 -Tolerance 0.001
+        Add-ApproxCheck -Checks $checks -Metrics $metrics `
+            -Column "directional_shadow_pcss_grazing_fade_end" -Area "pcss" `
+            -Name "PCSS grazing fallback end resolves" -Expected 0.80 -Tolerance 0.001
         foreach ($cascadeIndex in 0..($expectedCascades - 1)) {
             Add-MinCheck -Checks $checks -Metrics $metrics `
                 -Column "shadow_cascade_light_depth_span$cascadeIndex" -Area "pcss" `
@@ -814,6 +826,9 @@ $managedKeys = @(
     "SE_DIRECTIONAL_PCSS_FILTER_SAMPLES",
     "SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS",
     "SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS",
+    "SE_DIRECTIONAL_PCSS_GRAZING_FADE_START",
+    "SE_DIRECTIONAL_PCSS_GRAZING_FADE_END",
+    "SE_DIRECTIONAL_PCSS_GRAZING_FADE_OFF",
     "SE_FORWARD3D_AA_MODE",
     "SE_RENDER_VIEW",
     "SE_GLOBAL_IBL_QUALITY",

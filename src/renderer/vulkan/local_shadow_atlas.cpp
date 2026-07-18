@@ -52,6 +52,10 @@ VkSampler VulkanLocalShadowAtlas::Sampler() const {
     return m_Sampler;
 }
 
+VkSampler VulkanLocalShadowAtlas::ComparisonSampler() const {
+    return m_ComparisonSampler;
+}
+
 VkImageLayout VulkanLocalShadowAtlas::Layout() const {
     return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 }
@@ -119,6 +123,10 @@ void VulkanLocalShadowAtlas::Recreate(
 }
 
 void VulkanLocalShadowAtlas::Release() {
+    if (m_ComparisonSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_Device, m_ComparisonSampler, nullptr);
+        m_ComparisonSampler = VK_NULL_HANDLE;
+    }
     if (m_Sampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_Device, m_Sampler, nullptr);
         m_Sampler = VK_NULL_HANDLE;
@@ -166,6 +174,21 @@ void VulkanLocalShadowAtlas::CreateSampler(
 
     if (vkCreateSampler(device.Handle(), &samplerInfo, nullptr, &m_Sampler) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan local shadow atlas sampler");
+    }
+
+    samplerInfo.compareEnable = VK_TRUE;
+    samplerInfo.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    if (vkCreateSampler(
+            device.Handle(),
+            &samplerInfo,
+            nullptr,
+            &m_ComparisonSampler
+        ) != VK_SUCCESS) {
+        vkDestroySampler(device.Handle(), m_Sampler, nullptr);
+        m_Sampler = VK_NULL_HANDLE;
+        throw std::runtime_error(
+            "Failed to create Vulkan local shadow atlas comparison sampler"
+        );
     }
 }
 

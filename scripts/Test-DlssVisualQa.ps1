@@ -3286,9 +3286,9 @@ function Assert-DlssJitterConsistency {
         return
     }
 
-    if ([Math]::Abs($dlssJitterX - $temporalJitterX) -gt $epsilon -or
-        [Math]::Abs($dlssJitterY - $temporalJitterY) -gt $epsilon) {
-        throw "$Name DLSS jitter does not match applied projection jitter: temporal=$temporalJitterX/$temporalJitterY dlss=$dlssJitterX/$dlssJitterY"
+    if ([Math]::Abs($dlssJitterX + $temporalJitterX) -gt $epsilon -or
+        [Math]::Abs($dlssJitterY + $temporalJitterY) -gt $epsilon) {
+        throw "$Name DLSS jitter does not match the inverse of applied projection jitter: temporal=$temporalJitterX/$temporalJitterY dlss=$dlssJitterX/$dlssJitterY"
     }
 }
 

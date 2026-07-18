@@ -6,6 +6,7 @@
 #include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
@@ -942,6 +943,176 @@ void TransitionColorImage(
     );
 }
 
+void GenerateColorMipmaps(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    VkExtent2D extent,
+    VkFormat format,
+    u32 mipLevels,
+    const VulkanPhysicalDevice& physicalDevice
+) {
+    if (mipLevels <= 1u) {
+        return;
+    }
+    SE_ASSERT(
+        physicalDevice.SupportsLinearBlit(format),
+        "HDR scene color mip chain requires linear blit support"
+    );
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+
+    if (mipLevels > 1u) {
+        barrier.subresourceRange.baseMipLevel = 1u;
+        barrier.subresourceRange.levelCount = mipLevels - 1u;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &barrier
+        );
+    }
+
+    i32 mipWidth = static_cast<i32>(extent.width);
+    i32 mipHeight = static_cast<i32>(extent.height);
+    for (u32 mipLevel = 1u; mipLevel < mipLevels; ++mipLevel) {
+        if (mipLevel > 1u) {
+            barrier.subresourceRange.baseMipLevel = mipLevel - 1u;
+            barrier.subresourceRange.levelCount = 1u;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                1,
+                &barrier
+            );
+        }
+
+        VkImageBlit blit{};
+        blit.srcOffsets[0] = { 0, 0, 0 };
+        blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = mipLevel - 1u;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.dstOffsets[0] = { 0, 0, 0 };
+        blit.dstOffsets[1] = {
+            mipWidth > 1 ? mipWidth / 2 : 1,
+            mipHeight > 1 ? mipHeight / 2 : 1,
+            1
+        };
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = mipLevel;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+
+        vkCmdBlitImage(
+            commandBuffer,
+            image,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &blit,
+            VK_FILTER_LINEAR
+        );
+
+        barrier.subresourceRange.baseMipLevel = mipLevel - 1u;
+        barrier.subresourceRange.levelCount = 1u;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &barrier
+        );
+
+        if (mipWidth > 1) {
+            mipWidth /= 2;
+        }
+        if (mipHeight > 1) {
+            mipHeight /= 2;
+        }
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1u;
+    barrier.subresourceRange.levelCount = 1u;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1,
+        &barrier
+    );
+}
+
 void PrepareDlssMaskInput(
     VkCommandBuffer commandBuffer,
     VkImage image,
@@ -1009,6 +1180,168 @@ void PrepareTemporalHistoryColorForSampling(
             VK_ACCESS_SHADER_READ_BIT,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        );
+    }
+}
+
+void ClearSsrReconstructionImages(
+    VkCommandBuffer commandBuffer,
+    const VulkanSceneRenderTargets& renderTargets,
+    bool initialized
+) {
+    const VkClearColorValue clearValue{{ 0.0f, 0.0f, 0.0f, 0.0f }};
+    const VkImageSubresourceRange range{
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0,
+        1,
+        0,
+        1
+    };
+    auto clearImage = [&](VkImage image) {
+        TransitionColorImage(
+            commandBuffer,
+            image,
+            initialized
+                ? VK_IMAGE_LAYOUT_GENERAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            initialized ? VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT : 0,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            initialized ? VK_PIPELINE_STAGE_ALL_COMMANDS_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT
+        );
+        vkCmdClearColorImage(
+            commandBuffer,
+            image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            &clearValue,
+            1,
+            &range
+        );
+        TransitionColorImage(
+            commandBuffer,
+            image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        );
+    };
+
+    for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
+        clearImage(renderTargets.SsrRawImage(index));
+        clearImage(renderTargets.SsrResolvedImage(index));
+        clearImage(renderTargets.SsrHistoryColorImage(index));
+        clearImage(renderTargets.SsrHistoryMetadataImage(index));
+    }
+}
+
+void BarrierSsrComputeImage(
+    VkCommandBuffer commandBuffer,
+    VkImage image,
+    VkAccessFlags sourceAccess,
+    VkAccessFlags destinationAccess,
+    VkPipelineStageFlags sourceStage,
+    VkPipelineStageFlags destinationStage
+) {
+    TransitionColorImage(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        sourceAccess,
+        destinationAccess,
+        sourceStage,
+        destinationStage
+    );
+}
+
+void CopySsrHistoryToOtherImages(
+    VkCommandBuffer commandBuffer,
+    const VulkanSceneRenderTargets& renderTargets,
+    std::size_t sourceIndex
+) {
+    if (renderTargets.Count() <= 1 || sourceIndex >= renderTargets.Count()) {
+        return;
+    }
+
+    const VkExtent2D extent = renderTargets.Extent();
+    VkImageCopy copy{};
+    copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.srcSubresource.layerCount = 1;
+    copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.dstSubresource.layerCount = 1;
+    copy.extent = { extent.width, extent.height, 1 };
+    for (std::size_t destinationIndex = 0;
+         destinationIndex < renderTargets.Count();
+         ++destinationIndex) {
+        if (destinationIndex == sourceIndex) {
+            continue;
+        }
+        auto copyImage = [&](VkImage source, VkImage destination) {
+            TransitionColorImage(
+                commandBuffer,
+                source,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT
+            );
+            TransitionColorImage(
+                commandBuffer,
+                destination,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT
+            );
+            vkCmdCopyImage(
+                commandBuffer,
+                source,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                destination,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &copy
+            );
+            TransitionColorImage(
+                commandBuffer,
+                destination,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+            TransitionColorImage(
+                commandBuffer,
+                source,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            );
+        };
+        copyImage(
+            renderTargets.SsrHistoryColorImage(sourceIndex),
+            renderTargets.SsrHistoryColorImage(destinationIndex)
+        );
+        copyImage(
+            renderTargets.SsrHistoryMetadataImage(sourceIndex),
+            renderTargets.SsrHistoryMetadataImage(destinationIndex)
+        );
+        copyImage(
+            renderTargets.SsrResolvedImage(sourceIndex),
+            renderTargets.SsrResolvedImage(destinationIndex)
         );
     }
 }
@@ -1321,7 +1654,7 @@ void RecordTemporalUpscalerEvaluate(
             commandBuffer,
             TemporalUpscalerVulkanImageResource{
                 renderTargets.HdrSceneColorImage(imageIndex),
-                renderTargets.HdrSceneColorView(imageIndex),
+                renderTargets.HdrSceneColorAttachmentView(imageIndex),
                 renderTargets.HdrSceneColorFormat(),
                 renderExtent,
                 VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1982,6 +2315,7 @@ void VulkanCommandBuffer::Record(
     const VulkanRenderPass* depthLoadRenderPass,
     const VulkanFramebuffer* depthLoadFramebuffer,
     const VulkanSwapchain& swapchain,
+    const VulkanPhysicalDevice& physicalDevice,
     VulkanImGuiLayer* imguiLayer,
     const VulkanShadowRenderPass* shadowRenderPass,
     const VulkanGraphicsPipeline* shadowGraphicsPipeline,
@@ -2095,7 +2429,18 @@ void VulkanCommandBuffer::Record(
     RendererBindStats* bindStats,
     RenderFrameGraphPlan* frameGraph,
     const VulkanComputePipeline* hizBuildPipeline,
-    const VulkanSceneRenderTargets* hizTargets
+    const VulkanHiZDescriptorSets* hizDescriptorSets,
+    const VulkanDepthPyramid* hizDepthPyramid,
+    const VulkanSceneRenderTargets* hizSourceTargets,
+    const VulkanComputePipeline* ssrTracePipeline,
+    const VulkanComputePipeline* ssrTemporalPipeline,
+    const VulkanComputePipeline* ssrSpatialPipeline,
+    const VulkanComputePipeline* ssrDiagnosticsPipeline,
+    const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets,
+    const VulkanSceneRenderTargets* ssrTargets,
+    bool ssrReconstructionEnabled,
+    bool ssrImagesInitialized,
+    bool ssrHistoryReset
 ) const {
     const std::vector<VkFramebuffer>& framebuffers = framebuffer.Handles();
     const VkExtent2D extent = swapchain.Extent();
@@ -2679,20 +3024,217 @@ void VulkanCommandBuffer::Record(
         vkCmdEndRenderPass(commandBuffer);
     }
 
-    // Hi-Z depth pyramid build
-    if (hizBuildPipeline && hizTargets) {
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, hizBuildPipeline->Handle());
-        VkExtent2D ext = hizTargets->Extent();
-        for (u32 m = 0; m < 4; ++m) {
-            // We'd bind per-mip descriptor sets here. For v1, skip (no descriptor sets wired yet).
-            u32 mw = std::max(ext.width >> (m+1), 1u);
-            u32 mh = std::max(ext.height >> (m+1), 1u);
-            vkCmdDispatch(commandBuffer, (mw+15)/16, (mh+15)/16, 1);
-            VkMemoryBarrier mb{}; mb.sType=VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            mb.srcAccessMask=VK_ACCESS_SHADER_WRITE_BIT; mb.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,1,&mb,0,nullptr,0,nullptr);
+    // SSR trace can sample completed scene-color history, so establish its
+    // first-frame layout before the compute chain, not just before Deferred.
+    if (deferredLightingPipeline != nullptr &&
+        sceneRenderTargets != nullptr &&
+        !temporalHistoryColorInitialized) {
+        PrepareTemporalHistoryColorForSampling(
+            commandBuffer,
+            *sceneRenderTargets
+        );
+        temporalHistoryColorInitialized = true;
+    }
+
+    bool hizDepthPyramidBuilt = false;
+    if (hizBuildPipeline != nullptr &&
+        hizDescriptorSets != nullptr &&
+        hizDepthPyramid != nullptr &&
+        hizSourceTargets != nullptr &&
+        hizDepthPyramid->MipCount() > 0) {
+        VkImageMemoryBarrier sourceDepthBarrier{};
+        sourceDepthBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        sourceDepthBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        sourceDepthBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        sourceDepthBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        sourceDepthBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        sourceDepthBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        sourceDepthBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        sourceDepthBarrier.image = hizSourceTargets->SceneDepthImage(imageIndex);
+        sourceDepthBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        sourceDepthBarrier.subresourceRange.baseMipLevel = 0;
+        sourceDepthBarrier.subresourceRange.levelCount = 1;
+        sourceDepthBarrier.subresourceRange.baseArrayLayer = 0;
+        sourceDepthBarrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &sourceDepthBarrier
+        );
+
+        VkImageMemoryBarrier initializeBarrier{};
+        initializeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        initializeBarrier.srcAccessMask = 0;
+        initializeBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        initializeBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        initializeBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        initializeBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        initializeBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        initializeBarrier.image = hizDepthPyramid->Image(imageIndex);
+        initializeBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        initializeBarrier.subresourceRange.baseMipLevel = 0;
+        initializeBarrier.subresourceRange.levelCount = hizDepthPyramid->MipCount();
+        initializeBarrier.subresourceRange.baseArrayLayer = 0;
+        initializeBarrier.subresourceRange.layerCount = 1;
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1,
+            &initializeBarrier
+        );
+
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            hizBuildPipeline->Handle()
+        );
+        for (u32 mipIndex = 0; mipIndex < hizDepthPyramid->MipCount(); ++mipIndex) {
+            const VkDescriptorSet descriptorSet =
+                hizDescriptorSets->Handle(imageIndex, mipIndex);
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                hizBuildPipeline->Layout(),
+                0,
+                1,
+                &descriptorSet,
+                0,
+                nullptr
+            );
+            const VkExtent2D mipExtent = hizDepthPyramid->MipExtent(mipIndex);
+            vkCmdDispatch(
+                commandBuffer,
+                (mipExtent.width + 7u) / 8u,
+                (mipExtent.height + 7u) / 8u,
+                1
+            );
+            if (bindStats != nullptr) {
+                ++bindStats->ssrHiZBuildDispatches;
+                ++bindStats->ssrHiZBuildDescriptorBinds;
+            }
+
+            VkImageMemoryBarrier mipBarrier{};
+            mipBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            mipBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            mipBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            mipBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            mipBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            mipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            mipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            mipBarrier.image = hizDepthPyramid->Image(imageIndex);
+            mipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            mipBarrier.subresourceRange.baseMipLevel = mipIndex;
+            mipBarrier.subresourceRange.levelCount = 1;
+            mipBarrier.subresourceRange.baseArrayLayer = 0;
+            mipBarrier.subresourceRange.layerCount = 1;
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                1,
+                &mipBarrier
+            );
         }
+        hizDepthPyramidBuilt = true;
+    }
+
+    if (ssrTargets != nullptr &&
+        (!ssrImagesInitialized || ssrHistoryReset)) {
+        ClearSsrReconstructionImages(
+            commandBuffer,
+            *ssrTargets,
+            ssrImagesInitialized
+        );
+    }
+
+    const bool ssrReconstructionReady =
+        ssrReconstructionEnabled &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        ssrTracePipeline != nullptr &&
+        ssrTemporalPipeline != nullptr &&
+        ssrSpatialPipeline != nullptr &&
+        ssrDescriptorSets != nullptr &&
+        ssrTargets != nullptr &&
+        ssrDescriptorSets->Count() == ssrTargets->Count() &&
+        ssrTargets->Count() > 1u;
+    if (ssrReconstructionReady) {
+        const VkExtent2D ssrExtent = ssrTargets->Extent();
+        const u32 groupCountX = (ssrExtent.width + 7u) / 8u;
+        const u32 groupCountY = (ssrExtent.height + 7u) / 8u;
+        const VkDescriptorSet frameDescriptorSet =
+            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        const VkDescriptorSet reconstructionDescriptorSet =
+            ssrDescriptorSets->Handle(imageIndex);
+
+        auto bindSsrPipeline = [&](const VulkanComputePipeline& pipeline) {
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Handle()
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Layout(),
+                0,
+                1,
+                &frameDescriptorSet,
+                0,
+                nullptr
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Layout(),
+                1,
+                1,
+                &reconstructionDescriptorSet,
+                0,
+                nullptr
+            );
+        };
+
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrRawImage(imageIndex),
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+        bindSsrPipeline(*ssrTracePipeline);
+        vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+        if (bindStats != nullptr) {
+            ++bindStats->ssrReconstructionTraceDispatches;
+        }
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrRawImage(imageIndex),
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+
     }
 
     if (lightTileCullComputePipeline != nullptr &&
@@ -2807,6 +3349,13 @@ void VulkanCommandBuffer::Record(
         }
     }
 
+    if (deferredLightingPipeline != nullptr &&
+        sceneRenderTargets != nullptr &&
+        !temporalHistoryColorInitialized) {
+        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
+        temporalHistoryColorInitialized = true;
+    }
+
     bool forwardResidualDrawnInHdr = false;
     if (hdrRenderPass != nullptr && hdrFramebuffer != nullptr) {
         std::array<VkClearValue, 2> hdrClearValues{};
@@ -2887,6 +3436,9 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->deferredLightingDraws;
                 ++bindStats->deferredLightingFrameBinds;
                 ++bindStats->deferredLightingGBufferBinds;
+                if (hizDepthPyramidBuilt) {
+                    ++bindStats->ssrHiZConsumerDraws;
+                }
                 if (deferredPbrDebugView > 0) {
                     ++bindStats->deferredPbrDebugDraws;
                     ++bindStats->deferredPbrDebugFrameBinds;
@@ -3056,6 +3608,179 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    // SSR radiance is resolved after Deferred has written the current HDR
+    // scene color. The resolved image is consumed by Deferred on the next
+    // frame, avoiding a pre-lighting sample of stale scene color history.
+    const bool ssrPostReconstructionReady =
+        ssrReconstructionEnabled &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        ssrTemporalPipeline != nullptr &&
+        ssrSpatialPipeline != nullptr &&
+        ssrDescriptorSets != nullptr &&
+        ssrTargets != nullptr &&
+        ssrDescriptorSets->Count() == ssrTargets->Count() &&
+        ssrTargets->Count() > 1u &&
+        hdrRenderPass != nullptr &&
+        hdrFramebuffer != nullptr;
+    if (ssrPostReconstructionReady) {
+        const VkExtent2D ssrExtent = ssrTargets->Extent();
+        const u32 groupCountX = (ssrExtent.width + 7u) / 8u;
+        const u32 groupCountY = (ssrExtent.height + 7u) / 8u;
+        const VkDescriptorSet frameDescriptorSet =
+            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        const VkDescriptorSet reconstructionDescriptorSet =
+            ssrDescriptorSets->Handle(imageIndex);
+
+        TransitionColorImage(
+            commandBuffer,
+            ssrTargets->HdrSceneColorImage(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+        if (ssrTargets->HdrSceneColorMipLevels() > 1u) {
+            GenerateColorMipmaps(
+                commandBuffer,
+                ssrTargets->HdrSceneColorImage(imageIndex),
+                ssrTargets->Extent(),
+                ssrTargets->HdrSceneColorFormat(),
+                ssrTargets->HdrSceneColorMipLevels(),
+                physicalDevice
+            );
+        }
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrHistoryColorImage(imageIndex),
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrHistoryMetadataImage(imageIndex),
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+
+        auto bindSsrPostPipeline = [&](const VulkanComputePipeline& pipeline) {
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Handle()
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Layout(),
+                0,
+                1,
+                &frameDescriptorSet,
+                0,
+                nullptr
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                pipeline.Layout(),
+                1,
+                1,
+                &reconstructionDescriptorSet,
+                0,
+                nullptr
+            );
+        };
+
+        bindSsrPostPipeline(*ssrTemporalPipeline);
+        vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+        if (bindStats != nullptr) {
+            ++bindStats->ssrReconstructionTemporalDispatches;
+        }
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrHistoryColorImage(imageIndex),
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrHistoryMetadataImage(imageIndex),
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrResolvedImage(imageIndex),
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+
+        bindSsrPostPipeline(*ssrSpatialPipeline);
+        vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+        if (bindStats != nullptr) {
+            ++bindStats->ssrReconstructionSpatialDispatches;
+        }
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ssrTargets->SsrResolvedImage(imageIndex),
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            ssrDiagnosticsPipeline != nullptr
+                ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        );
+#if !defined(NDEBUG)
+        if (ssrDiagnosticsPipeline != nullptr) {
+            VkMemoryBarrier diagnosticsBarrier{};
+            diagnosticsBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            diagnosticsBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            diagnosticsBarrier.dstAccessMask =
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                1,
+                &diagnosticsBarrier,
+                0,
+                nullptr,
+                0,
+                nullptr
+            );
+            bindSsrPostPipeline(*ssrDiagnosticsPipeline);
+            vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+        }
+#else
+        (void)ssrDiagnosticsPipeline;
+#endif
+        CopySsrHistoryToOtherImages(
+            commandBuffer,
+            *ssrTargets,
+            imageIndex
+        );
+        if (bindStats != nullptr) {
+            bindStats->ssrReconstructionHistoryCopies +=
+                static_cast<u32>(ssrTargets->Count() > 0
+                    ? ssrTargets->Count() - 1u
+                    : 0u);
+        }
     }
 
     if (recordAutoExposureCompute &&
@@ -3310,12 +4035,6 @@ void VulkanCommandBuffer::Record(
             *bloomDownsampleFramebuffer,
             imageIndex
         );
-    }
-
-    if (useHdrCompositeAsMain &&
-        sceneRenderTargets != nullptr &&
-        !temporalHistoryColorInitialized) {
-        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
     }
 
     std::array<VkClearValue, 2> clearValues{};

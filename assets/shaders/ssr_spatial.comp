@@ -1,0 +1,252 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform FrameData {
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+    mat4 lightViewProj;
+    vec4 directionalLight;
+    vec4 ambientLight;
+    vec4 shadowControls;
+    vec4 shadowFiltering;
+    vec4 contactShadowControls;
+    vec4 contactShadowStabilityControls;
+    vec4 ssaoControls;
+    vec4 ssrControls;
+    vec4 reflectionProbeControls;
+    vec4 localReflectionProbePositionRadius;
+    vec4 localReflectionProbeControls;
+    vec4 localReflectionProbeColor;
+    vec4 localReflectionProbeBoxExtentsProjection;
+    vec4 reflectionProbePositionRadius[4];
+    vec4 reflectionProbeControlsArray[4];
+    vec4 reflectionProbeColorArray[4];
+    vec4 reflectionProbeBoxExtentsProjectionArray[4];
+    vec4 reflectionProbeBlendControls;
+    vec4 heightFogControls;
+    vec4 heightFogColor;
+    vec4 postProcessControls;
+    vec4 colorGradingControls;
+    vec4 toneMappingControls;
+    vec4 probeGridOriginSpacing;
+    vec4 probeGridSizeBlend;
+    vec4 autoExposureControls;
+    vec4 sharpeningControls;
+    vec4 colorGradingLutControls;
+    vec4 debugControls;
+    vec4 reflectionProbeDiffuseLobes[24];
+    mat4 previousView;
+    mat4 previousProj;
+    vec4 temporalJitter;
+    vec4 temporalControls;
+    vec4 temporalResolveControls;
+    vec4 temporalRejectionControls;
+    vec4 environmentControls;
+    vec4 reflectionProbeMipControls[4];
+} frame;
+
+layout(set = 1, binding = 0) uniform sampler2D sceneDepth;
+layout(set = 1, binding = 1) uniform sampler2D normalRoughness;
+layout(set = 1, binding = 2) uniform sampler2D albedoBuffer;
+layout(set = 1, binding = 3) uniform sampler2D materialBuffer;
+layout(set = 1, binding = 4) uniform sampler2D emissiveBuffer;
+layout(set = 1, binding = 5) uniform sampler2D velocityBuffer;
+layout(set = 1, binding = 6) uniform sampler2D depthPyramid;
+layout(set = 1, binding = 7) uniform sampler2D sceneColorHistory;
+layout(set = 1, binding = 8) uniform sampler2D rawInput;
+layout(set = 1, binding = 9) uniform sampler2D historyColorInput;
+layout(set = 1, binding = 10) uniform sampler2D historyMetadataInput;
+layout(rgba16f, set = 1, binding = 11) uniform image2D rawOutput;
+layout(rgba16f, set = 1, binding = 12) uniform image2D historyColorOutput;
+layout(rgba16f, set = 1, binding = 13) uniform image2D historyMetadataOutput;
+layout(set = 1, binding = 14) uniform sampler2D currentHistoryColorInput;
+layout(rgba16f, set = 1, binding = 15) uniform image2D resolvedOutput;
+
+bool SpatialVarianceClampEnabled() {
+    float encoded = floor(abs(frame.ssrControls.w) / 8192.0);
+    return mod(encoded, 2.0) > 0.5;
+}
+
+bool ProbeFallbackBlendEnabled() {
+    float encoded = floor(abs(frame.ssrControls.w) / 16384.0);
+    return mod(encoded, 2.0) > 0.5;
+}
+
+float ProbeFallbackBlendWeight(float confidence, float roughness) {
+    float resolvedConfidence = clamp(confidence, 0.0, 1.0);
+    if (!ProbeFallbackBlendEnabled()) {
+        return resolvedConfidence;
+    }
+
+    float confidenceStability =
+        resolvedConfidence * mix(
+            0.65,
+            1.0,
+            smoothstep(0.08, 0.78, resolvedConfidence)
+        );
+    float roughnessReliability =
+        1.0 - smoothstep(0.38, 0.88, clamp(roughness, 0.0, 1.0));
+    float roughnessCeiling = mix(0.35, 1.0, roughnessReliability);
+    return clamp(confidenceStability * roughnessCeiling, 0.0, 1.0);
+}
+
+vec3 RgbToYCoCg(vec3 color) {
+    return vec3(
+        dot(color, vec3(0.25, 0.50, 0.25)),
+        dot(color, vec3(0.50, 0.00, -0.50)),
+        dot(color, vec3(-0.25, 0.50, -0.25))
+    );
+}
+
+vec3 YCoCgToRgb(vec3 color) {
+    float temporary = color.x - color.z;
+    return vec3(temporary + color.y, color.x + color.z, temporary - color.y);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = imageSize(resolvedOutput);
+    if (any(greaterThanEqual(pixel, extent))) {
+        return;
+    }
+
+    float centerDepth = texelFetch(sceneDepth, pixel, 0).r;
+    vec4 centerNormalSample = texelFetch(normalRoughness, pixel, 0);
+    vec3 centerNormal = normalize(centerNormalSample.xyz * 2.0 - 1.0);
+    float centerRoughness = clamp(centerNormalSample.w, 0.0, 1.0);
+    vec4 center = texelFetch(currentHistoryColorInput, pixel, 0);
+    if (centerDepth <= 0.0 || centerDepth >= 0.999999 ||
+        centerRoughness >= 0.98) {
+        imageStore(resolvedOutput, pixel, vec4(0.0));
+        return;
+    }
+
+    const ivec2 offsets[13] = ivec2[](
+        ivec2(0, 0),
+        ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+        ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1),
+        ivec2(2, 0), ivec2(-2, 0), ivec2(0, 2), ivec2(0, -2)
+    );
+    const float spatialWeights[13] = float[](
+        1.0,
+        0.78, 0.78, 0.78, 0.78,
+        0.52, 0.52, 0.52, 0.52,
+        0.30, 0.30, 0.30, 0.30
+    );
+
+    vec3 resolvedSum = vec3(0.0);
+    float resolvedWeightSum = 0.0;
+    vec3 supportMeanSum = vec3(0.0);
+    vec3 supportSecondMomentSum = vec3(0.0);
+    float supportWeightSum = 0.0;
+    float confidenceSum = 0.0;
+    float confidenceWeightSum = 0.0;
+    uint validSampleCount = 0u;
+    float depthTolerance = max(0.00035, centerDepth * 0.006);
+    bool varianceClampEnabled = SpatialVarianceClampEnabled();
+
+    for (int index = 0; index < 13; ++index) {
+        ivec2 samplePixel = clamp(pixel + offsets[index], ivec2(0), extent - 1);
+        vec4 sampleColor = texelFetch(currentHistoryColorInput, samplePixel, 0);
+        if (sampleColor.a <= 0.0001) {
+            continue;
+        }
+        ++validSampleCount;
+
+        float sampleDepth = texelFetch(sceneDepth, samplePixel, 0).r;
+        vec4 sampleNormalRoughness = texelFetch(normalRoughness, samplePixel, 0);
+        vec3 sampleNormal = normalize(sampleNormalRoughness.xyz * 2.0 - 1.0);
+        float depthWeight = 1.0 - smoothstep(
+            depthTolerance,
+            depthTolerance * 3.0,
+            abs(sampleDepth - centerDepth)
+        );
+        float normalWeight = pow(max(dot(centerNormal, sampleNormal), 0.0), 32.0);
+        float roughnessWeight = 1.0 - smoothstep(
+            0.06,
+            0.20,
+            abs(sampleNormalRoughness.w - centerRoughness)
+        );
+        float compatibility = spatialWeights[index] * depthWeight * normalWeight *
+            roughnessWeight;
+        float resolveWeight = compatibility * mix(0.25, 1.0, sampleColor.a);
+        float supportWeight = compatibility * mix(0.15, 1.0, sampleColor.a);
+        vec3 sampleRgb = clamp(sampleColor.rgb, vec3(0.0), vec3(64.0));
+        vec3 sampleYCoCg = RgbToYCoCg(sampleRgb);
+
+        resolvedSum += sampleRgb * resolveWeight;
+        resolvedWeightSum += resolveWeight;
+        supportMeanSum += sampleYCoCg * supportWeight;
+        supportSecondMomentSum += sampleYCoCg * sampleYCoCg * supportWeight;
+        supportWeightSum += supportWeight;
+        confidenceSum += sampleColor.a * resolveWeight;
+        confidenceWeightSum += resolveWeight;
+    }
+
+    // A center miss may be reconstructed only when the local temporal
+    // neighborhood has enough support. Without this topology guard, a single
+    // sparse hit can be spread across a grazing reflection band.
+    if (center.a <= 0.0001 && validSampleCount < 5u) {
+        imageStore(resolvedOutput, pixel, vec4(0.0));
+        return;
+    }
+
+    vec3 resolved = resolvedWeightSum > 0.0001
+        ? resolvedSum / resolvedWeightSum
+        : center.rgb;
+    float confidence = confidenceWeightSum > 0.0001
+        ? confidenceSum / confidenceWeightSum
+        : center.a;
+
+    if (varianceClampEnabled && supportWeightSum > 0.0001) {
+        vec3 supportMean = supportMeanSum / supportWeightSum;
+        vec3 supportVariance = max(
+            supportSecondMomentSum / supportWeightSum - supportMean * supportMean,
+            vec3(0.0)
+        );
+        vec3 supportSigma = sqrt(supportVariance);
+        vec3 resolvedYCoCg = RgbToYCoCg(resolved);
+        vec3 sigmaScale = mix(
+            vec3(1.10, 0.95, 0.95),
+            vec3(1.95, 1.55, 1.55),
+            centerRoughness
+        );
+        vec3 clampExtent = max(
+            supportSigma * sigmaScale,
+            vec3(0.015, 0.004, 0.004)
+        );
+        resolvedYCoCg = clamp(
+            resolvedYCoCg,
+            supportMean - clampExtent,
+            supportMean + clampExtent
+        );
+        resolved = YCoCgToRgb(resolvedYCoCg);
+
+        float supportConfidence = clamp(supportWeightSum / 7.4, 0.0, 1.0);
+        if (center.a > 0.0001) {
+            confidence = clamp(mix(center.a, supportConfidence, 0.65), 0.0, 1.0);
+        } else {
+            confidence = clamp(supportConfidence * 0.75, 0.0, 1.0);
+        }
+    } else {
+        // Do not turn the trace confidence into a binary center-pixel gate. A
+        // grazing SSR ray can be low-confidence while its same-surface
+        // neighbors are valid; the edge-aware depth/normal weights above
+        // reconstruct that sample without exposing an alternating SSR/IBL
+        // checkerboard.
+        confidence = center.a > 0.0001
+            ? max(center.a, confidence * 0.85)
+            : confidence * 0.75;
+    }
+
+    confidence = ProbeFallbackBlendWeight(confidence, centerRoughness);
+
+    imageStore(
+        resolvedOutput,
+        pixel,
+        vec4(clamp(resolved, vec3(0.0), vec3(64.0)), clamp(confidence, 0.0, 1.0))
+    );
+}

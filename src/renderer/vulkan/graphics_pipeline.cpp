@@ -9,9 +9,40 @@
 #include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vertex.h"
 
+#if !defined(NDEBUG)
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#endif
+
 namespace se {
 
 namespace {
+
+#if !defined(NDEBUG)
+bool PipelineCreateTraceEnabled() {
+#if defined(_MSC_VER)
+    char* value = nullptr;
+    std::size_t valueSize = 0;
+    if (_dupenv_s(&value, &valueSize, "SE_VK_PIPELINE_TRACE") != 0 ||
+        value == nullptr) {
+        return false;
+    }
+    const bool enabled = std::strcmp(value, "1") == 0 ||
+        std::strcmp(value, "true") == 0 ||
+        std::strcmp(value, "on") == 0;
+    std::free(value);
+    return enabled;
+#else
+    const char* value = std::getenv("SE_VK_PIPELINE_TRACE");
+    return value != nullptr &&
+        (std::strcmp(value, "1") == 0 ||
+         std::strcmp(value, "true") == 0 ||
+         std::strcmp(value, "on") == 0);
+#endif
+}
+#endif
 
 VkPipelineShaderStageCreateInfo CreateShaderStageInfo(
     VkShaderStageFlagBits stage,
@@ -409,14 +440,39 @@ void VulkanGraphicsPipeline::CreateGraphicsPipeline(
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
 
-    if (vkCreateGraphicsPipelines(
+    #if !defined(NDEBUG)
+    const bool tracePipelineCreate = PipelineCreateTraceEnabled();
+    const auto pipelineCreateBegin = std::chrono::steady_clock::now();
+    if (tracePipelineCreate) {
+        std::cout
+            << "[pipeline-trace] begin vertex=" << spec.vertexShaderPath
+            << " fragment="
+            << (spec.hasFragmentShader ? spec.fragmentShaderPath : "none")
+            << std::endl;
+    }
+    #endif
+    const VkResult pipelineResult = vkCreateGraphicsPipelines(
             device.Handle(),
             device.PipelineCacheHandle(),
             1,
             &pipelineInfo,
             nullptr,
             &m_Pipeline
-        ) != VK_SUCCESS) {
+        );
+    #if !defined(NDEBUG)
+    if (tracePipelineCreate) {
+        const auto elapsed = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - pipelineCreateBegin
+        ).count();
+        std::cout
+            << "[pipeline-trace] end fragment="
+            << (spec.hasFragmentShader ? spec.fragmentShaderPath : "none")
+            << " result=" << static_cast<int>(pipelineResult)
+            << " ms=" << elapsed
+            << std::endl;
+    }
+    #endif
+    if (pipelineResult != VK_SUCCESS) {
         Release();
         throw std::runtime_error("Failed to create Vulkan graphics pipeline");
     }

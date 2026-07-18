@@ -465,6 +465,12 @@ struct CurrentVulkanFrameGraphInputs {
     bool temporalUpscalePostSourceRequested = false;
     bool temporalUpscalePostSourceExpected = false;
     u32 temporalUpscalePostSourceFallbackReason = 0;
+    bool ssrDepthPyramidAllocated = false;
+    bool ssrReconstructionActive = false;
+    VkFormat ssrDepthPyramidFormat = VK_FORMAT_UNDEFINED;
+    u32 ssrDepthPyramidWidth = 0;
+    u32 ssrDepthPyramidHeight = 0;
+    u32 ssrDepthPyramidMipCount = 0;
 };
 
 std::string_view RenderFramePassStatusName(RenderFramePassStatus status);

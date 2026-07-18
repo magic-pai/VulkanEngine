@@ -1,0 +1,113 @@
+#version 450
+
+// Debug-only SSR topology audit. This pass never contributes to lighting.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 3) buffer LightTileDiagnostics {
+    uvec4 lightCounters;
+    uvec4 overflowCounters;
+    uvec4 ssrCounters;
+    uvec4 ssrTopologyCounters;
+    uvec4 ssrFallbackCounters;
+} diagnostics;
+
+layout(set = 1, binding = 8) uniform sampler2D rawInput;
+layout(set = 1, binding = 14) uniform sampler2D temporalInput;
+layout(rgba16f, set = 1, binding = 15) uniform image2D resolvedOutput;
+
+bool InBounds(ivec2 pixel, ivec2 extent) {
+    return all(greaterThanEqual(pixel, ivec2(0))) &&
+        all(lessThan(pixel, extent));
+}
+
+float RawConfidence(ivec2 pixel, ivec2 extent) {
+    if (!InBounds(pixel, extent)) {
+        return 0.0;
+    }
+    return clamp(texelFetch(rawInput, pixel, 0).a, 0.0, 1.0);
+}
+
+float TemporalConfidence(ivec2 pixel, ivec2 extent) {
+    if (!InBounds(pixel, extent)) {
+        return 0.0;
+    }
+    return clamp(texelFetch(temporalInput, pixel, 0).a, 0.0, 1.0);
+}
+
+float ResolvedConfidence(ivec2 pixel) {
+    return clamp(imageLoad(resolvedOutput, pixel).a, 0.0, 1.0);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = imageSize(resolvedOutput);
+    if (!InBounds(pixel, extent)) {
+        return;
+    }
+
+    if (all(equal(pixel, ivec2(0)))) {
+        diagnostics.ssrCounters.w = 0x53535244u;
+    }
+
+    const float kRawHitThreshold = 0.0001;
+    const float kHighConfidenceThreshold = 0.18;
+    const float kResolvedThreshold = 0.0001;
+    float raw = RawConfidence(pixel, extent);
+    float temporal = TemporalConfidence(pixel, extent);
+    float resolved = ResolvedConfidence(pixel);
+    bool rawHit = raw > kRawHitThreshold;
+    bool rawHighConfidence = raw >= kHighConfidenceThreshold;
+    bool temporalValid = temporal > kResolvedThreshold;
+    bool resolvedValid = resolved > kResolvedThreshold;
+
+    if (rawHit) {
+        atomicAdd(diagnostics.ssrCounters.x, 1u);
+    }
+    if (rawHighConfidence) {
+        atomicAdd(diagnostics.ssrCounters.y, 1u);
+    }
+    if (temporalValid) {
+        atomicAdd(diagnostics.ssrCounters.z, 1u);
+    }
+    if (resolvedValid) {
+        atomicAdd(diagnostics.ssrTopologyCounters.x, 1u);
+        if (resolved < 0.85) {
+            atomicAdd(diagnostics.ssrFallbackCounters.y, 1u);
+        } else {
+            atomicAdd(diagnostics.ssrFallbackCounters.z, 1u);
+        }
+        atomicAdd(diagnostics.ssrFallbackCounters.x, 1u);
+        atomicAdd(
+            diagnostics.ssrFallbackCounters.w,
+            uint(clamp(round(resolved * 64.0), 0.0, 64.0))
+        );
+    }
+
+    uint neighborRawHits = 0u;
+    uint neighborResolvedHits = 0u;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            if (x == 0 && y == 0) {
+                continue;
+            }
+            ivec2 samplePixel = pixel + ivec2(x, y);
+            if (RawConfidence(samplePixel, extent) > kRawHitThreshold) {
+                ++neighborRawHits;
+            }
+            if (InBounds(samplePixel, extent) &&
+                ResolvedConfidence(samplePixel) > kResolvedThreshold) {
+                ++neighborResolvedHits;
+            }
+        }
+    }
+
+    if (rawHit && neighborRawHits <= 1u) {
+        atomicAdd(diagnostics.ssrTopologyCounters.y, 1u);
+    }
+    if (!rawHit && neighborRawHits >= 5u) {
+        atomicAdd(diagnostics.ssrTopologyCounters.z, 1u);
+    }
+    if (!resolvedValid && neighborResolvedHits >= 5u) {
+        atomicAdd(diagnostics.ssrTopologyCounters.w, 1u);
+    }
+}

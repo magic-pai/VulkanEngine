@@ -44,6 +44,16 @@ constexpr VkFormat kGpuCapturedSceneFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr u32 kGpuCapturedSceneDiffuseIrradianceFaceSize = 32u;
 constexpr u32 kGpuCapturedSceneDiffuseIrradianceSampleCount = 64u;
 
+u64 CapturedSceneCubemapMipMemoryBytes(u32 faceSize, u32 mipCount) {
+    u64 texelCount = 0u;
+    u32 extent = faceSize;
+    for (u32 mip = 0u; mip < mipCount; ++mip) {
+        texelCount += static_cast<u64>(extent) * static_cast<u64>(extent) * 6u;
+        extent = std::max(1u, extent >> 1u);
+    }
+    return texelCount * sizeof(u16) * 4u;
+}
+
 u32 MipCountForExtent(u32 extent) {
     u32 mipCount = 1u;
     while (extent > 1u) {
@@ -186,9 +196,10 @@ VkImageView CreateGpuCapturedSceneFaceView(
     return view;
 }
 
-VkImageView CreateGpuCapturedSceneCubeBaseView(
+VkImageView CreateGpuCapturedSceneCubeView(
     const VulkanDevice& device,
-    VkImage image
+    VkImage image,
+    u32 mipCount
 ) {
     VkImageViewCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -197,7 +208,7 @@ VkImageView CreateGpuCapturedSceneCubeBaseView(
     createInfo.format = kGpuCapturedSceneFormat;
     createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     createInfo.subresourceRange.baseMipLevel = 0u;
-    createInfo.subresourceRange.levelCount = 1u;
+    createInfo.subresourceRange.levelCount = mipCount;
     createInfo.subresourceRange.baseArrayLayer = 0u;
     createInfo.subresourceRange.layerCount = 6u;
     VkImageView view = VK_NULL_HANDLE;
@@ -2546,7 +2557,10 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        samplerInfo.maxLod = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = static_cast<f32>(
+            MipCountForExtent(kCapturedSceneCubemapFaceSize) - 1u
+        );
         if (vkCreateSampler(
                 device.Handle(),
                 &samplerInfo,
@@ -2604,7 +2618,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         pushRange.offset = 0u;
-        pushRange.size = sizeof(f32) + sizeof(u32) * 3u;
+        pushRange.size = sizeof(f32) + sizeof(u32) * 7u;
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1u;
@@ -2757,7 +2771,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneDiffuseIrradianceReso
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         pushRange.offset = 0u;
-        pushRange.size = sizeof(u32) * 4u;
+        pushRange.size = sizeof(u32) * 8u;
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1u;
@@ -2859,6 +2873,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
         return false;
     }
     if (resource->targetImage != nullptr &&
+        resource->sourceRadianceImage != nullptr &&
         resource->depthImage != nullptr &&
         m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE &&
         resource->framebuffers.size() == 6u) {
@@ -2905,6 +2920,23 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
             VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
             VK_IMAGE_VIEW_TYPE_CUBE
         );
+        resource->sourceRadianceImage = std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
+            kGpuCapturedSceneFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            mipCount,
+            6u,
+            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            VK_IMAGE_VIEW_TYPE_CUBE
+        );
         resource->targetDiffuseIrradianceImage = std::make_unique<VulkanImage>(
             device,
             physicalDevice,
@@ -2932,9 +2964,10 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             VK_IMAGE_ASPECT_DEPTH_BIT
         );
-        resource->prefilterSourceView = CreateGpuCapturedSceneCubeBaseView(
+        resource->prefilterSourceView = CreateGpuCapturedSceneCubeView(
             device,
-            resource->targetImage->Handle()
+            resource->sourceRadianceImage->Handle(),
+            resource->sourceRadianceImage->MipLevels()
         );
         resource->diffuseIrradianceArrayView = CreateGpuCapturedSceneMipArrayView(
             device,
@@ -3052,7 +3085,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
         for (u32 face = 0; face < 6u; ++face) {
             const VkImageView faceView = CreateGpuCapturedSceneFaceView(
                 device,
-                resource->targetImage->Handle(),
+                resource->sourceRadianceImage->Handle(),
                 face
             );
             resource->faceViews.push_back(faceView);
@@ -3115,6 +3148,7 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
     audit.selectiveInvalidationEnabled = refreshRequest.selectiveInvalidationEnabled;
     audit.gpuResourcesAllocated =
         resource.targetImage != nullptr &&
+        resource.sourceRadianceImage != nullptr &&
         m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE;
     audit.mipChainReady = resourceReady &&
         resource.activeBackend == CapturedSceneCaptureBackend::RasterizedGpu;
@@ -3220,6 +3254,12 @@ void VulkanReflectionProbeResources::BeginGpuCapturedSceneRefresh(
     resource.audit.captureFaceOrientationMask = 0u;
     resource.audit.captureFaceOrientationValid = false;
     resource.audit.mipGenerationCount = 0u;
+    resource.audit.sourceMipGenerationCount = 0u;
+    resource.audit.sourceMipCount = 0u;
+    resource.audit.sourceMipMemoryBytes = 0u;
+    resource.audit.sourceMipChainReady = false;
+    resource.audit.ggxPrefilterSourceImageSeparated = false;
+    resource.audit.ggxPrefilterPdfLodEnabled = false;
     resource.audit.ggxPrefilterDispatchCount = 0u;
     resource.audit.ggxPrefilterSampleCount = 0u;
     resource.audit.ggxPrefilterQuality = 0u;
@@ -3374,6 +3414,15 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
         audit.captureFaceOrientationValid =
             previousAudit.captureFaceOrientationValid;
         audit.mipGenerationCount = previousAudit.mipGenerationCount;
+        audit.sourceMipGenerationCount =
+            previousAudit.sourceMipGenerationCount;
+        audit.sourceMipCount = previousAudit.sourceMipCount;
+        audit.sourceMipMemoryBytes = previousAudit.sourceMipMemoryBytes;
+        audit.sourceMipChainReady = previousAudit.sourceMipChainReady;
+        audit.ggxPrefilterSourceImageSeparated =
+            previousAudit.ggxPrefilterSourceImageSeparated;
+        audit.ggxPrefilterPdfLodEnabled =
+            previousAudit.ggxPrefilterPdfLodEnabled;
         audit.ggxPrefilterDispatchCount =
             previousAudit.ggxPrefilterDispatchCount;
         audit.ggxPrefilterSampleCount = previousAudit.ggxPrefilterSampleCount;
@@ -3535,13 +3584,16 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
     if (resource == nullptr || resource->targetImage == nullptr ||
+        resource->sourceRadianceImage == nullptr ||
         commandBuffer == VK_NULL_HANDLE) {
         return;
     }
 
-    const VkImage image = resource->targetImage->Handle();
+    const VkImage sourceImage = resource->sourceRadianceImage->Handle();
+    const VkImage destinationImage = resource->targetImage->Handle();
     const u32 mipCount = resource->targetImage->MipLevels();
     if (m_GpuCapturedScenePrefilterPipeline == VK_NULL_HANDLE ||
+        resource->sourceRadianceImage->MipLevels() != mipCount ||
         resource->prefilterDescriptorSets.size() != mipCount - 1u) {
         return;
     }
@@ -3556,7 +3608,190 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
 
     RecordImageBarrier(
         commandBuffer,
-        image,
+        destinationImage,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0u,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u,
+        1u,
+        0u,
+        6u
+    );
+    VkImageCopy baseCopy{};
+    baseCopy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    baseCopy.srcSubresource.mipLevel = 0u;
+    baseCopy.srcSubresource.baseArrayLayer = 0u;
+    baseCopy.srcSubresource.layerCount = 6u;
+    baseCopy.dstSubresource = baseCopy.srcSubresource;
+    baseCopy.extent = {
+        kCapturedSceneCubemapFaceSize,
+        kCapturedSceneCubemapFaceSize,
+        1u
+    };
+    vkCmdCopyImage(
+        commandBuffer,
+        sourceImage,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        destinationImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1u,
+        &baseCopy
+    );
+    RecordImageBarrier(
+        commandBuffer,
+        destinationImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u,
+        1u,
+        0u,
+        6u
+    );
+
+    RecordImageBarrier(
+        commandBuffer,
+        sourceImage,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        0u,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        1u,
+        mipCount - 1u,
+        0u,
+        6u
+    );
+    for (u32 mip = 1u; mip < mipCount; ++mip) {
+        const i32 sourceExtent = static_cast<i32>(
+            std::max(1u, kCapturedSceneCubemapFaceSize >> (mip - 1u))
+        );
+        const i32 destinationExtent = static_cast<i32>(
+            std::max(1u, kCapturedSceneCubemapFaceSize >> mip)
+        );
+        VkImageBlit blit{};
+        blit.srcOffsets[1] = { sourceExtent, sourceExtent, 1 };
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = mip - 1u;
+        blit.srcSubresource.baseArrayLayer = 0u;
+        blit.srcSubresource.layerCount = 6u;
+        blit.dstOffsets[1] = { destinationExtent, destinationExtent, 1 };
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = mip;
+        blit.dstSubresource.baseArrayLayer = 0u;
+        blit.dstSubresource.layerCount = 6u;
+        vkCmdBlitImage(
+            commandBuffer,
+            sourceImage,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            sourceImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1u,
+            &blit,
+            VK_FILTER_LINEAR
+        );
+        RecordImageBarrier(
+            commandBuffer,
+            sourceImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            mip,
+            1u,
+            0u,
+            6u
+        );
+    }
+
+    if (!ggxPrefilterEnabled) {
+        RecordImageBarrier(
+            commandBuffer,
+            destinationImage,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            0u,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1u,
+            mipCount - 1u,
+            0u,
+            6u
+        );
+        for (u32 mip = 1u; mip < mipCount; ++mip) {
+            VkImageCopy mipCopy{};
+            mipCopy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            mipCopy.srcSubresource.mipLevel = mip;
+            mipCopy.srcSubresource.baseArrayLayer = 0u;
+            mipCopy.srcSubresource.layerCount = 6u;
+            mipCopy.dstSubresource = mipCopy.srcSubresource;
+            mipCopy.extent = {
+                std::max(1u, kCapturedSceneCubemapFaceSize >> mip),
+                std::max(1u, kCapturedSceneCubemapFaceSize >> mip),
+                1u
+            };
+            vkCmdCopyImage(
+                commandBuffer,
+                sourceImage,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                destinationImage,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1u,
+                &mipCopy
+            );
+        }
+        RecordImageBarrier(
+            commandBuffer,
+            destinationImage,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1u,
+            mipCount - 1u,
+            0u,
+            6u
+        );
+    } else {
+        RecordImageBarrier(
+            commandBuffer,
+            destinationImage,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_GENERAL,
+            0u,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1u,
+            mipCount - 1u,
+            0u,
+            6u
+        );
+    }
+
+    RecordImageBarrier(
+        commandBuffer,
+        sourceImage,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_TRANSFER_READ_BIT,
@@ -3565,25 +3800,15 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
         0u,
-        1u,
+        mipCount,
         0u,
         6u
     );
-    RecordImageBarrier(
-        commandBuffer,
-        image,
-        VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_IMAGE_LAYOUT_GENERAL,
-        0u,
-        VK_ACCESS_SHADER_WRITE_BIT,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        1u,
-        mipCount - 1u,
-        0u,
-        6u
-    );
+
+    if (!ggxPrefilterEnabled) {
+        return;
+    }
+
     vkCmdBindPipeline(
         commandBuffer,
         VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -3594,14 +3819,17 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
             f32 roughness = 0.0f;
             u32 mipExtent = 1u;
             u32 sampleCount = 1u;
-            u32 reserved = 0u;
+            u32 sourceFaceSize = kCapturedSceneCubemapFaceSize;
+            u32 sourceMipCount = 1u;
+            u32 pdfLodEnabled = 1u;
+            u32 reserved0 = 0u;
+            u32 reserved1 = 0u;
         } constants;
-        constants.roughness = ggxPrefilterEnabled
-            ? static_cast<f32>(mip) /
-                static_cast<f32>(std::max(1u, mipCount - 1u))
-            : 0.0f;
+        constants.roughness = static_cast<f32>(mip) /
+            static_cast<f32>(std::max(1u, mipCount - 1u));
         constants.mipExtent = std::max(1u, kCapturedSceneCubemapFaceSize >> mip);
         constants.sampleCount = sampleCount;
+        constants.sourceMipCount = mipCount;
         vkCmdBindDescriptorSets(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -3629,7 +3857,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     }
     RecordImageBarrier(
         commandBuffer,
-        image,
+        destinationImage,
         VK_IMAGE_LAYOUT_GENERAL,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_ACCESS_SHADER_WRITE_BIT,
@@ -3668,6 +3896,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDiffuseIrradiance(
     const CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
     if (resource == nullptr || resource->targetImage == nullptr ||
+        resource->sourceRadianceImage == nullptr ||
         resource->targetDiffuseIrradianceImage == nullptr ||
         resource->diffuseIrradianceDescriptorSet == VK_NULL_HANDLE ||
         commandBuffer == VK_NULL_HANDLE ||
@@ -3698,9 +3927,14 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDiffuseIrradiance(
     struct DiffuseIrradiancePushConstants {
         u32 faceSize = kGpuCapturedSceneDiffuseIrradianceFaceSize;
         u32 sampleCount = kGpuCapturedSceneDiffuseIrradianceSampleCount;
+        u32 sourceFaceSize = kCapturedSceneCubemapFaceSize;
+        u32 sourceMipCount = 1u;
+        u32 pdfLodEnabled = 1u;
         u32 reserved0 = 0u;
         u32 reserved1 = 0u;
+        u32 reserved2 = 0u;
     } constants;
+    constants.sourceMipCount = resource->sourceRadianceImage->MipLevels();
     vkCmdBindDescriptorSets(
         commandBuffer,
         VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -3943,7 +4177,14 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
         return;
     }
 
+    const u32 completedSourceMipCount = resource->sourceRadianceImage != nullptr
+        ? resource->sourceRadianceImage->MipLevels()
+        : 0u;
+    const bool sourceImageSeparated = resource->sourceRadianceImage != nullptr &&
+        resource->targetImage != nullptr &&
+        resource->sourceRadianceImage->Handle() != resource->targetImage->Handle();
     ReleaseGpuCapturedSceneAttachments(*resource);
+    resource->sourceRadianceImage.reset();
     resource->activeImage = std::move(resource->targetImage);
     resource->activeDiffuseIrradianceImage =
         std::move(resource->targetDiffuseIrradianceImage);
@@ -3969,10 +4210,24 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.refreshDeferredByBudget = false;
     resource->audit.lastRefreshCompletedFrame = schedulerFrame;
     resource->audit.gpuCaptureInProgress = false;
-    resource->audit.mipChainReady = true;
+    resource->audit.mipChainReady = resource->activeImage != nullptr;
     resource->audit.mipGenerationCount = 1u;
+    resource->audit.sourceMipGenerationCount = 1u;
+    resource->audit.sourceMipCount = completedSourceMipCount;
+    resource->audit.sourceMipMemoryBytes = CapturedSceneCubemapMipMemoryBytes(
+        kCapturedSceneCubemapFaceSize,
+        completedSourceMipCount
+    );
+    resource->audit.sourceMipChainReady = completedSourceMipCount ==
+        MipCountForExtent(kCapturedSceneCubemapFaceSize);
+    resource->audit.ggxPrefilterSourceImageSeparated = sourceImageSeparated;
+    resource->audit.ggxPrefilterPdfLodEnabled =
+        CapturedReflectionProbeGgxPrefilterEnabled(
+            resource->filteringSettings.quality
+        );
     resource->audit.ggxPrefilterDispatchCount =
-        resource->activeImage != nullptr
+        resource->audit.ggxPrefilterPdfLodEnabled &&
+            resource->activeImage != nullptr
             ? resource->activeImage->MipLevels() - 1u
             : 0u;
     resource->audit.ggxPrefilterSampleCount = CapturedReflectionProbeGgxSampleCount(
@@ -3986,7 +4241,10 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
             resource->filteringSettings.quality
         );
     resource->audit.ggxPrefilterReady =
-        !resource->audit.ggxPrefilterFallbackActive;
+        !resource->audit.ggxPrefilterFallbackActive &&
+        resource->audit.sourceMipChainReady &&
+        resource->audit.ggxPrefilterSourceImageSeparated &&
+        resource->audit.ggxPrefilterPdfLodEnabled;
     resource->audit.diffuseIrradianceDispatchCount = 1u;
     resource->audit.diffuseIrradianceSampleCount =
         kGpuCapturedSceneDiffuseIrradianceSampleCount;
@@ -4060,6 +4318,7 @@ void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneResources(
 ) {
     ReleaseGpuCapturedSceneAttachments(resource);
     resource.depthImage.reset();
+    resource.sourceRadianceImage.reset();
     resource.targetImage.reset();
     resource.targetDiffuseIrradianceImage.reset();
 }

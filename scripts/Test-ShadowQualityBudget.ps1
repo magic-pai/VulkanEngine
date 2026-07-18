@@ -88,6 +88,7 @@ function Invoke-LightingBenchmark {
         [Parameter(Mandatory = $true)][string]$Executable,
         [Parameter(Mandatory = $true)][string]$CsvPath,
         [AllowNull()][string]$Quality,
+        [AllowNull()][string]$ProductionFilter,
         [Parameter(Mandatory = $true)][int]$Warmup,
         [Parameter(Mandatory = $true)][int]$Capture,
         [Parameter(Mandatory = $true)][int]$AutoExit
@@ -111,14 +112,33 @@ function Invoke-LightingBenchmark {
         "SE_LOCAL_SHADOW_BIAS_MIN", "SE_LOCAL_SHADOW_BIAS_SLOPE",
         "SE_LOCAL_SHADOW_PCF_RADIUS", "SE_LOCAL_SHADOW_PCF_KERNEL_RADIUS",
         "SE_LOCAL_SHADOW_PCSS_STRENGTH", "SE_LOCAL_SHADOW_FACE_BLEND",
+        "SE_LOCAL_SHADOW_PRODUCTION_FILTER",
+        "SE_LOCAL_SHADOW_PCSS_BLOCKER_SAMPLES",
+        "SE_LOCAL_SHADOW_PCSS_FILTER_SAMPLES",
+        "SE_LOCAL_SHADOW_PCSS_SEARCH_RADIUS_TEXELS",
+        "SE_LOCAL_SHADOW_PCSS_MAX_PENUMBRA_TEXELS",
         "SE_LOCAL_SHADOW_POINT_BIAS_MIN", "SE_LOCAL_SHADOW_POINT_BIAS_SLOPE",
         "SE_LOCAL_SHADOW_POINT_PCF_RADIUS", "SE_LOCAL_SHADOW_POINT_PCF_KERNEL_RADIUS",
-        "SE_LOCAL_SHADOW_POINT_PCSS_STRENGTH", "SE_LOCAL_SHADOW_SPOT_BIAS_MIN",
+        "SE_LOCAL_SHADOW_POINT_PCSS_STRENGTH",
+        "SE_LOCAL_SHADOW_POINT_PCSS_BLOCKER_SAMPLES",
+        "SE_LOCAL_SHADOW_POINT_PCSS_FILTER_SAMPLES",
+        "SE_LOCAL_SHADOW_POINT_PCSS_SEARCH_RADIUS_TEXELS",
+        "SE_LOCAL_SHADOW_POINT_PCSS_MAX_PENUMBRA_TEXELS",
+        "SE_LOCAL_SHADOW_SPOT_BIAS_MIN",
         "SE_LOCAL_SHADOW_SPOT_BIAS_SLOPE", "SE_LOCAL_SHADOW_SPOT_PCF_RADIUS",
         "SE_LOCAL_SHADOW_SPOT_PCF_KERNEL_RADIUS", "SE_LOCAL_SHADOW_SPOT_PCSS_STRENGTH",
+        "SE_LOCAL_SHADOW_SPOT_PCSS_BLOCKER_SAMPLES",
+        "SE_LOCAL_SHADOW_SPOT_PCSS_FILTER_SAMPLES",
+        "SE_LOCAL_SHADOW_SPOT_PCSS_SEARCH_RADIUS_TEXELS",
+        "SE_LOCAL_SHADOW_SPOT_PCSS_MAX_PENUMBRA_TEXELS",
         "SE_LOCAL_SHADOW_RECT_BIAS_MIN", "SE_LOCAL_SHADOW_RECT_BIAS_SLOPE",
         "SE_LOCAL_SHADOW_RECT_PCF_RADIUS", "SE_LOCAL_SHADOW_RECT_PCF_KERNEL_RADIUS",
-        "SE_LOCAL_SHADOW_RECT_PCSS_STRENGTH", "SE_LOCAL_SHADOW_RECT_SAMPLE_TILES",
+        "SE_LOCAL_SHADOW_RECT_PCSS_STRENGTH",
+        "SE_LOCAL_SHADOW_RECT_PCSS_BLOCKER_SAMPLES",
+        "SE_LOCAL_SHADOW_RECT_PCSS_FILTER_SAMPLES",
+        "SE_LOCAL_SHADOW_RECT_PCSS_SEARCH_RADIUS_TEXELS",
+        "SE_LOCAL_SHADOW_RECT_PCSS_MAX_PENUMBRA_TEXELS",
+        "SE_LOCAL_SHADOW_RECT_SAMPLE_TILES",
         "SE_RECT_SHADOW_BIAS_SCALE", "SE_LOCAL_SHADOW_RECT_BIAS_SCALE",
         "SE_POINT_LIGHT_SHADOWS_OFF", "SE_SPOT_LIGHT_SHADOWS_OFF",
         "SE_RECT_LIGHT_SHADOWS_OFF", "SE_LOCAL_SHADOW_POINT_OFF",
@@ -137,6 +157,7 @@ function Invoke-LightingBenchmark {
         SE_FORCE_LIGHTING_SHOWCASE = "1"
         SE_FORWARD3D_SHADOW_PROFILE = "production"
         SE_SHADOW_QUALITY = $Quality
+        SE_LOCAL_SHADOW_PRODUCTION_FILTER = $ProductionFilter
         SE_FORWARD3D_AA_MODE = "taa"
         SE_RENDER_VIEW = "lit"
         SE_ENABLE_GPU_TIMESTAMPS = "1"
@@ -207,13 +228,15 @@ New-Item -ItemType Directory -Force -Path $lightingOutput | Out-Null
 $lightingRuns = @{}
 $lightingErrors = @{}
 foreach ($lane in @(
-    [pscustomobject]@{ name = "low"; quality = "low" },
-    [pscustomobject]@{ name = "default-ultra"; quality = $null }
+    [pscustomobject]@{ name = "low"; quality = "low"; production = "1" },
+    [pscustomobject]@{ name = "default-ultra"; quality = $null; production = "1" },
+    [pscustomobject]@{ name = "fallback-ultra"; quality = "ultra"; production = "0" }
 )) {
     $csvPath = Join-Path $lightingOutput "$($lane.name).csv"
     try {
         $lightingRuns[$lane.name] = @(Invoke-LightingBenchmark `
             -Executable $lightingExecutable -CsvPath $csvPath -Quality $lane.quality `
+            -ProductionFilter $lane.production `
             -Warmup $WarmupFrames -Capture $CaptureFrames -AutoExit $AutoExitFrames)
     } catch {
         $lightingErrors[$lane.name] = $_.Exception.Message
@@ -248,7 +271,29 @@ $budgetColumns = @(
     "local_shadow_atlas_tile_size",
     "local_shadow_atlas_width",
     "local_shadow_atlas_height",
-    "local_shadow_atlas_capacity"
+    "local_shadow_atlas_capacity",
+    "local_shadow_filter_contract_version",
+    "local_shadow_production_filter_enabled",
+    "local_shadow_production_filter_ready",
+    "local_shadow_production_filter_active",
+    "local_shadow_production_filter_fallback_reason",
+    "local_shadow_comparison_sampler_ready",
+    "local_shadow_raw_depth_sampler_ready",
+    "local_shadow_tile_range_contract_valid",
+    "local_shadow_tile_range_invalid_lights",
+    "local_shadow_filter_geometry_invalid_tiles",
+    "local_shadow_point_pcss_blocker_samples",
+    "local_shadow_point_pcss_filter_samples",
+    "local_shadow_point_pcss_search_radius_texels",
+    "local_shadow_point_pcss_max_penumbra_texels",
+    "local_shadow_spot_pcss_blocker_samples",
+    "local_shadow_spot_pcss_filter_samples",
+    "local_shadow_spot_pcss_search_radius_texels",
+    "local_shadow_spot_pcss_max_penumbra_texels",
+    "local_shadow_rect_pcss_blocker_samples",
+    "local_shadow_rect_pcss_filter_samples",
+    "local_shadow_rect_pcss_search_radius_texels",
+    "local_shadow_rect_pcss_max_penumbra_texels"
 )
 $typedFrameGraphColumns = @(
     "framegraph_validation_missing_resource_refs",
@@ -312,6 +357,17 @@ foreach ($laneName in @("low", "default-ultra")) {
             -Actual "invalidRows=$($invalidRows.Count)" -Expected "0"
     }
 
+    $invalidLocalGeometryRows = @(
+        $rows | Where-Object {
+            (Get-Number -Row $_ -Name "local_shadow_filter_geometry_valid_tiles") -ne
+                (Get-Number -Row $_ -Name "local_shadow_assigned_tiles")
+        }
+    )
+    Add-Check -Checks $checks -Area "portability" `
+        -Name "$laneName local filter geometry covers every assigned tile" `
+        -Passed ($invalidLocalGeometryRows.Count -eq 0) `
+        -Actual "invalidRows=$($invalidLocalGeometryRows.Count)" -Expected "0"
+
     $invalidTimingRows = @(
         $rows | Where-Object {
             (Get-Number -Row $_ -Name "gpu_available") -ne 1 -or
@@ -331,6 +387,58 @@ if ($lightingRuns["default-ultra"].Count -gt 0) {
     Add-Check -Checks $checks -Area "defaults" -Name "unoverridden scenes resolve Ultra shadows" `
         -Passed (@($defaultQualityIds | Where-Object { $_ -ne 4 }).Count -eq 0) `
         -Actual ($defaultQualityIds -join "/") -Expected "4"
+}
+
+if ($lightingRuns["fallback-ultra"].Count -gt 0) {
+    $fallbackRows = @($lightingRuns["fallback-ultra"])
+    foreach ($expectation in @(
+        [pscustomobject]@{ column = "local_shadow_filter_contract_version"; value = 3 },
+        [pscustomobject]@{ column = "local_shadow_production_filter_enabled"; value = 0 },
+        [pscustomobject]@{ column = "local_shadow_production_filter_ready"; value = 1 },
+        [pscustomobject]@{ column = "local_shadow_production_filter_active"; value = 0 },
+        [pscustomobject]@{ column = "local_shadow_production_filter_fallback_reason"; value = 1 },
+        [pscustomobject]@{ column = "local_shadow_comparison_sampler_ready"; value = 1 },
+        [pscustomobject]@{ column = "local_shadow_raw_depth_sampler_ready"; value = 1 },
+        [pscustomobject]@{ column = "local_shadow_tile_range_contract_valid"; value = 1 },
+        [pscustomobject]@{ column = "local_shadow_tile_range_invalid_lights"; value = 0 },
+        [pscustomobject]@{ column = "local_shadow_filter_geometry_invalid_tiles"; value = 0 }
+    )) {
+        $invalidRows = @(
+            $fallbackRows | Where-Object {
+                (Get-Number -Row $_ -Name $expectation.column) -ne
+                    $expectation.value
+            }
+        )
+        Add-Check -Checks $checks -Area "fallback" `
+            -Name "$($expectation.column) resolves to $($expectation.value)" `
+            -Passed ($invalidRows.Count -eq 0) `
+            -Actual "invalidRows=$($invalidRows.Count)" `
+            -Expected $expectation.value
+    }
+
+    $ultraRows = @($lightingRuns["default-ultra"])
+    if ($ultraRows.Count -gt 0) {
+        foreach ($column in @(
+            "shadow_quality",
+            "local_shadow_atlas_tile_size",
+            "local_shadow_atlas_width",
+            "local_shadow_atlas_height",
+            "local_shadow_atlas_capacity",
+            "local_shadow_assigned_tiles"
+        )) {
+            $enabledValue = Get-Number -Row $ultraRows[0] -Name $column
+            $mismatchRows = @(
+                $fallbackRows | Where-Object {
+                    (Get-Number -Row $_ -Name $column) -ne $enabledValue
+                }
+            )
+            Add-Check -Checks $checks -Area "fallback" `
+                -Name "$column remains unchanged by the filter control" `
+                -Passed ($mismatchRows.Count -eq 0) `
+                -Actual "enabled=$enabledValue mismatches=$($mismatchRows.Count)" `
+                -Expected "identical"
+        }
+    }
 }
 
 $shadowSettingsSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "src\renderer\vulkan\shadow_settings.h")

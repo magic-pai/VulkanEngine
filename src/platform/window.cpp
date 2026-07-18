@@ -128,6 +128,9 @@ namespace se {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        if (WindowEnvironmentFlagEnabled("SE_WINDOW_HIDDEN")) {
+            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+        }
         if (m_DecorationForcedOff) {
             glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
         }

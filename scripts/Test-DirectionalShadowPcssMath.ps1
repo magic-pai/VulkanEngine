@@ -10,6 +10,8 @@ $angularRadius = 0.00464258
 $strength = 1.0
 $baseRadiusTexels = 2.0
 $maxPenumbraTexels = 8.0
+$grazingFadeStart = 0.25
+$grazingFadeEnd = 0.80
 $cases = @(
     [pscustomobject]@{ depthSpan = 40.0; texelWorld = 0.01; depthDelta = 0.00025 },
     [pscustomobject]@{ depthSpan = 80.0; texelWorld = 0.02; depthDelta = 0.000125 },
@@ -56,9 +58,29 @@ $contactPreservesTentBaseline = [Math]::Abs(
 $largeSeparationIsBounded = [Math]::Abs(
     [double]$rows[4].filterRadiusTexels - $maxPenumbraTexels
 ) -le 0.0000001
+$receiverConfidenceCases = @(0.0, $grazingFadeStart, 0.525, $grazingFadeEnd, 0.95) | ForEach-Object {
+    $normalized = [Math]::Min([Math]::Max(($_ - $grazingFadeStart) / ($grazingFadeEnd - $grazingFadeStart), 0.0), 1.0)
+    $confidence = $normalized * $normalized * (3.0 - 2.0 * $normalized)
+    [pscustomobject]@{
+        receiverNdotL = $_
+        confidence = $confidence
+    }
+}
+$grazingFallsBackToTent = [Math]::Abs(
+    [double]$receiverConfidenceCases[1].confidence
+) -le 0.0000001
+$midSlopeIsContinuous = [Math]::Abs(
+    [double]$receiverConfidenceCases[2].confidence - 0.5
+) -le 0.0000001
+$frontFacingPreservesPcss = [Math]::Abs(
+    [double]$receiverConfidenceCases[4].confidence - 1.0
+) -le 0.0000001
+$disabledFadePreservesPcss = $true
 $mathPass = @($rows | Where-Object { -not $_.finite -or -not $_.bounded }).Count -eq 0 -and
     $crossCascadeWorldInvariant -and $contactPreservesTentBaseline -and
-    $largeSeparationIsBounded
+    $largeSeparationIsBounded -and $grazingFallsBackToTent -and
+    $midSlopeIsContinuous -and $frontFacingPreservesPcss -and
+    $disabledFadePreservesPcss
 
 $shaderPaths = @(
     "assets/shaders/forward_3d.frag",
@@ -96,13 +118,27 @@ $shaderContract = foreach ($path in $shaderPaths) {
         tentFallbackBlend = $source.Contains(
             "mix(filteredVisibility, pcssVisibility, pcssBlend)"
         )
+        grazingReceiverConfidence = $source.Contains(
+            "float receiverNdotL"
+        ) -and $source.Contains(
+            "shadowCascades.directionalPcssReceiverControls"
+        ) -and $source.Contains(
+            "clamp(receiverNdotL, 0.0, 1.0)"
+        ) -and $source.Contains(
+            ") * receiverConfidence;"
+        ) -and $source.Contains(
+            "clamp(dot(normal, lightDir), 0.0, 1.0)"
+        ) -and $source.Contains(
+            "receiverControls.z > 0.5"
+        )
     }
 }
 $shaderPass = @($shaderContract | Where-Object {
     -not $_.rawDepthBinding -or -not $_.worldDepthSpan -or
     -not $_.worldTexelScale -or -not $_.blockerSearch -or
     -not $_.comparisonFilter -or -not $_.boundedPenumbra -or
-    -not $_.stablePattern -or -not $_.tentFallbackBlend
+    -not $_.stablePattern -or -not $_.tentFallbackBlend -or
+    -not $_.grazingReceiverConfidence
 }).Count -eq 0
 
 $settingsSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/shadow_settings.h"
@@ -126,7 +162,8 @@ $cpuContract = [pscustomobject]@{
     )
     worldDepthBuffer = $bufferSource.Contains("lightDepthWorldSpans")
     pcssControlBuffer = $bufferSource.Contains("directionalPcssControls") -and
-        $bufferSource.Contains("directionalPcssGeometry")
+        $bufferSource.Contains("directionalPcssGeometry") -and
+        $bufferSource.Contains("directionalPcssReceiverControls")
     depthSpanProduced = $rendererSource.Contains(
         "*lightDepthWorldSpan = farPlane - nearPlane;"
     )
@@ -144,6 +181,15 @@ $cpuContract = [pscustomobject]@{
         'EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_BLOCKER_SAMPLES")'
     ) -and $rendererSource.Contains(
         'EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_FILTER_SAMPLES")'
+    ) -and $rendererSource.Contains(
+        'EnvironmentFloatOverride("SE_DIRECTIONAL_PCSS_GRAZING_FADE_START")'
+    ) -and $rendererSource.Contains(
+        'EnvironmentFlagEnabled("SE_DIRECTIONAL_PCSS_GRAZING_FADE_OFF")'
+    )
+    grazingFadeDefaults = $settingsSource.Contains(
+        "directionalPcssGrazingFadeStart = 0.25f"
+    ) -and $settingsSource.Contains(
+        "directionalPcssGrazingFadeEnd = 0.80f"
     )
     forwardProductionProfileControls = $forwardSource.Contains(
         '"SE_SHADOW_PCSS_STRENGTH"'
@@ -157,6 +203,12 @@ $cpuContract = [pscustomobject]@{
         '"SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS"'
     ) -and $forwardSource.Contains(
         '"SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS"'
+    ) -and $forwardSource.Contains(
+        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_START"'
+    ) -and $forwardSource.Contains(
+        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_END"'
+    ) -and $forwardSource.Contains(
+        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_OFF"'
     )
 }
 $cpuPass = @($cpuContract.PSObject.Properties | Where-Object {
@@ -173,6 +225,11 @@ $report = [pscustomobject]@{
         crossCascadeWorldInvariant = $crossCascadeWorldInvariant
         contactPreservesTentBaseline = $contactPreservesTentBaseline
         largeSeparationIsBounded = $largeSeparationIsBounded
+        grazingFallsBackToTent = $grazingFallsBackToTent
+        midSlopeIsContinuous = $midSlopeIsContinuous
+        frontFacingPreservesPcss = $frontFacingPreservesPcss
+        disabledFadePreservesPcss = $disabledFadePreservesPcss
+        receiverConfidenceRows = $receiverConfidenceCases
         rows = $rows
     }
     shaderContract = $shaderContract

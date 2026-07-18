@@ -2,6 +2,121 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - DLSS Jitter CSV Fields Follow The Inverse Projection Convention
+
+Symptom:
+- `scripts\Test-DlssVisualQa.ps1` started failing the real `default-object-motion` lane even though the renderer was applying jitter and the DLSS route was otherwise healthy.
+
+False leads:
+- Treating `temporal_upscaler_dlss_jitter_offset_*` as a same-sign echo of `temporal_jitter_pixels_*`.
+- Blaming the scene or render scale before checking the AA contract helper.
+
+Cause:
+- `DlssJitterOffsetPixels()` defaults to the negated Halton jitter. The DLSS CSV field is therefore an inverse contract, not a direct sign match.
+- `Assert-DlssJitterConsistency` was comparing the fields as if they were same-sign values.
+
+Control test:
+- Compare the AA contract helper in `scripts\Test-AaModeContracts.ps1` with `scripts\Test-DlssVisualQa.ps1`.
+- The former already uses `Require-NumericInverse`; the latter needed the same inverse check.
+
+Fix:
+- Change the DLSS visual QA jitter assertion to require `temporal_upscaler_dlss_jitter_offset_* == -temporal_jitter_pixels_*` when jitter is applied.
+
+Prevention:
+- Whenever a renderer stat is derived through a sign-convention helper, compare the recorded fields against that helper's contract, not against intuition.
+
+Validation:
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-DlssVisualQa.ps1 -SkipBuild -StrictGate -Suite default-object-motion,imported-dynamic` passed.
+
+## 2026-07-19 - DLSS Object Motion Gate Must Read Post-Classification State
+
+Symptom:
+- DLSS quality gate reported object motion as unavailable in the real Forward3D object-motion lanes even after the renderer was already producing velocity data.
+
+False leads:
+- Treating the result as a visual DLSS quality issue.
+- Tuning render scale, preset, or quality mode before checking the producer/consumer order.
+
+Cause:
+- `BuildFrameTemporalState` published `velocityObjectMotionReady = false` before `BuildGBufferCommandList` and the weighted-translucency / forward-residual motion-vector checks finished. `BuildFrameTemporalUpscaleState` and temporal stats then read that stale value.
+
+Control test:
+- Compare the real `default-object-motion` and `imported-dynamic` CSV rows before and after the fix. The gate should read `1/1/0`, the quality masks `255/255/0`, and both camera/object motion readiness bits should be `1`.
+
+Fix:
+- Refill `temporalState.velocityObjectMotionReady` after command classification and before building the upscale state and writing temporal stats.
+
+Prevention:
+- Never let DLSS quality gating consume pre-classification motion readiness. Producer classification must finish before the consumer contract is published.
+
+Validation:
+- Debug build passed.
+- Direct CSV checks on `default-object-motion` and `imported-dynamic` both showed `qualityGate=1/1/0`, `qualityMasks=255/255/0`, `qualityMode=1`, `recommendedPreset=12`, and `velocity/object motion ready=1/1`.
+
+## 2026-07-19 - SSR Current HDR Radiance Is Not A Safe Default Source
+
+Symptom:
+- LightingShowcase glossy spheres showed strange skybox-like blended reflections and white block artifacts. The artifacts changed with view angle and were most visible on metal surfaces.
+
+False leads:
+- Treating the skybox image, local captured probes, or IBL cache as the direct bug.
+- Further tuning SSR spatial variance clamps, trace confidence, or reflection strength after the source path was still mixed.
+
+Cause:
+- The SSR reconstruction path sampled current-frame HDR scene color as the default hit radiance source. That HDR image can contain high-contrast walls, light panels, visible-skybox/background contribution, and post-lighting results that are not a stable production reflection source for sparse SSR hits. Blending it with probe/environment fallback produced the white blocks and odd skybox-like fusion.
+
+Control test:
+- Launch the real LightingShowcase with only `SE_SSR_CURRENT_HDR_SOURCE=0`.
+
+Fix:
+- Make `ssrCurrentHdrSourceEnabled` default to off.
+- Decouple the legacy `SE_SSR_SCENE_COLOR` history control from current-HDR radiance; only `SE_SSR_CURRENT_HDR_SOURCE=1` opts into the experimental current-HDR source.
+- Keep the explicit enabled lane in `Test-SsrRefinementHealth.ps1` so the path remains diagnosable without becoming the production default.
+
+Prevention:
+- Do not default SSR to a post/deferred HDR color buffer as its hit-radiance source unless the source is separately validated for foreground geometry, background rejection, exposure/post ordering, mip validity, and temporal stability.
+- Treat current-frame HDR sampling as a Debug comparison path until SSR has a production radiance source contract.
+
+Validation:
+- User confirmed the single `SE_SSR_CURRENT_HDR_SOURCE=0` LightingShowcase window looked normal and the white blocks disappeared.
+
+## 2026-07-17 - Local PCSS Needs Descriptor And Cold-Compile Contracts
+
+Symptom:
+- After adding raw-depth and hardware-comparison local-shadow sampling, Forward3D loaded its FBX model but never reached the first benchmark frame; the window remained unresponsive.
+
+False leads:
+- Treating the Ultra `12+16` receiver sample budget as a runtime GPU hang. `SE_SHADOW_QUALITY=off` still stalled before the first frame.
+- Reducing the rect-light atlas scan from 64 tiles to a bounded per-light range improved the runtime contract but did not remove cold pipeline compilation time by itself.
+- Adding SPIR-V `DontUnroll` controls alone; the NVIDIA driver still copied the complete local-shadow call graph into multiple lighting and debug call sites.
+
+Cause:
+- The material descriptor layout grew from 14 to 15 combined-image samplers, but several pools allocating that shared layout still reserved 14 per set. Vulkan validation reported requests for 45 descriptors from pools containing 42.
+- Once the descriptor error was fixed, cold PSO creation exposed excessive driver inlining. Pipeline tracing measured approximately `11.8 s` for weighted translucency, `10.4 s` for each uncached forward render-pass variant, and `19.1 s` for deferred lighting.
+
+Control test:
+- Redirect Debug stdout/stderr and run four benchmark frames. Descriptor-pool warnings must be zero and CSV must be written.
+- Set `SE_VK_PIPELINE_TRACE=1`; begin/end records distinguish cold pipeline compilation from frame execution.
+- Compare LightingShowcase Low production, default Ultra production, and `SE_LOCAL_SHADOW_PRODUCTION_FILTER=0`. Fallback must preserve quality, atlas dimensions, and tile assignment while reporting active/fallback as `0/1`.
+
+Fix:
+- Define shared frame/material sampler counts and use the 15-binding material count in every pool allocating the material layout.
+- Upload contiguous `first/count/requested/valid` tile ranges per local light and bound shader traversal to six tiles per light.
+- Use authored point/spot source radius, rect residual source radius, nonlinear depth reconstruction, world-space blocker separation, stable rotated Poisson samples, and hardware comparison filtering in forward, deferred, and weighted-translucency consumers.
+- Apply SPIR-V `DontInline` to ten measured high-level lighting/shadow functions during shader generation, validate the rewritten module, and keep pipeline tracing Debug-only. This reduced measured cold PSO work from about `51 s` to `33 s` without the steady-frame regression caused by disabling inlining globally.
+
+Prevention:
+- A descriptor-layout binding addition is incomplete until every pool allocating that layout uses the same named descriptor count and a validation-layer runtime probe reaches a real frame.
+- Measure cold `vkCreateGraphicsPipelines` time after materially deepening a shader. Runtime sample budgets and PSO compile complexity are separate contracts.
+- Keep local-shadow producer ranges and projection geometry versioned and CSV-auditable; never recover ownership by scanning the whole atlas in every fragment.
+
+Validation:
+- Local PCSS math/static health passed, including one identical 12-function hash across all three consumers.
+- Forward3D four-tier health passed `347 pass / 0 warn / 0 fail`; the Forward3D/LightingShowcase production/fallback matrix passed `134 / 0 / 0`.
+- Debug and Release Forward3D/LightingShowcase builds passed; Release contains no `SE_VK_PIPELINE_TRACE` string.
+- The selected ten-function boundary measured about `11.08 ms` GPU and `24.68 ms` Debug CPU on the 60-frame Forward3D lane; forcing every function non-inline regressed those values to `16.81 ms` and `30.34 ms` and was rejected.
+- Visual acceptance is pending the single full-screen LightingShowcase window.
+
 ## 2026-07-16 - Captured Probe Parallax Must Share The FrameGraph Sampling Contract
 
 Symptom:
@@ -1956,3 +2071,200 @@ Validation:
 - `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_probe_spatial` passed `694 pass / 0 warn / 0 fail`.
 - Traversal reports canonical orientation `0x3F`, three selected/ready probes, mip-ready mask `0x7`, duplicate/failure masks `0x0`, blend error `1.19209e-7`, and blend delta `0.02769`.
 - User accepted the single normal `SelfEngineLightingShowcase` visual window.
+## SSR Hi-Z producer/consumer validation must include actual GPU commands
+
+Symptoms:
+- CPU stats reported hierarchical SSR active and a complete mip mask, while an early validation run still emitted `VUID-vkCmdDraw-None-09600` for an `UNDEFINED` depth-pyramid layout in Hi-Z-off lanes.
+- The first health script also reported zero build commands even though the completed CSV later contained `11` dispatches and one consumer draw.
+
+False leads:
+- Treating the expected mip count as proof that the compute producer executed.
+- Accepting a zero-issue FrameGraph as proof that Vulkan image layouts were valid.
+- Invoking a Win32 GUI executable with PowerShell's call operator and assuming the script waited for process exit.
+
+Cause:
+- The Deferred shader statically declares the depth-pyramid binding even when the runtime branch selects fixed-step SSR, so the image must have a valid descriptor layout before every Deferred draw, not only while Hi-Z dispatches run.
+- Windows PowerShell can return from a GUI-subsystem executable invocation before that process exits. The health script imported an early CSV row while the renderer was still running.
+
+Fix:
+- Transition every depth-pyramid image to `GENERAL` during resource creation; active Hi-Z frames explicitly discard/rebuild the full chain before Deferred consumption.
+- Record actual build dispatches, descriptor binds, and Deferred consumer draws in `RendererBindStats`, and compare their per-frame min/max against the expected mip count.
+- Run GUI benchmark lanes with `Start-Process -Wait`, capture stdout/stderr separately, and reject any `VUID` or Vulkan validation diagnostic.
+
+Prevention:
+- A screen-space producer is not data-closed until expected state, actual command counts, consumer use, fallback command suppression, FrameGraph validation, and Vulkan validation all agree.
+- Keep descriptors valid across dynamic branches even when a shader is expected not to sample them at runtime.
+
+## 2026-07-18 - Deferred SSR Must Reproject Its Previous-Frame Resolve
+
+Symptom:
+- Reflected color fragments changed with material content and camera distance: distant receivers showed more fragments, close receivers showed fewer, and very close receivers hid them.
+- The fragments moved as the camera moved and appeared on several materials, so the failure was not specific to a sphere, material, light, or probe.
+
+False leads:
+- Tuning sphere roughness, SSR strength, spatial radius, hit thickness, or showcase lighting.
+- Treating the reflected colors as bad cubemap compression after current-frame HDR radiance had already been proven active.
+
+Cause:
+- `SSRResolved` was produced after Deferred and consumed on the next frame, but Deferred sampled it at the current `fragUv`.
+- The previous-frame resolve therefore crossed current-frame object and silhouette boundaries. The error grows in screen-space significance as geometry becomes smaller with distance.
+
+Control test:
+- `SE_SSR_DEFERRED_REPROJECTION=0` disables only the Deferred receiver reprojection/rejection path while preserving trace, temporal, spatial, HDR-radiance, and probe fallback work.
+
+Fix:
+- Bind `SSRHistoryMetadata` beside `SSRResolved`, sample both at `fragUv - velocity`, and reject history by previous-view depth, octahedral normal, and roughness before blending with the environment fallback.
+- Bind resolved color and metadata from the same previous submitted image identity, model `SSRResolved` as persistent history, and publish contract version, descriptor readiness, rejection state, and alias state through Debug CSV.
+- The algorithm follows the common production reflection-denoiser contract used by FidelityFX Denoiser and NRD: motion-vector reprojection plus receiver depth/normal/material rejection. It reuses the existing RGBA16F metadata image, adding one sampled read and bounded ALU without adding another full-resolution allocation.
+
+Prevention:
+- A post-lighting image consumed by the next frame is temporal history even if its producer is named spatial resolve; its consumer must reproject and validate it.
+- Never accept a temporal reflection chain from producer-side denoising alone. Audit the final consumer coordinates and metadata identity explicitly.
+
+Validation:
+- `Test-SsrHitValidationMath.ps1` passed `29 / 0`.
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and regenerated `deferred_lighting.frag.spv`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\ssr_deferred_receiver_reprojection_health` passed `363 / 0` across LightingShowcase, animated Forward3D FBX, disabled-reprojection, Hi-Z fallback, and disabled controls.
+- Default and FBX lanes report contract `5`, reprojection/depth/normal/roughness `1/1/1/1`, metadata bound `1`, alias `0`, trace/temporal/spatial `1/1/1`, zero FrameGraph issues, and no Vulkan validation diagnostics. Visual acceptance is pending.
+
+## 2026-07-18 - SSR Spatial Denoise Must Not Binary-Gate Low-Confidence Centers
+
+Symptom:
+- Metallic spheres and other materials showed camera-distance-dependent colored fragments. The pattern appeared where sparse SSR samples alternated with the IBL fallback.
+
+False leads:
+- Further tuning one material, sphere distance, probe/cubemap input, SSR strength, or temporal reprojection.
+
+Cause:
+- The Debug topology audit measured `127479` raw hit pixels in the normal LightingShowcase lane, but only `4398` passed the spatial shader's hard `centerTraceConfidence >= 0.18` gate. Temporal valid pixels remained `127479`, proving temporal rejection was not the dominant loss.
+- The binary center gate discarded low-confidence grazing hits before the existing edge-aware depth/normal/roughness neighborhood filter could reconstruct them, leaving sparse SSR pixels interleaved with environment fallback.
+
+Fix:
+- Remove the binary center-confidence rejection from `ssr_spatial.comp`.
+- Keep invalid-depth and high-roughness rejection, then use same-surface depth/normal/roughness weights to reconstruct both low-confidence centers and center-miss neighborhoods. Confidence remains soft and falls back only when no valid temporal neighborhood exists.
+- Add a Debug-only `ssr_diagnostics.comp` pass that records raw hits, high-confidence hits, temporal-valid pixels, resolved-valid pixels, isolated hits, center-miss neighborhoods, and resolved holes into the existing host-visible diagnostics buffer. Release creates and dispatches no diagnostic pass.
+
+Prevention:
+- Never use a single SSR confidence threshold as a binary spatial validity gate. Confidence must control contribution weight; topology and surface compatibility decide whether reconstruction is allowed.
+- For screen-space denoisers, compare raw coverage, temporal coverage, spatial coverage, and neighborhood-hole counts before changing scene or material parameters.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed; `ssr_diagnostics.comp.spv` and the updated `ssr_spatial.comp.spv` regenerated successfully.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\ssr_hole_diagnostics_health_after_spatial_gate` passed `382 / 0` across ten LightingShowcase/Forward3D lanes with zero FrameGraph issues and no Vulkan validation diagnostics.
+- After the fix, the representative normal lane reported `193600` resolved-valid pixels versus `4339` before the fix. The absolute `resolvedHolePixels` counter increased from `510` to `1909`, so visual acceptance and further topology interpretation remain open rather than being declared complete.
+
+## 2026-07-18 - Packed SSR Control Fields Must Decode Every Bit Position
+
+Symptom:
+- SSR visual behavior and control lanes were inconsistent: the configured step count was not reflected in shader execution, and disabling the current HDR scene-color source did not reliably disable temporal radiance.
+
+Cause:
+- `ssrControls.w` packs step count plus flags at `64/128/256/512/1024`, but the shader-side decoders manually subtracted only the lower flags. The `1024` Deferred receiver-reprojection bit leaked into step and scene-color tests.
+
+Fix:
+- Decode the packed field by positional `floor/mod` tests in `ssr_trace.comp`, `ssr_temporal.comp`, and `deferred_lighting.frag`. Step count now reads the low six bits; Hi-Z, scene-color, hit-validation, reconstruction, and receiver-reprojection each read their own bit.
+- Extend `Test-SsrHitValidationMath.ps1` with a packed-control contract check.
+
+Validation:
+- `Test-SsrHitValidationMath.ps1` passed `30 / 0`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\ssr_control_decode_health` passed `382 / 0` across ten cross-scene lanes.
+- After decoding, the normal LightingShowcase lane reports `raw/temporal/resolved = 2616/2616/9525`; the explicit scene-color-off lane reports `2616/0/0`, proving the control now reaches the GPU shader path.
+- A fresh normal `SelfEngineLightingShowcase` visual window is open for acceptance; the earlier window was from before this control fix.
+
+## 2026-07-18 - SSR Temporal Must Keep Current HDR Separate From Deferred History
+
+Symptom:
+- Wall reflections produced distance-dependent white fragments and became soft or unstable. Hiding the showcase walls removed almost all of the fragments, proving that the receiver/material was not the source.
+
+Cause:
+- SSR reconstruction descriptor binding 7 was created for the current frame's `HdrSceneColor`, but the per-frame history update later overwrote the same binding with the previous temporal history image. The Deferred consumer legitimately needs that previous history at its separate binding 16; SSR Temporal runs after Deferred and needs the current HDR attachment.
+
+Fix:
+- Keep binding 7 in `VulkanSsrReconstructionDescriptorSets` bound to the current image-indexed HDR scene color.
+- Rebind only the GBuffer/Deferred binding 16 to the previous submitted temporal history.
+- Remove the reconstruction-side history update API and expose the current-HDR binding state through the existing Debug CSV contract.
+
+Validation:
+- Regenerated `ssr_trace.comp.spv` and `ssr_temporal.comp.spv`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_current_hdr_binding_health` passed `382 / 0` across LightingShowcase controls and animated Forward3D FBX.
+- Normal lanes report `currentHdr=1`, history descriptor bound `1`, temporal/spatial dispatches `1/1`, FrameGraph issues `0`, and raw/resolved plus metadata alias masks `0`.
+- Visual acceptance is pending on the restored-wall LightingShowcase window.
+
+## 2026-07-18 - SSR Full-Mip HDR Sampling Needs Explicit Per-Range Layout Transitions
+
+Symptom:
+- SSR reflections still looked weak and noisy even after the current-HDR path was wired up. Strict health kept failing with `VUID-vkCmdDraw-None-09600` on `SelfEngine.DLSS.InputColor.image[0]` mips `1..10`.
+
+False leads:
+- Raising SSR strength, changing roughness, or treating the artifact as a temporal-quality issue.
+
+Cause:
+- `ssr_trace.comp` still carried a stale current-HDR sampling binding even though the trace pass only writes hit UV/confidence.
+- The mip-generation path assumed the whole HDR image shared one old layout. In reality mip 0 and mip 1+ start in different states, so a single broad barrier left the higher mips in an undefined state for the full-mip descriptor.
+
+Fix:
+- Remove the unused current-HDR radiance sampling from `ssr_trace.comp`.
+- Split HDR mip generation into separate transitions for mip 0 and mip 1+ in both `command_buffer.cpp` and the generic `image.cpp` mipmap helper.
+- Keep the full-mip current-HDR sample only in the temporal pass that runs after mip generation.
+
+Prevention:
+- A view that spans multiple mip levels must not be bound until every covered subresource has a concrete layout contract.
+- When a pass no longer needs a resource, remove the shader binding instead of leaving an apparently harmless stale dependency behind.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed and regenerated `ssr_trace.comp.spv`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_refinement_health_trace_pruned_v2` passed `420 / 0`.
+- The LightingShowcase lane now reports `currentHdr=1`, `mipLevels=11`, `mipReady=1`, and `validationDiagnostics=0`.
+
+## 2026-07-18 - SSR Current HDR Radiance Needs a Small Neighborhood Filter
+
+Symptom:
+- Mirror-like materials still showed bright white fragments and blocky highlights, especially on the lower half of the metallic sphere and along other glossy reflection boundaries.
+
+False leads:
+- Treating the artifact as another layout bug, shadow seam, or trace-confidence issue.
+
+Cause:
+- The current-HDR reflection source was still sampled too directly in `ssr_temporal.comp`. Roughness-selected mips alone were not enough to suppress isolated high-contrast source pixels from the room lights and wall edges.
+
+Fix:
+- Add a small weighted neighborhood filter in `SampleCurrentHitRadiance` and clamp the result in YCoCg space.
+- Keep the original center-sample path available through `SE_SSR_CURRENT_HDR_FILTER_OFF=1` for Debug comparison.
+- Publish `reconstructionCurrentHdrRadianceFilterEnabled` through CSV/stats so the health gate can assert the production path is active.
+
+Prevention:
+- When a glossy reflection still shows sparse bright blocks, inspect the radiance input filter before touching SSR tracing or shadow bias.
+- A valid mip chain is not enough; current-frame reflection radiance still needs footprint-aware filtering.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_refinement_health_current_hdr_filter_v1` passed `420 / 0`.
+- The LightingShowcase lane reports `currentHdrSource=1`, `currentHdrFilter=1`, `mipLevels=11`, `mipReady=1`, and `validationDiagnostics=0`.
+
+## 2026-07-18 - SSR Spatial Variance Clamp Needs Support-Based Confidence
+
+Symptom:
+- White fragments and speckled blocks remained on glossy spheres and other reflective boundaries even after temporal/current-HDR filtering.
+
+False leads:
+- More trace steps, stronger current-HDR filtering, or blaming the depth pyramid / hit validation.
+
+Cause:
+- The spatial resolve still let sparse center hits dominate the final color and alpha; it did not clip strongly enough against local variance and neighborhood support.
+
+Control test:
+- `SE_SSR_SPATIAL_VARIANCE_CLAMP_OFF=1` versus the default-on lane in `scripts\Test-SsrRefinementHealth.ps1`.
+- LightingShowcase and Forward3D both reported `reconstructionSpatialVarianceClampEnabled=1` with `supportTapCount=13`; the off lane reported `0`.
+
+Fix:
+- Add support-weighted YCoCg variance clipping in `ssr_spatial.comp`.
+- Add the `SE_SSR_SPATIAL_VARIANCE_CLAMP` / `_OFF` control and expose `reconstructionSpatialVarianceClampEnabled` plus `reconstructionSpatialSupportTapCount`.
+- Make the confidence output support-aware so sparse outliers fade back to probe/IBL sooner.
+
+Prevention:
+- If glossy reflections still show sparse blocks after temporal filtering, inspect the spatial support envelope before revisiting SSR tracing or HDR mip generation.
+- Follow the production spatial-denoise / variance-clipping pattern used by AMD FidelityFX SSSR / denoiser-style filters; do not accept a pure bilateral average as the final answer.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed after `ssr_spatial.comp.spv` regenerated.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_spatial_variance_clamp_health` passed `469 / 0`.

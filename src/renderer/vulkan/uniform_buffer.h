@@ -127,6 +127,11 @@ struct LightBufferObject {
 struct LightTileDiagnosticsBufferObject {
     alignas(16) glm::uvec4 counters{};
     alignas(16) glm::uvec4 overflowCounters{};
+    // Debug-only SSR topology counters share this existing readback buffer.
+    // The first two vec4s remain ABI-compatible with the light culling shaders.
+    alignas(16) glm::uvec4 ssrCounters{};
+    alignas(16) glm::uvec4 ssrTopologyCounters{};
+    alignas(16) glm::uvec4 ssrFallbackCounters{};
 };
 
 struct AutoExposureBufferObject {
@@ -152,6 +157,8 @@ struct DirectionalShadowCascadeBufferObject {
     // x: blocker-search radius in texels, y: light angular radius in radians,
     // z: raw-depth sampler readiness, w: fallback reason.
     alignas(16) glm::vec4 directionalPcssGeometry{ 0.0f };
+    // x/y: grazing receiver confidence range in NdotL; z: enabled.
+    alignas(16) glm::vec4 directionalPcssReceiverControls{ 0.0f };
     alignas(16) glm::mat4 fallbackViewProjection{ 1.0f };
     alignas(16) std::array<glm::mat4, kMaxDirectionalShadowCascades> viewProjections{};
 };
@@ -171,6 +178,11 @@ struct LocalShadowBufferObject {
     alignas(16) glm::vec4 spotFilterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
     alignas(16) glm::vec4 rectFilterControls{ 0.0009f, 0.0024f, 1.0f, 1.0f };
     alignas(16) glm::vec4 kindSoftShadowControls{ 0.0f };
+    alignas(16) glm::vec4 pointPcssControls{ 0.0f };
+    alignas(16) glm::vec4 spotPcssControls{ 0.0f };
+    alignas(16) glm::vec4 rectPcssControls{ 0.0f };
+    // x: first tile, y: assigned count, z: requested count, w: range valid.
+    alignas(16) std::array<glm::uvec4, kMaxFrameLocalLights> tileRanges{};
     alignas(16) std::array<GpuLocalShadowTileRecord, kMaxFrameLocalShadowTiles> tiles{};
 };
 
@@ -251,7 +263,7 @@ static_assert(
 );
 
 static_assert(
-    sizeof(LightTileDiagnosticsBufferObject) == sizeof(glm::uvec4) * 2,
+    sizeof(LightTileDiagnosticsBufferObject) == sizeof(glm::uvec4) * 5,
     "LightTileDiagnosticsBufferObject layout must match the shader storage buffer"
 );
 
@@ -264,7 +276,7 @@ static_assert(
 
 static_assert(
     sizeof(DirectionalShadowCascadeBufferObject) ==
-        sizeof(glm::vec4) * 9 +
+        sizeof(glm::vec4) * 10 +
         sizeof(glm::mat4) * (1 + kMaxDirectionalShadowCascades),
     "DirectionalShadowCascadeBufferObject layout must match the shader storage buffer"
 );
@@ -278,7 +290,8 @@ static_assert(
 static_assert(
     sizeof(LocalShadowBufferObject) ==
         sizeof(glm::uvec4) * 2 +
-        sizeof(glm::vec4) * 6 +
+        sizeof(glm::vec4) * 9 +
+        sizeof(glm::uvec4) * kMaxFrameLocalLights +
         sizeof(GpuLocalShadowTileRecord) * kMaxFrameLocalShadowTiles,
     "LocalShadowBufferObject layout must match the shader storage buffer"
 );

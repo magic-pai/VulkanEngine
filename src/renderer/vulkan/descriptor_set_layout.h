@@ -8,6 +8,8 @@ class VulkanDevice;
 
 constexpr u32 kBonePaletteDescriptorSetIndex = 2;
 constexpr u32 kBonePaletteDescriptorBinding = 0;
+constexpr u32 kFrameDescriptorCombinedImageSamplerCount = 12;
+constexpr u32 kMaterialDescriptorCombinedImageSamplerCount = 19;
 
 VkDescriptorSetLayoutBinding BonePaletteDescriptorSetLayoutBinding();
 
@@ -58,6 +60,21 @@ public:
     ~VulkanHiZDescriptorSetLayout();
     SE_DISABLE_COPY(VulkanHiZDescriptorSetLayout);
     SE_DISABLE_MOVE(VulkanHiZDescriptorSetLayout);
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+// SSR reconstruction: GBuffer/history inputs plus isolated raw, temporal, metadata and spatial outputs.
+class VulkanSsrReconstructionDescriptorSetLayout {
+public:
+    explicit VulkanSsrReconstructionDescriptorSetLayout(const VulkanDevice& device);
+    ~VulkanSsrReconstructionDescriptorSetLayout();
+    SE_DISABLE_COPY(VulkanSsrReconstructionDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanSsrReconstructionDescriptorSetLayout);
     VkDescriptorSetLayout Handle() const;
     void Release();
 private:

@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_control_flow_attributes : require
 
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
@@ -120,6 +121,7 @@ layout(std430, set = 0, binding = 4) readonly buffer DirectionalShadowCascades {
     vec4 directionalFilterControls;
     vec4 directionalPcssControls;
     vec4 directionalPcssGeometry;
+    vec4 directionalPcssReceiverControls;
     mat4 fallbackViewProjection;
     mat4 viewProjections[4];
 } shadowCascades;
@@ -139,6 +141,10 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
     vec4 spotFilterControls;
     vec4 rectFilterControls;
     vec4 kindSoftShadowControls;
+    vec4 pointPcssControls;
+    vec4 spotPcssControls;
+    vec4 rectPcssControls;
+    uvec4 tileRanges[64];
     LocalShadowTileRecord tiles[64];
 } localShadows;
 
@@ -161,7 +167,8 @@ layout(set = 1, binding = 8) uniform sampler2D specularSampler;
 layout(set = 1, binding = 9) uniform sampler2D clearcoatSampler;
 layout(set = 1, binding = 10) uniform sampler2D transmissionSampler;
 layout(set = 1, binding = 11) uniform sampler2D clearcoatRoughnessSampler;
-layout(set = 1, binding = 12) uniform sampler2D localShadowSampler;
+layout(set = 1, binding = 12) uniform sampler2DShadow localShadowComparisonSampler;
+layout(set = 1, binding = 14) uniform sampler2D localShadowRawDepthSampler;
 
 const float PI = 3.14159265359;
 const int MAX_LOCAL_LIGHTS = 64;
@@ -170,6 +177,7 @@ const int MAX_LIGHTS_PER_TILE = 16;
 const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
+const int MAX_LOCAL_SHADOW_TILES_PER_LIGHT = 6;
 const int MAX_REFLECTION_PROBES = 4;
 const int REFLECTION_PROBE_DIFFUSE_LOBE_COUNT = 6;
 
@@ -442,6 +450,61 @@ float LocalReflectionProbeWeight(vec3 worldPosition) {
     return LocalReflectionProbeWeightAt(0, worldPosition);
 }
 
+bool LocalReflectionProbeProductionBlendEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(mode, 2.0) > 0.5;
+}
+
+bool ReflectionProbeIndependentIblEnergyEnabled() {
+    return floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5;
+}
+
+float LocalReflectionProbeShapeCoordinateAt(
+    int probeIndex,
+    vec3 worldPosition
+) {
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
+    if (boxExtentsProjection.w > 0.5) {
+        vec3 normalizedBox = abs(worldPosition - positionRadius.xyz) /
+            max(boxExtentsProjection.xyz, vec3(0.001));
+        return max(max(normalizedBox.x, normalizedBox.y), normalizedBox.z);
+    }
+    return length(worldPosition - positionRadius.xyz) /
+        max(positionRadius.w, 0.001);
+}
+
+float LocalReflectionProbeProductionCoverageAt(
+    int probeIndex,
+    vec3 worldPosition
+) {
+    vec4 controls = frame.reflectionProbeControlsArray[probeIndex];
+    if (controls.x <= 0.0001 || controls.y <= 0.0001 ||
+        controls.z <= 0.0001) {
+        return 0.0;
+    }
+    float edgeWidth = mix(0.08, 0.45, clamp(controls.z, 0.0, 1.0));
+    float edgeStart = clamp(1.0 - edgeWidth, 0.05, 0.95);
+    return 1.0 - smoothstep(
+        edgeStart,
+        1.0,
+        LocalReflectionProbeShapeCoordinateAt(probeIndex, worldPosition)
+    );
+}
+
+float LocalReflectionProbeVolumePriorityAt(int probeIndex) {
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
+    if (boxExtentsProjection.w > 0.5) {
+        vec3 extents = max(boxExtentsProjection.xyz, vec3(0.01));
+        return 1.0 / max(extents.x * extents.y * extents.z, 0.000001);
+    }
+    float radius = max(positionRadius.w, 0.01);
+    return 1.0 / (radius * radius * radius);
+}
+
 vec3 BoxProjectedLocalReflectionDirectionAt(
     int probeIndex,
     vec3 direction,
@@ -553,28 +616,76 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
 }
 
-vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec3 worldPosition) {
-    vec3 globalRadiance = GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+struct EnvironmentRadianceResult {
+    vec3 globalRadiance;
+    vec3 localRadiance;
+    vec3 resolvedRadiance;
+    float localCoverage;
+};
+
+EnvironmentRadianceResult ResolveEnvironmentRadiance(
+    vec3 direction,
+    vec3 sunDirection,
+    float roughness,
+    vec3 worldPosition
+) {
+    EnvironmentRadianceResult result;
+    result.globalRadiance = GlobalEnvironmentRadiance(
+        direction,
+        sunDirection,
+        roughness
+    );
+    result.localRadiance = result.globalRadiance;
+    result.resolvedRadiance = result.globalRadiance;
+    result.localCoverage = 0.0;
     int probeCount = clamp(
         int(frame.reflectionProbeBlendControls.x + 0.5),
         0,
         MAX_REFLECTION_PROBES
     );
     if (frame.reflectionProbeBlendControls.y <= 0.5 || probeCount <= 0) {
-        return globalRadiance;
+        return result;
     }
 
     float weights[MAX_REFLECTION_PROBES];
+    float coverages[MAX_REFLECTION_PROBES];
+    float priorities[MAX_REFLECTION_PROBES];
+    bool productionBlend = LocalReflectionProbeProductionBlendEnabled();
+    float bestPriority = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        float coverage = probeIndex < probeCount
+            ? LocalReflectionProbeProductionCoverageAt(probeIndex, worldPosition)
+            : 0.0;
+        float priority = probeIndex < probeCount
+            ? LocalReflectionProbeVolumePriorityAt(probeIndex)
+            : 0.0;
+        coverages[probeIndex] = coverage;
+        priorities[probeIndex] = priority;
+        if (coverage > 0.0001) {
+            bestPriority = max(bestPriority, priority);
+        }
+    }
+
     float totalWeight = 0.0;
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
-        float weight = probeIndex < probeCount
-            ? LocalReflectionProbeWeightAt(probeIndex, worldPosition)
-            : 0.0;
+        float weight = 0.0;
+        if (probeIndex < probeCount) {
+            weight = productionBlend
+                ? coverages[probeIndex] * smoothstep(
+                    0.35,
+                    0.95,
+                    priorities[probeIndex] / max(bestPriority, 0.000001)
+                )
+                : LocalReflectionProbeWeightAt(probeIndex, worldPosition);
+        }
         weights[probeIndex] = weight;
         totalWeight += weight;
+        result.localCoverage = productionBlend
+            ? max(result.localCoverage, coverages[probeIndex])
+            : clamp(totalWeight, 0.0, 1.0);
     }
     if (totalWeight <= 0.0001) {
-        return globalRadiance;
+        return result;
     }
 
     vec3 localBlend = vec3(0.0);
@@ -596,7 +707,7 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
                 direction,
                 worldPosition
             );
-        vec3 sampledRadiance = globalRadiance * localTint;
+        vec3 sampledRadiance = result.globalRadiance * localTint;
         if (color.a > 0.5) {
             int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
             float localCubemapWeight = 1.0 - smoothstep(0.88, 1.0, roughnessClamped);
@@ -629,7 +740,27 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
         localBlend += localRadiance * (rawWeight / totalWeight);
     }
 
-    return mix(globalRadiance, localBlend, clamp(totalWeight, 0.0, 1.0));
+    result.localRadiance = localBlend;
+    result.resolvedRadiance = mix(
+        result.globalRadiance,
+        result.localRadiance,
+        result.localCoverage
+    );
+    return result;
+}
+
+vec3 EnvironmentRadiance(
+    vec3 direction,
+    vec3 sunDirection,
+    float roughness,
+    vec3 worldPosition
+) {
+    return ResolveEnvironmentRadiance(
+        direction,
+        sunDirection,
+        roughness,
+        worldPosition
+    ).resolvedRadiance;
 }
 
 IblAmbientResult BuildIblAmbient(
@@ -692,7 +823,7 @@ vec3 LocalShadowAtlasDebugColor(vec2 uv) {
 
     int tileIndex = tileCoord.y * tileColumns + tileCoord.x;
     vec2 tileUv = fract(grid);
-    float atlasDepth = texture(localShadowSampler, uv).r;
+    float atlasDepth = texture(localShadowRawDepthSampler, uv).r;
     vec3 depthColor = mix(
         vec3(0.02, 0.025, 0.035),
         vec3(0.92, 0.94, 0.98),
@@ -774,16 +905,52 @@ float PointShadowFaceSeamRisk(vec3 fromLight) {
     return 1.0 - smoothstep(0.02, 0.16, axisGap);
 }
 
+bool GetLocalShadowTileRange(
+    int assignedTileCount,
+    int localLightIndex,
+    out int firstTileIndex,
+    out int tileCount
+) {
+    firstTileIndex = 0;
+    tileCount = 0;
+    if (localShadows.atlasInfo2.w < 3u ||
+        localLightIndex < 0 || localLightIndex >= MAX_LOCAL_LIGHTS) {
+        return false;
+    }
+
+    uvec4 range = localShadows.tileRanges[localLightIndex];
+    firstTileIndex = int(range.x);
+    tileCount = int(range.y);
+    return range.w != 0u && tileCount > 0 &&
+        tileCount <= MAX_LOCAL_SHADOW_TILES_PER_LIGHT &&
+        firstTileIndex >= 0 && firstTileIndex < assignedTileCount &&
+        firstTileIndex + tileCount <= assignedTileCount;
+}
+
 bool FindLocalShadowTile(
     int assignedTileCount,
     int localLightIndex,
     int targetFace,
     out LocalShadowTileRecord foundTile
 ) {
-    for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
-        if (tileIndex >= assignedTileCount) {
+    int firstTileIndex = 0;
+    int tileCount = 0;
+    if (!GetLocalShadowTileRange(
+            assignedTileCount,
+            localLightIndex,
+            firstTileIndex,
+            tileCount
+        )) {
+        return false;
+    }
+
+    [[dont_unroll]] for (int rangeOffset = 0;
+         rangeOffset < MAX_LOCAL_SHADOW_TILES_PER_LIGHT;
+         ++rangeOffset) {
+        if (rangeOffset >= tileCount) {
             break;
         }
+        int tileIndex = firstTileIndex + rangeOffset;
         LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
         if (int(tile.tileInfo.y) != localLightIndex) {
             continue;
@@ -823,6 +990,64 @@ float LocalShadowPcssStrength(uint lightKind) {
         return clamp(localShadows.kindSoftShadowControls.z, 0.0, 1.0);
     }
     return clamp(localShadows.softShadowControls.x, 0.0, 1.0);
+}
+
+vec4 LocalShadowPcssControls(uint lightKind) {
+    if (lightKind == 0u) {
+        return localShadows.pointPcssControls;
+    }
+    if (lightKind == 1u) {
+        return localShadows.spotPcssControls;
+    }
+    if (lightKind == 2u) {
+        return localShadows.rectPcssControls;
+    }
+    return vec4(0.0);
+}
+
+float LinearizeLocalShadowDepth(float depth, vec4 lightInfo) {
+    float nearPlane = max(lightInfo.x, 0.0001);
+    float farPlane = max(lightInfo.y, nearPlane + 0.0001);
+    float denominator = farPlane - clamp(depth, 0.0, 1.0) * (farPlane - nearPlane);
+    return nearPlane * farPlane / max(denominator, 0.000001);
+}
+
+float LocalShadowStableDiskAngle(uvec4 tileInfo) {
+    uint value = tileInfo.y * 747796405u +
+        tileInfo.z * 2891336453u + tileInfo.w * 277803737u + 0x9e3779b9u;
+    value ^= value >> 16u;
+    value *= 2246822519u;
+    value ^= value >> 13u;
+    return float(value & 65535u) * (6.28318530718 / 65536.0);
+}
+
+const vec2 LOCAL_SHADOW_POISSON_DISK[16] = vec2[](
+    vec2(-0.94201624, -0.39906216),
+    vec2( 0.94558609, -0.76890725),
+    vec2(-0.09418410, -0.92938870),
+    vec2( 0.34495938,  0.29387760),
+    vec2(-0.91588581,  0.45771432),
+    vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543,  0.27676845),
+    vec2( 0.97484398,  0.75648379),
+    vec2( 0.44323325, -0.97511554),
+    vec2( 0.53742981, -0.47373420),
+    vec2(-0.26496911, -0.41893023),
+    vec2( 0.79197514,  0.19090188),
+    vec2(-0.24188840,  0.99706507),
+    vec2(-0.81409955,  0.91437590),
+    vec2( 0.19984126,  0.78641367),
+    vec2( 0.14383161, -0.14100790)
+);
+
+mat2 LocalShadowDiskRotation(float angle) {
+    float cosine = cos(angle);
+    float sine = sin(angle);
+    return mat2(cosine, sine, -sine, cosine);
+}
+
+vec2 LocalShadowDiskOffset(int sampleIndex, mat2 rotation) {
+    return rotation * LOCAL_SHADOW_POISSON_DISK[sampleIndex];
 }
 
 float RectAreaShadowSoftness(LocalLightRecord localLight, vec3 worldPosition) {
@@ -887,7 +1112,7 @@ float SampleLocalShadowTileVisibility(
     vec2 tileOrigin = vec2(float(tileX), float(tileY)) * atlasTileScale;
     vec2 atlasUv = tileOrigin + shadowUv * atlasTileScale;
     vec2 tileMax = tileOrigin + atlasTileScale;
-    vec2 texelSize = 1.0 / vec2(textureSize(localShadowSampler, 0));
+    vec2 texelSize = 1.0 / vec2(textureSize(localShadowRawDepthSampler, 0));
     float rectAreaSoftness = clamp(areaSoftness, 0.0, 1.0);
     float shadowTileEdgeDistance = min(
         min(shadowUv.x, 1.0 - shadowUv.x),
@@ -902,73 +1127,185 @@ float SampleLocalShadowTileVisibility(
     float biasSlope = max(filterControls.y, 0.0);
     float nDotL = clamp(dot(normal, lightDir), 0.0, 1.0);
     float bias = max(biasSlope * (1.0 - nDotL), biasMin) * max(biasScale, 0.0);
-    int kernelRadius = clamp(int(filterControls.w + 0.5), 0, 2);
-    if (kernelRadius <= 0) {
-        float closestDepth = texture(localShadowSampler, atlasUv).r;
-        float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-        float occlusion = shadow *
-            mix(1.0, 0.42, rectAreaSoftness) *
-            rectTileEdgeFade;
-        return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
-    }
+    bool productionFilterReady = localShadows.atlasInfo2.w >= 3u &&
+        localShadows.softShadowControls.w > 0.5 &&
+        tile.lightInfo.x > 0.0 && tile.lightInfo.y > tile.lightInfo.x &&
+        tile.lightInfo.w > 0.0;
+    if (!productionFilterReady) {
+        int kernelRadius = clamp(int(filterControls.w + 0.5), 0, 2);
+        if (kernelRadius <= 0) {
+            float closestDepth = texture(localShadowRawDepthSampler, atlasUv).r;
+            float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+            float occlusion = shadow *
+                mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
+            return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+        }
 
-    float shadow = 0.0;
-    int sampleCount = 0;
-    float filterRadius = max(filterControls.z, 0.0);
-    filterRadius *= 1.0 + rectAreaSoftness * 5.5;
-    pcssStrength = max(clamp(pcssStrength, 0.0, 1.0), rectAreaSoftness * 0.55);
-    if (pcssStrength > 0.0001 && kernelRadius > 0) {
-        float blockerDepthSum = 0.0;
-        int blockerCount = 0;
-        float searchRadius = max(filterRadius, 1.0) * (1.0 + pcssStrength);
-        for (int x = -1; x <= 1; ++x) {
-            for (int y = -1; y <= 1; ++y) {
-                vec2 blockerUv = clamp(
-                    atlasUv + vec2(x, y) * texelSize * searchRadius,
+        float shadow = 0.0;
+        int sampleCount = 0;
+        float filterRadius = max(filterControls.z, 0.0) *
+            (1.0 + rectAreaSoftness * 5.5);
+        float legacyPcssStrength = max(
+            clamp(pcssStrength, 0.0, 1.0),
+            rectAreaSoftness * 0.55
+        );
+        if (legacyPcssStrength > 0.0001) {
+            float blockerDepthSum = 0.0;
+            int blockerCount = 0;
+            float searchRadius = max(filterRadius, 1.0) *
+                (1.0 + legacyPcssStrength);
+            for (int x = -1; x <= 1; ++x) {
+                for (int y = -1; y <= 1; ++y) {
+                    vec2 blockerUv = clamp(
+                        atlasUv + vec2(x, y) * texelSize * searchRadius,
+                        tileOrigin + texelSize,
+                        tileMax - texelSize
+                    );
+                    float blockerDepth = texture(
+                        localShadowRawDepthSampler,
+                        blockerUv
+                    ).r;
+                    if (currentDepth - bias > blockerDepth) {
+                        blockerDepthSum += blockerDepth;
+                        ++blockerCount;
+                    }
+                }
+            }
+            if (blockerCount > 0) {
+                float averageBlockerDepth = blockerDepthSum / float(blockerCount);
+                float penumbra = clamp(
+                    (currentDepth - averageBlockerDepth) /
+                        max(averageBlockerDepth, 0.0001),
+                    0.0,
+                    1.0
+                );
+                filterRadius *= 1.0 + penumbra * legacyPcssStrength * 3.0;
+            }
+        }
+
+        for (int x = -2; x <= 2; ++x) {
+            if (abs(x) > kernelRadius) {
+                continue;
+            }
+            for (int y = -2; y <= 2; ++y) {
+                if (abs(y) > kernelRadius) {
+                    continue;
+                }
+                vec2 sampleUv = clamp(
+                    atlasUv + vec2(x, y) * texelSize * filterRadius,
                     tileOrigin + texelSize,
                     tileMax - texelSize
                 );
-                float blockerDepth = texture(localShadowSampler, blockerUv).r;
-                if (currentDepth - bias > blockerDepth) {
-                    blockerDepthSum += blockerDepth;
-                    ++blockerCount;
-                }
+                float closestDepth = texture(localShadowRawDepthSampler, sampleUv).r;
+                shadow += currentDepth - bias > closestDepth ? 1.0 : 0.0;
+                ++sampleCount;
             }
         }
 
+        float occlusion = shadow / max(float(sampleCount), 1.0);
+        occlusion *= mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
+        return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    }
+
+    uint lightKind = tile.tileInfo.w;
+    vec4 pcssControls = LocalShadowPcssControls(lightKind);
+    int blockerSampleCount = clamp(int(pcssControls.x + 0.5), 0, 16);
+    int filterSampleCount = clamp(int(pcssControls.y + 0.5), 1, 16);
+    float searchRadiusLimit = clamp(pcssControls.z, 0.0, 16.0);
+    float maxPenumbraTexels = clamp(pcssControls.w, 0.5, 16.0);
+    float receiverDistance = LinearizeLocalShadowDepth(currentDepth, tile.lightInfo);
+    float sourceRadius = max(tile.lightInfo.z, 0.0);
+    float tanHalfFov = max(tile.lightInfo.w, 0.0001);
+    float worldTexelSize = max(
+        2.0 * receiverDistance * tanHalfFov / float(tileSize),
+        0.000001
+    );
+    float baseFilterRadius = max(filterControls.z, 0.5);
+    float filterRadiusTexels = min(baseFilterRadius, maxPenumbraTexels);
+    float stableAngle = LocalShadowStableDiskAngle(tile.tileInfo);
+    mat2 diskRotation = LocalShadowDiskRotation(stableAngle);
+    vec2 sampleGuard = texelSize * 1.5;
+    float comparisonDepth = clamp(currentDepth - bias, 0.0, 1.0);
+
+    if (pcssStrength > 0.0001 && sourceRadius > 0.000001 &&
+        blockerSampleCount > 0 && searchRadiusLimit > 0.0) {
+        float projectedSourceTexels = sourceRadius / worldTexelSize;
+        float geometricSearchRadius = projectedSourceTexels *
+            max(receiverDistance - tile.lightInfo.x, 0.0) /
+            max(receiverDistance, tile.lightInfo.x);
+        float searchRadiusTexels = clamp(
+            max(baseFilterRadius, geometricSearchRadius),
+            0.5,
+            searchRadiusLimit
+        );
+        float blockerDistanceSum = 0.0;
+        int blockerCount = 0;
+        [[dont_unroll]] for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+            if (sampleIndex >= blockerSampleCount) {
+                break;
+            }
+            vec2 sampleOffset = LocalShadowDiskOffset(
+                sampleIndex,
+                diskRotation
+            );
+            vec2 blockerUv = clamp(
+                atlasUv + sampleOffset * texelSize * searchRadiusTexels,
+                tileOrigin + sampleGuard,
+                tileMax - sampleGuard
+            );
+            float blockerDepth = textureLod(
+                localShadowRawDepthSampler,
+                blockerUv,
+                0.0
+            ).r;
+            if (comparisonDepth > blockerDepth + 0.000001) {
+                blockerDistanceSum += LinearizeLocalShadowDepth(
+                    blockerDepth,
+                    tile.lightInfo
+                );
+                ++blockerCount;
+            }
+        }
         if (blockerCount > 0) {
-            float averageBlockerDepth = blockerDepthSum / float(blockerCount);
-            float penumbra = clamp(
-                (currentDepth - averageBlockerDepth) / max(averageBlockerDepth, 0.0001),
-                0.0,
-                1.0
+            float averageBlockerDistance =
+                blockerDistanceSum / float(blockerCount);
+            float blockerSeparationWorld = max(
+                receiverDistance - averageBlockerDistance,
+                0.0
             );
-            filterRadius *= 1.0 + penumbra * pcssStrength * 3.0;
+            float penumbraWorld = sourceRadius * blockerSeparationWorld /
+                max(averageBlockerDistance, tile.lightInfo.x);
+            filterRadiusTexels = clamp(
+                baseFilterRadius +
+                    penumbraWorld * clamp(pcssStrength, 0.0, 1.0) /
+                    worldTexelSize,
+                baseFilterRadius,
+                maxPenumbraTexels
+            );
         }
     }
 
-    for (int x = -2; x <= 2; ++x) {
-        if (abs(x) > kernelRadius) {
-            continue;
+    float visibilitySum = 0.0;
+    [[dont_unroll]] for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+        if (sampleIndex >= filterSampleCount) {
+            break;
         }
-        for (int y = -2; y <= 2; ++y) {
-            if (abs(y) > kernelRadius) {
-                continue;
-            }
-            vec2 sampleUv = clamp(
-                atlasUv + vec2(x, y) * texelSize * filterRadius,
-                tileOrigin + texelSize,
-                tileMax - texelSize
-            );
-            float closestDepth = texture(localShadowSampler, sampleUv).r;
-            shadow += currentDepth - bias > closestDepth ? 1.0 : 0.0;
-            ++sampleCount;
-        }
+        vec2 sampleOffset = LocalShadowDiskOffset(
+            sampleIndex,
+            diskRotation
+        );
+        vec2 sampleUv = clamp(
+            atlasUv + sampleOffset * texelSize * filterRadiusTexels,
+            tileOrigin + sampleGuard,
+            tileMax - sampleGuard
+        );
+        visibilitySum += texture(
+            localShadowComparisonSampler,
+            vec3(sampleUv, comparisonDepth)
+        );
     }
-
-    float occlusion = shadow / max(float(sampleCount), 1.0);
-    occlusion *= mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
-    return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    float visibility = visibilitySum / float(filterSampleCount);
+    return mix(1.0, visibility, clamp(frame.shadowControls.y, 0.0, 1.0));
 }
 
 float LocalShadowVisibility(
@@ -1008,12 +1345,25 @@ float LocalShadowVisibility(
     float areaSoftness =
         lightKind == 2u ? RectAreaShadowSoftness(localLight, worldPosition) : 0.0;
     if (lightKind == 2u) {
+        int firstTileIndex = 0;
+        int tileCount = 0;
+        if (!GetLocalShadowTileRange(
+                assignedTileCount,
+                localLightIndex,
+                firstTileIndex,
+                tileCount
+            )) {
+            return 1.0;
+        }
         float visibilitySum = 0.0;
         int visibilityCount = 0;
-        for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
-            if (tileIndex >= assignedTileCount) {
+        [[dont_unroll]] for (int rangeOffset = 0;
+             rangeOffset < MAX_LOCAL_SHADOW_TILES_PER_LIGHT;
+             ++rangeOffset) {
+            if (rangeOffset >= tileCount) {
                 break;
             }
+            int tileIndex = firstTileIndex + rangeOffset;
             LocalShadowTileRecord rectTile = localShadows.tiles[tileIndex];
             if (int(rectTile.tileInfo.y) != localLightIndex ||
                 rectTile.tileInfo.w != 2u) {
@@ -1909,12 +2259,25 @@ bool SampleDirectionalPcssVisibility(
     float baseBias,
     vec2 receiverPlaneGradient,
     float receiverPlaneBiasScale,
+    float receiverNdotL,
     int cascadeIndex,
     out float pcssVisibility,
     out float pcssBlend
 ) {
     pcssVisibility = 1.0;
     pcssBlend = 0.0;
+    // Grazing self-receivers make blocker search unreliable; retain Tent PCF there.
+    vec4 receiverControls = shadowCascades.directionalPcssReceiverControls;
+    float receiverConfidence = receiverControls.z > 0.5
+        ? smoothstep(
+            clamp(receiverControls.x, 0.0, 0.95),
+            max(receiverControls.y, receiverControls.x + 0.001),
+            clamp(receiverNdotL, 0.0, 1.0)
+        )
+        : 1.0;
+    if (receiverConfidence <= 0.0001) {
+        return false;
+    }
     float strength = clamp(shadowCascades.directionalPcssControls.x, 0.0, 1.0);
     int blockerSampleCount = clamp(
         int(shadowCascades.directionalPcssControls.y + 0.5),
@@ -2009,7 +2372,11 @@ bool SampleDirectionalPcssVisibility(
         2.0,
         maxPenumbraTexels
     );
-    pcssBlend = smoothstep(2.0, min(3.0, maxPenumbraTexels), filterRadiusTexels);
+    pcssBlend = smoothstep(
+        2.0,
+        min(3.0, maxPenumbraTexels),
+        filterRadiusTexels
+    ) * receiverConfidence;
 
     float visibilitySum = 0.0;
     for (int sampleIndex = 0;
@@ -2114,6 +2481,7 @@ bool SampleShadowCascadeVisibility(
         bias,
         receiverPlaneGradient,
         receiverPlaneBiasScale,
+        clamp(dot(normal, lightDir), 0.0, 1.0),
         cascadeIndex,
         pcssVisibility,
         pcssBlend
@@ -2647,8 +3015,10 @@ void main() {
         fragWorldPosition,
         f0,
         occlusion,
-        envStrength,
-        envStrength * (0.55 + specularStrength)
+        ReflectionProbeIndependentIblEnergyEnabled() ? 1.0 : envStrength,
+        ReflectionProbeIndependentIblEnergyEnabled()
+            ? 1.0
+            : envStrength * (0.55 + specularStrength)
     );
     vec3 ambient = iblAmbient.diffuse + iblAmbient.specular;
     float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);

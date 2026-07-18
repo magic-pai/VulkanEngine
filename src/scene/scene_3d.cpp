@@ -94,7 +94,8 @@ PointLight3D& Scene3D::CreatePointLight(
     glm::vec3 position,
     f32 radius,
     glm::vec3 color,
-    f32 intensity
+    f32 intensity,
+    f32 sourceRadius
 ) {
     m_PointLights.push_back(PointLight3D{
         std::move(name),
@@ -102,6 +103,7 @@ PointLight3D& Scene3D::CreatePointLight(
         std::max(radius, 0.0f),
         glm::max(color, glm::vec3(0.0f)),
         std::max(intensity, 0.0f),
+        std::max(sourceRadius, 0.0f),
         true
     });
     MarkLightsChanged();
@@ -117,7 +119,8 @@ SpotLight3D& Scene3D::CreateSpotLight(
     glm::vec3 color,
     f32 intensity,
     f32 innerConeDegrees,
-    f32 outerConeDegrees
+    f32 outerConeDegrees,
+    f32 sourceRadius
 ) {
     if (glm::dot(direction, direction) <= 0.0001f) {
         direction = { 0.0f, -1.0f, 0.0f };
@@ -137,6 +140,7 @@ SpotLight3D& Scene3D::CreateSpotLight(
         std::max(intensity, 0.0f),
         innerConeDegrees,
         outerConeDegrees,
+        std::max(sourceRadius, 0.0f),
         true
     });
     MarkLightsChanged();

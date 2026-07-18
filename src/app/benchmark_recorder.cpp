@@ -484,6 +484,9 @@ void BenchmarkRecorder::RecordFrame(
         << shadowCascades.pcssSearchRadiusTexels << ','
         << shadowCascades.pcssMaxPenumbraTexels << ','
         << shadowCascades.pcssLightAngularRadiusRadians << ','
+        << shadowCascades.pcssGrazingFadeEnabled << ','
+        << shadowCascades.pcssGrazingFadeStart << ','
+        << shadowCascades.pcssGrazingFadeEnd << ','
         << shadowCascades.filterMode << ','
         << shadowCascades.filterSampleCount << ','
         << shadowCascades.filterKernelWidth << ','
@@ -518,10 +521,99 @@ void BenchmarkRecorder::RecordFrame(
         << ssao.sampleCount << ','
         << ssr.enabled << ','
         << ssr.colorResolveEnabled << ','
+        << ssr.traceInputsReady << ','
+        << ssr.hierarchicalRequested << ','
+        << ssr.hierarchicalActive << ','
+        << ssr.hierarchicalFallbackReason << ','
+        << ssr.fixedStepFallbackActive << ','
+        << ssr.depthPyramidAllocated << ','
+        << ssr.depthPyramidReady << ','
+        << ssr.depthPyramidWidth << ','
+        << ssr.depthPyramidHeight << ','
+        << ssr.depthPyramidMipCount << ','
+        << ssr.depthPyramidImageCount << ','
+        << static_cast<u32>(ssr.depthPyramidFormat) << ','
+        << ssr.depthPyramidMemoryBytes << ','
+        << ssr.depthPyramidBuildDispatchCount << ','
+        << ssr.depthPyramidGeneratedMipMask << ','
+        << ssr.traversalMaxMip << ','
+        << ssr.refinementEnabled << ','
+        << ssr.refinementStepCount << ','
+        << ssr.hitValidationRequested << ','
+        << ssr.hitValidationActive << ','
+        << ssr.hitValidationContractVersion << ','
+        << ssr.hitNormalValidationEnabled << ','
+        << ssr.hitFootprintTapCount << ','
+        << ssr.signedDepthValidationEnabled << ','
+        << ssr.originBiasMinimumPixels << ','
+        << ssr.originBiasMaximumPixels << ','
+        << ssr.reconstructionRequested << ','
+        << ssr.reconstructionActive << ','
+        << ssr.reconstructionTargetsAllocated << ','
+        << ssr.reconstructionDescriptorSetsReady << ','
+        << ssr.reconstructionTraceDispatches << ','
+        << ssr.reconstructionTemporalDispatches << ','
+        << ssr.reconstructionSpatialDispatches << ','
+        << ssr.reconstructionHistoryCopies << ','
+        << ssr.reconstructionHistoryReset << ','
+        << ssr.reconstructionImageCount << ','
+        << ssr.reconstructionMemoryBytes << ','
+        << ssr.reconstructionTemporalContractVersion << ','
+        << ssr.reconstructionTemporalMissHistoryRejectEnabled << ','
+        << ssr.reconstructionTemporalPreviousViewDepthEnabled << ','
+        << ssr.reconstructionTemporalHistoryLockEnabled << ','
+        << ssr.reconstructionSpatialCenterHitGateEnabled << ','
+        << ssr.reconstructionSpatialVarianceClampEnabled << ','
+        << ssr.reconstructionSpatialSupportTapCount << ','
+        << ssr.reconstructionRawResolvedAliased << ','
+        << ssr.reconstructionCurrentHdrSourceEnabled << ','
+        << ssr.reconstructionCurrentHdrRadianceFilterEnabled << ','
+        << ssr.reconstructionCurrentHdrMipLevels << ','
+        << ssr.reconstructionCurrentHdrMipChainReady << ','
+        << ssr.fallbackBlendRequested << ','
+        << ssr.fallbackBlendActive << ','
+        << ssr.fallbackBlendContractVersion << ','
+        << ssr.fallbackBlendResolvedPixels << ','
+        << ssr.fallbackBlendPartialPixels << ','
+        << ssr.fallbackBlendHighTrustPixels << ','
+        << ssr.fallbackBlendAveragePermille << ','
+        << ssr.reconstructionDeferredConsumerContractVersion << ','
+        << ssr.reconstructionDeferredReceiverReprojectionEnabled << ','
+        << ssr.reconstructionDeferredDepthRejectEnabled << ','
+        << ssr.reconstructionDeferredNormalRejectEnabled << ','
+        << ssr.reconstructionDeferredRoughnessRejectEnabled << ','
+        << ssr.reconstructionDeferredMetadataDescriptorBound << ','
+        << ssr.reconstructionResolvedMetadataAliased << ','
+        << ssr.reflectionProbeFallbackEnabled << ','
+        << ssr.sceneColorHistoryRequested << ','
+        << ssr.sceneColorHistoryDescriptorBound << ','
+        << ssr.sceneColorHistoryReady << ','
+        << ssr.sceneColorHistoryActive << ','
+        << ssr.sceneColorHistoryFallbackReason << ','
+        << ssr.sceneColorHistorySourceValid << ','
+        << ssr.sceneColorHistoryCurrentImageIndex << ','
+        << ssr.sceneColorHistorySourceImageIndex << ','
+        << ssr.sceneColorHistoryFrameAge << ','
+        << ssr.radianceSource << ','
         << ssr.strength << ','
         << ssr.rayLength << ','
         << ssr.thickness << ','
         << ssr.stepCount << ','
+        << ssr.holeDiagnosticsRequested << ','
+        << ssr.holeDiagnosticsActive << ','
+        << ssr.holeDiagnosticsReadbackValid << ','
+        << ssr.holeDiagnosticsContractVersion << ','
+        << ssr.holeDiagnosticsPixelCount << ','
+        << ssr.holeDiagnosticsRawHitPixels << ','
+        << ssr.holeDiagnosticsRawHighConfidencePixels << ','
+        << ssr.holeDiagnosticsTemporalValidPixels << ','
+        << ssr.holeDiagnosticsResolvedValidPixels << ','
+        << ssr.holeDiagnosticsIsolatedRawHitPixels << ','
+        << ssr.holeDiagnosticsCenterMissNeighborHitPixels << ','
+        << ssr.holeDiagnosticsResolvedHolePixels << ','
+        << ssr.holeDiagnosticsRawHitTemporalRejectedPixels << ','
+        << ssr.holeDiagnosticsRawHitSpatialRejectedPixels << ','
+        << ssr.holeDiagnosticsTemporalMissCarriedPixels << ','
         << ibl.quality << ','
         << ibl.requestedSource << ','
         << ibl.actualSource << ','
@@ -639,6 +731,12 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneCaptureCulledCount << ','
         << reflectionProbe.capturedSceneCaptureFaceOrientationMask << ','
         << reflectionProbe.capturedSceneMipGenerationCount << ','
+        << reflectionProbe.capturedSceneSourceMipGenerationCount << ','
+        << reflectionProbe.capturedSceneSourceMipCount << ','
+        << reflectionProbe.capturedSceneSourceMipMemoryBytes << ','
+        << reflectionProbe.capturedSceneSourceMipChainReady << ','
+        << reflectionProbe.capturedSceneGgxPrefilterSourceImageSeparated << ','
+        << reflectionProbe.capturedSceneGgxPrefilterPdfLodEnabled << ','
         << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterQuality << ','
@@ -844,6 +942,37 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.selectedNormalizedBlendWeights[1] << ','
         << reflectionProbe.selectedNormalizedBlendWeights[2] << ','
         << reflectionProbe.selectedNormalizedBlendWeights[3] << ','
+        << reflectionProbe.receiverAuditRequested << ','
+        << reflectionProbe.receiverAuditProductionBlend << ','
+        << reflectionProbe.receiverAuditIndependentIblEnergy << ','
+        << reflectionProbe.receiverAuditPositionX << ','
+        << reflectionProbe.receiverAuditPositionY << ','
+        << reflectionProbe.receiverAuditPositionZ << ','
+        << reflectionProbe.receiverAuditDirectionX << ','
+        << reflectionProbe.receiverAuditDirectionY << ','
+        << reflectionProbe.receiverAuditDirectionZ << ','
+        << reflectionProbe.receiverAuditRoughness << ','
+        << reflectionProbe.receiverAuditPositiveWeightMask << ','
+        << reflectionProbe.receiverAuditReadyCubemapMask << ','
+        << reflectionProbe.receiverAuditBoxProjectionHitMask << ','
+        << reflectionProbe.receiverAuditDominantSlot << ','
+        << reflectionProbe.receiverAuditTotalWeight << ','
+        << reflectionProbe.receiverAuditLocalCoverage << ','
+        << reflectionProbe.receiverAuditDominantNormalizedWeight << ','
+        << reflectionProbe.receiverAuditLocalCubemapWeight << ','
+        << reflectionProbe.receiverAuditWeights[0] << ','
+        << reflectionProbe.receiverAuditWeights[1] << ','
+        << reflectionProbe.receiverAuditWeights[2] << ','
+        << reflectionProbe.receiverAuditWeights[3] << ','
+        << reflectionProbe.receiverAuditNormalizedWeights[0] << ','
+        << reflectionProbe.receiverAuditNormalizedWeights[1] << ','
+        << reflectionProbe.receiverAuditNormalizedWeights[2] << ','
+        << reflectionProbe.receiverAuditNormalizedWeights[3] << ','
+        << reflectionProbe.receiverAuditResolvedLods[0] << ','
+        << reflectionProbe.receiverAuditResolvedLods[1] << ','
+        << reflectionProbe.receiverAuditResolvedLods[2] << ','
+        << reflectionProbe.receiverAuditResolvedLods[3] << ','
+        << reflectionProbe.capturedSceneNeutralTintMask << ','
         << reflectionProbe.multiBlendEnabled << ','
         << reflectionProbe.localEnabled << ','
         << reflectionProbe.localSceneOwned << ','
@@ -965,6 +1094,18 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.pcfRadius << ','
         << localShadowAtlas.pcfKernelRadius << ','
         << localShadowAtlas.pcssStrength << ','
+        << localShadowAtlas.filterContractVersion << ','
+        << localShadowAtlas.productionFilterEnabled << ','
+        << localShadowAtlas.productionFilterReady << ','
+        << localShadowAtlas.productionFilterActive << ','
+        << localShadowAtlas.productionFilterFallbackReason << ','
+        << localShadowAtlas.comparisonSamplerReady << ','
+        << localShadowAtlas.rawDepthSamplerReady << ','
+        << localShadowAtlas.tileRangeContractValid << ','
+        << localShadowAtlas.tileRangeInvalidLights << ','
+        << localShadowAtlas.tileRangeMaxTilesPerLight << ','
+        << localShadowAtlas.filterGeometryValidTiles << ','
+        << localShadowAtlas.filterGeometryInvalidTiles << ','
         << localShadowAtlas.faceBlendStrength << ','
         << localShadowAtlas.rectBiasScale << ','
         << localShadowAtlas.pointBiasMin << ','
@@ -972,16 +1113,28 @@ void BenchmarkRecorder::RecordFrame(
         << localShadowAtlas.pointPcfRadius << ','
         << localShadowAtlas.pointPcfKernelRadius << ','
         << localShadowAtlas.pointPcssStrength << ','
+        << localShadowAtlas.pointPcssBlockerSamples << ','
+        << localShadowAtlas.pointPcssFilterSamples << ','
+        << localShadowAtlas.pointPcssSearchRadiusTexels << ','
+        << localShadowAtlas.pointPcssMaxPenumbraTexels << ','
         << localShadowAtlas.spotBiasMin << ','
         << localShadowAtlas.spotBiasSlope << ','
         << localShadowAtlas.spotPcfRadius << ','
         << localShadowAtlas.spotPcfKernelRadius << ','
         << localShadowAtlas.spotPcssStrength << ','
+        << localShadowAtlas.spotPcssBlockerSamples << ','
+        << localShadowAtlas.spotPcssFilterSamples << ','
+        << localShadowAtlas.spotPcssSearchRadiusTexels << ','
+        << localShadowAtlas.spotPcssMaxPenumbraTexels << ','
         << localShadowAtlas.rectBiasMin << ','
         << localShadowAtlas.rectBiasSlope << ','
         << localShadowAtlas.rectPcfRadius << ','
         << localShadowAtlas.rectPcfKernelRadius << ','
         << localShadowAtlas.rectPcssStrength << ','
+        << localShadowAtlas.rectPcssBlockerSamples << ','
+        << localShadowAtlas.rectPcssFilterSamples << ','
+        << localShadowAtlas.rectPcssSearchRadiusTexels << ','
+        << localShadowAtlas.rectPcssMaxPenumbraTexels << ','
         << localShadowAtlas.rectShadowBaseSampleTiles << ','
         << localShadowAtlas.rectShadowMaxSampleTiles << ','
         << localShadowAtlas.rectShadowSamplePattern << ','
@@ -1281,6 +1434,13 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ssrDebugDraws << ','
         << binds.ssrDebugFrameBinds << ','
         << binds.ssrDebugGBufferBinds << ','
+        << binds.ssrHiZBuildDispatches << ','
+        << binds.ssrHiZBuildDescriptorBinds << ','
+        << binds.ssrHiZConsumerDraws << ','
+        << binds.ssrReconstructionTraceDispatches << ','
+        << binds.ssrReconstructionTemporalDispatches << ','
+        << binds.ssrReconstructionSpatialDispatches << ','
+        << binds.ssrReconstructionHistoryCopies << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -1629,6 +1789,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "directional_shadow_pcss_search_radius_texels,"
         << "directional_shadow_pcss_max_penumbra_texels,"
         << "directional_shadow_pcss_light_angular_radius_radians,"
+        << "directional_shadow_pcss_grazing_fade_enabled,"
+        << "directional_shadow_pcss_grazing_fade_start,"
+        << "directional_shadow_pcss_grazing_fade_end,"
         << "directional_shadow_filter_mode,directional_shadow_filter_samples,"
         << "directional_shadow_filter_kernel_width,directional_shadow_filter_max_depth_samples,"
         << "directional_shadow_filter_hardware_compare_enabled,"
@@ -1646,8 +1809,80 @@ void BenchmarkRecorder::WriteHeader() {
         << "shadow_contact_thickness,shadow_contact_steps,"
         << "shadow_contact_jitter_strength,shadow_contact_edge_fade_pixels,"
         << "ssao_enabled,ssao_strength,ssao_radius,ssao_bias,ssao_sample_count,"
-        << "ssr_enabled,ssr_color_resolve_enabled,ssr_strength,"
+        << "ssr_enabled,ssr_color_resolve_enabled,ssr_trace_inputs_ready,"
+        << "ssr_hiz_requested,ssr_hiz_active,ssr_hiz_fallback_reason,"
+        << "ssr_fixed_step_fallback_active,ssr_depth_pyramid_allocated,"
+        << "ssr_depth_pyramid_ready,ssr_depth_pyramid_width,"
+        << "ssr_depth_pyramid_height,ssr_depth_pyramid_mip_count,"
+        << "ssr_depth_pyramid_image_count,ssr_depth_pyramid_format,"
+        << "ssr_depth_pyramid_memory_bytes,ssr_depth_pyramid_build_dispatch_count,"
+        << "ssr_depth_pyramid_generated_mip_mask,ssr_hiz_traversal_max_mip,"
+        << "ssr_refinement_enabled,ssr_refinement_step_count,"
+        << "ssr_hit_validation_requested,ssr_hit_validation_active,"
+        << "ssr_hit_validation_contract_version,"
+        << "ssr_hit_normal_validation_enabled,ssr_hit_footprint_tap_count,"
+        << "ssr_signed_depth_validation_enabled,"
+        << "ssr_origin_bias_minimum_pixels,ssr_origin_bias_maximum_pixels,"
+        << "ssr_reconstruction_requested,ssr_reconstruction_active,"
+        << "ssr_reconstruction_targets_allocated,"
+        << "ssr_reconstruction_descriptor_sets_ready,"
+        << "ssr_reconstruction_bind_trace_dispatches,"
+        << "ssr_reconstruction_bind_temporal_dispatches,"
+        << "ssr_reconstruction_bind_spatial_dispatches,"
+        << "ssr_reconstruction_bind_history_copies,"
+        << "ssr_reconstruction_history_reset,"
+        << "ssr_reconstruction_image_count,"
+        << "ssr_reconstruction_memory_bytes,"
+        << "ssr_reconstruction_temporal_contract_version,"
+        << "ssr_reconstruction_temporal_miss_history_reject_enabled,"
+        << "ssr_reconstruction_temporal_previous_view_depth_enabled,"
+        << "ssr_reconstruction_temporal_history_lock_enabled,"
+        << "ssr_reconstruction_spatial_center_hit_gate_enabled,"
+        << "ssr_reconstruction_spatial_variance_clamp_enabled,"
+        << "ssr_reconstruction_spatial_support_tap_count,"
+        << "ssr_reconstruction_raw_resolved_aliased,"
+        << "ssr_reconstruction_current_hdr_source_enabled,"
+        << "ssr_reconstruction_current_hdr_radiance_filter_enabled,"
+        << "ssr_reconstruction_current_hdr_mip_levels,"
+        << "ssr_reconstruction_current_hdr_mip_chain_ready,"
+        << "ssr_fallback_blend_requested,"
+        << "ssr_fallback_blend_active,"
+        << "ssr_fallback_blend_contract_version,"
+        << "ssr_fallback_blend_resolved_pixels,"
+        << "ssr_fallback_blend_partial_pixels,"
+        << "ssr_fallback_blend_high_trust_pixels,"
+        << "ssr_fallback_blend_average_permille,"
+        << "ssr_reconstruction_deferred_consumer_contract_version,"
+        << "ssr_reconstruction_deferred_receiver_reprojection_enabled,"
+        << "ssr_reconstruction_deferred_depth_reject_enabled,"
+        << "ssr_reconstruction_deferred_normal_reject_enabled,"
+        << "ssr_reconstruction_deferred_roughness_reject_enabled,"
+        << "ssr_reconstruction_deferred_metadata_descriptor_bound,"
+        << "ssr_reconstruction_resolved_metadata_aliased,"
+        << "ssr_reflection_probe_fallback_enabled,"
+        << "ssr_scene_color_history_requested,"
+        << "ssr_scene_color_history_descriptor_bound,"
+        << "ssr_scene_color_history_ready,"
+        << "ssr_scene_color_history_active,"
+        << "ssr_scene_color_history_fallback_reason,"
+        << "ssr_scene_color_history_source_valid,"
+        << "ssr_scene_color_history_current_image_index,"
+        << "ssr_scene_color_history_source_image_index,"
+        << "ssr_scene_color_history_frame_age,ssr_radiance_source,"
+        << "ssr_strength,"
         << "ssr_ray_length,ssr_thickness,ssr_step_count,"
+        << "ssr_hole_diagnostics_requested,ssr_hole_diagnostics_active,"
+        << "ssr_hole_diagnostics_readback_valid,ssr_hole_diagnostics_contract_version,"
+        << "ssr_hole_diagnostics_pixel_count,ssr_hole_diagnostics_raw_hit_pixels,"
+        << "ssr_hole_diagnostics_raw_high_confidence_pixels,"
+        << "ssr_hole_diagnostics_temporal_valid_pixels,"
+        << "ssr_hole_diagnostics_resolved_valid_pixels,"
+        << "ssr_hole_diagnostics_isolated_raw_hit_pixels,"
+        << "ssr_hole_diagnostics_center_miss_neighbor_hit_pixels,"
+        << "ssr_hole_diagnostics_resolved_hole_pixels,"
+        << "ssr_hole_diagnostics_raw_hit_temporal_rejected_pixels,"
+        << "ssr_hole_diagnostics_raw_hit_spatial_rejected_pixels,"
+        << "ssr_hole_diagnostics_temporal_miss_carried_pixels,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"
         << "ibl_cache_fallback_reason,ibl_cache_hit,ibl_runtime_generated,"
@@ -1732,6 +1967,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_capture_culled_count,"
         << "reflection_probe_captured_scene_capture_face_orientation_mask,"
         << "reflection_probe_captured_scene_mip_generation_count,"
+        << "reflection_probe_captured_scene_source_mip_generation_count,"
+        << "reflection_probe_captured_scene_source_mip_count,"
+        << "reflection_probe_captured_scene_source_mip_memory_bytes,"
+        << "reflection_probe_captured_scene_source_mip_chain_ready,"
+        << "reflection_probe_captured_scene_ggx_prefilter_source_image_separated,"
+        << "reflection_probe_captured_scene_ggx_prefilter_pdf_lod_enabled,"
         << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_quality,"
@@ -1937,6 +2178,37 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_selected_normalized_blend_weight_1,"
         << "reflection_probe_selected_normalized_blend_weight_2,"
         << "reflection_probe_selected_normalized_blend_weight_3,"
+        << "reflection_probe_receiver_audit_requested,"
+        << "reflection_probe_receiver_audit_production_blend,"
+        << "reflection_probe_receiver_audit_independent_ibl_energy,"
+        << "reflection_probe_receiver_audit_position_x,"
+        << "reflection_probe_receiver_audit_position_y,"
+        << "reflection_probe_receiver_audit_position_z,"
+        << "reflection_probe_receiver_audit_direction_x,"
+        << "reflection_probe_receiver_audit_direction_y,"
+        << "reflection_probe_receiver_audit_direction_z,"
+        << "reflection_probe_receiver_audit_roughness,"
+        << "reflection_probe_receiver_audit_positive_weight_mask,"
+        << "reflection_probe_receiver_audit_ready_cubemap_mask,"
+        << "reflection_probe_receiver_audit_box_projection_hit_mask,"
+        << "reflection_probe_receiver_audit_dominant_slot,"
+        << "reflection_probe_receiver_audit_total_weight,"
+        << "reflection_probe_receiver_audit_local_coverage,"
+        << "reflection_probe_receiver_audit_dominant_normalized_weight,"
+        << "reflection_probe_receiver_audit_local_cubemap_weight,"
+        << "reflection_probe_receiver_audit_weight_0,"
+        << "reflection_probe_receiver_audit_weight_1,"
+        << "reflection_probe_receiver_audit_weight_2,"
+        << "reflection_probe_receiver_audit_weight_3,"
+        << "reflection_probe_receiver_audit_normalized_weight_0,"
+        << "reflection_probe_receiver_audit_normalized_weight_1,"
+        << "reflection_probe_receiver_audit_normalized_weight_2,"
+        << "reflection_probe_receiver_audit_normalized_weight_3,"
+        << "reflection_probe_receiver_audit_lod_0,"
+        << "reflection_probe_receiver_audit_lod_1,"
+        << "reflection_probe_receiver_audit_lod_2,"
+        << "reflection_probe_receiver_audit_lod_3,"
+        << "reflection_probe_captured_scene_neutral_tint_mask,"
         << "reflection_probe_multi_blend_enabled,"
         << "reflection_probe_local_enabled,reflection_probe_local_scene_owned,"
         << "reflection_probe_local_radius,"
@@ -2003,17 +2275,41 @@ void BenchmarkRecorder::WriteHeader() {
         << "local_shadow_cache_reason_summary,"
         << "local_shadow_bias_min,local_shadow_bias_slope,"
         << "local_shadow_pcf_radius,local_shadow_pcf_kernel_radius,"
-        << "local_shadow_pcss_strength,local_shadow_face_blend_strength,"
+        << "local_shadow_pcss_strength,local_shadow_filter_contract_version,"
+        << "local_shadow_production_filter_enabled,"
+        << "local_shadow_production_filter_ready,"
+        << "local_shadow_production_filter_active,"
+        << "local_shadow_production_filter_fallback_reason,"
+        << "local_shadow_comparison_sampler_ready,"
+        << "local_shadow_raw_depth_sampler_ready,"
+        << "local_shadow_tile_range_contract_valid,"
+        << "local_shadow_tile_range_invalid_lights,"
+        << "local_shadow_tile_range_max_tiles_per_light,"
+        << "local_shadow_filter_geometry_valid_tiles,"
+        << "local_shadow_filter_geometry_invalid_tiles,"
+        << "local_shadow_face_blend_strength,"
         << "local_shadow_rect_bias_scale,"
         << "local_shadow_point_bias_min,local_shadow_point_bias_slope,"
         << "local_shadow_point_pcf_radius,local_shadow_point_pcf_kernel_radius,"
         << "local_shadow_point_pcss_strength,"
+        << "local_shadow_point_pcss_blocker_samples,"
+        << "local_shadow_point_pcss_filter_samples,"
+        << "local_shadow_point_pcss_search_radius_texels,"
+        << "local_shadow_point_pcss_max_penumbra_texels,"
         << "local_shadow_spot_bias_min,local_shadow_spot_bias_slope,"
         << "local_shadow_spot_pcf_radius,local_shadow_spot_pcf_kernel_radius,"
         << "local_shadow_spot_pcss_strength,"
+        << "local_shadow_spot_pcss_blocker_samples,"
+        << "local_shadow_spot_pcss_filter_samples,"
+        << "local_shadow_spot_pcss_search_radius_texels,"
+        << "local_shadow_spot_pcss_max_penumbra_texels,"
         << "local_shadow_rect_bias_min,local_shadow_rect_bias_slope,"
         << "local_shadow_rect_pcf_radius,local_shadow_rect_pcf_kernel_radius,"
         << "local_shadow_rect_pcss_strength,"
+        << "local_shadow_rect_pcss_blocker_samples,"
+        << "local_shadow_rect_pcss_filter_samples,"
+        << "local_shadow_rect_pcss_search_radius_texels,"
+        << "local_shadow_rect_pcss_max_penumbra_texels,"
         << "local_shadow_rect_base_sample_tiles,"
         << "local_shadow_rect_max_sample_tiles,"
         << "local_shadow_rect_sample_pattern,"
@@ -2271,6 +2567,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "contact_shadow_debug_gbuffer_binds,"
         << "ssao_debug_draws,ssao_debug_frame_binds,ssao_debug_gbuffer_binds,"
         << "ssr_debug_draws,ssr_debug_frame_binds,ssr_debug_gbuffer_binds,"
+        << "ssr_hiz_build_dispatches,ssr_hiz_build_descriptor_binds,"
+        << "ssr_hiz_consumer_draws,"
+        << "ssr_reconstruction_trace_dispatches,"
+        << "ssr_reconstruction_temporal_dispatches,"
+        << "ssr_reconstruction_spatial_dispatches,"
+        << "ssr_reconstruction_history_copies,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

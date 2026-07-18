@@ -10,6 +10,7 @@ class VulkanCommandPool;
 class VulkanDepthBuffer;
 class VulkanDescriptorSets;
 class VulkanDevice;
+class VulkanPhysicalDevice;
 class VulkanDlssMaskFramebuffer;
 class VulkanDlssMaskRenderPass;
 class VulkanFramebuffer;
@@ -23,6 +24,8 @@ class VulkanGraphicsPipeline;
 class VulkanHdrFramebuffer;
 class VulkanHdrDescriptorSets;
 class VulkanHdrRenderPass;
+class VulkanHiZDescriptorSets;
+class VulkanSsrReconstructionDescriptorSets;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
 class VulkanMaterialDescriptorSets;
@@ -33,6 +36,7 @@ class VulkanBloomRenderPass;
 class VulkanRenderPass;
 class VulkanRenderResources2D;
 class VulkanSceneRenderTargets;
+class VulkanDepthPyramid;
 class VulkanShadowFramebuffer;
 class VulkanShadowRenderPass;
 class VulkanSwapchain;
@@ -185,6 +189,7 @@ public:
         const VulkanRenderPass* depthLoadRenderPass,
         const VulkanFramebuffer* depthLoadFramebuffer,
         const VulkanSwapchain& swapchain,
+        const VulkanPhysicalDevice& physicalDevice,
         VulkanImGuiLayer* imguiLayer,
         const VulkanShadowRenderPass* shadowRenderPass = nullptr,
         const VulkanGraphicsPipeline* shadowGraphicsPipeline = nullptr,
@@ -299,7 +304,18 @@ public:
         RendererBindStats* bindStats = nullptr,
         RenderFrameGraphPlan* frameGraph = nullptr,
         const VulkanComputePipeline* hizBuildPipeline = nullptr,
-        const VulkanSceneRenderTargets* hizTargets = nullptr
+        const VulkanHiZDescriptorSets* hizDescriptorSets = nullptr,
+        const VulkanDepthPyramid* hizDepthPyramid = nullptr,
+        const VulkanSceneRenderTargets* hizSourceTargets = nullptr,
+        const VulkanComputePipeline* ssrTracePipeline = nullptr,
+        const VulkanComputePipeline* ssrTemporalPipeline = nullptr,
+        const VulkanComputePipeline* ssrSpatialPipeline = nullptr,
+        const VulkanComputePipeline* ssrDiagnosticsPipeline = nullptr,
+        const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets = nullptr,
+        const VulkanSceneRenderTargets* ssrTargets = nullptr,
+        bool ssrReconstructionEnabled = false,
+        bool ssrImagesInitialized = false,
+        bool ssrHistoryReset = false
     ) const;
     void Recreate(
         const VulkanDevice& device,

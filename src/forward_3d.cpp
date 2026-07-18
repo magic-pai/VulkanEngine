@@ -2082,6 +2082,20 @@ void BuildLightingShowcaseScene(
     se::Scene3D& scene,
     se::Scene3D* lightIndexOverlayScene = nullptr
 ) {
+#if !defined(NDEBUG)
+    const bool showcaseWallsOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_WALLS_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_WALLS_OFF");
+#else
+    constexpr bool showcaseWallsOff = false;
+#endif
+#if !defined(NDEBUG)
+    const bool showcaseSupportSurfacesOff =
+        EnvironmentFlagEnabled("SE_SHOWCASE_SUPPORT_SURFACES_OFF") ||
+        EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_SUPPORT_SURFACES_OFF");
+#else
+    constexpr bool showcaseSupportSurfacesOff = false;
+#endif
     const bool showcaseLocalLightsOff =
         EnvironmentFlagEnabled("SE_SHOWCASE_LOCAL_LIGHTS_OFF") ||
         EnvironmentFlagEnabled("SE_LIGHTING_SHOWCASE_LOCAL_LIGHTS_OFF");
@@ -2152,43 +2166,47 @@ void BuildLightingShowcaseScene(
         renderable.SetDrawOrder(drawOrder);
     };
 
-    se::Renderable3D& floor = scene.CreateRenderable(
-        "Showcase Charcoal Floor",
-        "Plane",
-        "ShowcaseCharcoalMaterial"
-    );
-    place(floor, { 0.0f, -1.05f, 0.0f }, { 8.5f, 1.0f, 6.2f }, {}, -30);
-    floor.SetPickable(false);
-    if (showcaseFloorShadowCasterOff) {
-        floor.SetCastShadow(false);
+    if (!showcaseSupportSurfacesOff) {
+        se::Renderable3D& floor = scene.CreateRenderable(
+            "Showcase Charcoal Floor",
+            "Plane",
+            "ShowcaseCharcoalMaterial"
+        );
+        place(floor, { 0.0f, -1.05f, 0.0f }, { 8.5f, 1.0f, 6.2f }, {}, -30);
+        floor.SetPickable(false);
+        if (showcaseFloorShadowCasterOff) {
+            floor.SetCastShadow(false);
+        }
     }
 
-    se::Renderable3D& backWall = scene.CreateRenderable(
-        "Showcase Back Wall",
-        "Cube",
-        "ShowcaseBackdropMaterial"
-    );
-    place(backWall, { 0.0f, 1.05f, -2.35f }, { 8.5f, 4.2f, 0.16f }, {}, -25);
-    backWall.SetPickable(false);
-    backWall.SetCastShadow(false);
+    if (!showcaseWallsOff) {
+        se::Renderable3D& backWall = scene.CreateRenderable(
+            "Showcase Back Wall",
+            "Cube",
+            "ShowcaseBackdropMaterial"
+        );
+        place(backWall, { 0.0f, 1.05f, -2.35f }, { 8.5f, 4.2f, 0.16f }, {}, -25);
+        backWall.SetPickable(false);
+        backWall.SetCastShadow(false);
 
-    se::Renderable3D& leftWall = scene.CreateRenderable(
-        "Showcase Left Shadow Wall",
-        "Cube",
-        "ShowcaseBackdropMaterial"
-    );
-    place(leftWall, { -4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
-    leftWall.SetPickable(false);
-    leftWall.SetCastShadow(false);
+        se::Renderable3D& leftWall = scene.CreateRenderable(
+            "Showcase Left Shadow Wall",
+            "Cube",
+            "ShowcaseBackdropMaterial"
+        );
+        place(leftWall, { -4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
+        leftWall.SetPickable(false);
+        leftWall.SetCastShadow(false);
 
-    se::Renderable3D& rightWall = scene.CreateRenderable(
-        "Showcase Right Shadow Wall",
-        "Cube",
-        "ShowcaseBackdropMaterial"
-    );
-    place(rightWall, { 4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
-    rightWall.SetPickable(false);
-    rightWall.SetCastShadow(false);
+        se::Renderable3D& rightWall = scene.CreateRenderable(
+            "Showcase Right Shadow Wall",
+            "Cube",
+            "ShowcaseBackdropMaterial"
+        );
+        place(rightWall, { 4.15f, 0.7f, 0.0f }, { 0.12f, 3.5f, 5.0f }, {}, -24);
+        rightWall.SetPickable(false);
+        rightWall.SetCastShadow(false);
+    }
 
     se::Renderable3D& ceiling = scene.CreateRenderable(
         "Showcase Soft Ceiling",
@@ -2204,21 +2222,23 @@ void BuildLightingShowcaseScene(
         glm::vec3{ 0.0f, -0.78f, -0.15f },
         glm::vec3{ 2.15f, -0.8f, 0.15f }
     };
-    for (std::size_t index = 0; index < pedestalPositions.size(); ++index) {
-        se::Renderable3D& pedestal = scene.CreateRenderable(
-            "Showcase Pedestal " + std::to_string(index),
-            "Cube",
-            index == 1 ? "ShowcaseWarmStoneMaterial" : "ShowcaseCharcoalMaterial"
-        );
-        place(
-            pedestal,
-            pedestalPositions[index],
-            { 1.36f, 0.48f, 1.2f },
-            { 0.0f, index == 1 ? 0.0f : (index == 0 ? -8.0f : 8.0f), 0.0f },
-            -10
-        );
-        if (showcasePropShadowCastersOff) {
-            pedestal.SetCastShadow(false);
+    if (!showcaseSupportSurfacesOff) {
+        for (std::size_t index = 0; index < pedestalPositions.size(); ++index) {
+            se::Renderable3D& pedestal = scene.CreateRenderable(
+                "Showcase Pedestal " + std::to_string(index),
+                "Cube",
+                index == 1 ? "ShowcaseWarmStoneMaterial" : "ShowcaseCharcoalMaterial"
+            );
+            place(
+                pedestal,
+                pedestalPositions[index],
+                { 1.36f, 0.48f, 1.2f },
+                { 0.0f, index == 1 ? 0.0f : (index == 0 ? -8.0f : 8.0f), 0.0f },
+                -10
+            );
+            if (showcasePropShadowCastersOff) {
+                pedestal.SetCastShadow(false);
+            }
         }
     }
 
@@ -2288,15 +2308,17 @@ void BuildLightingShowcaseScene(
     };
     for (std::size_t index = 0; index < materialSamplePositions.size(); ++index) {
         const glm::vec3& samplePosition = materialSamplePositions[index];
-        se::Renderable3D& base = scene.CreateRenderable(
-            "Showcase Material Sample Base " + std::to_string(index),
-            "Cube",
-            "ShowcaseCharcoalMaterial"
-        );
-        place(base, { samplePosition.x, -1.0f, samplePosition.z }, { 0.66f, 0.12f, 0.46f }, {}, -12);
-        base.SetPickable(false);
-        if (showcasePropShadowCastersOff) {
-            base.SetCastShadow(false);
+        if (!showcaseSupportSurfacesOff) {
+            se::Renderable3D& base = scene.CreateRenderable(
+                "Showcase Material Sample Base " + std::to_string(index),
+                "Cube",
+                "ShowcaseCharcoalMaterial"
+            );
+            place(base, { samplePosition.x, -1.0f, samplePosition.z }, { 0.66f, 0.12f, 0.46f }, {}, -12);
+            base.SetPickable(false);
+            if (showcasePropShadowCastersOff) {
+                base.SetCastShadow(false);
+            }
         }
 
         se::Renderable3D& sample = scene.CreateRenderable(
@@ -3135,10 +3157,6 @@ void ApplyLightingShowcaseRendererSettings(se::VulkanRenderer& renderer) {
     shadow.ssaoRadius = 1.55f;
     shadow.ssaoBias = 0.022f;
     shadow.ssaoSampleCount = 16u;
-    shadow.ssrStrength = 0.0f;
-    shadow.ssrRayLength = 0.0f;
-    shadow.ssrThickness = 0.0f;
-    shadow.ssrStepCount = 0u;
     shadow.reflectionProbeFallbackEnabled = true;
     shadow.reflectionProbeCubemapEnabled = true;
     shadow.reflectionProbeDiffuseIntensity = 1.32f;
@@ -3361,6 +3379,25 @@ void ApplyForward3DDirectionalShadowEnvironmentOverrides(
         0.0f,
         16.0f
     );
+    (void)ApplyEnvironmentF32Override(
+        shadow.directionalPcssGrazingFadeStart,
+        "SE_DIRECTIONAL_PCSS_GRAZING_FADE_START",
+        0.0f,
+        0.95f
+    );
+    (void)ApplyEnvironmentF32Override(
+        shadow.directionalPcssGrazingFadeEnd,
+        "SE_DIRECTIONAL_PCSS_GRAZING_FADE_END",
+        0.01f,
+        1.0f
+    );
+    shadow.directionalPcssGrazingFadeEnd = std::max(
+        shadow.directionalPcssGrazingFadeEnd,
+        std::min(shadow.directionalPcssGrazingFadeStart + 0.01f, 1.0f)
+    );
+    if (EnvironmentFlagEnabled("SE_DIRECTIONAL_PCSS_GRAZING_FADE_OFF")) {
+        shadow.directionalPcssGrazingFadeEnabled = false;
+    }
 
     se::u32 filterMode = static_cast<se::u32>(shadow.directionalFilterMode);
     if (ApplyEnvironmentU32Override(
@@ -3786,7 +3823,8 @@ BridgeSceneLightApplyResult ApplyBridgeSceneLights(
                 light.color,
                 PreviewLocalIntensity(light.intensity),
                 innerCone,
-                outerCone
+                outerCone,
+                PositiveOrFallback(light.sourceRadius, 0.05f)
             );
             ++appliedSpotCount;
             continue;
@@ -3822,7 +3860,8 @@ BridgeSceneLightApplyResult ApplyBridgeSceneLights(
                 light.position,
                 PositiveOrFallback(light.attenuationRadius, 600.0f),
                 light.color,
-                PreviewLocalIntensity(light.intensity)
+                PreviewLocalIntensity(light.intensity),
+                PositiveOrFallback(light.sourceRadius, 0.05f)
             );
             ++appliedPointCount;
             continue;

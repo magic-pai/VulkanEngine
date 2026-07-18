@@ -480,6 +480,32 @@ void DrawShadowDiagnostics(const RendererStats& stats) {
         local.faceBlendStrength
     );
     ImGui::Text(
+        "Local production v%u: %s / %s, compare/raw %s/%s, fallback %u",
+        local.filterContractVersion,
+        local.productionFilterEnabled != 0u ? "enabled" : "fallback",
+        local.productionFilterReady != 0u ? "ready" : "not ready",
+        local.comparisonSamplerReady != 0u ? "ready" : "missing",
+        local.rawDepthSamplerReady != 0u ? "ready" : "missing",
+        local.productionFilterFallbackReason
+    );
+    ImGui::Text(
+        "Local ranges: %s, invalid %u, max/light %u; geometry %u valid / %u invalid",
+        local.tileRangeContractValid != 0u ? "valid" : "invalid",
+        local.tileRangeInvalidLights,
+        local.tileRangeMaxTilesPerLight,
+        local.filterGeometryValidTiles,
+        local.filterGeometryInvalidTiles
+    );
+    ImGui::Text(
+        "Local PCSS samples P/S/R: %u+%u / %u+%u / %u+%u",
+        local.pointPcssBlockerSamples,
+        local.pointPcssFilterSamples,
+        local.spotPcssBlockerSamples,
+        local.spotPcssFilterSamples,
+        local.rectPcssBlockerSamples,
+        local.rectPcssFilterSamples
+    );
+    ImGui::Text(
         "Contact: strength %.3f, length %.3f, thickness %.3f, steps %u, jitter %.3f, edge %.1f",
         cascades.contactShadowStrength,
         cascades.contactShadowLength,
@@ -670,6 +696,16 @@ void DrawShadowDebugOverlay(
     }
     if (local.droppedTiles > 0) {
         DrawShadowWarning("Local shadow tiles were dropped; some local shadows are missing.");
+        warned = true;
+    }
+    if (local.productionFilterEnabled != 0u &&
+        local.productionFilterReady == 0u) {
+        DrawShadowWarning("Production local-shadow filtering is not ready; inspect fallback reason.");
+        warned = true;
+    }
+    if (local.tileRangeContractValid == 0u ||
+        local.filterGeometryInvalidTiles > 0u) {
+        DrawShadowWarning("Local-shadow tile ranges or projection geometry are invalid.");
         warned = true;
     }
     if (local.cacheSkippedTiles > 0) {
@@ -1992,6 +2028,28 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         16.0f,
         "%.2f texels"
     );
+    ImGui::Checkbox(
+        "PCSS grazing receiver fallback##Shadow",
+        &settings.directionalPcssGrazingFadeEnabled
+    );
+    ImGui::SliderFloat(
+        "PCSS grazing fade start##Shadow",
+        &settings.directionalPcssGrazingFadeStart,
+        0.0f,
+        0.95f,
+        "%.3f NdotL"
+    );
+    ImGui::SliderFloat(
+        "PCSS grazing fade end##Shadow",
+        &settings.directionalPcssGrazingFadeEnd,
+        0.01f,
+        1.0f,
+        "%.3f NdotL"
+    );
+    settings.directionalPcssGrazingFadeEnd = std::max(
+        settings.directionalPcssGrazingFadeEnd,
+        std::min(settings.directionalPcssGrazingFadeStart + 0.01f, 1.0f)
+    );
     ImGui::SliderFloat("Cascade lambda##Shadow", &settings.cascadeSplitLambda, 0.0f, 1.0f);
     ImGui::SliderFloat("Cascade distance##Shadow", &settings.cascadeMaxDistance, 25.0f, 2000.0f);
     ImGui::SliderFloat("Cascade blend##Shadow", &settings.cascadeBlendRatio, 0.0f, 0.25f, "%.3f");
@@ -2055,6 +2113,31 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.ssrStepCount =
             static_cast<u32>(std::clamp(ssrStepCount, 0, 32));
     }
+    ImGui::Checkbox(
+        "SSR refined depth crossings##Shadow",
+        &settings.ssrRefinementEnabled
+    );
+    ImGui::Checkbox("SSR hierarchical depth##Shadow", &settings.ssrHiZEnabled);
+    ImGui::Checkbox(
+        "SSR completed scene-color history##Shadow",
+        &settings.ssrSceneColorHistoryEnabled
+    );
+    ImGui::Checkbox(
+        "SSR current HDR source##Shadow",
+        &settings.ssrCurrentHdrSourceEnabled
+    );
+    ImGui::Checkbox(
+        "SSR current HDR radiance filter##Shadow",
+        &settings.ssrCurrentHdrRadianceFilterEnabled
+    );
+    ImGui::Checkbox(
+        "SSR production hit validation##Shadow",
+        &settings.ssrHitValidationEnabled
+    );
+    ImGui::Checkbox(
+        "SSR spatial variance clamp##Shadow",
+        &settings.ssrSpatialVarianceClampEnabled
+    );
     ImGui::SeparatorText("Reflection fallback");
     ImGui::Checkbox("Global reflection fallback##Shadow", &settings.reflectionProbeFallbackEnabled);
     ImGui::Checkbox("Global IBL cubemap##Shadow", &settings.globalIblCubemapEnabled);
@@ -2168,6 +2251,10 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         settings.heightFogColorB = heightFogColor[2];
     }
     ImGui::SeparatorText("Local shadows");
+    ImGui::Checkbox(
+        "Production local filter##Shadow",
+        &settings.localProductionFilterEnabled
+    );
     if (ImGui::SliderFloat(
             "Local bias min##Shadow",
             &settings.localBiasMin,
@@ -2215,6 +2302,48 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
         )) {
         SyncLocalShadowKindFiltersToShared(settings);
     }
+    int localBlockerSamples =
+        static_cast<int>(settings.localPcssBlockerSampleCount);
+    if (ImGui::SliderInt(
+            "Local blocker samples##Shadow",
+            &localBlockerSamples,
+            0,
+            16
+        )) {
+        settings.localPcssBlockerSampleCount =
+            static_cast<u32>(std::clamp(localBlockerSamples, 0, 16));
+        SyncLocalShadowKindFiltersToShared(settings);
+    }
+    int localFilterSamples =
+        static_cast<int>(settings.localPcssFilterSampleCount);
+    if (ImGui::SliderInt(
+            "Local filter samples##Shadow",
+            &localFilterSamples,
+            1,
+            16
+        )) {
+        settings.localPcssFilterSampleCount =
+            static_cast<u32>(std::clamp(localFilterSamples, 1, 16));
+        SyncLocalShadowKindFiltersToShared(settings);
+    }
+    if (ImGui::SliderFloat(
+            "Local search radius texels##Shadow",
+            &settings.localPcssSearchRadiusTexels,
+            0.0f,
+            16.0f,
+            "%.2f"
+        )) {
+        SyncLocalShadowKindFiltersToShared(settings);
+    }
+    if (ImGui::SliderFloat(
+            "Local max penumbra texels##Shadow",
+            &settings.localPcssMaxPenumbraTexels,
+            0.5f,
+            16.0f,
+            "%.2f"
+        )) {
+        SyncLocalShadowKindFiltersToShared(settings);
+    }
     ImGui::SliderFloat(
         "Local face blend##Shadow",
         &settings.localFaceBlendStrength,
@@ -2252,6 +2381,30 @@ void DrawShadowControls(VulkanShadowSettings& settings) {
                 static_cast<u32>(std::clamp(kernelRadius, 0, 2));
         }
         ImGui::SliderFloat("PCSS strength", &filter.pcssStrength, 0.0f, 1.0f, "%.3f");
+        int blockerSamples = static_cast<int>(filter.pcssBlockerSampleCount);
+        if (ImGui::SliderInt("Blocker samples", &blockerSamples, 0, 16)) {
+            filter.pcssBlockerSampleCount =
+                static_cast<u32>(std::clamp(blockerSamples, 0, 16));
+        }
+        int filterSamples = static_cast<int>(filter.pcssFilterSampleCount);
+        if (ImGui::SliderInt("Filter samples", &filterSamples, 1, 16)) {
+            filter.pcssFilterSampleCount =
+                static_cast<u32>(std::clamp(filterSamples, 1, 16));
+        }
+        ImGui::SliderFloat(
+            "Search radius texels",
+            &filter.pcssSearchRadiusTexels,
+            0.0f,
+            16.0f,
+            "%.2f"
+        );
+        ImGui::SliderFloat(
+            "Max penumbra texels",
+            &filter.pcssMaxPenumbraTexels,
+            0.5f,
+            16.0f,
+            "%.2f"
+        );
         ImGui::PopID();
     };
     drawLocalFilterControls("Point lights", settings.pointLocalShadowFilter);
@@ -2303,6 +2456,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "GBuffer Velocity";
     case ForwardDebugView::DeferredShadow:
         return "Deferred Shadow";
+    case ForwardDebugView::DirectionalPcssDelta:
+        return "Directional PCSS Delta";
     case ForwardDebugView::DeferredDirect:
         return "Deferred Direct";
     case ForwardDebugView::DeferredAmbient:
@@ -2351,6 +2506,8 @@ const char* ForwardDebugViewName(ForwardDebugView view) {
         return "SSR";
     case ForwardDebugView::ReflectionProbe:
         return "Reflection Probe";
+    case ForwardDebugView::ReflectionProbeRadiance:
+        return "Local Probe Radiance";
     case ForwardDebugView::HeightFog:
         return "Height Fog";
     case ForwardDebugView::Bloom:
@@ -2475,6 +2632,7 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::GBufferEmissive,
         ForwardDebugView::GBufferVelocity,
         ForwardDebugView::DeferredShadow,
+        ForwardDebugView::DirectionalPcssDelta,
         ForwardDebugView::DeferredDirect,
         ForwardDebugView::DeferredAmbient,
         ForwardDebugView::DeferredAmbientDiffuse,
@@ -2499,6 +2657,7 @@ void DrawRenderDebugControls(VulkanRenderDebugSettings& settings) {
         ForwardDebugView::Ssao,
         ForwardDebugView::Ssr,
         ForwardDebugView::ReflectionProbe,
+        ForwardDebugView::ReflectionProbeRadiance,
         ForwardDebugView::HeightFog,
         ForwardDebugView::Bloom,
         ForwardDebugView::ColorGrading,
@@ -2718,13 +2877,101 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssao.sampleCount
     );
     ImGui::Text(
-        "SSR: %s, color %s, strength %.3f, ray %.1f, thickness %.3f, steps %u",
+        "SSR: %s, color %s, inputs %s, Hi-Z %s/%s fallback %u, fixed fallback %s",
         stats.ssr.enabled ? "enabled" : "off",
         stats.ssr.colorResolveEnabled ? "on" : "off",
+        stats.ssr.traceInputsReady ? "ready" : "missing",
+        stats.ssr.hierarchicalRequested ? "requested" : "off",
+        stats.ssr.hierarchicalActive ? "active" : "inactive",
+        stats.ssr.hierarchicalFallbackReason,
+        stats.ssr.fixedStepFallbackActive ? "active" : "off"
+    );
+    ImGui::Text(
+        "SSR depth pyramid: %s/%s, %ux%u, %u mips x %u images, format %u, %.2f MiB, dispatches %u, mask 0x%llx, max mip %u",
+        stats.ssr.depthPyramidAllocated ? "allocated" : "missing",
+        stats.ssr.depthPyramidReady ? "ready" : "not-ready",
+        stats.ssr.depthPyramidWidth,
+        stats.ssr.depthPyramidHeight,
+        stats.ssr.depthPyramidMipCount,
+        stats.ssr.depthPyramidImageCount,
+        static_cast<u32>(stats.ssr.depthPyramidFormat),
+        static_cast<double>(stats.ssr.depthPyramidMemoryBytes) /
+            (1024.0 * 1024.0),
+        stats.ssr.depthPyramidBuildDispatchCount,
+        static_cast<unsigned long long>(stats.ssr.depthPyramidGeneratedMipMask),
+        stats.ssr.traversalMaxMip
+    );
+    ImGui::Text(
+        "SSR trace: refinement %s/%u, probe fallback %s, strength %.3f, ray %.1f, thickness %.3f, steps %u",
+        stats.ssr.refinementEnabled ? "on" : "off",
+        stats.ssr.refinementStepCount,
+        stats.ssr.reflectionProbeFallbackEnabled ? "on" : "off",
         stats.ssr.strength,
         stats.ssr.rayLength,
         stats.ssr.thickness,
         stats.ssr.stepCount
+    );
+    ImGui::Text(
+        "SSR hit validation: requested/active %u/%u, contract %u, normal/depth %u/%u, hit+receiver footprint %u taps, origin %.1f-%.1f px",
+        stats.ssr.hitValidationRequested,
+        stats.ssr.hitValidationActive,
+        stats.ssr.hitValidationContractVersion,
+        stats.ssr.hitNormalValidationEnabled,
+        stats.ssr.signedDepthValidationEnabled,
+        stats.ssr.hitFootprintTapCount,
+        stats.ssr.originBiasMinimumPixels,
+        stats.ssr.originBiasMaximumPixels
+    );
+    ImGui::Text(
+        "SSR radiance: history %s/%s/%s, active %s, fallback %u, source %u",
+        stats.ssr.sceneColorHistoryRequested ? "requested" : "off",
+        stats.ssr.sceneColorHistoryDescriptorBound ? "bound" : "unbound",
+        stats.ssr.sceneColorHistoryReady ? "ready" : "cold",
+        stats.ssr.sceneColorHistoryActive ? "yes" : "no",
+        stats.ssr.sceneColorHistoryFallbackReason,
+        stats.ssr.radianceSource
+    );
+    ImGui::Text(
+        "SSR current HDR: source %s, radiance filter %s, mip %u, ready %s",
+        stats.ssr.reconstructionCurrentHdrSourceEnabled ? "on" : "off",
+        stats.ssr.reconstructionCurrentHdrRadianceFilterEnabled ? "on" : "off",
+        stats.ssr.reconstructionCurrentHdrMipLevels,
+        stats.ssr.reconstructionCurrentHdrMipChainReady ? "yes" : "no"
+    );
+    ImGui::Text(
+        "SSR reconstruction: requested/active %u/%u, targets/descriptors %u/%u, dispatch trace/temporal/spatial %u/%u/%u, history copies %u, reset %u, %.2f MiB",
+        stats.ssr.reconstructionRequested,
+        stats.ssr.reconstructionActive,
+        stats.ssr.reconstructionTargetsAllocated,
+        stats.ssr.reconstructionDescriptorSetsReady,
+        stats.ssr.reconstructionTraceDispatches,
+        stats.ssr.reconstructionTemporalDispatches,
+        stats.ssr.reconstructionSpatialDispatches,
+        stats.ssr.reconstructionHistoryCopies,
+        stats.ssr.reconstructionHistoryReset,
+        static_cast<double>(stats.ssr.reconstructionMemoryBytes) /
+            (1024.0 * 1024.0)
+    );
+    ImGui::Text(
+        "SSR temporal contract: version %u, history lock %s, previous depth %s, miss reject %s",
+        stats.ssr.reconstructionTemporalContractVersion,
+        stats.ssr.reconstructionTemporalHistoryLockEnabled ? "on" : "off",
+        stats.ssr.reconstructionTemporalPreviousViewDepthEnabled ? "on" : "off",
+        stats.ssr.reconstructionTemporalMissHistoryRejectEnabled ? "on" : "off"
+    );
+    ImGui::Text(
+        "SSR spatial contract: center gate %s, variance clamp %s, support taps %u, raw resolved aliased %s",
+        stats.ssr.reconstructionSpatialCenterHitGateEnabled ? "on" : "off",
+        stats.ssr.reconstructionSpatialVarianceClampEnabled ? "on" : "off",
+        stats.ssr.reconstructionSpatialSupportTapCount,
+        stats.ssr.reconstructionRawResolvedAliased ? "yes" : "no"
+    );
+    ImGui::Text(
+        "SSR history identity: %s, current image %u, source image %u, age %u frame",
+        stats.ssr.sceneColorHistorySourceValid ? "valid" : "cold",
+        stats.ssr.sceneColorHistoryCurrentImageIndex,
+        stats.ssr.sceneColorHistorySourceImageIndex,
+        stats.ssr.sceneColorHistoryFrameAge
     );
     ImGui::Text(
         "Reflection fallback: %s, diffuse %.2f, specular %.2f, horizon %.2f",
@@ -2960,6 +3207,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneGgxPrefilterFallbackActive
     );
     ImGui::Text(
+        "Captured filter source: mips %u, builds %u, memory %.2f MiB, ready/separate/PDF %u/%u/%u",
+        stats.reflectionProbe.capturedSceneSourceMipCount,
+        stats.reflectionProbe.capturedSceneSourceMipGenerationCount,
+        static_cast<double>(
+            stats.reflectionProbe.capturedSceneSourceMipMemoryBytes
+        ) / (1024.0 * 1024.0),
+        stats.reflectionProbe.capturedSceneSourceMipChainReady,
+        stats.reflectionProbe.capturedSceneGgxPrefilterSourceImageSeparated,
+        stats.reflectionProbe.capturedSceneGgxPrefilterPdfLodEnabled
+    );
+    ImGui::Text(
         "Captured diffuse irradiance: %s, dispatches %u, samples %u, face %u",
         stats.reflectionProbe.capturedSceneDiffuseIrradianceReady ? "ready" : "pending",
         stats.reflectionProbe.capturedSceneDiffuseIrradianceDispatchCount,
@@ -3077,10 +3335,13 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneLastCapturedFace
     );
     ImGui::Text(
-        "Captured scene GGX prefilter: %s, dispatches %u, samples %u",
+        "Captured scene GGX prefilter: %s, dispatches %u, samples %u, source mips %u, separate/PDF %u/%u",
         stats.reflectionProbe.capturedSceneGgxPrefilterReady ? "ready" : "pending",
         stats.reflectionProbe.capturedSceneGgxPrefilterDispatchCount,
-        stats.reflectionProbe.capturedSceneGgxPrefilterSampleCount
+        stats.reflectionProbe.capturedSceneGgxPrefilterSampleCount,
+        stats.reflectionProbe.capturedSceneSourceMipCount,
+        stats.reflectionProbe.capturedSceneGgxPrefilterSourceImageSeparated,
+        stats.reflectionProbe.capturedSceneGgxPrefilterPdfLodEnabled
     );
     ImGui::Text(
         "Captured scene refresh: %s, last %s, performed %u, dirty 0x%X, signature %u -> %u, radiance %u",
@@ -3159,6 +3420,44 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.selectedNormalizedBlendWeights[2],
         stats.reflectionProbe.selectedNormalizedBlendWeights[3]
     );
+    if (stats.reflectionProbe.receiverAuditRequested != 0u) {
+        ImGui::Text(
+            "Reflection receiver audit: %s, IBL energy %s, position (%.2f %.2f %.2f), direction (%.2f %.2f %.2f), roughness %.3f, masks weight/ready/hit 0x%X/0x%X/0x%X",
+            stats.reflectionProbe.receiverAuditProductionBlend != 0u
+                ? "volume-priority"
+                : "legacy",
+            stats.reflectionProbe.receiverAuditIndependentIblEnergy != 0u
+                ? "independent"
+                : "legacy ambient-scaled",
+            stats.reflectionProbe.receiverAuditPositionX,
+            stats.reflectionProbe.receiverAuditPositionY,
+            stats.reflectionProbe.receiverAuditPositionZ,
+            stats.reflectionProbe.receiverAuditDirectionX,
+            stats.reflectionProbe.receiverAuditDirectionY,
+            stats.reflectionProbe.receiverAuditDirectionZ,
+            stats.reflectionProbe.receiverAuditRoughness,
+            stats.reflectionProbe.receiverAuditPositiveWeightMask,
+            stats.reflectionProbe.receiverAuditReadyCubemapMask,
+            stats.reflectionProbe.receiverAuditBoxProjectionHitMask
+        );
+        ImGui::Text(
+            "Reflection receiver blend: total %.3f, coverage %.3f, dominant %d/%.3f, cubemap %.3f, weights [%.3f %.3f %.3f %.3f], lods [%.2f %.2f %.2f %.2f], neutral captured 0x%X",
+            stats.reflectionProbe.receiverAuditTotalWeight,
+            stats.reflectionProbe.receiverAuditLocalCoverage,
+            stats.reflectionProbe.receiverAuditDominantSlot,
+            stats.reflectionProbe.receiverAuditDominantNormalizedWeight,
+            stats.reflectionProbe.receiverAuditLocalCubemapWeight,
+            stats.reflectionProbe.receiverAuditNormalizedWeights[0],
+            stats.reflectionProbe.receiverAuditNormalizedWeights[1],
+            stats.reflectionProbe.receiverAuditNormalizedWeights[2],
+            stats.reflectionProbe.receiverAuditNormalizedWeights[3],
+            stats.reflectionProbe.receiverAuditResolvedLods[0],
+            stats.reflectionProbe.receiverAuditResolvedLods[1],
+            stats.reflectionProbe.receiverAuditResolvedLods[2],
+            stats.reflectionProbe.receiverAuditResolvedLods[3],
+            stats.reflectionProbe.capturedSceneNeutralTintMask
+        );
+    }
     ImGui::Text(
         "Height fog: %s, density %.4f, falloff %.3f, start %.1f, max %.3f",
         stats.heightFog.enabled ? "enabled" : "off",

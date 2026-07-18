@@ -1033,6 +1033,8 @@ std::string_view VulkanFormatName(VkFormat format) {
         return "R16G16B16A16_UNORM";
     case VK_FORMAT_R32_UINT:
         return "R32_UINT";
+    case VK_FORMAT_R32_SFLOAT:
+        return "R32_SFLOAT";
     case VK_FORMAT_D32_SFLOAT:
         return "D32_SFLOAT";
     case VK_FORMAT_D32_SFLOAT_S8_UINT:
@@ -1540,7 +1542,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
     if (inputs.localShadowAtlasWidth > 0 &&
         inputs.localShadowAtlasHeight > 0 &&
-        inputs.localShadowAtlasTileSize > 0) {
+        inputs.localShadowAtlasTileSize > 0 &&
+        inputs.localShadowAtlasAssignedTiles > 0) {
         AppendResource(
             plan,
             RenderGraphResourceStatus::Physical,
@@ -1828,6 +1831,55 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
             "depth attachment, sampled, Hi-Z source",
             sceneExtentScale
         );
+        if (inputs.ssrDepthPyramidAllocated) {
+            AppendResource(
+                plan,
+                RenderGraphResourceStatus::Physical,
+                RenderGraphResourceLifetime::PerFrame,
+                "SSRRaw",
+                "R16G16B16A16_SFLOAT",
+                "storage-written raw SSR hit radiance before temporal/spatial reconstruction",
+                sceneExtentScale
+            );
+            AppendResource(
+                plan,
+                RenderGraphResourceStatus::Physical,
+                RenderGraphResourceLifetime::PersistentHistory,
+                "SSRResolved",
+                "R16G16B16A16_SFLOAT",
+                "isolated spatially resolved SSR radiance consumed by Deferred on the next frame",
+                "swapchain history"
+            );
+            AppendResource(
+                plan,
+                RenderGraphResourceStatus::Physical,
+                RenderGraphResourceLifetime::PersistentHistory,
+                "SSRHistoryColor",
+                "R16G16B16A16_SFLOAT",
+                "velocity-reprojected SSR radiance history",
+                "swapchain history"
+            );
+            AppendResource(
+                plan,
+                RenderGraphResourceStatus::Physical,
+                RenderGraphResourceLifetime::PersistentHistory,
+                "SSRHistoryMetadata",
+                "R16G16B16A16_SFLOAT",
+                "SSR depth, octahedral normal, roughness history metadata",
+                "swapchain history"
+            );
+            AppendResource(
+                plan,
+                RenderGraphResourceStatus::Physical,
+                RenderGraphResourceLifetime::PerFrame,
+                "SSRDepthPyramid",
+                VulkanFormatName(inputs.ssrDepthPyramidFormat),
+                "compute-written conservative min-depth mip chain, sampled",
+                std::to_string(inputs.ssrDepthPyramidWidth) + "x" +
+                    std::to_string(inputs.ssrDepthPyramidHeight) + " / " +
+                    std::to_string(inputs.ssrDepthPyramidMipCount) + " mips"
+            );
+        }
         AppendResource(
             plan,
             RenderGraphResourceStatus::Physical,
@@ -2074,7 +2126,8 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
     }
     if (inputs.localShadowAtlasWidth > 0 &&
         inputs.localShadowAtlasHeight > 0 &&
-        inputs.localShadowAtlasTileSize > 0) {
+        inputs.localShadowAtlasTileSize > 0 &&
+        inputs.localShadowAtlasAssignedTiles > 0) {
         AppendPass(
             plan,
             RenderFramePassKind::Shadow,
@@ -2087,6 +2140,30 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 : "",
             "Physical atlas resource and occupancy diagnostics for upcoming point/spot shadow rendering."
         );
+    }
+    if (inputs.ssrDepthPyramidAllocated) {
+        AppendPass(
+            plan,
+            RenderFramePassKind::Reflections,
+            RenderFramePassStatus::Active,
+            RenderFramePassQueue::Compute,
+            "SSRDepthPyramidBuild",
+            "SceneDepth",
+            "SSRDepthPyramid",
+            "Copies full-resolution scene depth into mip zero, then conservatively reduces every generated mip before deferred SSR traversal."
+        );
+        if (inputs.ssrReconstructionActive) {
+            AppendPass(
+                plan,
+                RenderFramePassKind::Reflections,
+                RenderFramePassStatus::Active,
+                RenderFramePassQueue::Compute,
+                "SSRTrace",
+                "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, Velocity, SceneDepth, SSRDepthPyramid",
+                "SSRRaw",
+                "Pre-lighting hierarchical trace writes only screen-space hit coordinates and confidence; radiance is resolved after Deferred."
+            );
+        }
     }
     if (inputs.lightTileCullComputeEnabled) {
         AppendPass(
@@ -2127,9 +2204,17 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
                 ? "DeferredLighting"
                 : "HdrOffscreenTarget",
             inputs.deferredLightingEnabled
-                ? (inputs.lightTileCullComputeEnabled
-                    ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
-                    : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
+                ? (inputs.ssrReconstructionActive
+                    ? (inputs.lightTileCullComputeEnabled
+                        ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferMaterialAux, GBufferEmissive, Velocity, SceneDepth, SSRDepthPyramid, SSRResolved, SSRHistoryMetadata, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                        : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferMaterialAux, GBufferEmissive, Velocity, SceneDepth, SSRDepthPyramid, SSRResolved, SSRHistoryMetadata, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
+                    : (inputs.ssrDepthPyramidAllocated
+                        ? (inputs.lightTileCullComputeEnabled
+                            ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, SSRDepthPyramid, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                            : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, SSRDepthPyramid, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")
+                        : (inputs.lightTileCullComputeEnabled
+                            ? "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, LightTileLists, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                            : "GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, GBufferMaterialAux, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap")))
                 : "",
             "HDRSceneColor",
             inputs.deferredLightingEnabled

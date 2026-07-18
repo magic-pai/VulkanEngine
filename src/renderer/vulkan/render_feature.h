@@ -26,6 +26,19 @@ struct VulkanRenderFeatureContext {
     bool sceneReflectionProbeCubemapSamplingEnabled = false;
     u32 reflectionProbeCaptureSourceType = 0;
     u32 reflectionProbeCaptureFallbackReason = 0;
+    bool ssrDepthPyramidAllocated = false;
+    bool ssrHiZDescriptorSetsReady = false;
+    bool ssrHiZBuildPipelineAvailable = false;
+    bool ssrSceneColorHistoryDescriptorReady = false;
+    u32 ssrDepthPyramidWidth = 0;
+    u32 ssrDepthPyramidHeight = 0;
+    u32 ssrDepthPyramidMipCount = 0;
+    u32 ssrDepthPyramidImageCount = 0;
+    VkFormat ssrDepthPyramidFormat = VK_FORMAT_UNDEFINED;
+    bool ssrReconstructionTargetsAllocated = false;
+    bool ssrReconstructionDescriptorSetsReady = false;
+    bool ssrReconstructionPipelinesAvailable = false;
+    u32 ssrReconstructionImageCount = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

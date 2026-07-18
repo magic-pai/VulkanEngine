@@ -7,6 +7,8 @@
 namespace se {
 
 class VulkanDescriptorSetLayout;
+class VulkanHiZDescriptorSetLayout;
+class VulkanSsrReconstructionDescriptorSetLayout;
 class VulkanMaterialDescriptorSetLayout;
 class VulkanDevice;
 
@@ -22,6 +24,20 @@ public:
     VulkanComputePipeline(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+
+    VulkanComputePipeline(
+        const VulkanDevice& device,
+        const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+
+    VulkanComputePipeline(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const VulkanSsrReconstructionDescriptorSetLayout&
+            reconstructionDescriptorSetLayout,
         const std::string& computeShaderPath
     );
 
@@ -42,6 +58,13 @@ public:
     void Recreate(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
+        const VulkanSsrReconstructionDescriptorSetLayout&
+            reconstructionDescriptorSetLayout,
         const std::string& computeShaderPath
     );
     void Release();

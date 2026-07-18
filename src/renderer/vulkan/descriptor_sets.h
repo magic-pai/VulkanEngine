@@ -5,11 +5,14 @@
 namespace se {
 
 class VulkanDescriptorSetLayout;
+class VulkanHiZDescriptorSetLayout;
+class VulkanSsrReconstructionDescriptorSetLayout;
 class VulkanMaterialDescriptorSetLayout;
 class VulkanDevice;
 class VulkanMaterial;
 class VulkanSampler;
 class VulkanBloomPyramid;
+class VulkanDepthPyramid;
 class VulkanColorGradingLut;
 class VulkanSceneRenderTargets;
 class VulkanDirectionalShadowCascadeAtlas;
@@ -46,7 +49,6 @@ public:
 
     VkDescriptorSet Handle(std::size_t index) const;
     std::size_t Count() const;
-
     void Recreate(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& descriptorSetLayout,
@@ -140,7 +142,8 @@ public:
         const VulkanSampler& sampler,
         const VulkanShadowMap* shadowMap = nullptr,
         const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
-        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr,
+        const VulkanDepthPyramid* depthPyramid = nullptr
     );
 
     ~VulkanGBufferDescriptorSets();
@@ -150,6 +153,13 @@ public:
 
     VkDescriptorSet Handle(std::size_t index) const;
     std::size_t Count() const;
+    bool UpdateSsrSceneColorHistory(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler,
+        std::size_t descriptorIndex,
+        std::size_t historyImageIndex
+    );
 
     void Recreate(
         const VulkanDevice& device,
@@ -158,7 +168,8 @@ public:
         const VulkanSampler& sampler,
         const VulkanShadowMap* shadowMap = nullptr,
         const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas = nullptr,
-        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr
+        const VulkanLocalShadowAtlas* localShadowAtlas = nullptr,
+        const VulkanDepthPyramid* depthPyramid = nullptr
     );
     void Release();
 
@@ -171,7 +182,92 @@ private:
         const VulkanSampler& sampler,
         const VulkanShadowMap* shadowMap,
         const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
-        const VulkanLocalShadowAtlas* localShadowAtlas
+        const VulkanLocalShadowAtlas* localShadowAtlas,
+        const VulkanDepthPyramid* depthPyramid
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanHiZDescriptorSets {
+public:
+    VulkanHiZDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
+    );
+    ~VulkanHiZDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanHiZDescriptorSets);
+    SE_DISABLE_MOVE(VulkanHiZDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t imageIndex, u32 mipIndex) const;
+    std::size_t Count() const;
+    u32 MipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
+    );
+    void Release();
+
+private:
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+    std::size_t m_Count = 0;
+    u32 m_MipCount = 0;
+};
+
+class VulkanSsrReconstructionDescriptorSets {
+public:
+    VulkanSsrReconstructionDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
+    );
+    ~VulkanSsrReconstructionDescriptorSets();
+
+    SE_DISABLE_COPY(VulkanSsrReconstructionDescriptorSets);
+    SE_DISABLE_MOVE(VulkanSsrReconstructionDescriptorSets);
+
+    VkDescriptorSet Handle(std::size_t imageIndex) const;
+    std::size_t Count() const;
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
+    );
+    void Release();
+
+private:
+    void CreateDescriptorSets(
+        const VulkanDevice& device,
+        const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        const VulkanSampler& sampler
     );
 
 private:

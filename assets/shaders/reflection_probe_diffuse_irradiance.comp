@@ -8,8 +8,12 @@ layout(rgba16f, set = 0, binding = 1) uniform writeonly image2DArray diffuseIrra
 layout(push_constant) uniform DiffuseIrradianceConstants {
     uint faceSize;
     uint sampleCount;
+    uint sourceFaceSize;
+    uint sourceMipCount;
+    uint pdfLodEnabled;
     uint reserved0;
     uint reserved1;
+    uint reserved2;
 } constants;
 
 const float PI = 3.14159265359;
@@ -76,10 +80,22 @@ void main() {
             sin(phi) * sinTheta,
             cosTheta
         );
+        float pdf = max(cosTheta / PI, 0.000001);
+        float sampleSolidAngle = 1.0 / (float(sampleCount) * pdf);
+        float sourceSize = float(max(constants.sourceFaceSize, 1u));
+        float texelSolidAngle = 4.0 * PI / (6.0 * sourceSize * sourceSize);
+        float maximumLod = float(max(constants.sourceMipCount, 1u) - 1u);
+        float sourceLod = constants.pdfLodEnabled != 0u
+            ? clamp(
+                0.5 * log2(sampleSolidAngle / texelSolidAngle),
+                0.0,
+                maximumLod
+            )
+            : 0.0;
         irradiance += textureLod(
             capturedRadiance,
             tangentFrame * localDirection,
-            0.0
+            sourceLod
         ).rgb;
     }
 

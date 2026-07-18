@@ -50,6 +50,15 @@ std::vector<std::byte> BuildNeutralLutStrip(u32 size) {
     return texels;
 }
 
+u32 CalculateMipLevels(VkExtent2D extent) {
+    const u32 maxDimension = std::max(extent.width, extent.height);
+    u32 mipLevels = 1u;
+    while ((1u << mipLevels) < maxDimension) {
+        ++mipLevels;
+    }
+    return mipLevels;
+}
+
 void NameImageForCapture(
     VkDevice device,
     const VulkanImage& image,
@@ -74,6 +83,27 @@ void NameImageForCapture(
         device,
         VK_OBJECT_TYPE_IMAGE_VIEW,
         image.View(),
+        viewName.c_str()
+    );
+}
+
+void NameImageViewForCapture(
+    VkDevice device,
+    VkImageView view,
+    const char* prefix,
+    std::size_t index,
+    const char* suffix
+) {
+    if (prefix == nullptr || prefix[0] == '\0') {
+        return;
+    }
+
+    const std::string viewName =
+        std::string(prefix) + "." + suffix + "[" + std::to_string(index) + "]";
+    SetVulkanDebugObjectName(
+        device,
+        VK_OBJECT_TYPE_IMAGE_VIEW,
+        view,
         viewName.c_str()
     );
 }
@@ -709,9 +739,25 @@ VkImageView VulkanSceneRenderTargets::HdrSceneColorView(std::size_t index) const
     return m_HdrSceneColorImages[index]->View();
 }
 
+VkImageView VulkanSceneRenderTargets::HdrSceneColorAttachmentView(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        index < m_HdrSceneColorAttachmentViews.size(),
+        "HDR scene color attachment index is out of range"
+    );
+    return m_HdrSceneColorAttachmentViews[index];
+}
+
 VkImage VulkanSceneRenderTargets::HdrSceneColorImage(std::size_t index) const {
     SE_ASSERT(index < m_HdrSceneColorImages.size(), "HDR scene color index is out of range");
     return m_HdrSceneColorImages[index]->Handle();
+}
+
+u32 VulkanSceneRenderTargets::HdrSceneColorMipLevels() const {
+    return m_HdrSceneColorImages.empty()
+        ? 0u
+        : m_HdrSceneColorImages.front()->MipLevels();
 }
 
 VkImageView VulkanSceneRenderTargets::TemporalResolvedColorView(std::size_t index) const {
@@ -806,6 +852,64 @@ VkImage VulkanSceneRenderTargets::TemporalHistoryColorImage(std::size_t index) c
     return m_TemporalHistoryColorImages[index]->Handle();
 }
 
+VkImageView VulkanSceneRenderTargets::SsrRawView(std::size_t index) const {
+    SE_ASSERT(index < m_SsrRawImages.size(), "SSR raw image index is out of range");
+    return m_SsrRawImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::SsrRawImage(std::size_t index) const {
+    SE_ASSERT(index < m_SsrRawImages.size(), "SSR raw image index is out of range");
+    return m_SsrRawImages[index]->Handle();
+}
+
+VkImageView VulkanSceneRenderTargets::SsrResolvedView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrResolvedImages.size(),
+        "SSR resolved image index is out of range"
+    );
+    return m_SsrResolvedImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::SsrResolvedImage(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrResolvedImages.size(),
+        "SSR resolved image index is out of range"
+    );
+    return m_SsrResolvedImages[index]->Handle();
+}
+
+VkImageView VulkanSceneRenderTargets::SsrHistoryColorView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrHistoryColorImages.size(),
+        "SSR history color index is out of range"
+    );
+    return m_SsrHistoryColorImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::SsrHistoryColorImage(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrHistoryColorImages.size(),
+        "SSR history color index is out of range"
+    );
+    return m_SsrHistoryColorImages[index]->Handle();
+}
+
+VkImageView VulkanSceneRenderTargets::SsrHistoryMetadataView(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrHistoryMetadataImages.size(),
+        "SSR history metadata index is out of range"
+    );
+    return m_SsrHistoryMetadataImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::SsrHistoryMetadataImage(std::size_t index) const {
+    SE_ASSERT(
+        index < m_SsrHistoryMetadataImages.size(),
+        "SSR history metadata index is out of range"
+    );
+    return m_SsrHistoryMetadataImages[index]->Handle();
+}
+
 VkImageView VulkanSceneRenderTargets::WeightedTranslucencyAccumView(std::size_t index) const {
     SE_ASSERT(
         index < m_WeightedTranslucencyAccumImages.size(),
@@ -897,6 +1001,10 @@ VkFormat VulkanSceneRenderTargets::TemporalHistoryColorFormat() const {
     return kHdrSceneColorFormat;
 }
 
+VkFormat VulkanSceneRenderTargets::SsrReconstructionFormat() const {
+    return kSsrReconstructionFormat;
+}
+
 VkFormat VulkanSceneRenderTargets::WeightedTranslucencyAccumFormat() const {
     return kWeightedTranslucencyAccumFormat;
 }
@@ -952,10 +1060,15 @@ void VulkanSceneRenderTargets::Recreate(
     VkExtent2D extent
 ) {
     Release();
+    m_Device = device.Handle();
     m_DisplayExtent = swapchain.Extent();
     m_Extent =
         extent.width > 0u && extent.height > 0u ? extent : swapchain.Extent();
     const std::size_t count = swapchain.Images().size();
+    const u32 hdrSceneColorMipLevels =
+        physicalDevice.SupportsLinearBlit(kHdrSceneColorFormat)
+            ? CalculateMipLevels(m_Extent)
+            : 1u;
 
     CreateImageArray(
         device,
@@ -966,11 +1079,40 @@ void VulkanSceneRenderTargets::Recreate(
             VK_IMAGE_USAGE_SAMPLED_BIT |
             VK_IMAGE_USAGE_STORAGE_BIT |
             VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_HdrSceneColorImages,
-        "SelfEngine.DLSS.InputColor"
+        "SelfEngine.DLSS.InputColor",
+        hdrSceneColorMipLevels
     );
+    m_HdrSceneColorAttachmentViews.resize(count, VK_NULL_HANDLE);
+    for (std::size_t index = 0; index < count; ++index) {
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_HdrSceneColorImages[index]->Handle();
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = kHdrSceneColorFormat;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(
+                device.Handle(),
+                &viewInfo,
+                nullptr,
+                &m_HdrSceneColorAttachmentViews[index]
+            ) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create Vulkan HDR scene color attachment view");
+        }
+        NameImageViewForCapture(
+            device.Handle(),
+            m_HdrSceneColorAttachmentViews[index],
+            "SelfEngine.DLSS.InputColor",
+            index,
+            "attachment"
+        );
+    }
     CreateImageArray(
         device,
         physicalDevice,
@@ -1009,6 +1151,51 @@ void VulkanSceneRenderTargets::Recreate(
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_TemporalHistoryColorImages,
         "SelfEngine.Temporal.HistoryColor"
+    );
+    const VkImageUsageFlags ssrReconstructionUsage =
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kSsrReconstructionFormat,
+        ssrReconstructionUsage,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_SsrRawImages,
+        "SelfEngine.SSR.RawTrace"
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kSsrReconstructionFormat,
+        ssrReconstructionUsage,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_SsrResolvedImages,
+        "SelfEngine.SSR.SpatialResolved"
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kSsrReconstructionFormat,
+        ssrReconstructionUsage,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_SsrHistoryColorImages,
+        "SelfEngine.SSR.HistoryColor"
+    );
+    CreateImageArray(
+        device,
+        physicalDevice,
+        count,
+        kSsrReconstructionFormat,
+        ssrReconstructionUsage,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        m_SsrHistoryMetadataImages,
+        "SelfEngine.SSR.HistoryMetadata"
     );
     CreateImageArray(
         device,
@@ -1135,12 +1322,24 @@ void VulkanSceneRenderTargets::Recreate(
 }
 
 void VulkanSceneRenderTargets::Release() {
+    if (m_Device != VK_NULL_HANDLE) {
+        for (VkImageView view : m_HdrSceneColorAttachmentViews) {
+            if (view != VK_NULL_HANDLE) {
+                vkDestroyImageView(m_Device, view, nullptr);
+            }
+        }
+    }
+    m_HdrSceneColorAttachmentViews.clear();
     m_HdrSceneColorImages.clear();
     m_TemporalResolvedColorImages.clear();
     m_TemporalUpscaleOutputImages.clear();
     m_DlssBiasCurrentColorMaskImages.clear();
     m_DlssTransparencyMaskImages.clear();
     m_TemporalHistoryColorImages.clear();
+    m_SsrRawImages.clear();
+    m_SsrResolvedImages.clear();
+    m_SsrHistoryColorImages.clear();
+    m_SsrHistoryMetadataImages.clear();
     m_WeightedTranslucencyAccumImages.clear();
     m_WeightedTranslucencyRevealageImages.clear();
     m_SceneDepthImages.clear();
@@ -1150,6 +1349,7 @@ void VulkanSceneRenderTargets::Release() {
     m_GBufferMaterialImages.clear();
     m_GBufferEmissiveImages.clear();
     m_GBufferMaterialAuxImages.clear();
+    m_Device = VK_NULL_HANDLE;
     m_DisplayExtent = {};
     m_Extent = {};
 }
@@ -1162,7 +1362,8 @@ void VulkanSceneRenderTargets::CreateImageArray(
     VkImageUsageFlags usage,
     VkImageAspectFlags aspectFlags,
     std::vector<std::unique_ptr<VulkanImage>>& images,
-    const char* debugNamePrefix
+    const char* debugNamePrefix,
+    u32 mipLevels
 ) const {
     images.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -1174,7 +1375,8 @@ void VulkanSceneRenderTargets::CreateImageArray(
             VK_IMAGE_TILING_OPTIMAL,
             usage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            aspectFlags
+            aspectFlags,
+            mipLevels
         ));
         NameImageForCapture(
             device.Handle(),
@@ -1194,7 +1396,8 @@ void VulkanSceneRenderTargets::CreateImageArrayForExtent(
     VkImageUsageFlags usage,
     VkImageAspectFlags aspectFlags,
     std::vector<std::unique_ptr<VulkanImage>>& images,
-    const char* debugNamePrefix
+    const char* debugNamePrefix,
+    u32 mipLevels
 ) const {
     images.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -1206,7 +1409,8 @@ void VulkanSceneRenderTargets::CreateImageArrayForExtent(
             VK_IMAGE_TILING_OPTIMAL,
             usage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            aspectFlags
+            aspectFlags,
+            mipLevels
         ));
         NameImageForCapture(
             device.Handle(),
@@ -1214,6 +1418,173 @@ void VulkanSceneRenderTargets::CreateImageArrayForExtent(
             debugNamePrefix,
             index
         );
+    }
+}
+
+VulkanDepthPyramid::VulkanDepthPyramid(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    const VulkanSwapchain& swapchain,
+    VkExtent2D extent
+) {
+    Recreate(device, physicalDevice, commandPool, swapchain, extent);
+}
+
+VulkanDepthPyramid::~VulkanDepthPyramid() {
+    Release();
+}
+
+VkImage VulkanDepthPyramid::Image(std::size_t imageIndex) const {
+    SE_ASSERT(imageIndex < m_Images.size(), "Depth-pyramid image index is out of range");
+    return m_Images[imageIndex]->Handle();
+}
+
+VkImageView VulkanDepthPyramid::View(std::size_t imageIndex) const {
+    SE_ASSERT(imageIndex < m_Images.size(), "Depth-pyramid view index is out of range");
+    return m_Images[imageIndex]->View();
+}
+
+VkImageView VulkanDepthPyramid::MipView(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    SE_ASSERT(imageIndex < m_MipViews.size(), "Depth-pyramid image index is out of range");
+    SE_ASSERT(mipIndex < m_MipViews[imageIndex].size(), "Depth-pyramid mip index is out of range");
+    return m_MipViews[imageIndex][mipIndex];
+}
+
+VkFormat VulkanDepthPyramid::Format() const {
+    return kFormat;
+}
+
+VkExtent2D VulkanDepthPyramid::Extent() const {
+    return m_Extent;
+}
+
+VkExtent2D VulkanDepthPyramid::MipExtent(u32 mipIndex) const {
+    SE_ASSERT(mipIndex < m_MipCount, "Depth-pyramid mip extent index is out of range");
+    return VkExtent2D{
+        std::max(m_Extent.width >> mipIndex, 1u),
+        std::max(m_Extent.height >> mipIndex, 1u)
+    };
+}
+
+std::size_t VulkanDepthPyramid::Count() const {
+    return m_Images.size();
+}
+
+u32 VulkanDepthPyramid::MipCount() const {
+    return m_MipCount;
+}
+
+void VulkanDepthPyramid::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    const VulkanSwapchain& swapchain,
+    VkExtent2D extent
+) {
+    Release();
+    m_Device = device.Handle();
+    try {
+        CreateImages(
+            device,
+            physicalDevice,
+            commandPool,
+            swapchain.Images().size(),
+            extent
+        );
+    } catch (...) {
+        Release();
+        throw;
+    }
+}
+
+void VulkanDepthPyramid::Release() {
+    if (m_Device != VK_NULL_HANDLE) {
+        for (std::vector<VkImageView>& views : m_MipViews) {
+            for (VkImageView view : views) {
+                if (view != VK_NULL_HANDLE) {
+                    vkDestroyImageView(m_Device, view, nullptr);
+                }
+            }
+        }
+    }
+    m_MipViews.clear();
+    m_Images.clear();
+    m_Extent = {};
+    m_MipCount = 0;
+}
+
+void VulkanDepthPyramid::CreateImages(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    std::size_t count,
+    VkExtent2D extent
+) {
+    SE_ASSERT(count > 0, "Depth-pyramid image count must be greater than zero");
+    SE_ASSERT(extent.width > 0 && extent.height > 0, "Depth-pyramid extent must be valid");
+
+    m_Extent = extent;
+    u32 largestDimension = std::max(extent.width, extent.height);
+    m_MipCount = 1;
+    while (largestDimension > 1 && m_MipCount < kSsrDepthPyramidMaxMipCount) {
+        largestDimension >>= 1u;
+        ++m_MipCount;
+    }
+
+    m_Images.reserve(count);
+    m_MipViews.resize(count);
+    for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
+        m_Images.push_back(std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
+            kFormat,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            m_MipCount
+        ));
+        NameImageForCapture(
+            device.Handle(),
+            *m_Images.back(),
+            "SelfEngine.SSR.DepthPyramid",
+            imageIndex
+        );
+        m_Images.back()->TransitionLayout(
+            device,
+            commandPool,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_GENERAL,
+            m_MipCount
+        );
+
+        std::vector<VkImageView>& views = m_MipViews[imageIndex];
+        views.resize(m_MipCount, VK_NULL_HANDLE);
+        for (u32 mipIndex = 0; mipIndex < m_MipCount; ++mipIndex) {
+            VkImageViewCreateInfo viewInfo{};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = m_Images.back()->Handle();
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = kFormat;
+            viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel = mipIndex;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount = 1;
+            if (vkCreateImageView(
+                    device.Handle(),
+                    &viewInfo,
+                    nullptr,
+                    &views[mipIndex]
+                ) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create Vulkan depth-pyramid mip view");
+            }
+        }
     }
 }
 
@@ -1553,7 +1924,7 @@ void VulkanHdrFramebuffer::CreateFramebuffers(
     for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
         const VkImageView colorAttachment = useTemporalResolvedColor
             ? renderTargets.TemporalResolvedColorView(index)
-            : renderTargets.HdrSceneColorView(index);
+            : renderTargets.HdrSceneColorAttachmentView(index);
         const std::array<VkImageView, 2> attachments = {
             colorAttachment,
             renderTargets.SceneDepthView(index)

@@ -31,6 +31,10 @@ class VulkanImage;
 class VulkanDepthBuffer;
 class VulkanDescriptorSetLayout;
 class VulkanDescriptorSets;
+class VulkanHiZDescriptorSetLayout;
+class VulkanSsrReconstructionDescriptorSetLayout;
+class VulkanHiZDescriptorSets;
+class VulkanSsrReconstructionDescriptorSets;
 class VulkanDevice;
 class VulkanFramebuffer;
 class VulkanForwardResidualVelocityFramebuffer;
@@ -56,6 +60,7 @@ class VulkanGBufferRenderPass;
 class VulkanHdrFramebuffer;
 class VulkanHdrRenderPass;
 class VulkanSceneRenderTargets;
+class VulkanDepthPyramid;
 class VulkanWeightedTranslucencyFramebuffer;
 class VulkanWeightedTranslucencyRenderPass;
 class VulkanShadowFramebuffer;
@@ -201,6 +206,7 @@ struct RendererLocalLight {
     f32 outerConeCos = 0.0f;
     f32 width = 0.0f;
     f32 height = 0.0f;
+    f32 sourceRadius = 0.05f;
 };
 
 inline constexpr std::size_t kRendererMaxFrameLocalLights = 64;
@@ -357,6 +363,24 @@ struct FrameLightTileGpuReadbackStats {
     u32 overflowDroppedCount = 0;
 };
 
+struct FrameSsrGpuDiagnosticsStats {
+    bool valid = false;
+    u32 pixelCount = 0;
+    u32 rawHitPixels = 0;
+    u32 rawHighConfidencePixels = 0;
+    u32 temporalValidPixels = 0;
+    u32 resolvedValidPixels = 0;
+    u32 isolatedRawHitPixels = 0;
+    u32 centerMissNeighborHitPixels = 0;
+    u32 resolvedHolePixels = 0;
+    u32 rawHitTemporalRejectedPixels = 0;
+    u32 rawHitSpatialRejectedPixels = 0;
+    u32 fallbackBlendResolvedPixels = 0;
+    u32 fallbackBlendPartialPixels = 0;
+    u32 fallbackBlendHighTrustPixels = 0;
+    u32 fallbackBlendWeightSum64 = 0;
+};
+
 struct FrameAutoExposureReadbackStats {
     bool valid = false;
     f32 exposure = 1.0f;
@@ -405,6 +429,7 @@ struct LocalShadowTile {
     u32 localLightIndex = 0;
     u32 faceIndex = 0;
     u32 lightKind = 0;
+    glm::vec4 filterGeometry{ 0.05f, 1.0f, 0.0f, 1.0f };
     u64 cacheKey = 0;
     u64 cacheTileIdentity = 0;
     u64 cacheLightSignature = 0;
@@ -417,6 +442,7 @@ struct LocalShadowTileSet {
     std::array<LocalShadowTile, kMaxLocalShadowTiles> tiles{};
     std::array<u32, kRendererMaxFrameLocalLights> requestedTilesByLocalLight{};
     std::array<u32, kRendererMaxFrameLocalLights> assignedTilesByLocalLight{};
+    std::array<u32, kRendererMaxFrameLocalLights> firstAssignedTileByLocalLight{};
     u32 tileSize = 0;
     u32 tileColumns = 0;
     u32 tileRows = 0;
@@ -583,6 +609,8 @@ private:
     bool TemporalJitterApplyEnabledForCurrentMode() const;
     bool TemporalVelocityJitteredHistoryPolicyForCurrentMode() const;
     f32 ActiveMaterialTextureMipLodBias() const;
+    bool SsrHiZResourcesReady() const;
+    bool SsrReconstructionResourcesReady() const;
     void EnsureVisibleSkyboxResources();
     u32 UpdateEnvironmentDescriptorSets(
         VulkanDescriptorSets* descriptorSets,
@@ -615,6 +643,9 @@ private:
         FrameLightTileStats* tileStats
     ) const;
     FrameLightTileGpuReadbackStats ReadPreviousLightTileGpuStats(
+        std::size_t imageIndex
+    ) const;
+    FrameSsrGpuDiagnosticsStats ReadPreviousSsrGpuDiagnostics(
         std::size_t imageIndex
     ) const;
     FrameAutoExposureReadbackStats ReadPreviousAutoExposureStats(
@@ -787,6 +818,7 @@ private:
     u32 m_TemporalFrameCounter = 0;
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
+    std::optional<u32> m_PreviousTemporalHistoryImageIndex;
     bool m_DlssQualitySceneContentMotionSupported = true;
     RendererTemporalAntialiasingMode m_TemporalAntialiasingMode =
         RendererTemporalAntialiasingMode::Environment;
@@ -797,6 +829,9 @@ private:
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;
     std::unique_ptr<VulkanMaterialDescriptorSetLayout> m_MaterialDescriptorSetLayout;
+    std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
+    std::unique_ptr<VulkanSsrReconstructionDescriptorSetLayout>
+        m_SsrReconstructionDescriptorSetLayout;
     std::unique_ptr<VulkanUniformBuffer> m_UniformBuffer;
     std::unique_ptr<VulkanUniformBuffer> m_OverlayUniformBuffer;
     std::unique_ptr<VulkanDescriptorSets> m_DescriptorSets;
@@ -805,6 +840,9 @@ private:
     std::unique_ptr<VulkanMaterialDescriptorSets>
         m_ReflectionCaptureMaterialDescriptorSets;
     std::unique_ptr<VulkanGBufferDescriptorSets> m_GBufferDescriptorSets;
+    std::unique_ptr<VulkanHiZDescriptorSets> m_HiZDescriptorSets;
+    std::unique_ptr<VulkanSsrReconstructionDescriptorSets>
+        m_SsrReconstructionDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;
     std::unique_ptr<VulkanBloomDescriptorSets> m_BloomDescriptorSets;
@@ -819,9 +857,11 @@ private:
     std::unique_ptr<VulkanLocalShadowBuffer> m_LocalShadowBuffer;
     std::unique_ptr<VulkanBonePaletteFallbackDescriptorSet> m_BonePaletteFallbackDescriptorSet;
     std::unique_ptr<VulkanSceneRenderTargets> m_SceneRenderTargets;
+    std::unique_ptr<VulkanDepthPyramid> m_SsrDepthPyramid;
     std::unique_ptr<VulkanBloomPyramid> m_BloomPyramid;
     std::unique_ptr<VulkanColorGradingLut> m_ColorGradingLut;
     std::unique_ptr<VulkanSampler> m_SceneTargetSampler;
+    std::unique_ptr<VulkanSampler> m_SsrDepthPyramidSampler;
     std::unique_ptr<VulkanGBufferRenderPass> m_GBufferRenderPass;
     std::unique_ptr<VulkanGBufferFramebuffer> m_GBufferFramebuffer;
     std::unique_ptr<VulkanForwardResidualVelocityRenderPass> m_ForwardResidualVelocityRenderPass;
@@ -871,6 +911,12 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_LightTileCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_AutoExposureComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_HiZBuildComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_SsrTraceComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_SsrTemporalComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_SsrSpatialComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_SsrDiagnosticsComputePipeline;
+    bool m_SsrReconstructionImagesInitialized = false;
     // IBL textures
     std::unique_ptr<VulkanImage> m_IblBrdfImage;
     std::unique_ptr<VulkanImage> m_IblIrradianceImage;

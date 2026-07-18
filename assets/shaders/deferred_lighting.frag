@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_control_flow_attributes : require
 
 layout(location = 0) in vec2 fragUv;
 layout(location = 0) out vec4 outColor;
@@ -101,6 +102,7 @@ layout(std430, set = 0, binding = 4) readonly buffer DirectionalShadowCascades {
     vec4 directionalFilterControls;
     vec4 directionalPcssControls;
     vec4 directionalPcssGeometry;
+    vec4 directionalPcssReceiverControls;
     mat4 fallbackViewProjection;
     mat4 viewProjections[4];
 } shadowCascades;
@@ -120,6 +122,10 @@ layout(std430, set = 0, binding = 5) readonly buffer LocalShadowData {
     vec4 spotFilterControls;
     vec4 rectFilterControls;
     vec4 kindSoftShadowControls;
+    vec4 pointPcssControls;
+    vec4 spotPcssControls;
+    vec4 rectPcssControls;
+    uvec4 tileRanges[64];
     LocalShadowTileRecord tiles[64];
 } localShadows;
 
@@ -153,7 +159,12 @@ layout(set = 1, binding = 5) uniform sampler2D gBufferEmissive;
 layout(set = 1, binding = 6) uniform sampler2DShadow shadowSampler;
 layout(set = 1, binding = 13) uniform sampler2D shadowRawDepthSampler;
 layout(set = 1, binding = 7) uniform sampler2D gBufferMaterialAux;
-layout(set = 1, binding = 12) uniform sampler2D localShadowSampler;
+layout(set = 1, binding = 12) uniform sampler2DShadow localShadowComparisonSampler;
+layout(set = 1, binding = 14) uniform sampler2D localShadowRawDepthSampler;
+layout(set = 1, binding = 15) uniform sampler2D ssrDepthPyramid;
+layout(set = 1, binding = 16) uniform sampler2D ssrSceneColorHistory;
+layout(set = 1, binding = 17) uniform sampler2D ssrResolvedReflection;
+layout(set = 1, binding = 18) uniform sampler2D ssrHistoryMetadata;
 
 const float PI = 3.14159265359;
 const int MAX_LOCAL_LIGHTS = 64;
@@ -164,6 +175,7 @@ const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_FRAME_MATERIALS = 256;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
+const int MAX_LOCAL_SHADOW_TILES_PER_LIGHT = 6;
 const int MAX_REFLECTION_PROBES = 4;
 const int REFLECTION_PROBE_DIFFUSE_LOBE_COUNT = 6;
 
@@ -539,6 +551,61 @@ float LocalReflectionProbeWeight(vec3 worldPosition) {
     return LocalReflectionProbeWeightAt(0, worldPosition);
 }
 
+bool LocalReflectionProbeProductionBlendEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(mode, 2.0) > 0.5;
+}
+
+bool ReflectionProbeIndependentIblEnergyEnabled() {
+    return floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5;
+}
+
+float LocalReflectionProbeShapeCoordinateAt(
+    int probeIndex,
+    vec3 worldPosition
+) {
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
+    if (boxExtentsProjection.w > 0.5) {
+        vec3 normalizedBox = abs(worldPosition - positionRadius.xyz) /
+            max(boxExtentsProjection.xyz, vec3(0.001));
+        return max(max(normalizedBox.x, normalizedBox.y), normalizedBox.z);
+    }
+    return length(worldPosition - positionRadius.xyz) /
+        max(positionRadius.w, 0.001);
+}
+
+float LocalReflectionProbeProductionCoverageAt(
+    int probeIndex,
+    vec3 worldPosition
+) {
+    vec4 controls = frame.reflectionProbeControlsArray[probeIndex];
+    if (controls.x <= 0.0001 || controls.y <= 0.0001 ||
+        controls.z <= 0.0001) {
+        return 0.0;
+    }
+    float edgeWidth = mix(0.08, 0.45, clamp(controls.z, 0.0, 1.0));
+    float edgeStart = clamp(1.0 - edgeWidth, 0.05, 0.95);
+    return 1.0 - smoothstep(
+        edgeStart,
+        1.0,
+        LocalReflectionProbeShapeCoordinateAt(probeIndex, worldPosition)
+    );
+}
+
+float LocalReflectionProbeVolumePriorityAt(int probeIndex) {
+    vec4 positionRadius = frame.reflectionProbePositionRadius[probeIndex];
+    vec4 boxExtentsProjection =
+        frame.reflectionProbeBoxExtentsProjectionArray[probeIndex];
+    if (boxExtentsProjection.w > 0.5) {
+        vec3 extents = max(boxExtentsProjection.xyz, vec3(0.01));
+        return 1.0 / max(extents.x * extents.y * extents.z, 0.000001);
+    }
+    float radius = max(positionRadius.w, 0.01);
+    return 1.0 / (radius * radius * radius);
+}
+
 vec3 BoxProjectedLocalReflectionDirectionAt(
     int probeIndex,
     vec3 direction,
@@ -650,28 +717,76 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness) {
     return GlobalEnvironmentRadiance(direction, sunDirection, roughness);
 }
 
-vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec3 worldPosition) {
-    vec3 globalRadiance = GlobalEnvironmentRadiance(direction, sunDirection, roughness);
+struct EnvironmentRadianceResult {
+    vec3 globalRadiance;
+    vec3 localRadiance;
+    vec3 resolvedRadiance;
+    float localCoverage;
+};
+
+EnvironmentRadianceResult ResolveEnvironmentRadiance(
+    vec3 direction,
+    vec3 sunDirection,
+    float roughness,
+    vec3 worldPosition
+) {
+    EnvironmentRadianceResult result;
+    result.globalRadiance = GlobalEnvironmentRadiance(
+        direction,
+        sunDirection,
+        roughness
+    );
+    result.localRadiance = result.globalRadiance;
+    result.resolvedRadiance = result.globalRadiance;
+    result.localCoverage = 0.0;
     int probeCount = clamp(
         int(frame.reflectionProbeBlendControls.x + 0.5),
         0,
         MAX_REFLECTION_PROBES
     );
     if (frame.reflectionProbeBlendControls.y <= 0.5 || probeCount <= 0) {
-        return globalRadiance;
+        return result;
     }
 
     float weights[MAX_REFLECTION_PROBES];
+    float coverages[MAX_REFLECTION_PROBES];
+    float priorities[MAX_REFLECTION_PROBES];
+    bool productionBlend = LocalReflectionProbeProductionBlendEnabled();
+    float bestPriority = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        float coverage = probeIndex < probeCount
+            ? LocalReflectionProbeProductionCoverageAt(probeIndex, worldPosition)
+            : 0.0;
+        float priority = probeIndex < probeCount
+            ? LocalReflectionProbeVolumePriorityAt(probeIndex)
+            : 0.0;
+        coverages[probeIndex] = coverage;
+        priorities[probeIndex] = priority;
+        if (coverage > 0.0001) {
+            bestPriority = max(bestPriority, priority);
+        }
+    }
+
     float totalWeight = 0.0;
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
-        float weight = probeIndex < probeCount
-            ? LocalReflectionProbeWeightAt(probeIndex, worldPosition)
-            : 0.0;
+        float weight = 0.0;
+        if (probeIndex < probeCount) {
+            weight = productionBlend
+                ? coverages[probeIndex] * smoothstep(
+                    0.35,
+                    0.95,
+                    priorities[probeIndex] / max(bestPriority, 0.000001)
+                )
+                : LocalReflectionProbeWeightAt(probeIndex, worldPosition);
+        }
         weights[probeIndex] = weight;
         totalWeight += weight;
+        result.localCoverage = productionBlend
+            ? max(result.localCoverage, coverages[probeIndex])
+            : clamp(totalWeight, 0.0, 1.0);
     }
     if (totalWeight <= 0.0001) {
-        return globalRadiance;
+        return result;
     }
 
     vec3 localBlend = vec3(0.0);
@@ -693,7 +808,7 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
                 direction,
                 worldPosition
             );
-        vec3 sampledRadiance = globalRadiance * localTint;
+        vec3 sampledRadiance = result.globalRadiance * localTint;
         if (color.a > 0.5) {
             int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
             float localCubemapWeight = 1.0 - smoothstep(0.88, 1.0, roughnessClamped);
@@ -726,7 +841,27 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughness, vec
         localBlend += localRadiance * (rawWeight / totalWeight);
     }
 
-    return mix(globalRadiance, localBlend, clamp(totalWeight, 0.0, 1.0));
+    result.localRadiance = localBlend;
+    result.resolvedRadiance = mix(
+        result.globalRadiance,
+        result.localRadiance,
+        result.localCoverage
+    );
+    return result;
+}
+
+vec3 EnvironmentRadiance(
+    vec3 direction,
+    vec3 sunDirection,
+    float roughness,
+    vec3 worldPosition
+) {
+    return ResolveEnvironmentRadiance(
+        direction,
+        sunDirection,
+        roughness,
+        worldPosition
+    ).resolvedRadiance;
 }
 
 IblAmbientResult BuildIblAmbient(
@@ -904,7 +1039,7 @@ vec3 LocalShadowAtlasDebugColor(vec2 uv) {
 
     int tileIndex = tileCoord.y * tileColumns + tileCoord.x;
     vec2 tileUv = fract(grid);
-    float atlasDepth = texture(localShadowSampler, uv).r;
+    float atlasDepth = texture(localShadowRawDepthSampler, uv).r;
     vec3 depthColor = mix(
         vec3(0.02, 0.025, 0.035),
         vec3(0.92, 0.94, 0.98),
@@ -1005,16 +1140,52 @@ float PointShadowFaceSeamRisk(vec3 fromLight) {
     return 1.0 - smoothstep(0.02, 0.16, axisGap);
 }
 
+bool GetLocalShadowTileRange(
+    int assignedTileCount,
+    int localLightIndex,
+    out int firstTileIndex,
+    out int tileCount
+) {
+    firstTileIndex = 0;
+    tileCount = 0;
+    if (localShadows.atlasInfo2.w < 3u ||
+        localLightIndex < 0 || localLightIndex >= MAX_LOCAL_LIGHTS) {
+        return false;
+    }
+
+    uvec4 range = localShadows.tileRanges[localLightIndex];
+    firstTileIndex = int(range.x);
+    tileCount = int(range.y);
+    return range.w != 0u && tileCount > 0 &&
+        tileCount <= MAX_LOCAL_SHADOW_TILES_PER_LIGHT &&
+        firstTileIndex >= 0 && firstTileIndex < assignedTileCount &&
+        firstTileIndex + tileCount <= assignedTileCount;
+}
+
 bool FindLocalShadowTile(
     int assignedTileCount,
     int localLightIndex,
     int targetFace,
     out LocalShadowTileRecord foundTile
 ) {
-    for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
-        if (tileIndex >= assignedTileCount) {
+    int firstTileIndex = 0;
+    int tileCount = 0;
+    if (!GetLocalShadowTileRange(
+            assignedTileCount,
+            localLightIndex,
+            firstTileIndex,
+            tileCount
+        )) {
+        return false;
+    }
+
+    [[dont_unroll]] for (int rangeOffset = 0;
+         rangeOffset < MAX_LOCAL_SHADOW_TILES_PER_LIGHT;
+         ++rangeOffset) {
+        if (rangeOffset >= tileCount) {
             break;
         }
+        int tileIndex = firstTileIndex + rangeOffset;
         LocalShadowTileRecord tile = localShadows.tiles[tileIndex];
         if (int(tile.tileInfo.y) != localLightIndex) {
             continue;
@@ -1126,6 +1297,64 @@ float LocalShadowPcssStrength(uint lightKind) {
     return clamp(localShadows.softShadowControls.x, 0.0, 1.0);
 }
 
+vec4 LocalShadowPcssControls(uint lightKind) {
+    if (lightKind == 0u) {
+        return localShadows.pointPcssControls;
+    }
+    if (lightKind == 1u) {
+        return localShadows.spotPcssControls;
+    }
+    if (lightKind == 2u) {
+        return localShadows.rectPcssControls;
+    }
+    return vec4(0.0);
+}
+
+float LinearizeLocalShadowDepth(float depth, vec4 lightInfo) {
+    float nearPlane = max(lightInfo.x, 0.0001);
+    float farPlane = max(lightInfo.y, nearPlane + 0.0001);
+    float denominator = farPlane - clamp(depth, 0.0, 1.0) * (farPlane - nearPlane);
+    return nearPlane * farPlane / max(denominator, 0.000001);
+}
+
+float LocalShadowStableDiskAngle(uvec4 tileInfo) {
+    uint value = tileInfo.y * 747796405u +
+        tileInfo.z * 2891336453u + tileInfo.w * 277803737u + 0x9e3779b9u;
+    value ^= value >> 16u;
+    value *= 2246822519u;
+    value ^= value >> 13u;
+    return float(value & 65535u) * (6.28318530718 / 65536.0);
+}
+
+const vec2 LOCAL_SHADOW_POISSON_DISK[16] = vec2[](
+    vec2(-0.94201624, -0.39906216),
+    vec2( 0.94558609, -0.76890725),
+    vec2(-0.09418410, -0.92938870),
+    vec2( 0.34495938,  0.29387760),
+    vec2(-0.91588581,  0.45771432),
+    vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543,  0.27676845),
+    vec2( 0.97484398,  0.75648379),
+    vec2( 0.44323325, -0.97511554),
+    vec2( 0.53742981, -0.47373420),
+    vec2(-0.26496911, -0.41893023),
+    vec2( 0.79197514,  0.19090188),
+    vec2(-0.24188840,  0.99706507),
+    vec2(-0.81409955,  0.91437590),
+    vec2( 0.19984126,  0.78641367),
+    vec2( 0.14383161, -0.14100790)
+);
+
+mat2 LocalShadowDiskRotation(float angle) {
+    float cosine = cos(angle);
+    float sine = sin(angle);
+    return mat2(cosine, sine, -sine, cosine);
+}
+
+vec2 LocalShadowDiskOffset(int sampleIndex, mat2 rotation) {
+    return rotation * LOCAL_SHADOW_POISSON_DISK[sampleIndex];
+}
+
 float RectAreaShadowSoftness(LocalLightRecord localLight, vec3 worldPosition) {
     vec3 rectNormal = localLight.directionType.xyz;
     if (dot(rectNormal, rectNormal) < 0.0001) {
@@ -1188,7 +1417,7 @@ float SampleLocalShadowTileVisibility(
     vec2 tileOrigin = vec2(float(tileX), float(tileY)) * atlasTileScale;
     vec2 atlasUv = tileOrigin + shadowUv * atlasTileScale;
     vec2 tileMax = tileOrigin + atlasTileScale;
-    vec2 texelSize = 1.0 / vec2(textureSize(localShadowSampler, 0));
+    vec2 texelSize = 1.0 / vec2(textureSize(localShadowRawDepthSampler, 0));
     float rectAreaSoftness = clamp(areaSoftness, 0.0, 1.0);
     float shadowTileEdgeDistance = min(
         min(shadowUv.x, 1.0 - shadowUv.x),
@@ -1203,73 +1432,185 @@ float SampleLocalShadowTileVisibility(
     float biasSlope = max(filterControls.y, 0.0);
     float nDotL = clamp(dot(normal, lightDir), 0.0, 1.0);
     float bias = max(biasSlope * (1.0 - nDotL), biasMin) * max(biasScale, 0.0);
-    int kernelRadius = clamp(int(filterControls.w + 0.5), 0, 2);
-    if (kernelRadius <= 0) {
-        float closestDepth = texture(localShadowSampler, atlasUv).r;
-        float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-        float occlusion = shadow *
-            mix(1.0, 0.42, rectAreaSoftness) *
-            rectTileEdgeFade;
-        return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
-    }
+    bool productionFilterReady = localShadows.atlasInfo2.w >= 3u &&
+        localShadows.softShadowControls.w > 0.5 &&
+        tile.lightInfo.x > 0.0 && tile.lightInfo.y > tile.lightInfo.x &&
+        tile.lightInfo.w > 0.0;
+    if (!productionFilterReady) {
+        int kernelRadius = clamp(int(filterControls.w + 0.5), 0, 2);
+        if (kernelRadius <= 0) {
+            float closestDepth = texture(localShadowRawDepthSampler, atlasUv).r;
+            float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+            float occlusion = shadow *
+                mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
+            return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+        }
 
-    float shadow = 0.0;
-    int sampleCount = 0;
-    float filterRadius = max(filterControls.z, 0.0);
-    filterRadius *= 1.0 + rectAreaSoftness * 5.5;
-    pcssStrength = max(clamp(pcssStrength, 0.0, 1.0), rectAreaSoftness * 0.55);
-    if (pcssStrength > 0.0001 && kernelRadius > 0) {
-        float blockerDepthSum = 0.0;
-        int blockerCount = 0;
-        float searchRadius = max(filterRadius, 1.0) * (1.0 + pcssStrength);
-        for (int x = -1; x <= 1; ++x) {
-            for (int y = -1; y <= 1; ++y) {
-                vec2 blockerUv = clamp(
-                    atlasUv + vec2(x, y) * texelSize * searchRadius,
+        float shadow = 0.0;
+        int sampleCount = 0;
+        float filterRadius = max(filterControls.z, 0.0) *
+            (1.0 + rectAreaSoftness * 5.5);
+        float legacyPcssStrength = max(
+            clamp(pcssStrength, 0.0, 1.0),
+            rectAreaSoftness * 0.55
+        );
+        if (legacyPcssStrength > 0.0001) {
+            float blockerDepthSum = 0.0;
+            int blockerCount = 0;
+            float searchRadius = max(filterRadius, 1.0) *
+                (1.0 + legacyPcssStrength);
+            for (int x = -1; x <= 1; ++x) {
+                for (int y = -1; y <= 1; ++y) {
+                    vec2 blockerUv = clamp(
+                        atlasUv + vec2(x, y) * texelSize * searchRadius,
+                        tileOrigin + texelSize,
+                        tileMax - texelSize
+                    );
+                    float blockerDepth = texture(
+                        localShadowRawDepthSampler,
+                        blockerUv
+                    ).r;
+                    if (currentDepth - bias > blockerDepth) {
+                        blockerDepthSum += blockerDepth;
+                        ++blockerCount;
+                    }
+                }
+            }
+            if (blockerCount > 0) {
+                float averageBlockerDepth = blockerDepthSum / float(blockerCount);
+                float penumbra = clamp(
+                    (currentDepth - averageBlockerDepth) /
+                        max(averageBlockerDepth, 0.0001),
+                    0.0,
+                    1.0
+                );
+                filterRadius *= 1.0 + penumbra * legacyPcssStrength * 3.0;
+            }
+        }
+
+        for (int x = -2; x <= 2; ++x) {
+            if (abs(x) > kernelRadius) {
+                continue;
+            }
+            for (int y = -2; y <= 2; ++y) {
+                if (abs(y) > kernelRadius) {
+                    continue;
+                }
+                vec2 sampleUv = clamp(
+                    atlasUv + vec2(x, y) * texelSize * filterRadius,
                     tileOrigin + texelSize,
                     tileMax - texelSize
                 );
-                float blockerDepth = texture(localShadowSampler, blockerUv).r;
-                if (currentDepth - bias > blockerDepth) {
-                    blockerDepthSum += blockerDepth;
-                    ++blockerCount;
-                }
+                float closestDepth = texture(localShadowRawDepthSampler, sampleUv).r;
+                shadow += currentDepth - bias > closestDepth ? 1.0 : 0.0;
+                ++sampleCount;
             }
         }
 
+        float occlusion = shadow / max(float(sampleCount), 1.0);
+        occlusion *= mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
+        return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    }
+
+    uint lightKind = tile.tileInfo.w;
+    vec4 pcssControls = LocalShadowPcssControls(lightKind);
+    int blockerSampleCount = clamp(int(pcssControls.x + 0.5), 0, 16);
+    int filterSampleCount = clamp(int(pcssControls.y + 0.5), 1, 16);
+    float searchRadiusLimit = clamp(pcssControls.z, 0.0, 16.0);
+    float maxPenumbraTexels = clamp(pcssControls.w, 0.5, 16.0);
+    float receiverDistance = LinearizeLocalShadowDepth(currentDepth, tile.lightInfo);
+    float sourceRadius = max(tile.lightInfo.z, 0.0);
+    float tanHalfFov = max(tile.lightInfo.w, 0.0001);
+    float worldTexelSize = max(
+        2.0 * receiverDistance * tanHalfFov / float(tileSize),
+        0.000001
+    );
+    float baseFilterRadius = max(filterControls.z, 0.5);
+    float filterRadiusTexels = min(baseFilterRadius, maxPenumbraTexels);
+    float stableAngle = LocalShadowStableDiskAngle(tile.tileInfo);
+    mat2 diskRotation = LocalShadowDiskRotation(stableAngle);
+    vec2 sampleGuard = texelSize * 1.5;
+    float comparisonDepth = clamp(currentDepth - bias, 0.0, 1.0);
+
+    if (pcssStrength > 0.0001 && sourceRadius > 0.000001 &&
+        blockerSampleCount > 0 && searchRadiusLimit > 0.0) {
+        float projectedSourceTexels = sourceRadius / worldTexelSize;
+        float geometricSearchRadius = projectedSourceTexels *
+            max(receiverDistance - tile.lightInfo.x, 0.0) /
+            max(receiverDistance, tile.lightInfo.x);
+        float searchRadiusTexels = clamp(
+            max(baseFilterRadius, geometricSearchRadius),
+            0.5,
+            searchRadiusLimit
+        );
+        float blockerDistanceSum = 0.0;
+        int blockerCount = 0;
+        [[dont_unroll]] for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+            if (sampleIndex >= blockerSampleCount) {
+                break;
+            }
+            vec2 sampleOffset = LocalShadowDiskOffset(
+                sampleIndex,
+                diskRotation
+            );
+            vec2 blockerUv = clamp(
+                atlasUv + sampleOffset * texelSize * searchRadiusTexels,
+                tileOrigin + sampleGuard,
+                tileMax - sampleGuard
+            );
+            float blockerDepth = textureLod(
+                localShadowRawDepthSampler,
+                blockerUv,
+                0.0
+            ).r;
+            if (comparisonDepth > blockerDepth + 0.000001) {
+                blockerDistanceSum += LinearizeLocalShadowDepth(
+                    blockerDepth,
+                    tile.lightInfo
+                );
+                ++blockerCount;
+            }
+        }
         if (blockerCount > 0) {
-            float averageBlockerDepth = blockerDepthSum / float(blockerCount);
-            float penumbra = clamp(
-                (currentDepth - averageBlockerDepth) / max(averageBlockerDepth, 0.0001),
-                0.0,
-                1.0
+            float averageBlockerDistance =
+                blockerDistanceSum / float(blockerCount);
+            float blockerSeparationWorld = max(
+                receiverDistance - averageBlockerDistance,
+                0.0
             );
-            filterRadius *= 1.0 + penumbra * pcssStrength * 3.0;
+            float penumbraWorld = sourceRadius * blockerSeparationWorld /
+                max(averageBlockerDistance, tile.lightInfo.x);
+            filterRadiusTexels = clamp(
+                baseFilterRadius +
+                    penumbraWorld * clamp(pcssStrength, 0.0, 1.0) /
+                    worldTexelSize,
+                baseFilterRadius,
+                maxPenumbraTexels
+            );
         }
     }
 
-    for (int x = -2; x <= 2; ++x) {
-        if (abs(x) > kernelRadius) {
-            continue;
+    float visibilitySum = 0.0;
+    [[dont_unroll]] for (int sampleIndex = 0; sampleIndex < 16; ++sampleIndex) {
+        if (sampleIndex >= filterSampleCount) {
+            break;
         }
-        for (int y = -2; y <= 2; ++y) {
-            if (abs(y) > kernelRadius) {
-                continue;
-            }
-            vec2 sampleUv = clamp(
-                atlasUv + vec2(x, y) * texelSize * filterRadius,
-                tileOrigin + texelSize,
-                tileMax - texelSize
-            );
-            float closestDepth = texture(localShadowSampler, sampleUv).r;
-            shadow += currentDepth - bias > closestDepth ? 1.0 : 0.0;
-            ++sampleCount;
-        }
+        vec2 sampleOffset = LocalShadowDiskOffset(
+            sampleIndex,
+            diskRotation
+        );
+        vec2 sampleUv = clamp(
+            atlasUv + sampleOffset * texelSize * filterRadiusTexels,
+            tileOrigin + sampleGuard,
+            tileMax - sampleGuard
+        );
+        visibilitySum += texture(
+            localShadowComparisonSampler,
+            vec3(sampleUv, comparisonDepth)
+        );
     }
-
-    float occlusion = shadow / max(float(sampleCount), 1.0);
-    occlusion *= mix(1.0, 0.42, rectAreaSoftness) * rectTileEdgeFade;
-    return 1.0 - occlusion * clamp(frame.shadowControls.y, 0.0, 1.0);
+    float visibility = visibilitySum / float(filterSampleCount);
+    return mix(1.0, visibility, clamp(frame.shadowControls.y, 0.0, 1.0));
 }
 
 float LocalShadowVisibility(
@@ -1309,12 +1650,25 @@ float LocalShadowVisibility(
     float areaSoftness =
         lightKind == 2u ? RectAreaShadowSoftness(localLight, worldPosition) : 0.0;
     if (lightKind == 2u) {
+        int firstTileIndex = 0;
+        int tileCount = 0;
+        if (!GetLocalShadowTileRange(
+                assignedTileCount,
+                localLightIndex,
+                firstTileIndex,
+                tileCount
+            )) {
+            return 1.0;
+        }
         float visibilitySum = 0.0;
         int visibilityCount = 0;
-        for (int tileIndex = 0; tileIndex < MAX_LOCAL_SHADOW_TILES; ++tileIndex) {
-            if (tileIndex >= assignedTileCount) {
+        [[dont_unroll]] for (int rangeOffset = 0;
+             rangeOffset < MAX_LOCAL_SHADOW_TILES_PER_LIGHT;
+             ++rangeOffset) {
+            if (rangeOffset >= tileCount) {
                 break;
             }
+            int tileIndex = firstTileIndex + rangeOffset;
             LocalShadowTileRecord rectTile = localShadows.tiles[tileIndex];
             if (int(rectTile.tileInfo.y) != localLightIndex ||
                 rectTile.tileInfo.w != 2u) {
@@ -1412,6 +1766,65 @@ vec3 ReconstructViewPosition(vec2 uv, float depth) {
         return vec3(0.0);
     }
     return viewPosition.xyz / viewPosition.w;
+}
+
+vec2 SsrOctEncode(vec3 value) {
+    value /= max(abs(value.x) + abs(value.y) + abs(value.z), 0.000001);
+    vec2 encoded = value.xy;
+    if (value.z < 0.0) {
+        encoded = (1.0 - abs(encoded.yx)) * sign(encoded.xy);
+    }
+    return encoded;
+}
+
+vec3 SsrOctDecode(vec2 encoded) {
+    vec3 value = vec3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
+    if (value.z < 0.0) {
+        value.xy = (1.0 - abs(value.yx)) * sign(value.xy);
+    }
+    return normalize(value);
+}
+
+bool SsrDeferredReceiverReprojectionEnabled() {
+    float encodedControl = floor(abs(frame.ssrControls.w) / 1024.0);
+    return mod(encodedControl, 2.0) > 0.5;
+}
+
+float SsrDeferredReceiverHistoryConfidence(
+    vec2 historyUv,
+    vec3 receiverNormal,
+    float receiverRoughness,
+    float receiverPreviousViewDepth
+) {
+    vec2 texelSize = 1.0 / vec2(textureSize(ssrHistoryMetadata, 0));
+    if (any(lessThan(historyUv, texelSize * 0.5)) ||
+        any(greaterThan(historyUv, vec2(1.0) - texelSize * 0.5))) {
+        return 0.0;
+    }
+
+    vec4 historyMetadata = texture(ssrHistoryMetadata, historyUv);
+    if (historyMetadata.x <= 0.0001 || receiverPreviousViewDepth <= 0.0001) {
+        return 0.0;
+    }
+
+    float depthTolerance = max(0.035, receiverPreviousViewDepth * 0.015);
+    float depthConfidence = 1.0 - smoothstep(
+        depthTolerance,
+        depthTolerance * 2.5,
+        abs(historyMetadata.x - receiverPreviousViewDepth)
+    );
+    vec3 historyNormal = SsrOctDecode(historyMetadata.yz);
+    float normalConfidence = smoothstep(
+        0.80,
+        0.96,
+        dot(receiverNormal, historyNormal)
+    );
+    float roughnessConfidence = 1.0 - smoothstep(
+        0.08,
+        0.22,
+        abs(historyMetadata.w - receiverRoughness)
+    );
+    return min(depthConfidence, min(normalConfidence, roughnessConfidence));
 }
 
 vec3 ViewRayWorldDirection(vec2 uv) {
@@ -1566,9 +1979,346 @@ struct SsrTraceResult {
     float validRay;
     float travel;
     float facing;
+    float refinementUsed;
+    float hitFacing;
+    float footprintConfidence;
+    float receiverFootprintConfidence;
+    float depthConfidence;
+    float validationConfidence;
 };
 
-SsrTraceResult TraceScreenSpaceReflection(
+struct SsrProjectedSample {
+    vec2 uv;
+    vec3 rayView;
+    vec3 sceneView;
+    float depthDelta;
+    float valid;
+    float hasDepth;
+};
+
+ivec2 SsrNearestTexel(vec2 uv) {
+    ivec2 extent = textureSize(sceneDepth, 0);
+    return clamp(
+        ivec2(uv * vec2(extent)),
+        ivec2(0),
+        extent - ivec2(1)
+    );
+}
+
+float SsrFetchDepthNearest(vec2 uv) {
+    return texelFetch(sceneDepth, SsrNearestTexel(uv), 0).r;
+}
+
+vec4 SsrFetchAlbedoNearest(vec2 uv) {
+    return texelFetch(gBufferAlbedo, SsrNearestTexel(uv), 0);
+}
+
+vec4 SsrFetchNormalRoughnessNearest(vec2 uv) {
+    return texelFetch(gBufferNormalRoughness, SsrNearestTexel(uv), 0);
+}
+
+vec4 SsrFetchMaterialNearest(vec2 uv) {
+    return texelFetch(gBufferMaterial, SsrNearestTexel(uv), 0);
+}
+
+vec4 SsrFetchEmissiveNearest(vec2 uv) {
+    return texelFetch(gBufferEmissive, SsrNearestTexel(uv), 0);
+}
+
+vec2 SsrFetchVelocityNearest(vec2 uv) {
+    return texelFetch(gBufferVelocity, SsrNearestTexel(uv), 0).rg;
+}
+
+SsrProjectedSample ProjectSsrRaySample(
+    vec3 viewPosition,
+    vec3 reflectionDir,
+    float rayLength,
+    float t,
+    vec2 texelSize
+) {
+    SsrProjectedSample traceSample;
+    traceSample.uv = vec2(0.0);
+    traceSample.rayView = viewPosition + reflectionDir * rayLength * t;
+    traceSample.sceneView = vec3(0.0);
+    traceSample.depthDelta = 0.0;
+    traceSample.valid = 0.0;
+    traceSample.hasDepth = 0.0;
+
+    vec4 clip = frame.proj * vec4(traceSample.rayView, 1.0);
+    if (abs(clip.w) <= 0.000001) {
+        return traceSample;
+    }
+
+    vec3 ndc = clip.xyz / clip.w;
+    vec2 sampleUv = ndc.xy * 0.5 + 0.5;
+    if (sampleUv.x <= texelSize.x || sampleUv.x >= 1.0 - texelSize.x ||
+        sampleUv.y <= texelSize.y || sampleUv.y >= 1.0 - texelSize.y ||
+        ndc.z <= 0.0 || ndc.z >= 1.0) {
+        return traceSample;
+    }
+
+    traceSample.uv = sampleUv;
+    traceSample.valid = 1.0;
+    float sampleDepth = SsrFetchDepthNearest(sampleUv);
+    if (sampleDepth >= 0.999999 || sampleDepth <= 0.0) {
+        return traceSample;
+    }
+
+    traceSample.sceneView = ReconstructViewPosition(sampleUv, sampleDepth);
+    traceSample.depthDelta =
+        traceSample.rayView.z - traceSample.sceneView.z;
+    traceSample.hasDepth = 1.0;
+    return traceSample;
+}
+
+float SsrTraceControl() {
+    return mod(floor(abs(frame.ssrControls.w)), 128.0);
+}
+
+int SsrTraceStepCount() {
+    return clamp(int(mod(floor(abs(frame.ssrControls.w)), 64.0) + 0.5), 0, 32);
+}
+
+bool SsrHierarchicalTraceEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 64.0), 2.0) > 0.5;
+}
+
+bool SsrSceneColorHistoryEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 128.0), 2.0) > 0.5;
+}
+
+bool SsrCurrentHdrSourceEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 2048.0), 2.0) > 0.5;
+}
+
+bool SsrProbeFallbackBlendEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 16384.0), 2.0) > 0.5;
+}
+
+float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
+    float resolvedConfidence = clamp(confidence, 0.0, 1.0);
+    if (!SsrProbeFallbackBlendEnabled()) {
+        return resolvedConfidence;
+    }
+
+    float confidenceStability =
+        resolvedConfidence * mix(
+            0.65,
+            1.0,
+            smoothstep(0.08, 0.78, resolvedConfidence)
+        );
+    float roughnessReliability =
+        1.0 - smoothstep(0.38, 0.88, clamp(roughness, 0.0, 1.0));
+    float roughnessCeiling = mix(0.35, 1.0, roughnessReliability);
+    return clamp(confidenceStability * roughnessCeiling, 0.0, 1.0);
+}
+
+float SsrCurrentHdrRadianceTrust(float traceConfidence) {
+    float confidence = clamp(traceConfidence, 0.0, 1.0);
+    if (confidence < 0.45) {
+        return 0.0;
+    }
+    return smoothstep(0.45, 0.85, confidence);
+}
+
+bool SsrHitValidationEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 256.0), 2.0) > 0.5;
+}
+
+bool SsrReconstructionEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 512.0), 2.0) > 0.5;
+}
+
+float SsrSignedDepthConfidence(float depthDelta, float thickness) {
+    float safeThickness = max(thickness, 0.0001);
+    float frontError = max(depthDelta, 0.0);
+    float behindError = max(-depthDelta, 0.0);
+    float frontConfidence = 1.0 - smoothstep(
+        safeThickness * 0.5,
+        safeThickness,
+        frontError
+    );
+    float behindConfidence = 1.0 - smoothstep(
+        safeThickness,
+        safeThickness * 2.0,
+        behindError
+    );
+    return frontConfidence * behindConfidence;
+}
+
+float SsrHitFootprintConfidence(
+    vec2 hitUv,
+    vec3 hitSceneView,
+    vec3 hitNormalView,
+    float thickness,
+    vec2 texelSize
+) {
+    const vec2 offsets[4] = vec2[](
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, -1.0)
+    );
+    float stableWeight = 1.0;
+    const float totalWeight = 5.0;
+    float planeTolerance = max(thickness * 1.5, abs(hitSceneView.z) * 0.0015);
+    for (int index = 0; index < 4; ++index) {
+        vec2 sampleUv = hitUv + offsets[index] * texelSize;
+        if (any(lessThanEqual(sampleUv, vec2(0.0))) ||
+            any(greaterThanEqual(sampleUv, vec2(1.0)))) {
+            continue;
+        }
+
+        float sampleDepth = SsrFetchDepthNearest(sampleUv);
+        vec4 sampleAlbedo = SsrFetchAlbedoNearest(sampleUv);
+        if (sampleDepth <= 0.0 || sampleDepth >= 0.999999 ||
+            sampleAlbedo.a <= 0.001) {
+            continue;
+        }
+
+        vec3 sampleSceneView = ReconstructViewPosition(sampleUv, sampleDepth);
+        vec3 sampleNormal = normalize(
+            SsrFetchNormalRoughnessNearest(sampleUv).xyz * 2.0 - 1.0
+        );
+        vec3 sampleNormalView = normalize((frame.view * vec4(sampleNormal, 0.0)).xyz);
+        float planeSeparation = abs(dot(
+            sampleSceneView - hitSceneView,
+            hitNormalView
+        ));
+        float planeConfidence = 1.0 - smoothstep(
+            planeTolerance,
+            planeTolerance * 2.5,
+            planeSeparation
+        );
+        float normalConfidence = smoothstep(
+            0.45,
+            0.90,
+            dot(hitNormalView, sampleNormalView)
+        );
+        stableWeight += planeConfidence * normalConfidence;
+    }
+    return smoothstep(0.55, 0.95, stableWeight / totalWeight);
+}
+
+float SsrReceiverFootprintConfidence(
+    vec2 receiverUv,
+    vec3 receiverSceneView,
+    vec3 receiverNormalView,
+    float thickness,
+    vec2 texelSize
+) {
+    const vec2 offsets[4] = vec2[](
+        vec2(1.0, 0.0),
+        vec2(-1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, -1.0)
+    );
+    float stableWeight = 1.0;
+    const float totalWeight = 5.0;
+    float planeTolerance = max(
+        thickness * 1.5,
+        abs(receiverSceneView.z) * 0.0015
+    );
+    for (int index = 0; index < 4; ++index) {
+        vec2 sampleUv = receiverUv + offsets[index] * texelSize;
+        if (any(lessThanEqual(sampleUv, vec2(0.0))) ||
+            any(greaterThanEqual(sampleUv, vec2(1.0)))) {
+            continue;
+        }
+
+        float sampleDepth = SsrFetchDepthNearest(sampleUv);
+        vec4 sampleAlbedo = SsrFetchAlbedoNearest(sampleUv);
+        if (sampleDepth <= 0.0 || sampleDepth >= 0.999999 ||
+            sampleAlbedo.a <= 0.001) {
+            continue;
+        }
+
+        vec3 sampleSceneView = ReconstructViewPosition(sampleUv, sampleDepth);
+        vec3 sampleNormal = normalize(
+            SsrFetchNormalRoughnessNearest(sampleUv).xyz * 2.0 - 1.0
+        );
+        vec3 sampleNormalView = normalize((frame.view * vec4(sampleNormal, 0.0)).xyz);
+        float planeSeparation = abs(dot(
+            sampleSceneView - receiverSceneView,
+            receiverNormalView
+        ));
+        float planeConfidence = 1.0 - smoothstep(
+            planeTolerance,
+            planeTolerance * 2.5,
+            planeSeparation
+        );
+        float normalConfidence = smoothstep(
+            0.45,
+            0.90,
+            dot(receiverNormalView, sampleNormalView)
+        );
+        stableWeight += planeConfidence * normalConfidence;
+    }
+    return smoothstep(0.75, 0.98, stableWeight / totalWeight);
+}
+
+float SsrHitValidationConfidence(
+    vec2 receiverUv,
+    SsrProjectedSample hitSample,
+    vec3 reflectionDir,
+    float receiverFacing,
+    vec3 receiverSceneView,
+    vec3 receiverNormalView,
+    float thickness,
+    vec2 texelSize,
+    vec2 depthExtent,
+    out float hitFacing,
+    out float footprintConfidence,
+    out float receiverFootprintConfidence,
+    out float depthConfidence
+) {
+    hitFacing = 1.0;
+    footprintConfidence = 1.0;
+    receiverFootprintConfidence = 1.0;
+    depthConfidence = 1.0;
+    if (!SsrHitValidationEnabled()) {
+        return 1.0;
+    }
+
+    receiverFootprintConfidence = SsrReceiverFootprintConfidence(
+        receiverUv,
+        receiverSceneView,
+        receiverNormalView,
+        thickness,
+        texelSize
+    );
+    vec3 hitNormal = normalize(
+        SsrFetchNormalRoughnessNearest(hitSample.uv).xyz * 2.0 - 1.0
+    );
+    vec3 hitNormalView = normalize((frame.view * vec4(hitNormal, 0.0)).xyz);
+    hitFacing = smoothstep(
+        0.05,
+        0.25,
+        dot(hitNormalView, -reflectionDir)
+    );
+    depthConfidence = SsrSignedDepthConfidence(
+        hitSample.depthDelta,
+        thickness
+    );
+    footprintConfidence = SsrHitFootprintConfidence(
+        hitSample.uv,
+        hitSample.sceneView,
+        hitNormalView,
+        thickness,
+        texelSize
+    );
+    float travelPixels = length((hitSample.uv - receiverUv) * depthExtent);
+    float minimumTravelPixels = mix(6.0, 2.0, receiverFacing);
+    float travelConfidence = smoothstep(
+        minimumTravelPixels,
+        minimumTravelPixels + 2.0,
+        travelPixels
+    );
+    return receiverFacing * receiverFootprintConfidence * hitFacing *
+        depthConfidence * footprintConfidence * travelConfidence;
+}
+
+SsrTraceResult TraceFixedStepScreenSpaceReflection(
     vec2 uv,
     float depth,
     vec3 normal,
@@ -1580,11 +2330,18 @@ SsrTraceResult TraceScreenSpaceReflection(
     result.validRay = 0.0;
     result.travel = 0.0;
     result.facing = 0.0;
+    result.refinementUsed = 0.0;
+    result.hitFacing = 0.0;
+    result.footprintConfidence = 0.0;
+    result.receiverFootprintConfidence = 0.0;
+    result.depthConfidence = 0.0;
+    result.validationConfidence = 0.0;
 
     float strength = clamp(frame.ssrControls.x, 0.0, 1.0);
     float rayLength = clamp(frame.ssrControls.y, 0.0, 64.0);
     float thickness = clamp(frame.ssrControls.z, 0.0, 0.5);
-    int stepCount = clamp(int(frame.ssrControls.w + 0.5), 0, 32);
+    int stepCount = SsrTraceStepCount();
+    bool refinementEnabled = frame.ssrControls.w >= 0.0;
     if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0 ||
         depth >= 0.999999) {
         return result;
@@ -1594,19 +2351,34 @@ SsrTraceResult TraceScreenSpaceReflection(
     vec3 viewNormal = normalize((frame.view * vec4(normal, 0.0)).xyz);
     vec3 viewDirFromCamera = normalize(viewPosition);
     vec3 reflectionDir = normalize(reflect(viewDirFromCamera, viewNormal));
-    result.facing = smoothstep(0.0, 0.45, max(dot(-viewDirFromCamera, viewNormal), 0.0));
+    result.facing = smoothstep(
+        0.06,
+        0.30,
+        max(dot(-viewDirFromCamera, viewNormal), 0.0)
+    );
     if (reflectionDir.z >= -0.0001) {
         return result;
     }
 
     vec2 texelSize = 1.0 / vec2(textureSize(sceneDepth, 0));
     vec2 depthExtent = vec2(textureSize(sceneDepth, 0));
-    float jitter = InterleavedGradientNoise(floor(uv * depthExtent));
+    // SSR has no dedicated hit-history accumulation yet. A per-pixel random
+    // step therefore turns hit acceptance into temporal noise; keep the
+    // traversal deterministic until the production temporal resolve exists.
+    const float jitter = 0.5;
     float roughnessMask = 1.0 - smoothstep(0.45, 0.95, roughness);
     float edgeFadePixels = 24.0;
     float bestConfidence = 0.0;
+    float bestHitFacing = 0.0;
+    float bestFootprintConfidence = 0.0;
+    float bestReceiverFootprintConfidence = 0.0;
+    float bestDepthConfidence = 0.0;
+    float bestValidationConfidence = 0.0;
     vec2 bestUv = uv;
     float validRay = 0.0;
+    float previousT = 0.0;
+    float previousDepthDelta = 0.0;
+    bool previousSampleValid = false;
 
     for (int index = 1; index <= 32; ++index) {
         if (index > stepCount) {
@@ -1615,49 +2387,495 @@ SsrTraceResult TraceScreenSpaceReflection(
 
         float t = (float(index) - 0.35 + jitter * 0.7) / float(stepCount);
         t = clamp(t, 0.001, 1.0);
-        vec3 rayView = viewPosition + reflectionDir * rayLength * t;
-        vec4 clip = frame.proj * vec4(rayView, 1.0);
-        if (abs(clip.w) <= 0.000001) {
-            continue;
-        }
-
-        vec3 ndc = clip.xyz / clip.w;
-        vec2 sampleUv = ndc.xy * 0.5 + 0.5;
-        if (sampleUv.x <= texelSize.x || sampleUv.x >= 1.0 - texelSize.x ||
-            sampleUv.y <= texelSize.y || sampleUv.y >= 1.0 - texelSize.y ||
-            ndc.z <= 0.0 || ndc.z >= 1.0) {
+        SsrProjectedSample traceSample = ProjectSsrRaySample(
+            viewPosition,
+            reflectionDir,
+            rayLength,
+            t,
+            texelSize
+        );
+        if (traceSample.valid < 0.5) {
             continue;
         }
         validRay = 1.0;
-
-        float sampleDepth = texture(sceneDepth, sampleUv).r;
-        if (sampleDepth >= 0.999999 || sampleDepth <= 0.0) {
+        if (traceSample.hasDepth < 0.5) {
             continue;
         }
 
-        vec3 sampleViewPosition = ReconstructViewPosition(sampleUv, sampleDepth);
-        float depthDelta = abs(rayView.z - sampleViewPosition.z);
-        float adaptiveThickness = max(thickness, abs(rayView.z) * 0.006);
-        float hit = 1.0 - smoothstep(adaptiveThickness, adaptiveThickness * 2.5, depthDelta);
-        if (rayView.z > sampleViewPosition.z) {
-            hit *= 0.45;
+        float adaptiveThickness = max(
+            thickness,
+            abs(traceSample.rayView.z) * 0.006
+        );
+        if (!refinementEnabled) {
+            float depthDelta = abs(traceSample.depthDelta);
+            float hit = 1.0 - smoothstep(
+                adaptiveThickness,
+                adaptiveThickness * 2.5,
+                depthDelta
+            );
+            if (traceSample.depthDelta > 0.0) {
+                hit *= 0.45;
+            }
+            vec2 edgePixels =
+                min(traceSample.uv, 1.0 - traceSample.uv) * depthExtent;
+            float edgeFade = smoothstep(
+                0.0,
+                edgeFadePixels,
+                min(edgePixels.x, edgePixels.y)
+            );
+            float distanceFade = 1.0 - smoothstep(0.45, 1.0, t);
+            float hitFacing = 1.0;
+            float footprintConfidence = 1.0;
+            float receiverFootprintConfidence = 1.0;
+            float depthConfidence = 1.0;
+            float validationConfidence = SsrHitValidationConfidence(
+                uv,
+                traceSample,
+                reflectionDir,
+                result.facing,
+                viewPosition,
+                viewNormal,
+                adaptiveThickness,
+                texelSize,
+                depthExtent,
+                hitFacing,
+                footprintConfidence,
+                receiverFootprintConfidence,
+                depthConfidence
+            );
+            float confidence = hit * edgeFade * distanceFade * roughnessMask *
+                strength * validationConfidence;
+            if (confidence > bestConfidence) {
+                bestConfidence = confidence;
+                bestUv = traceSample.uv;
+                bestHitFacing = hitFacing;
+                bestFootprintConfidence = footprintConfidence;
+                bestReceiverFootprintConfidence = receiverFootprintConfidence;
+                bestDepthConfidence = depthConfidence;
+                bestValidationConfidence = validationConfidence;
+            }
+            continue;
         }
 
-        vec2 edgePixels = min(sampleUv, 1.0 - sampleUv) * depthExtent;
-        float edgeFade = smoothstep(0.0, edgeFadePixels, min(edgePixels.x, edgePixels.y));
-        float distanceFade = 1.0 - smoothstep(0.45, 1.0, t);
-        float confidence = hit * edgeFade * distanceFade * roughnessMask * strength;
-        if (confidence > bestConfidence) {
-            bestConfidence = confidence;
-            bestUv = sampleUv;
+        bool crossedDepth = previousSampleValid &&
+            previousDepthDelta > adaptiveThickness &&
+            traceSample.depthDelta <= adaptiveThickness;
+        bool firstSampleHit = !previousSampleValid &&
+            traceSample.depthDelta <= adaptiveThickness;
+        if (crossedDepth || firstSampleHit) {
+            SsrProjectedSample hitSample = traceSample;
+            float lowerT = previousSampleValid ? previousT : max(0.001, t - 1.0 / float(stepCount));
+            float upperT = t;
+            int refinementIterations = crossedDepth ? 4 : 0;
+            for (int refineIndex = 0; refineIndex < 4; ++refineIndex) {
+                if (refineIndex >= refinementIterations) {
+                    break;
+                }
+                float middleT = 0.5 * (lowerT + upperT);
+                SsrProjectedSample middleSample = ProjectSsrRaySample(
+                    viewPosition,
+                    reflectionDir,
+                    rayLength,
+                    middleT,
+                    texelSize
+                );
+                if (middleSample.valid < 0.5 || middleSample.hasDepth < 0.5) {
+                    lowerT = middleT;
+                    continue;
+                }
+                float middleThickness = max(
+                    thickness,
+                    abs(middleSample.rayView.z) * 0.006
+                );
+                if (middleSample.depthDelta > middleThickness) {
+                    lowerT = middleT;
+                } else {
+                    upperT = middleT;
+                    hitSample = middleSample;
+                }
+            }
+
+            float hitThickness = max(thickness, abs(hitSample.rayView.z) * 0.006);
+            float hit = 1.0 - smoothstep(
+                hitThickness,
+                hitThickness * 2.5,
+                abs(hitSample.depthDelta)
+            );
+            vec2 edgePixels = min(hitSample.uv, 1.0 - hitSample.uv) * depthExtent;
+            float edgeFade = smoothstep(
+                0.0,
+                edgeFadePixels,
+                min(edgePixels.x, edgePixels.y)
+            );
+            float distanceFade = 1.0 - smoothstep(0.45, 1.0, upperT);
+            bestValidationConfidence = SsrHitValidationConfidence(
+                uv,
+                hitSample,
+                reflectionDir,
+                result.facing,
+                viewPosition,
+                viewNormal,
+                hitThickness,
+                texelSize,
+                depthExtent,
+                bestHitFacing,
+                bestFootprintConfidence,
+                bestReceiverFootprintConfidence,
+                bestDepthConfidence
+            );
+            bestConfidence = hit * edgeFade * distanceFade * roughnessMask *
+                strength * bestValidationConfidence;
+            bestUv = hitSample.uv;
+            result.refinementUsed = float(refinementIterations);
+            break;
         }
+
+        previousT = t;
+        previousDepthDelta = traceSample.depthDelta;
+        previousSampleValid = true;
     }
 
     result.confidence = clamp(bestConfidence, 0.0, 1.0);
     result.validRay = validRay;
     result.hitUv = bestUv;
     result.travel = clamp(length(bestUv - uv) * 3.5, 0.0, 1.0);
+    result.hitFacing = bestHitFacing;
+    result.footprintConfidence = bestFootprintConfidence;
+    result.receiverFootprintConfidence = bestReceiverFootprintConfidence;
+    result.depthConfidence = bestDepthConfidence;
+    result.validationConfidence = bestValidationConfidence;
     return result;
+}
+
+float SsrScreenRayExitT(vec3 origin, vec3 direction) {
+    float exitT = 1.0;
+    for (int axis = 0; axis < 3; ++axis) {
+        float component = direction[axis];
+        if (abs(component) <= 0.000001) {
+            continue;
+        }
+        float boundary = component > 0.0 ? 0.999999 : 0.000001;
+        float axisT = (boundary - origin[axis]) / component;
+        if (axisT > 0.0) {
+            exitT = min(exitT, axisT);
+        }
+    }
+    return max(exitT, 0.0);
+}
+
+float SsrNextCellBoundaryT(
+    vec2 uv,
+    vec2 screenDirection,
+    ivec2 cellCount
+) {
+    vec2 cells = vec2(max(cellCount, ivec2(1)));
+    vec2 cell = floor(clamp(uv, vec2(0.0), vec2(0.999999)) * cells);
+    vec2 boundaryCell = cell + step(vec2(0.0), screenDirection);
+    vec2 boundaryUv = boundaryCell / cells;
+    vec2 boundaryDelta = boundaryUv - uv;
+    vec2 boundaryT = vec2(1e20);
+    if (abs(screenDirection.x) > 0.000001) {
+        boundaryT.x = boundaryDelta.x / screenDirection.x;
+    }
+    if (abs(screenDirection.y) > 0.000001) {
+        boundaryT.y = boundaryDelta.y / screenDirection.y;
+    }
+    if (boundaryT.x <= 0.000001) {
+        boundaryT.x = 1e20;
+    }
+    if (boundaryT.y <= 0.000001) {
+        boundaryT.y = 1e20;
+    }
+    return min(boundaryT.x, boundaryT.y);
+}
+
+SsrProjectedSample EvaluateSsrScreenSample(
+    vec3 screenOrigin,
+    vec3 screenDirection,
+    float t,
+    vec2 texelSize
+) {
+    SsrProjectedSample traceSample;
+    traceSample.uv = vec2(0.0);
+    traceSample.rayView = vec3(0.0);
+    traceSample.sceneView = vec3(0.0);
+    traceSample.depthDelta = 0.0;
+    traceSample.valid = 0.0;
+    traceSample.hasDepth = 0.0;
+
+    vec3 screenPoint = screenOrigin + screenDirection * t;
+    if (screenPoint.x <= texelSize.x ||
+        screenPoint.x >= 1.0 - texelSize.x ||
+        screenPoint.y <= texelSize.y ||
+        screenPoint.y >= 1.0 - texelSize.y ||
+        screenPoint.z <= 0.0 || screenPoint.z >= 1.0) {
+        return traceSample;
+    }
+
+    traceSample.uv = screenPoint.xy;
+    traceSample.valid = 1.0;
+    traceSample.rayView = ReconstructViewPosition(
+        screenPoint.xy,
+        screenPoint.z
+    );
+    float sceneDepthValue = SsrFetchDepthNearest(screenPoint.xy);
+    if (sceneDepthValue >= 0.999999 || sceneDepthValue <= 0.0) {
+        return traceSample;
+    }
+    traceSample.sceneView = ReconstructViewPosition(
+        screenPoint.xy,
+        sceneDepthValue
+    );
+    traceSample.depthDelta = traceSample.rayView.z - traceSample.sceneView.z;
+    traceSample.hasDepth = 1.0;
+    return traceSample;
+}
+
+SsrTraceResult TraceHierarchicalScreenSpaceReflection(
+    vec2 uv,
+    float depth,
+    vec3 normal,
+    float roughness
+) {
+    SsrTraceResult result;
+    result.hitUv = uv;
+    result.confidence = 0.0;
+    result.validRay = 0.0;
+    result.travel = 0.0;
+    result.facing = 0.0;
+    result.refinementUsed = 0.0;
+    result.hitFacing = 0.0;
+    result.footprintConfidence = 0.0;
+    result.receiverFootprintConfidence = 0.0;
+    result.depthConfidence = 0.0;
+    result.validationConfidence = 0.0;
+
+    float strength = clamp(frame.ssrControls.x, 0.0, 1.0);
+    float rayLength = clamp(frame.ssrControls.y, 0.0, 64.0);
+    float thickness = clamp(frame.ssrControls.z, 0.0, 0.5);
+    int stepCount = SsrTraceStepCount();
+    if (strength <= 0.0001 || rayLength <= 0.0001 || stepCount <= 0 ||
+        depth >= 0.999999) {
+        return result;
+    }
+
+    vec3 viewPosition = ReconstructViewPosition(uv, depth);
+    vec3 viewNormal = normalize((frame.view * vec4(normal, 0.0)).xyz);
+    vec3 viewDirFromCamera = normalize(viewPosition);
+    vec3 reflectionDir = normalize(reflect(viewDirFromCamera, viewNormal));
+    result.facing = smoothstep(
+        0.06,
+        0.30,
+        max(dot(-viewDirFromCamera, viewNormal), 0.0)
+    );
+    if (reflectionDir.z >= -0.0001) {
+        return result;
+    }
+
+    vec4 endClip = frame.proj * vec4(
+        viewPosition + reflectionDir * rayLength,
+        1.0
+    );
+    if (abs(endClip.w) <= 0.000001) {
+        return result;
+    }
+    vec3 endNdc = endClip.xyz / endClip.w;
+    vec3 screenOrigin = vec3(uv, depth);
+    vec3 screenEnd = vec3(endNdc.xy * 0.5 + 0.5, endNdc.z);
+    vec3 screenDirection = screenEnd - screenOrigin;
+    vec2 depthExtent = vec2(textureSize(sceneDepth, 0));
+    vec2 texelSize = 1.0 / depthExtent;
+    float projectedLengthPixels = length(screenDirection.xy * depthExtent);
+    if (projectedLengthPixels <= 0.5) {
+        return result;
+    }
+
+    int maxMip = max(textureQueryLevels(ssrDepthPyramid) - 1, 0);
+    int mip = min(2, maxMip);
+    float maxT = SsrScreenRayExitT(screenOrigin, screenDirection);
+    float originBiasPixels = SsrHitValidationEnabled()
+        ? mix(6.0, 2.0, result.facing)
+        : 2.0;
+    float currentT = min(
+        max(originBiasPixels / projectedLengthPixels, 0.0005),
+        maxT
+    );
+    float previousFrontT = 0.0;
+    bool hasFrontSample = false;
+    bool refinementEnabled = frame.ssrControls.w >= 0.0;
+    float roughnessMask = 1.0 - smoothstep(0.45, 0.95, roughness);
+    const float edgeFadePixels = 24.0;
+
+    for (int iteration = 0; iteration < 32; ++iteration) {
+        if (iteration >= stepCount || currentT >= maxT) {
+            break;
+        }
+        vec3 screenPoint = screenOrigin + screenDirection * currentT;
+        if (screenPoint.x <= texelSize.x ||
+            screenPoint.x >= 1.0 - texelSize.x ||
+            screenPoint.y <= texelSize.y ||
+            screenPoint.y >= 1.0 - texelSize.y ||
+            screenPoint.z <= 0.0 || screenPoint.z >= 1.0) {
+            break;
+        }
+        result.validRay = 1.0;
+
+        ivec2 mipSize = textureSize(ssrDepthPyramid, mip);
+        ivec2 mipPixel = clamp(
+            ivec2(screenPoint.xy * vec2(mipSize)),
+            ivec2(0),
+            mipSize - ivec2(1)
+        );
+        float nearestDepth = texelFetch(
+            ssrDepthPyramid,
+            mipPixel,
+            mip
+        ).r;
+        bool emptyCell = nearestDepth >= 0.999999 || nearestDepth <= 0.0;
+        vec3 rayView = ReconstructViewPosition(screenPoint.xy, screenPoint.z);
+        float depthDelta = 1e20;
+        float adaptiveThickness = max(thickness, abs(rayView.z) * 0.006);
+        if (!emptyCell) {
+            vec3 nearestSceneView = ReconstructViewPosition(
+                screenPoint.xy,
+                nearestDepth
+            );
+            depthDelta = rayView.z - nearestSceneView.z;
+        }
+
+        bool rayInFrontOfCell = emptyCell || depthDelta > adaptiveThickness;
+        if (rayInFrontOfCell) {
+            previousFrontT = currentT;
+            hasFrontSample = true;
+            ivec2 cellCount = textureSize(ssrDepthPyramid, mip);
+            float boundaryAdvance = SsrNextCellBoundaryT(
+                screenPoint.xy,
+                screenDirection.xy,
+                cellCount
+            );
+            if (boundaryAdvance >= 1e19) {
+                break;
+            }
+            currentT += boundaryAdvance + max(0.25 / projectedLengthPixels, 0.00001);
+            mip = min(mip + 1, maxMip);
+            continue;
+        }
+
+        if (mip > 0) {
+            --mip;
+            continue;
+        }
+
+        if (!hasFrontSample) {
+            currentT += max(1.0 / projectedLengthPixels, 0.00005);
+            continue;
+        }
+
+        float lowerT = previousFrontT;
+        float upperT = currentT;
+        SsrProjectedSample hitSample = EvaluateSsrScreenSample(
+            screenOrigin,
+            screenDirection,
+            upperT,
+            texelSize
+        );
+        int refinementIterations = refinementEnabled ? 4 : 0;
+        for (int refineIndex = 0; refineIndex < 4; ++refineIndex) {
+            if (refineIndex >= refinementIterations) {
+                break;
+            }
+            float middleT = 0.5 * (lowerT + upperT);
+            SsrProjectedSample middleSample = EvaluateSsrScreenSample(
+                screenOrigin,
+                screenDirection,
+                middleT,
+                texelSize
+            );
+            if (middleSample.valid < 0.5 || middleSample.hasDepth < 0.5) {
+                lowerT = middleT;
+                continue;
+            }
+            float middleThickness = max(
+                thickness,
+                abs(middleSample.rayView.z) * 0.006
+            );
+            if (middleSample.depthDelta > middleThickness) {
+                lowerT = middleT;
+            } else {
+                upperT = middleT;
+                hitSample = middleSample;
+            }
+        }
+
+        if (hitSample.valid > 0.5 && hitSample.hasDepth > 0.5) {
+            float hitThickness = max(
+                thickness,
+                abs(hitSample.rayView.z) * 0.006
+            );
+            float hit = 1.0 - smoothstep(
+                hitThickness,
+                hitThickness * 2.5,
+                abs(hitSample.depthDelta)
+            );
+            vec2 edgePixels = min(
+                hitSample.uv,
+                1.0 - hitSample.uv
+            ) * depthExtent;
+            float edgeFade = smoothstep(
+                0.0,
+                edgeFadePixels,
+                min(edgePixels.x, edgePixels.y)
+            );
+            float distanceFade = 1.0 - smoothstep(0.45, 1.0, upperT);
+            result.validationConfidence = SsrHitValidationConfidence(
+                uv,
+                hitSample,
+                reflectionDir,
+                result.facing,
+                viewPosition,
+                viewNormal,
+                hitThickness,
+                texelSize,
+                depthExtent,
+                result.hitFacing,
+                result.footprintConfidence,
+                result.receiverFootprintConfidence,
+                result.depthConfidence
+            );
+            result.confidence = clamp(
+                hit * edgeFade * distanceFade * roughnessMask * strength *
+                    result.validationConfidence,
+                0.0,
+                1.0
+            );
+            result.hitUv = hitSample.uv;
+            result.travel = clamp(
+                length(hitSample.uv - uv) * 3.5,
+                0.0,
+                1.0
+            );
+            result.refinementUsed = float(refinementIterations);
+        }
+        break;
+    }
+    return result;
+}
+
+SsrTraceResult TraceScreenSpaceReflection(
+    vec2 uv,
+    float depth,
+    vec3 normal,
+    float roughness
+) {
+    if (SsrHierarchicalTraceEnabled()) {
+        return TraceHierarchicalScreenSpaceReflection(
+            uv,
+            depth,
+            normal,
+            roughness
+        );
+    }
+    return TraceFixedStepScreenSpaceReflection(uv, depth, normal, roughness);
 }
 
 vec3 ScreenSpaceReflectionDebug(
@@ -1667,15 +2885,25 @@ vec3 ScreenSpaceReflectionDebug(
     vec3 miss = trace.validRay > 0.5
         ? vec3(0.03, 0.09, 0.16)
         : mix(vec3(0.02, 0.025, 0.035), vec3(0.28, 0.10, 0.055), trace.facing);
+    if (SsrHitValidationEnabled() && trace.validRay > 0.5) {
+        vec3 rejection = vec3(
+            1.0 - trace.hitFacing,
+            1.0 - trace.footprintConfidence,
+            1.0 - trace.depthConfidence
+        );
+        miss = mix(miss, rejection, 0.35 * (1.0 - trace.validationConfidence));
+    }
     vec3 rough = vec3(0.18, 0.11, 0.035);
     vec3 hit = mix(vec3(0.08, 0.46, 0.72), vec3(0.85, 0.98, 1.0), trace.confidence);
     hit = mix(hit, vec3(0.26, 0.96, 0.78), trace.travel * 0.35);
+    hit = mix(hit, vec3(0.36, 0.98, 0.52), step(0.5, trace.refinementUsed));
     return mix(mix(miss, rough, smoothstep(0.45, 0.95, roughness)), hit, trace.confidence);
 }
 
 vec3 ScreenSpaceReflectionRadiance(
     SsrTraceResult trace,
     vec3 fallbackRadiance,
+    float receiverRoughness,
     vec3 lightDir,
     float ambientStrength,
     float directIntensity
@@ -1684,22 +2912,22 @@ vec3 ScreenSpaceReflectionRadiance(
         return fallbackRadiance;
     }
 
-    float hitDepth = texture(sceneDepth, trace.hitUv).r;
+    float hitDepth = SsrFetchDepthNearest(trace.hitUv);
     if (hitDepth >= 0.999999 || hitDepth <= 0.0) {
         return fallbackRadiance;
     }
 
-    vec4 hitAlbedo = texture(gBufferAlbedo, trace.hitUv);
+    vec4 hitAlbedo = SsrFetchAlbedoNearest(trace.hitUv);
     if (hitAlbedo.a <= 0.001) {
         return fallbackRadiance;
     }
 
-    vec4 hitNormalRoughness = texture(gBufferNormalRoughness, trace.hitUv);
-    vec4 hitMaterial = texture(gBufferMaterial, trace.hitUv);
+    vec4 hitNormalRoughness = SsrFetchNormalRoughnessNearest(trace.hitUv);
+    vec4 hitMaterial = SsrFetchMaterialNearest(trace.hitUv);
     vec3 hitNormal = normalize(hitNormalRoughness.xyz * 2.0 - 1.0);
     float hitRoughness = clamp(hitNormalRoughness.w, 0.04, 1.0);
     float hitOcclusion = clamp(hitMaterial.g, 0.0, 1.0);
-    vec3 hitEmissive = max(texture(gBufferEmissive, trace.hitUv).rgb, vec3(0.0));
+    vec3 hitEmissive = max(SsrFetchEmissiveNearest(trace.hitUv).rgb, vec3(0.0));
     vec3 hitBaseColor = hitAlbedo.rgb;
     float hitNDotL = max(dot(hitNormal, lightDir), 0.0);
     vec3 diffuseApprox =
@@ -1712,7 +2940,71 @@ vec3 ScreenSpaceReflectionRadiance(
         EnvironmentRadiance(reflect(-lightDir, hitNormal), lightDir, hitRoughness) *
         mix(0.04, 0.18, 1.0 - hitRoughness);
     vec3 hitRadiance = max(diffuseApprox + glossyApprox + hitEmissive, vec3(0.0));
-    return mix(fallbackRadiance, hitRadiance, trace.confidence);
+
+    float historyReady = clamp(frame.temporalResolveControls.z, 0.0, 1.0);
+    float velocityReady = clamp(frame.temporalResolveControls.w, 0.0, 1.0);
+    float currentHdrTrust = SsrCurrentHdrSourceEnabled()
+        ? SsrCurrentHdrRadianceTrust(trace.confidence)
+        : 0.0;
+    if (!SsrCurrentHdrSourceEnabled() || !SsrSceneColorHistoryEnabled() ||
+        historyReady <= 0.5 || velocityReady <= 0.5) {
+        return mix(
+            fallbackRadiance,
+            hitRadiance,
+            SsrProbeFallbackBlendWeight(trace.confidence, receiverRoughness)
+        );
+    }
+
+    vec2 reprojectionVelocity = SsrFetchVelocityNearest(trace.hitUv);
+    if (frame.temporalControls.z > 0.5) {
+        reprojectionVelocity -= frame.temporalJitter.zw;
+    }
+    vec2 historyUv = trace.hitUv - reprojectionVelocity;
+    if (any(lessThanEqual(historyUv, vec2(0.0))) ||
+        any(greaterThanEqual(historyUv, vec2(1.0)))) {
+        return mix(
+            fallbackRadiance,
+            hitRadiance,
+            SsrProbeFallbackBlendWeight(trace.confidence, receiverRoughness)
+        );
+    }
+
+    vec2 historyExtent = vec2(max(textureSize(ssrSceneColorHistory, 0), ivec2(1)));
+    vec2 historyTexel = 1.0 / historyExtent;
+    float filterRadiusPixels = mix(
+        0.5,
+        3.0,
+        clamp(receiverRoughness * receiverRoughness, 0.0, 1.0)
+    );
+    vec2 filterRadius = historyTexel * filterRadiusPixels;
+    vec3 historyRadiance =
+        texture(ssrSceneColorHistory, historyUv).rgb * 0.40 +
+        texture(ssrSceneColorHistory, historyUv + vec2(filterRadius.x, 0.0)).rgb * 0.15 +
+        texture(ssrSceneColorHistory, historyUv - vec2(filterRadius.x, 0.0)).rgb * 0.15 +
+        texture(ssrSceneColorHistory, historyUv + vec2(0.0, filterRadius.y)).rgb * 0.15 +
+        texture(ssrSceneColorHistory, historyUv - vec2(0.0, filterRadius.y)).rgb * 0.15;
+    historyRadiance = clamp(historyRadiance, vec3(0.0), vec3(64.0));
+
+    float velocityThreshold = max(frame.temporalRejectionControls.y, 0.01);
+    float motionConfidence = 1.0 - smoothstep(
+        velocityThreshold * 0.5,
+        velocityThreshold * 2.0,
+        length(reprojectionVelocity)
+    );
+    vec2 edgePixels = min(historyUv, 1.0 - historyUv) * historyExtent;
+    float historyEdgeConfidence = smoothstep(
+        0.0,
+        8.0,
+        min(edgePixels.x, edgePixels.y)
+    );
+    float historyConfidence = motionConfidence * historyEdgeConfidence;
+    historyConfidence *= currentHdrTrust;
+    vec3 resolvedHitRadiance = mix(hitRadiance, historyRadiance, historyConfidence);
+    float blendWeight = SsrProbeFallbackBlendWeight(
+        currentHdrTrust * mix(0.65, 1.0, historyConfidence),
+        receiverRoughness
+    );
+    return mix(fallbackRadiance, resolvedHitRadiance, blendWeight);
 }
 
 int ActiveShadowCascadeCount() {
@@ -2247,12 +3539,25 @@ bool SampleDirectionalPcssVisibility(
     float baseBias,
     vec2 receiverPlaneGradient,
     float receiverPlaneBiasScale,
+    float receiverNdotL,
     int cascadeIndex,
     out float pcssVisibility,
     out float pcssBlend
 ) {
     pcssVisibility = 1.0;
     pcssBlend = 0.0;
+    // Grazing self-receivers make blocker search unreliable; retain Tent PCF there.
+    vec4 receiverControls = shadowCascades.directionalPcssReceiverControls;
+    float receiverConfidence = receiverControls.z > 0.5
+        ? smoothstep(
+            clamp(receiverControls.x, 0.0, 0.95),
+            max(receiverControls.y, receiverControls.x + 0.001),
+            clamp(receiverNdotL, 0.0, 1.0)
+        )
+        : 1.0;
+    if (receiverConfidence <= 0.0001) {
+        return false;
+    }
     float strength = clamp(shadowCascades.directionalPcssControls.x, 0.0, 1.0);
     int blockerSampleCount = clamp(
         int(shadowCascades.directionalPcssControls.y + 0.5),
@@ -2347,7 +3652,11 @@ bool SampleDirectionalPcssVisibility(
         2.0,
         maxPenumbraTexels
     );
-    pcssBlend = smoothstep(2.0, min(3.0, maxPenumbraTexels), filterRadiusTexels);
+    pcssBlend = smoothstep(
+        2.0,
+        min(3.0, maxPenumbraTexels),
+        filterRadiusTexels
+    ) * receiverConfidence;
 
     float visibilitySum = 0.0;
     for (int sampleIndex = 0;
@@ -2457,6 +3766,7 @@ bool SampleShadowCascadeVisibility(
         bias,
         receiverPlaneGradient,
         receiverPlaneBiasScale,
+        clamp(dot(normal, lightDir), 0.0, 1.0),
         cascadeIndex,
         pcssVisibility,
         pcssBlend
@@ -3402,21 +4712,67 @@ void main() {
     vec3 reflection = reflect(-viewDir, normal);
     vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
     f0 = mix(dielectricF0, baseColor, metallic);
-    SsrTraceResult ssrTrace = TraceScreenSpaceReflection(
-        fragUv,
-        depth,
-        normal,
-        roughness
-    );
     vec3 environmentReflection =
         EnvironmentRadiance(reflection, lightDir, roughness, worldPosition);
-    vec3 ssrReflection = ScreenSpaceReflectionRadiance(
-        ssrTrace,
-        environmentReflection,
-        lightDir,
-        ambientStrength,
-        directIntensity
-    );
+    SsrTraceResult ssrTrace;
+    ssrTrace.hitUv = fragUv;
+    ssrTrace.confidence = 0.0;
+    ssrTrace.validRay = 0.0;
+    ssrTrace.travel = 0.0;
+    ssrTrace.facing = 0.0;
+    ssrTrace.refinementUsed = 0.0;
+    ssrTrace.hitFacing = 0.0;
+    ssrTrace.footprintConfidence = 0.0;
+    ssrTrace.receiverFootprintConfidence = 0.0;
+    ssrTrace.depthConfidence = 0.0;
+    ssrTrace.validationConfidence = 0.0;
+    vec3 ssrReflection = environmentReflection;
+    if (SsrReconstructionEnabled()) {
+        vec2 ssrHistoryUv = fragUv;
+        float receiverHistoryConfidence = 1.0;
+        if (SsrDeferredReceiverReprojectionEnabled()) {
+            vec2 velocity = texture(gBufferVelocity, fragUv).rg;
+            ssrHistoryUv = fragUv - velocity;
+            vec3 previousReceiverViewPosition =
+                (frame.previousView * vec4(worldPosition, 1.0)).xyz;
+            receiverHistoryConfidence =
+                frame.temporalControls.x > 0.5 &&
+                frame.temporalControls.y > 0.5
+                ? SsrDeferredReceiverHistoryConfidence(
+                    ssrHistoryUv,
+                    normal,
+                    roughness,
+                    abs(previousReceiverViewPosition.z)
+                )
+                : 0.0;
+        }
+        vec4 resolvedSsr = texture(ssrResolvedReflection, ssrHistoryUv);
+        float resolvedConfidence = clamp(resolvedSsr.a, 0.0, 1.0) *
+            receiverHistoryConfidence;
+        ssrReflection = mix(
+            environmentReflection,
+            max(resolvedSsr.rgb, vec3(0.0)),
+            resolvedConfidence
+        );
+        ssrTrace.validRay = step(0.0001, resolvedConfidence);
+        ssrTrace.confidence = resolvedConfidence;
+        ssrTrace.validationConfidence = receiverHistoryConfidence;
+    } else {
+        ssrTrace = TraceScreenSpaceReflection(
+            fragUv,
+            depth,
+            normal,
+            roughness
+        );
+        ssrReflection = ScreenSpaceReflectionRadiance(
+            ssrTrace,
+            environmentReflection,
+            roughness,
+            lightDir,
+            ambientStrength,
+            directIntensity
+        );
+    }
     IblAmbientResult iblAmbient = BuildIblAmbient(
         baseColor,
         roughness,
@@ -3427,8 +4783,12 @@ void main() {
         worldPosition,
         f0,
         occlusion,
-        0.45 * ambientStrength,
-        0.36 * ambientStrength,
+        ReflectionProbeIndependentIblEnergyEnabled()
+            ? 1.0
+            : 0.45 * ambientStrength,
+        ReflectionProbeIndependentIblEnergyEnabled()
+            ? 1.0
+            : 0.36 * ambientStrength,
         ssrReflection
     );
     vec3 ambientDiffuse = iblAmbient.diffuse;
@@ -3723,6 +5083,25 @@ void main() {
                 lightDir,
                 roughness,
                 worldPosition
+            ),
+            1.0
+        );
+        return;
+    }
+    if (deferredDebugView == 23) {
+        EnvironmentRadianceResult probeRadiance = ResolveEnvironmentRadiance(
+            reflection,
+            lightDir,
+            roughness,
+            worldPosition
+        );
+        vec3 displayRadiance = probeRadiance.localRadiance /
+            (probeRadiance.localRadiance + vec3(1.0));
+        outColor = vec4(
+            mix(
+                vec3(0.08, 0.01, 0.04),
+                displayRadiance,
+                probeRadiance.localCoverage
             ),
             1.0
         );

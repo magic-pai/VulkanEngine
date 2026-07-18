@@ -61,7 +61,11 @@ enum class ForwardDebugView : int {
     DeferredAmbientProbe = 53,
     LocalShadowSelected = 54,
     DeferredEnergyBalance = 55,
-    ShadowCascadeReceiver = 56
+    ShadowCascadeReceiver = 56,
+    // Debug-only PCSS contribution relative to the production Tent-PCF baseline.
+    DirectionalPcssDelta = 57,
+    // Raw local-probe radiance without direct-light specular highlights.
+    ReflectionProbeRadiance = 58
 };
 
 struct VulkanRenderDebugSettings {

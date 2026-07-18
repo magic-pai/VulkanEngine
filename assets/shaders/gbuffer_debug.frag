@@ -70,6 +70,7 @@ layout(std430, set = 0, binding = 4) readonly buffer DirectionalShadowCascades {
     vec4 directionalFilterControls;
     vec4 directionalPcssControls;
     vec4 directionalPcssGeometry;
+    vec4 directionalPcssReceiverControls;
     mat4 fallbackViewProjection;
     mat4 viewProjections[4];
 } shadowCascades;
@@ -409,9 +410,11 @@ bool SampleShadowCascadeVisibility(
     vec3 normal,
     vec3 lightDir,
     int cascadeIndex,
-    out float visibility
+    out float visibility,
+    out float pcssDelta
 ) {
     visibility = 1.0;
+    pcssDelta = 0.0;
     vec2 shadowUv = vec2(0.0);
     float currentDepth = 1.0;
     if (ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth) != 0) {
@@ -616,12 +619,25 @@ bool SampleDirectionalPcssVisibility(
     float baseBias,
     vec2 receiverPlaneGradient,
     float receiverPlaneBiasScale,
+    float receiverNdotL,
     int cascadeIndex,
     out float pcssVisibility,
     out float pcssBlend
 ) {
     pcssVisibility = 1.0;
     pcssBlend = 0.0;
+    // Grazing self-receivers make blocker search unreliable; retain Tent PCF there.
+    vec4 receiverControls = shadowCascades.directionalPcssReceiverControls;
+    float receiverConfidence = receiverControls.z > 0.5
+        ? smoothstep(
+            clamp(receiverControls.x, 0.0, 0.95),
+            max(receiverControls.y, receiverControls.x + 0.001),
+            clamp(receiverNdotL, 0.0, 1.0)
+        )
+        : 1.0;
+    if (receiverConfidence <= 0.0001) {
+        return false;
+    }
     float strength = clamp(shadowCascades.directionalPcssControls.x, 0.0, 1.0);
     int blockerSampleCount = clamp(
         int(shadowCascades.directionalPcssControls.y + 0.5),
@@ -716,7 +732,11 @@ bool SampleDirectionalPcssVisibility(
         2.0,
         maxPenumbraTexels
     );
-    pcssBlend = smoothstep(2.0, min(3.0, maxPenumbraTexels), filterRadiusTexels);
+    pcssBlend = smoothstep(
+        2.0,
+        min(3.0, maxPenumbraTexels),
+        filterRadiusTexels
+    ) * receiverConfidence;
 
     float visibilitySum = 0.0;
     for (int sampleIndex = 0;
@@ -758,9 +778,11 @@ bool SampleShadowCascadeVisibility(
     vec3 normal,
     vec3 lightDir,
     int cascadeIndex,
-    out float visibility
+    out float visibility,
+    out float pcssDelta
 ) {
     visibility = 1.0;
+    pcssDelta = 0.0;
     vec2 shadowUv = vec2(0.0);
     float currentDepth = 1.0;
     vec3 shadowReceiverPosition = DirectionalShadowReceiverPosition(
@@ -822,6 +844,7 @@ bool SampleShadowCascadeVisibility(
         bias,
         receiverPlaneGradient,
         receiverPlaneBiasScale,
+        clamp(dot(normal, lightDir), 0.0, 1.0),
         cascadeIndex,
         pcssVisibility,
         pcssBlend
@@ -884,9 +907,11 @@ bool SampleShadowCascadeVisibility(
         filteredVisibility /= max(weightSum, 1.0);
     }
 
+    float tentVisibility = filteredVisibility;
     if (pcssResolved) {
         filteredVisibility = mix(filteredVisibility, pcssVisibility, pcssBlend);
     }
+    pcssDelta = abs(filteredVisibility - tentVisibility);
 
     visibility = mix(
         1.0 - clamp(frame.shadowControls.y, 0.0, 1.0),
@@ -905,12 +930,14 @@ bool ResolveShadowCascadeVisibility(
     out float visibility
 ) {
     visibility = 1.0;
+    float ignoredPcssDelta = 0.0;
     if (SampleShadowCascadeVisibility(
             worldPosition,
             normal,
             lightDir,
             preferredCascadeIndex,
-            visibility)) {
+            visibility,
+            ignoredPcssDelta)) {
         return true;
     }
 
@@ -922,7 +949,8 @@ bool ResolveShadowCascadeVisibility(
                 normal,
                 lightDir,
                 lowerIndex,
-                visibility)) {
+                visibility,
+                ignoredPcssDelta)) {
             return true;
         }
 
@@ -933,7 +961,8 @@ bool ResolveShadowCascadeVisibility(
                 normal,
                 lightDir,
                 upperIndex,
-                visibility)) {
+                visibility,
+                ignoredPcssDelta)) {
             return true;
         }
     }
@@ -1011,15 +1040,98 @@ float ShadowVisibility(vec3 worldPosition, vec3 normal, vec3 lightDir) {
     }
 
     float nextVisibility = visibility;
+    float nextPcssDelta = 0.0;
     if (SampleShadowCascadeVisibility(
         worldPosition,
         normal,
         lightDir,
         cascadeIndex + 1,
-        nextVisibility)) {
+        nextVisibility,
+        nextPcssDelta)) {
         visibility = mix(visibility, nextVisibility, blendFactor);
     }
     return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCascadeCount, viewDepth);
+}
+
+float DirectionalPcssDelta(vec3 worldPosition, vec3 normal, vec3 lightDir) {
+    if (frame.shadowControls.x < 0.5 ||
+        frame.shadowControls.y <= 0.001 ||
+        !DirectionalShadowReceiveEnabled()) {
+        return 0.0;
+    }
+
+    float viewDepth = 0.0;
+    int cascadeIndex = SelectShadowCascade(worldPosition, viewDepth);
+    int activeCascadeCount = ActiveShadowCascadeCount();
+    if (cascadeIndex < 0 || activeCascadeCount <= 0) {
+        return 0.0;
+    }
+
+    float visibility = 1.0;
+    float pcssDelta = 0.0;
+    bool resolved = SampleShadowCascadeVisibility(
+        worldPosition,
+        normal,
+        lightDir,
+        cascadeIndex,
+        visibility,
+        pcssDelta
+    );
+    if (!resolved) {
+        for (int offset = 1; offset < MAX_DIRECTIONAL_SHADOW_CASCADES; ++offset) {
+            int lowerIndex = cascadeIndex - offset;
+            if (lowerIndex >= 0 && SampleShadowCascadeVisibility(
+                    worldPosition,
+                    normal,
+                    lightDir,
+                    lowerIndex,
+                    visibility,
+                    pcssDelta)) {
+                resolved = true;
+                break;
+            }
+            int upperIndex = cascadeIndex + offset;
+            if (upperIndex < activeCascadeCount && SampleShadowCascadeVisibility(
+                    worldPosition,
+                    normal,
+                    lightDir,
+                    upperIndex,
+                    visibility,
+                    pcssDelta)) {
+                resolved = true;
+                break;
+            }
+        }
+    }
+    if (!resolved) {
+        return 0.0;
+    }
+
+    if (cascadeIndex + 1 < activeCascadeCount) {
+        float cascadeStart = cascadeIndex == 0
+            ? 0.0
+            : shadowCascades.splitDepths[cascadeIndex - 1];
+        float cascadeEnd = shadowCascades.splitDepths[cascadeIndex];
+        float blendWidth = max(cascadeEnd - cascadeStart, 0.0001) *
+            clamp(shadowCascades.cascadeBlendControls.x, 0.0, 0.25);
+        if (blendWidth > 0.0001) {
+            float blendFactor = smoothstep(cascadeEnd - blendWidth, cascadeEnd, viewDepth);
+            if (blendFactor > 0.0001) {
+                float nextVisibility = 1.0;
+                float nextPcssDelta = 0.0;
+                if (SampleShadowCascadeVisibility(
+                        worldPosition,
+                        normal,
+                        lightDir,
+                        cascadeIndex + 1,
+                        nextVisibility,
+                        nextPcssDelta)) {
+                    pcssDelta = mix(pcssDelta, nextPcssDelta, blendFactor);
+                }
+            }
+        }
+    }
+    return clamp(pcssDelta, 0.0, 1.0);
 }
 
 vec3 ShadowCascadeReceiverDebugColor(vec3 worldPosition, vec3 normal, vec3 lightDir) {
@@ -1041,13 +1153,15 @@ vec3 ShadowCascadeReceiverDebugColor(vec3 worldPosition, vec3 normal, vec3 light
     int projectionStatus =
         ProjectShadowCascade(worldPosition, cascadeIndex, shadowUv, currentDepth);
     float primaryVisibility = 1.0;
+    float primaryPcssDelta = 0.0;
     bool primaryValid = projectionStatus == 0 &&
         SampleShadowCascadeVisibility(
             worldPosition,
             normal,
             lightDir,
             cascadeIndex,
-            primaryVisibility
+            primaryVisibility,
+            primaryPcssDelta
         );
 
     float resolvedVisibility = primaryVisibility;
@@ -1152,6 +1266,26 @@ void main() {
         vec3 normal = normalize(normalRoughness.xyz * 2.0 - 1.0);
         vec3 worldPosition = ReconstructWorldPosition(depthUv, depth);
         outColor = vec4(vec3(ShadowVisibility(worldPosition, normal, lightDir)), 1.0);
+    } else if (view == 13) {
+        if (depth >= 0.999999 || albedo.a <= 0.001) {
+            outColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+        }
+
+        vec3 lightDirection = frame.directionalLight.xyz;
+        if (dot(lightDirection, lightDirection) < 0.0001) {
+            lightDirection = vec3(-0.45, -0.82, -0.35);
+        }
+        vec3 lightDir = normalize(-lightDirection);
+        vec3 normal = normalize(normalRoughness.xyz * 2.0 - 1.0);
+        vec3 worldPosition = ReconstructWorldPosition(depthUv, depth);
+        // Scale low-amplitude PCSS-vs-Tent differences into an 8-bit capture range.
+        float encodedDelta = clamp(
+            DirectionalPcssDelta(worldPosition, normal, lightDir) * 24.0,
+            0.0,
+            1.0
+        );
+        outColor = vec4(vec3(encodedDelta), 1.0);
     } else if (view == 9) {
         if (depth >= 0.999999 || albedo.a <= 0.001) {
             outColor = vec4(vec3(1.0), 1.0);

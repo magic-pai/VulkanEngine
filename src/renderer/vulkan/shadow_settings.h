@@ -13,6 +13,10 @@ struct VulkanLocalShadowFilterSettings {
     f32 pcfRadius = 2.4f;
     u32 pcfKernelRadius = 2;
     f32 pcssStrength = 0.32f;
+    u32 pcssBlockerSampleCount = 12;
+    u32 pcssFilterSampleCount = 16;
+    f32 pcssSearchRadiusTexels = 8.0f;
+    f32 pcssMaxPenumbraTexels = 8.0f;
 };
 
 enum class VulkanShadowQuality : int {
@@ -57,11 +61,19 @@ struct VulkanShadowSettings {
     u32 directionalPcssFilterSampleCount = 16;
     f32 directionalPcssSearchRadiusTexels = 8.0f;
     f32 directionalPcssMaxPenumbraTexels = 8.0f;
+    bool directionalPcssGrazingFadeEnabled = true;
+    f32 directionalPcssGrazingFadeStart = 0.25f;
+    f32 directionalPcssGrazingFadeEnd = 0.80f;
     f32 localBiasMin = 0.00065f;
     f32 localBiasSlope = 0.0018f;
     f32 localPcfRadius = 2.4f;
     u32 localPcfKernelRadius = 2;
     f32 localPcssStrength = 0.32f;
+    u32 localPcssBlockerSampleCount = 12;
+    u32 localPcssFilterSampleCount = 16;
+    f32 localPcssSearchRadiusTexels = 8.0f;
+    f32 localPcssMaxPenumbraTexels = 8.0f;
+    bool localProductionFilterEnabled = true;
     f32 localFaceBlendStrength = 0.80f;
     VulkanLocalShadowFilterSettings pointLocalShadowFilter{};
     VulkanLocalShadowFilterSettings spotLocalShadowFilter{};
@@ -82,10 +94,20 @@ struct VulkanShadowSettings {
     f32 ssaoRadius = 2.0f;
     f32 ssaoBias = 0.02f;
     u32 ssaoSampleCount = 16;
-    f32 ssrStrength = 0.55f;
-    f32 ssrRayLength = 18.0f;
-    f32 ssrThickness = 0.08f;
-    u32 ssrStepCount = 12;
+    f32 ssrStrength = 0.78f;
+    f32 ssrRayLength = 36.0f;
+    f32 ssrThickness = 0.05f;
+    u32 ssrStepCount = 22;
+    bool ssrRefinementEnabled = true;
+    bool ssrHiZEnabled = true;
+    bool ssrSceneColorHistoryEnabled = true;
+    bool ssrCurrentHdrSourceEnabled = false;
+    bool ssrCurrentHdrRadianceFilterEnabled = true;
+    bool ssrSpatialVarianceClampEnabled = true;
+    bool ssrProbeFallbackBlendEnabled = true;
+    bool ssrTemporalHistoryLockEnabled = true;
+    bool ssrHitValidationEnabled = true;
+    bool ssrDeferredReceiverReprojectionEnabled = true;
     bool reflectionProbeFallbackEnabled = true;
     f32 reflectionProbeDiffuseIntensity = 1.0f;
     f32 reflectionProbeSpecularIntensity = 1.0f;
@@ -130,7 +152,11 @@ inline void SyncLocalShadowKindFiltersToShared(VulkanShadowSettings& settings) {
         settings.localBiasSlope,
         settings.localPcfRadius,
         settings.localPcfKernelRadius,
-        settings.localPcssStrength
+        settings.localPcssStrength,
+        settings.localPcssBlockerSampleCount,
+        settings.localPcssFilterSampleCount,
+        settings.localPcssSearchRadiusTexels,
+        settings.localPcssMaxPenumbraTexels
     };
     settings.pointLocalShadowFilter = shared;
     settings.spotLocalShadowFilter = shared;
@@ -173,6 +199,11 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 0.0f;
         settings.localPcfKernelRadius = 0;
         settings.localPcssStrength = 0.0f;
+        settings.localPcssBlockerSampleCount = 0u;
+        settings.localPcssFilterSampleCount = 0u;
+        settings.localPcssSearchRadiusTexels = 0.0f;
+        settings.localPcssMaxPenumbraTexels = 0.0f;
+        settings.localProductionFilterEnabled = false;
         settings.localFaceBlendStrength = 0.0f;
         settings.rectLightShadowSampleTiles = 2u;
         settings.contactShadowStrength = 0.0f;
@@ -189,6 +220,12 @@ inline void ApplyShadowQualityPreset(
         settings.ssrRayLength = 0.0f;
         settings.ssrThickness = 0.0f;
         settings.ssrStepCount = 0;
+        settings.ssrSceneColorHistoryEnabled = false;
+        settings.ssrCurrentHdrSourceEnabled = false;
+        settings.ssrCurrentHdrRadianceFilterEnabled = false;
+        settings.ssrSpatialVarianceClampEnabled = false;
+        settings.ssrProbeFallbackBlendEnabled = false;
+        settings.ssrTemporalHistoryLockEnabled = false;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -228,6 +265,11 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 0.75f;
         settings.localPcfKernelRadius = 1;
         settings.localPcssStrength = 0.0f;
+        settings.localPcssBlockerSampleCount = 0u;
+        settings.localPcssFilterSampleCount = 4u;
+        settings.localPcssSearchRadiusTexels = 0.0f;
+        settings.localPcssMaxPenumbraTexels = 1.5f;
+        settings.localProductionFilterEnabled = true;
         settings.localFaceBlendStrength = 0.25f;
         settings.rectLightShadowSampleTiles = 2u;
         settings.contactShadowStrength = 0.12f;
@@ -244,6 +286,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrRayLength = 10.0f;
         settings.ssrThickness = 0.12f;
         settings.ssrStepCount = 8;
+        settings.ssrTemporalHistoryLockEnabled = true;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -283,6 +326,11 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 1.25f;
         settings.localPcfKernelRadius = 1;
         settings.localPcssStrength = 0.08f;
+        settings.localPcssBlockerSampleCount = 8u;
+        settings.localPcssFilterSampleCount = 8u;
+        settings.localPcssSearchRadiusTexels = 4.0f;
+        settings.localPcssMaxPenumbraTexels = 4.0f;
+        settings.localProductionFilterEnabled = true;
         settings.localFaceBlendStrength = 0.50f;
         settings.rectLightShadowSampleTiles = 2u;
         settings.contactShadowStrength = 0.35f;
@@ -299,6 +347,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrRayLength = 18.0f;
         settings.ssrThickness = 0.08f;
         settings.ssrStepCount = 12;
+        settings.ssrTemporalHistoryLockEnabled = true;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 180.0f;
@@ -338,6 +387,11 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 1.8f;
         settings.localPcfKernelRadius = 2;
         settings.localPcssStrength = 0.22f;
+        settings.localPcssBlockerSampleCount = 8u;
+        settings.localPcssFilterSampleCount = 12u;
+        settings.localPcssSearchRadiusTexels = 6.0f;
+        settings.localPcssMaxPenumbraTexels = 6.0f;
+        settings.localProductionFilterEnabled = true;
         settings.localFaceBlendStrength = 0.65f;
         settings.rectLightShadowSampleTiles = 4u;
         settings.contactShadowStrength = 0.48f;
@@ -354,6 +408,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrRayLength = 28.0f;
         settings.ssrThickness = 0.06f;
         settings.ssrStepCount = 18;
+        settings.ssrTemporalHistoryLockEnabled = true;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 300.0f;
@@ -393,6 +448,11 @@ inline void ApplyShadowQualityPreset(
         settings.localPcfRadius = 2.4f;
         settings.localPcfKernelRadius = 2;
         settings.localPcssStrength = 0.32f;
+        settings.localPcssBlockerSampleCount = 12u;
+        settings.localPcssFilterSampleCount = 16u;
+        settings.localPcssSearchRadiusTexels = 8.0f;
+        settings.localPcssMaxPenumbraTexels = 8.0f;
+        settings.localProductionFilterEnabled = true;
         settings.localFaceBlendStrength = 0.80f;
         settings.rectLightShadowSampleTiles = 4u;
         settings.contactShadowStrength = 0.56f;
@@ -409,6 +469,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrRayLength = 36.0f;
         settings.ssrThickness = 0.05f;
         settings.ssrStepCount = 22;
+        settings.ssrTemporalHistoryLockEnabled = true;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 360.0f;
@@ -444,6 +505,10 @@ inline void ApplyForward3DShadowProductionOverrides(VulkanShadowSettings& settin
         settings.localPcfRadius = 0.75f;
         settings.localPcfKernelRadius = 1u;
         settings.localPcssStrength = 0.0f;
+        settings.localPcssBlockerSampleCount = 0u;
+        settings.localPcssFilterSampleCount = 4u;
+        settings.localPcssSearchRadiusTexels = 0.0f;
+        settings.localPcssMaxPenumbraTexels = 1.5f;
         settings.localFaceBlendStrength = 0.35f;
         settings.contactShadowStrength = 0.16f;
         settings.contactShadowSteps = 2u;
@@ -464,7 +529,11 @@ inline void ApplyForward3DShadowProductionOverrides(VulkanShadowSettings& settin
         settings.directionalFilterReceiverBiasExtentTexels = 1.5f;
         settings.localPcfRadius = 1.4f;
         settings.localPcfKernelRadius = 1u;
-        settings.localPcssStrength = 0.08f;
+        settings.localPcssStrength = 0.16f;
+        settings.localPcssBlockerSampleCount = 8u;
+        settings.localPcssFilterSampleCount = 8u;
+        settings.localPcssSearchRadiusTexels = 4.0f;
+        settings.localPcssMaxPenumbraTexels = 4.0f;
         settings.localFaceBlendStrength = 0.60f;
         settings.contactShadowJitterStrength = 0.12f;
         break;
@@ -483,7 +552,11 @@ inline void ApplyForward3DShadowProductionOverrides(VulkanShadowSettings& settin
         settings.directionalFilterReceiverBiasExtentTexels = 2.5f;
         settings.localPcfRadius = 1.4f;
         settings.localPcfKernelRadius = 2u;
-        settings.localPcssStrength = 0.0f;
+        settings.localPcssStrength = 0.28f;
+        settings.localPcssBlockerSampleCount = 8u;
+        settings.localPcssFilterSampleCount = 12u;
+        settings.localPcssSearchRadiusTexels = 6.0f;
+        settings.localPcssMaxPenumbraTexels = 6.0f;
         settings.localFaceBlendStrength = 0.85f;
         settings.contactShadowJitterStrength = 0.18f;
         break;
@@ -507,6 +580,10 @@ inline void ApplyForward3DShadowProductionOverrides(VulkanShadowSettings& settin
         settings.localPcfRadius = 2.8f;
         settings.localPcfKernelRadius = 2u;
         settings.localPcssStrength = 0.38f;
+        settings.localPcssBlockerSampleCount = 12u;
+        settings.localPcssFilterSampleCount = 16u;
+        settings.localPcssSearchRadiusTexels = 8.0f;
+        settings.localPcssMaxPenumbraTexels = 8.0f;
         settings.localFaceBlendStrength = 0.92f;
         settings.contactShadowSteps = 8u;
         settings.contactShadowJitterStrength = 0.20f;

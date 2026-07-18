@@ -115,7 +115,9 @@ void VulkanDescriptorSets::CreateDescriptorPool(
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     poolSizes[1].descriptorCount = static_cast<u32>(count * 8); // 8 storage bindings
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[2].descriptorCount = static_cast<u32>(count * 14);
+    poolSizes[2].descriptorCount = static_cast<u32>(
+        count * kFrameDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -358,7 +360,9 @@ void VulkanMaterialDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
+    poolSizes[0].descriptorCount = static_cast<u32>(
+        count * kMaterialDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -500,17 +504,19 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
             }
 
             VkDescriptorImageInfo localShadowImageInfo{};
+            VkDescriptorImageInfo localShadowRawDepthImageInfo{};
             if (localShadowAtlas != nullptr) {
                 localShadowImageInfo.imageLayout = localShadowAtlas->Layout();
                 localShadowImageInfo.imageView = localShadowAtlas->View(imageIndex);
-                localShadowImageInfo.sampler = localShadowAtlas->Sampler();
+                localShadowImageInfo.sampler = localShadowAtlas->ComparisonSampler();
+                localShadowRawDepthImageInfo = localShadowImageInfo;
+                localShadowRawDepthImageInfo.sampler = localShadowAtlas->Sampler();
             } else {
-                localShadowImageInfo.imageLayout = material.AlbedoTexture().Layout();
-                localShadowImageInfo.imageView = material.AlbedoTexture().View();
-                localShadowImageInfo.sampler = material.Sampler().Handle();
+                localShadowImageInfo = shadowImageInfo;
+                localShadowRawDepthImageInfo = shadowRawDepthImageInfo;
             }
 
-            std::array<VkWriteDescriptorSet, 14> descriptorWrites{};
+            std::array<VkWriteDescriptorSet, 19> descriptorWrites{};
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = m_DescriptorSets[descriptorIndex];
             descriptorWrites[0].dstBinding = 0;
@@ -624,6 +630,28 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
             descriptorWrites[13].descriptorCount = 1;
             descriptorWrites[13].pImageInfo = &shadowRawDepthImageInfo;
 
+            descriptorWrites[14].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[14].dstSet = m_DescriptorSets[descriptorIndex];
+            descriptorWrites[14].dstBinding = 14;
+            descriptorWrites[14].dstArrayElement = 0;
+            descriptorWrites[14].descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[14].descriptorCount = 1;
+            descriptorWrites[14].pImageInfo = &localShadowRawDepthImageInfo;
+
+            // Material/forward paths do not consume the deferred-only SSR bindings,
+            // but every shared-layout descriptor set still receives a valid fallback.
+            for (std::size_t binding = 15; binding < descriptorWrites.size(); ++binding) {
+                descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                descriptorWrites[binding].dstSet = m_DescriptorSets[descriptorIndex];
+                descriptorWrites[binding].dstBinding = static_cast<u32>(binding);
+                descriptorWrites[binding].dstArrayElement = 0;
+                descriptorWrites[binding].descriptorType =
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                descriptorWrites[binding].descriptorCount = 1;
+                descriptorWrites[binding].pImageInfo = &albedoImageInfo;
+            }
+
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(descriptorWrites.size()),
@@ -642,7 +670,8 @@ VulkanGBufferDescriptorSets::VulkanGBufferDescriptorSets(
     const VulkanSampler& sampler,
     const VulkanShadowMap* shadowMap,
     const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
-    const VulkanLocalShadowAtlas* localShadowAtlas
+    const VulkanLocalShadowAtlas* localShadowAtlas,
+    const VulkanDepthPyramid* depthPyramid
 ) : m_Device(device.Handle()) {
     try {
         CreateDescriptorSets(
@@ -652,7 +681,8 @@ VulkanGBufferDescriptorSets::VulkanGBufferDescriptorSets(
             sampler,
             shadowMap,
             cascadeAtlas,
-            localShadowAtlas
+            localShadowAtlas,
+            depthPyramid
         );
     } catch (...) {
         Release();
@@ -673,6 +703,59 @@ std::size_t VulkanGBufferDescriptorSets::Count() const {
     return m_DescriptorSets.size();
 }
 
+bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanSampler& sampler,
+    std::size_t descriptorIndex,
+    std::size_t historyImageIndex
+) {
+    if (descriptorIndex >= m_DescriptorSets.size() ||
+        historyImageIndex >= renderTargets.Count()) {
+        return false;
+    }
+
+    VkDescriptorImageInfo historyColorInfo{};
+    historyColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    historyColorInfo.imageView = renderTargets.TemporalHistoryColorView(historyImageIndex);
+    historyColorInfo.sampler = sampler.Handle();
+
+    VkDescriptorImageInfo resolvedInfo{};
+    resolvedInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    resolvedInfo.imageView = renderTargets.SsrResolvedView(historyImageIndex);
+    resolvedInfo.sampler = sampler.Handle();
+
+    VkDescriptorImageInfo metadataInfo{};
+    metadataInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    metadataInfo.imageView = renderTargets.SsrHistoryMetadataView(historyImageIndex);
+    metadataInfo.sampler = sampler.Handle();
+
+    std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
+    const std::array<VkDescriptorImageInfo*, 3> imageInfos = {
+        &historyColorInfo,
+        &resolvedInfo,
+        &metadataInfo
+    };
+    const std::array<u32, 3> bindings = { 16u, 17u, 18u };
+    for (std::size_t index = 0; index < descriptorWrites.size(); ++index) {
+        descriptorWrites[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrites[index].dstSet = m_DescriptorSets[descriptorIndex];
+        descriptorWrites[index].dstBinding = bindings[index];
+        descriptorWrites[index].dstArrayElement = 0;
+        descriptorWrites[index].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrites[index].descriptorCount = 1;
+        descriptorWrites[index].pImageInfo = imageInfos[index];
+    }
+    vkUpdateDescriptorSets(
+        device.Handle(),
+        static_cast<u32>(descriptorWrites.size()),
+        descriptorWrites.data(),
+        0,
+        nullptr
+    );
+    return true;
+}
+
 void VulkanGBufferDescriptorSets::Recreate(
     const VulkanDevice& device,
     const VulkanMaterialDescriptorSetLayout& descriptorSetLayout,
@@ -680,7 +763,8 @@ void VulkanGBufferDescriptorSets::Recreate(
     const VulkanSampler& sampler,
     const VulkanShadowMap* shadowMap,
     const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
-    const VulkanLocalShadowAtlas* localShadowAtlas
+    const VulkanLocalShadowAtlas* localShadowAtlas,
+    const VulkanDepthPyramid* depthPyramid
 ) {
     Release();
     m_Device = device.Handle();
@@ -693,7 +777,8 @@ void VulkanGBufferDescriptorSets::Recreate(
             sampler,
             shadowMap,
             cascadeAtlas,
-            localShadowAtlas
+            localShadowAtlas,
+            depthPyramid
         );
     } catch (...) {
         Release();
@@ -718,7 +803,9 @@ void VulkanGBufferDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
+    poolSizes[0].descriptorCount = static_cast<u32>(
+        count * kMaterialDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -738,7 +825,8 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
     const VulkanSampler& sampler,
     const VulkanShadowMap* shadowMap,
     const VulkanDirectionalShadowCascadeAtlas* cascadeAtlas,
-    const VulkanLocalShadowAtlas* localShadowAtlas
+    const VulkanLocalShadowAtlas* localShadowAtlas,
+    const VulkanDepthPyramid* depthPyramid
 ) {
     const std::size_t count = renderTargets.Count();
     CreateDescriptorPool(device, count);
@@ -758,7 +846,10 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
     }
 
     for (std::size_t index = 0; index < count; ++index) {
-        std::array<VkDescriptorImageInfo, 14> imageInfos{};
+        std::array<
+            VkDescriptorImageInfo,
+            kMaterialDescriptorCombinedImageSamplerCount
+        > imageInfos{};
         imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         imageInfos[0].imageView = renderTargets.GBufferAlbedoView(index);
         imageInfos[0].sampler = sampler.Handle();
@@ -798,9 +889,11 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
         if (localShadowAtlas != nullptr) {
             imageInfos[12].imageLayout = localShadowAtlas->Layout();
             imageInfos[12].imageView = localShadowAtlas->View(index);
-            imageInfos[12].sampler = localShadowAtlas->Sampler();
+            imageInfos[12].sampler = localShadowAtlas->ComparisonSampler();
+            imageInfos[14] = imageInfos[12];
+            imageInfos[14].sampler = localShadowAtlas->Sampler();
         } else {
-            imageInfos[12] = imageInfos[0];
+            imageInfos[12] = imageInfos[6];
         }
 
         if (cascadeAtlas != nullptr) {
@@ -814,8 +907,30 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
         } else {
             imageInfos[13] = imageInfos[0];
         }
+        if (localShadowAtlas == nullptr) {
+            imageInfos[14] = imageInfos[13];
+        }
+        if (depthPyramid != nullptr) {
+            imageInfos[15].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            imageInfos[15].imageView = depthPyramid->View(index);
+            imageInfos[15].sampler = sampler.Handle();
+        } else {
+            imageInfos[15] = imageInfos[0];
+        }
+        imageInfos[16].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfos[16].imageView = renderTargets.TemporalHistoryColorView(index);
+        imageInfos[16].sampler = sampler.Handle();
+        imageInfos[17].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[17].imageView = renderTargets.SsrResolvedView(index);
+        imageInfos[17].sampler = sampler.Handle();
+        imageInfos[18].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[18].imageView = renderTargets.SsrHistoryMetadataView(index);
+        imageInfos[18].sampler = sampler.Handle();
 
-        std::array<VkWriteDescriptorSet, 14> descriptorWrites{};
+        std::array<
+            VkWriteDescriptorSet,
+            kMaterialDescriptorCombinedImageSamplerCount
+        > descriptorWrites{};
         for (std::size_t binding = 0; binding < descriptorWrites.size(); ++binding) {
             descriptorWrites[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[binding].dstSet = m_DescriptorSets[index];
@@ -830,6 +945,340 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
             device.Handle(),
             static_cast<u32>(descriptorWrites.size()),
             descriptorWrites.data(),
+            0,
+            nullptr
+        );
+    }
+}
+
+VulkanHiZDescriptorSets::VulkanHiZDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) : m_Device(device.Handle()) {
+    CreateDescriptorSets(
+        device,
+        descriptorSetLayout,
+        renderTargets,
+        depthPyramid,
+        sampler
+    );
+}
+
+VulkanHiZDescriptorSets::~VulkanHiZDescriptorSets() {
+    Release();
+}
+
+VkDescriptorSet VulkanHiZDescriptorSets::Handle(
+    std::size_t imageIndex,
+    u32 mipIndex
+) const {
+    SE_ASSERT(imageIndex < m_Count, "Hi-Z descriptor image index is out of range");
+    SE_ASSERT(mipIndex < m_MipCount, "Hi-Z descriptor mip index is out of range");
+    return m_DescriptorSets[imageIndex * m_MipCount + mipIndex];
+}
+
+std::size_t VulkanHiZDescriptorSets::Count() const {
+    return m_Count;
+}
+
+u32 VulkanHiZDescriptorSets::MipCount() const {
+    return m_MipCount;
+}
+
+void VulkanHiZDescriptorSets::Recreate(
+    const VulkanDevice& device,
+    const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateDescriptorSets(
+        device,
+        descriptorSetLayout,
+        renderTargets,
+        depthPyramid,
+        sampler
+    );
+}
+
+void VulkanHiZDescriptorSets::Release() {
+    m_DescriptorSets.clear();
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        m_DescriptorPool = VK_NULL_HANDLE;
+    }
+    m_Count = 0;
+    m_MipCount = 0;
+}
+
+void VulkanHiZDescriptorSets::CreateDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanHiZDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) {
+    SE_ASSERT(
+        renderTargets.Count() == depthPyramid.Count(),
+        "Hi-Z source and pyramid image counts must match"
+    );
+    m_Count = depthPyramid.Count();
+    m_MipCount = depthPyramid.MipCount();
+    const std::size_t setCount = m_Count * m_MipCount;
+
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = static_cast<u32>(setCount);
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(setCount);
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<u32>(setCount);
+    if (vkCreateDescriptorPool(
+            device.Handle(),
+            &poolInfo,
+            nullptr,
+            &m_DescriptorPool
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create Vulkan Hi-Z descriptor pool");
+    }
+
+    std::vector<VkDescriptorSetLayout> layouts(
+        setCount,
+        descriptorSetLayout.Handle()
+    );
+    m_DescriptorSets.resize(setCount);
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_DescriptorPool;
+    allocateInfo.descriptorSetCount = static_cast<u32>(setCount);
+    allocateInfo.pSetLayouts = layouts.data();
+    if (vkAllocateDescriptorSets(
+            device.Handle(),
+            &allocateInfo,
+            m_DescriptorSets.data()
+        ) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to allocate Vulkan Hi-Z descriptor sets");
+    }
+
+    for (std::size_t imageIndex = 0; imageIndex < m_Count; ++imageIndex) {
+        for (u32 mipIndex = 0; mipIndex < m_MipCount; ++mipIndex) {
+            VkDescriptorImageInfo sourceInfo{};
+            sourceInfo.imageLayout = mipIndex == 0
+                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                : VK_IMAGE_LAYOUT_GENERAL;
+            sourceInfo.imageView = mipIndex == 0
+                ? renderTargets.SceneDepthView(imageIndex)
+                : depthPyramid.MipView(imageIndex, mipIndex - 1);
+            sourceInfo.sampler = sampler.Handle();
+
+            VkDescriptorImageInfo destinationInfo{};
+            destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            destinationInfo.imageView = depthPyramid.MipView(imageIndex, mipIndex);
+
+            std::array<VkWriteDescriptorSet, 2> writes{};
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = Handle(imageIndex, mipIndex);
+            writes[0].dstBinding = 0;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].descriptorCount = 1;
+            writes[0].pImageInfo = &sourceInfo;
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = Handle(imageIndex, mipIndex);
+            writes[1].dstBinding = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo = &destinationInfo;
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                static_cast<u32>(writes.size()),
+                writes.data(),
+                0,
+                nullptr
+            );
+        }
+    }
+}
+
+VulkanSsrReconstructionDescriptorSets::VulkanSsrReconstructionDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) : m_Device(device.Handle()) {
+    CreateDescriptorSets(
+        device,
+        descriptorSetLayout,
+        renderTargets,
+        depthPyramid,
+        sampler
+    );
+}
+
+VulkanSsrReconstructionDescriptorSets::~VulkanSsrReconstructionDescriptorSets() {
+    Release();
+}
+
+VkDescriptorSet VulkanSsrReconstructionDescriptorSets::Handle(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_DescriptorSets.size(),
+        "SSR reconstruction descriptor image index is out of range"
+    );
+    return m_DescriptorSets[imageIndex];
+}
+
+std::size_t VulkanSsrReconstructionDescriptorSets::Count() const {
+    return m_DescriptorSets.size();
+}
+
+void VulkanSsrReconstructionDescriptorSets::Recreate(
+    const VulkanDevice& device,
+    const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateDescriptorSets(
+        device,
+        descriptorSetLayout,
+        renderTargets,
+        depthPyramid,
+        sampler
+    );
+}
+
+void VulkanSsrReconstructionDescriptorSets::Release() {
+    m_DescriptorSets.clear();
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        m_DescriptorPool = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanSsrReconstructionDescriptorSets::CreateDescriptorSets(
+    const VulkanDevice& device,
+    const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanDepthPyramid& depthPyramid,
+    const VulkanSampler& sampler
+) {
+    SE_ASSERT(
+        renderTargets.Count() == depthPyramid.Count(),
+        "SSR reconstruction targets and depth pyramid counts must match"
+    );
+    const std::size_t count = renderTargets.Count();
+
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 12u);
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(count * 4u);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<u32>(count);
+    if (vkCreateDescriptorPool(
+            device.Handle(),
+            &poolInfo,
+            nullptr,
+            &m_DescriptorPool
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create Vulkan SSR reconstruction descriptor pool"
+        );
+    }
+
+    std::vector<VkDescriptorSetLayout> layouts(
+        count,
+        descriptorSetLayout.Handle()
+    );
+    m_DescriptorSets.resize(count);
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_DescriptorPool;
+    allocateInfo.descriptorSetCount = static_cast<u32>(count);
+    allocateInfo.pSetLayouts = layouts.data();
+    if (vkAllocateDescriptorSets(
+            device.Handle(),
+            &allocateInfo,
+            m_DescriptorSets.data()
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to allocate Vulkan SSR reconstruction descriptor sets"
+        );
+    }
+
+    for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
+        const std::size_t historySourceIndex = count > 1
+            ? (imageIndex + 1u) % count
+            : imageIndex;
+        std::array<VkDescriptorImageInfo, 16> imageInfos{};
+        auto sampled = [&](u32 binding, VkImageView view, VkImageLayout layout) {
+            imageInfos[binding].imageLayout = layout;
+            imageInfos[binding].imageView = view;
+            imageInfos[binding].sampler = sampler.Handle();
+        };
+        sampled(0, renderTargets.SceneDepthView(imageIndex),
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        sampled(1, renderTargets.GBufferNormalRoughnessView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(2, renderTargets.GBufferAlbedoView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(3, renderTargets.GBufferMaterialView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(4, renderTargets.GBufferEmissiveView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(5, renderTargets.VelocityView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(6, depthPyramid.View(imageIndex), VK_IMAGE_LAYOUT_GENERAL);
+        sampled(7, renderTargets.HdrSceneColorView(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        sampled(8, renderTargets.SsrRawView(imageIndex), VK_IMAGE_LAYOUT_GENERAL);
+        sampled(9, renderTargets.SsrHistoryColorView(historySourceIndex),
+            VK_IMAGE_LAYOUT_GENERAL);
+        sampled(10, renderTargets.SsrHistoryMetadataView(historySourceIndex),
+            VK_IMAGE_LAYOUT_GENERAL);
+
+        imageInfos[11].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[11].imageView = renderTargets.SsrRawView(imageIndex);
+        imageInfos[12].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[12].imageView = renderTargets.SsrHistoryColorView(imageIndex);
+        imageInfos[13].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[13].imageView = renderTargets.SsrHistoryMetadataView(imageIndex);
+        sampled(14, renderTargets.SsrHistoryColorView(imageIndex),
+            VK_IMAGE_LAYOUT_GENERAL);
+        imageInfos[15].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        imageInfos[15].imageView = renderTargets.SsrResolvedView(imageIndex);
+
+        std::array<VkWriteDescriptorSet, 16> writes{};
+        for (u32 binding = 0; binding < writes.size(); ++binding) {
+            writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[binding].dstSet = m_DescriptorSets[imageIndex];
+            writes[binding].dstBinding = binding;
+            writes[binding].descriptorType = binding <= 10 || binding == 14
+                ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[binding].descriptorCount = 1;
+            writes[binding].pImageInfo = &imageInfos[binding];
+        }
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            static_cast<u32>(writes.size()),
+            writes.data(),
             0,
             nullptr
         );
@@ -919,7 +1368,9 @@ void VulkanHdrDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
+    poolSizes[0].descriptorCount = static_cast<u32>(
+        count * kMaterialDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -963,7 +1414,7 @@ void VulkanHdrDescriptorSets::CreateDescriptorSets(
         hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         hdrImageInfo.imageView = useTemporalUpscaleOutputSource
             ? renderTargets.TemporalUpscaleOutputView(index)
-            : renderTargets.HdrSceneColorView(index);
+            : renderTargets.HdrSceneColorAttachmentView(index);
         hdrImageInfo.sampler = sampler.Handle();
 
         VkDescriptorImageInfo bloomImageInfo = hdrImageInfo;
@@ -1143,7 +1594,9 @@ void VulkanBloomDescriptorSets::CreateDescriptorPool(
     const std::size_t setCount = swapchainCount * mipCount * 2;
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(setCount * 14);
+    poolSizes[0].descriptorCount = static_cast<u32>(
+        setCount * kMaterialDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1215,7 +1668,7 @@ void VulkanBloomDescriptorSets::CreateDescriptorSets(
             downsampleSourceInfo.imageView = mipIndex == 0
                 ? (useTemporalUpscaleOutputSource
                     ? renderTargets.TemporalUpscaleOutputView(imageIndex)
-                    : renderTargets.HdrSceneColorView(imageIndex))
+                    : renderTargets.HdrSceneColorAttachmentView(imageIndex))
                 : bloomPyramid.BloomMipView(imageIndex, mipIndex - 1);
             downsampleSourceInfo.sampler = sampler.Handle();
 
@@ -1351,7 +1804,9 @@ void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorPool(
 
     std::array<VkDescriptorPoolSize, 1> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = static_cast<u32>(count * 14);
+    poolSizes[0].descriptorCount = static_cast<u32>(
+        count * kMaterialDescriptorCombinedImageSamplerCount
+    );
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1390,7 +1845,7 @@ void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorSets(
     for (std::size_t index = 0; index < count; ++index) {
         std::array<VkDescriptorImageInfo, 13> imageInfos{};
         imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfos[0].imageView = renderTargets.HdrSceneColorView(index);
+        imageInfos[0].imageView = renderTargets.HdrSceneColorAttachmentView(index);
         imageInfos[0].sampler = sampler.Handle();
         imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         imageInfos[1].imageView = renderTargets.WeightedTranslucencyAccumView(index);

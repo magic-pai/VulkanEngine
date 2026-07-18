@@ -211,6 +211,9 @@ struct CapturedSceneCaptureAudit {
     u32 captureCulledCount = 0;
     u32 captureFaceOrientationMask = 0;
     u32 mipGenerationCount = 0;
+    u32 sourceMipGenerationCount = 0;
+    u32 sourceMipCount = 0;
+    u64 sourceMipMemoryBytes = 0;
     u32 ggxPrefilterDispatchCount = 0;
     u32 ggxPrefilterSampleCount = 0;
     u32 ggxPrefilterQuality = 0;
@@ -264,6 +267,9 @@ struct CapturedSceneCaptureAudit {
     bool gpuCaptureInProgress = false;
     bool captureFaceOrientationValid = false;
     bool mipChainReady = false;
+    bool sourceMipChainReady = false;
+    bool ggxPrefilterSourceImageSeparated = false;
+    bool ggxPrefilterPdfLodEnabled = false;
     bool ggxPrefilterReady = false;
     bool ggxPrefilterFallbackActive = false;
     bool diffuseIrradianceReady = false;
@@ -504,6 +510,7 @@ private:
     struct CapturedSceneProbeResource {
         std::unique_ptr<VulkanImage> activeImage;
         std::unique_ptr<VulkanImage> targetImage;
+        std::unique_ptr<VulkanImage> sourceRadianceImage;
         std::unique_ptr<VulkanImage> activeDiffuseIrradianceImage;
         std::unique_ptr<VulkanImage> targetDiffuseIrradianceImage;
         std::unique_ptr<VulkanImage> depthImage;
