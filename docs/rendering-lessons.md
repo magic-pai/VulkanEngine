@@ -80,6 +80,34 @@ Prevention:
 Validation:
 - User confirmed the single `SE_SSR_CURRENT_HDR_SOURCE=0` LightingShowcase window looked normal and the white blocks disappeared.
 
+## 2026-07-19 - SSR Consumer Stats Must Be Written After Temporal Stats
+
+Symptom:
+- LightingShowcase and Forward3D current-HDR lanes still reported stale SSR consumer fields even though the source path and image bindings were already correct.
+
+False leads:
+- Treating it as another radiance, history-lock, or probe fallback bug.
+- Chasing visuals first when the failure was in the published contract.
+
+Cause:
+- `temporalConsumerSsrReady`, `sceneColorHistory*`, `radianceSource`, and `temporalConsumerSsrActive` were computed before `WriteTemporalStats`, so they could read stale temporal state.
+
+Control test:
+- Move the consumer-publication block to after `WriteTemporalStats`.
+- Rerun the real LightingShowcase current-HDR lane and the Forward3D animated FBX lane.
+
+Fix:
+- Publish the SSR consumer stats only after the temporal writeback is complete.
+
+Prevention:
+- Any CSV field that summarizes a producer/consumer contract must be written after the producer's final state is settled.
+- If a data gate disagrees with a valid visual window, check stat ordering before adding more rendering knobs.
+
+Validation:
+- Current release LightingShowcase current-HDR enabled lane on a trusted Dev Drive reported `sceneColorHistoryReady=1`, `sceneColorHistoryActive=1`, `radianceSource=2`, `temporalConsumerSsrReady=1`, and `temporalConsumerSsrActive=1`.
+- Current release Forward3D animated FBX lane on the same Dev Drive reported the same contract values.
+- The history-lock-off control reported `reconstructionTemporalHistoryLockEnabled=0` and `holeDiagnosticsTemporalMissCarriedPixels=0`.
+
 ## 2026-07-17 - Local PCSS Needs Descriptor And Cold-Compile Contracts
 
 Symptom:

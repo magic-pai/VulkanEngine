@@ -1,6 +1,10 @@
 [CmdletBinding()]
 param(
+    [string]$ForwardExecutablePath = "build\Debug\SelfEngineForward3D.exe",
+    [string]$ShowcaseExecutablePath = "build\Debug\SelfEngineLightingShowcase.exe",
     [switch]$SkipBuild,
+    [switch]$SkipSigning,
+    [switch]$VerifyHoleDiagnostics,
     [switch]$Strict,
     [string]$OutputDirectory = ""
 )
@@ -14,8 +18,19 @@ if (![System.IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot $OutputDirectory
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
-$forwardExecutable = Join-Path $projectRoot "build\Debug\SelfEngineForward3D.exe"
-$showcaseExecutable = Join-Path $projectRoot "build\Debug\SelfEngineLightingShowcase.exe"
+
+function Resolve-FullPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $projectRoot $Path))
+}
+
+$forwardExecutable = Resolve-FullPath $ForwardExecutablePath
+$showcaseExecutable = Resolve-FullPath $ShowcaseExecutablePath
 
 function Invoke-SsrBuild {
     param([string]$Root)
@@ -149,10 +164,16 @@ function Invoke-SsrLane {
     }
     $stdout = Get-Content -Raw -LiteralPath $stdoutPath -ErrorAction SilentlyContinue
     $stderr = Get-Content -Raw -LiteralPath $stderrPath -ErrorAction SilentlyContinue
-    @($stdout, $stderr) |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-        Set-Content -LiteralPath $logPath -Encoding utf8
+    $combinedLog = (
+        @($stdout, $stderr) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath $logPath -Value $combinedLog -Encoding utf8
 
+    $expectedCapturedFrames = 0
+    if ($Environment.ContainsKey("SE_BENCHMARK_FRAMES")) {
+        [void][int]::TryParse($Environment["SE_BENCHMARK_FRAMES"], [ref]$expectedCapturedFrames)
+    }
     $rows = @()
     $csvDeadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $csvDeadline) {
@@ -162,7 +183,10 @@ function Invoke-SsrLane {
             } catch {
                 $rows = @()
             }
-            if ($rows.Count -gt 0) {
+            if ($rows.Count -gt 0 -and (
+                    $expectedCapturedFrames -le 0 -or
+                    $rows.Count -ge $expectedCapturedFrames
+                )) {
                 break
             }
         }
@@ -219,10 +243,10 @@ function Invoke-SsrLane {
     $reconstructionActive = Get-UIntMetric $last "ssr_reconstruction_active"
     $reconstructionTargetsAllocated = Get-UIntMetric $last "ssr_reconstruction_targets_allocated"
     $reconstructionDescriptorSetsReady = Get-UIntMetric $last "ssr_reconstruction_descriptor_sets_ready"
-    $reconstructionTraceDispatches = Get-UIntMetric $last "ssr_reconstruction_trace_dispatches"
-    $reconstructionTemporalDispatches = Get-UIntMetric $last "ssr_reconstruction_temporal_dispatches"
-    $reconstructionSpatialDispatches = Get-UIntMetric $last "ssr_reconstruction_spatial_dispatches"
-    $reconstructionHistoryCopies = Get-UIntMetric $last "ssr_reconstruction_history_copies"
+    $reconstructionTraceDispatches = Get-UIntMetric $last "ssr_reconstruction_bind_trace_dispatches"
+    $reconstructionTemporalDispatches = Get-UIntMetric $last "ssr_reconstruction_bind_temporal_dispatches"
+    $reconstructionSpatialDispatches = Get-UIntMetric $last "ssr_reconstruction_bind_spatial_dispatches"
+    $reconstructionHistoryCopies = Get-UIntMetric $last "ssr_reconstruction_bind_history_copies"
     $reconstructionHistoryReset = Get-UIntMetric $last "ssr_reconstruction_history_reset"
     $reconstructionImageCount = Get-UIntMetric $last "ssr_reconstruction_image_count"
     $reconstructionMemoryBytes = [uint64]$last.ssr_reconstruction_memory_bytes
@@ -313,12 +337,17 @@ function Invoke-SsrLane {
     $gpuMainAverage = [double](
         $rows | Measure-Object gpu_main_ms -Average
     ).Average
-    $validationDiagnostics = @(
-        Select-String `
-            -LiteralPath $logPath `
-            -Pattern "\[Vulkan Validation\]|VUID-|validation error" `
-            -CaseSensitive:$false
-    )
+    $validationDiagnostics = @()
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path -LiteralPath $path) {
+            $validationDiagnostics += @(
+                Select-String `
+                    -LiteralPath $path `
+                    -Pattern "\[Vulkan Validation\]|VUID-|validation error" `
+                    -CaseSensitive:$false
+            )
+        }
+    }
 
     $checks = @(
         (New-Check "frame graph validation" ($frameGraphIssues -eq 0) $frameGraphIssues "0"),
@@ -442,6 +471,65 @@ function Invoke-SsrLane {
         $checks += New-Check "SSR reconstruction memory contract" `
             ($reconstructionMemoryBytes -eq $expectedReconstructionMemoryBytes -and $reconstructionMemoryBytes -gt 0) `
             $reconstructionMemoryBytes $expectedReconstructionMemoryBytes
+        if ($holeDiagnosticsRequested -eq 1) {
+            $checks += New-Check "SSR hole diagnostics counts are bounded" `
+                (
+                    $holeDiagnosticsReadbackValid -eq 1 -and
+                    $holeDiagnosticsPixelCount -gt 0 -and
+                    $holeDiagnosticsRawHitPixels -le $holeDiagnosticsPixelCount -and
+                    $holeDiagnosticsRawHighConfidencePixels -le $holeDiagnosticsRawHitPixels -and
+                    $holeDiagnosticsTemporalValidPixels -le $holeDiagnosticsPixelCount -and
+                    $holeDiagnosticsResolvedValidPixels -le $holeDiagnosticsPixelCount -and
+                    $holeDiagnosticsIsolatedRawHitPixels -le $holeDiagnosticsRawHitPixels -and
+                    $holeDiagnosticsCenterMissNeighborHitPixels -le $holeDiagnosticsPixelCount -and
+                    $holeDiagnosticsResolvedHolePixels -le $holeDiagnosticsPixelCount
+                ) `
+                "pixels=$holeDiagnosticsPixelCount,raw=$holeDiagnosticsRawHitPixels,high=$holeDiagnosticsRawHighConfidencePixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,isolated=$holeDiagnosticsIsolatedRawHitPixels,missNeighbor=$holeDiagnosticsCenterMissNeighborHitPixels,holes=$holeDiagnosticsResolvedHolePixels" `
+                "all within frame/raw bounds"
+            $checks += New-Check "SSR reliability diagnostics are per-pixel categories" `
+                (
+                    $holeDiagnosticsRawHitTemporalRejectedPixels -le $holeDiagnosticsRawHitPixels -and
+                    $holeDiagnosticsRawHitSpatialRejectedPixels -le $holeDiagnosticsRawHitPixels -and
+                    $holeDiagnosticsRawHitSpatialRejectedPixels -le (
+                        [int64]$holeDiagnosticsRawHitPixels -
+                        [int64]$holeDiagnosticsRawHitTemporalRejectedPixels
+                    ) -and
+                    $holeDiagnosticsTemporalMissCarriedPixels -le $holeDiagnosticsTemporalValidPixels
+                ) `
+                "temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels,spatialRejected=$holeDiagnosticsRawHitSpatialRejectedPixels,missCarried=$holeDiagnosticsTemporalMissCarriedPixels,raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels" `
+                "category counts bounded by matching producer stage"
+            $checks += New-Check "SSR fallback diagnostics match resolved coverage" `
+                (
+                    $fallbackBlendResolvedPixels -eq $holeDiagnosticsResolvedValidPixels -and
+                    $fallbackBlendPartialPixels -le $fallbackBlendResolvedPixels -and
+                    $fallbackBlendHighTrustPixels -le $fallbackBlendResolvedPixels -and
+                    $fallbackBlendAveragePermille -le 1000
+                ) `
+                "resolved=$holeDiagnosticsResolvedValidPixels,fallbackResolved=$fallbackBlendResolvedPixels,partial=$fallbackBlendPartialPixels,highTrust=$fallbackBlendHighTrustPixels,avg=$fallbackBlendAveragePermille" `
+                "resolved coverage and fallback counts agree"
+            if ($currentHdrSourceExpected) {
+                $checks += New-Check "current-HDR source produces resolved SSR diagnostics" `
+                    (
+                        $holeDiagnosticsTemporalValidPixels -gt 0 -and
+                        $holeDiagnosticsResolvedValidPixels -gt 0 -and
+                        $holeDiagnosticsRawHitTemporalRejectedPixels -lt
+                            $holeDiagnosticsRawHitPixels
+                    ) `
+                    "raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels" `
+                    "temporal/resolved coverage >0 and not all raw hits rejected"
+            } else {
+                $checks += New-Check "current-HDR disabled does not seed temporal SSR radiance" `
+                    (
+                        $holeDiagnosticsTemporalValidPixels -eq 0 -and
+                        $holeDiagnosticsResolvedValidPixels -eq 0 -and
+                        $holeDiagnosticsTemporalMissCarriedPixels -eq 0 -and
+                        $holeDiagnosticsRawHitTemporalRejectedPixels -eq
+                            $holeDiagnosticsRawHitPixels
+                    ) `
+                    "raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,missCarried=$holeDiagnosticsTemporalMissCarriedPixels,temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels" `
+                    "temporal/resolved/miss-carried=0 and temporalRejected=raw"
+            }
+        }
     } else {
         $checks += New-Check "SSR reconstruction disabled path submits no dispatches" `
             ($reconstructionTraceDispatches -eq 0 -and $reconstructionTemporalDispatches -eq 0 -and $reconstructionSpatialDispatches -eq 0) `
@@ -477,8 +565,10 @@ function Invoke-SsrLane {
     "hiz" {
         $checks += New-Check "SSR resolve active" ($ssrEnabled -eq 1 -and $colorResolve -eq 1) "enabled=$ssrEnabled,color=$colorResolve" "1/1"
         $checks += New-Check "SSR trace parameters active" ($ssrStrength -gt 0.0 -and $ssrRayLength -gt 0.0 -and $ssrThickness -gt 0.0 -and $ssrStepCount -gt 0) "strength=$ssrStrength,ray=$ssrRayLength,thickness=$ssrThickness,steps=$ssrStepCount" "all > 0"
-        $checks += New-Check "SSR hole diagnostics contract active" ($holeDiagnosticsRequested -eq 1 -and $holeDiagnosticsActive -eq 1 -and $holeDiagnosticsContractVersion -eq 1) "requested/active/version=$holeDiagnosticsRequested/$holeDiagnosticsActive/$holeDiagnosticsContractVersion" "1/1/1"
-        $checks += New-Check "SSR hole diagnostics readback valid" ($holeDiagnosticsReadbackValid -eq 1 -and $holeDiagnosticsPixelCount -gt 0) "valid=$holeDiagnosticsReadbackValid,pixels=$holeDiagnosticsPixelCount" "1,pixels>0"
+        if ($VerifyHoleDiagnostics) {
+            $checks += New-Check "SSR hole diagnostics contract active" ($holeDiagnosticsRequested -eq 1 -and $holeDiagnosticsActive -eq 1 -and $holeDiagnosticsContractVersion -eq 2) "requested/active/version=$holeDiagnosticsRequested/$holeDiagnosticsActive/$holeDiagnosticsContractVersion" "1/1/2"
+            $checks += New-Check "SSR hole diagnostics readback valid" ($holeDiagnosticsReadbackValid -eq 1 -and $holeDiagnosticsPixelCount -gt 0) "valid=$holeDiagnosticsReadbackValid,pixels=$holeDiagnosticsPixelCount" "1,pixels>0"
+        }
         $checks += New-Check "completed scene-color history radiance active" ($sceneColorHistoryRequested -eq 1 -and $sceneColorHistoryDescriptorBound -eq 1 -and $sceneColorHistoryReady -eq 1 -and $sceneColorHistoryActive -eq 1 -and $sceneColorHistoryFallbackReason -eq 0 -and $radianceSource -eq 2) "requested=$sceneColorHistoryRequested,bound=$sceneColorHistoryDescriptorBound,ready=$sceneColorHistoryReady,active=$sceneColorHistoryActive,fallback=$sceneColorHistoryFallbackReason,source=$radianceSource" "1/1/1/1/0/2"
         $checks += New-Check "scene-color history is previous submitted frame" ($sceneColorHistorySourceValid -eq 1 -and $sceneColorHistoryFrameAge -eq 1 -and $sceneColorHistoryCurrentImageIndex -lt $pyramidImageCount -and $sceneColorHistorySourceImageIndex -lt $pyramidImageCount) "valid=$sceneColorHistorySourceValid,current=$sceneColorHistoryCurrentImageIndex,source=$sceneColorHistorySourceImageIndex,age=$sceneColorHistoryFrameAge" "valid indices, age=1"
         $checks += New-Check "SSR temporal consumer active" ($temporalSsrReady -eq 1 -and $temporalSsrActive -eq 1) "ready=$temporalSsrReady,active=$temporalSsrActive" "1/1"
@@ -517,8 +607,10 @@ function Invoke-SsrLane {
     }
     "hiz-gbuffer" {
         $checks += New-Check "SSR GBuffer radiance control active" ($ssrEnabled -eq 1 -and $colorResolve -eq 1 -and $hizRequested -eq 1 -and $hizActive -eq 1) "enabled=$ssrEnabled,color=$colorResolve,hiz=$hizRequested/$hizActive" "1/1/1/1"
-        $checks += New-Check "SSR hole diagnostics contract active" ($holeDiagnosticsRequested -eq 1 -and $holeDiagnosticsActive -eq 1 -and $holeDiagnosticsContractVersion -eq 1) "requested/active/version=$holeDiagnosticsRequested/$holeDiagnosticsActive/$holeDiagnosticsContractVersion" "1/1/1"
-        $checks += New-Check "SSR hole diagnostics readback valid" ($holeDiagnosticsReadbackValid -eq 1 -and $holeDiagnosticsPixelCount -gt 0) "valid=$holeDiagnosticsReadbackValid,pixels=$holeDiagnosticsPixelCount" "1,pixels>0"
+        if ($VerifyHoleDiagnostics) {
+            $checks += New-Check "SSR hole diagnostics contract active" ($holeDiagnosticsRequested -eq 1 -and $holeDiagnosticsActive -eq 1 -and $holeDiagnosticsContractVersion -eq 2) "requested/active/version=$holeDiagnosticsRequested/$holeDiagnosticsActive/$holeDiagnosticsContractVersion" "1/1/2"
+            $checks += New-Check "SSR hole diagnostics readback valid" ($holeDiagnosticsReadbackValid -eq 1 -and $holeDiagnosticsPixelCount -gt 0) "valid=$holeDiagnosticsReadbackValid,pixels=$holeDiagnosticsPixelCount" "1,pixels>0"
+        }
         $checks += New-Check "scene-color history control disabled" ($sceneColorHistoryRequested -eq 0 -and $sceneColorHistoryDescriptorBound -eq 1 -and $sceneColorHistoryActive -eq 0 -and $sceneColorHistoryFallbackReason -eq 1 -and $radianceSource -eq 1) "requested=$sceneColorHistoryRequested,bound=$sceneColorHistoryDescriptorBound,active=$sceneColorHistoryActive,fallback=$sceneColorHistoryFallbackReason,source=$radianceSource" "0/1/0/1/1"
         $checks += New-Check "SSR temporal consumer inactive in control" ($temporalSsrActive -eq 0) $temporalSsrActive "0"
         $checks += New-Check "GBuffer control keeps Hi-Z commands" ($actualBuildDispatchMinimum -eq $pyramidMipCount -and $actualBuildDispatches -eq $pyramidMipCount -and $actualConsumerDrawMinimum -eq 1 -and $actualConsumerDraws -eq 1) "dispatches=$actualBuildDispatchMinimum..$actualBuildDispatches,consumer=$actualConsumerDrawMinimum..$actualConsumerDraws" "$pyramidMipCount..$pyramidMipCount/1..1"
@@ -682,7 +774,9 @@ foreach ($executable in @($forwardExecutable, $showcaseExecutable)) {
     if (!(Test-Path -LiteralPath $executable)) {
         throw "Missing Debug executable: $executable"
     }
-    Invoke-SsrSigning -Root $projectRoot -TargetPath $executable
+    if (-not $SkipSigning) {
+        Invoke-SsrSigning -Root $projectRoot -TargetPath $executable
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
@@ -698,7 +792,6 @@ $common = @{
     SE_BENCHMARK_WARMUP_FRAMES = "8"
     SE_BENCHMARK_FRAMES = "12"
     SE_AUTO_EXIT_FRAMES = "20"
-    SE_SSR_HOLE_DIAGNOSTICS = "1"
     SE_REFLECTION_RECEIVER_AUDIT = "1"
     SE_REFLECTION_RECEIVER_AUDIT_X = "-2.15"
     SE_REFLECTION_RECEIVER_AUDIT_Y = "0.18"
@@ -707,6 +800,9 @@ $common = @{
     SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Y = "0.18"
     SE_REFLECTION_RECEIVER_AUDIT_DIRECTION_Z = "-0.92"
     SE_REFLECTION_RECEIVER_AUDIT_ROUGHNESS = "0.24"
+}
+if ($VerifyHoleDiagnostics) {
+    $common["SE_SSR_HOLE_DIAGNOSTICS"] = "1"
 }
 $normalShowcase = $common.Clone()
 $normalShowcase.Remove("SE_SHADOW_QUALITY")
@@ -863,6 +959,21 @@ $lanes = @(
         }
     },
     [pscustomobject]@{
+        name = "lighting-showcase-current-hdr-history-lock-disabled"
+        executable = $showcaseExecutable
+        scene = "LightingShowcase current-HDR radiance with history lock disabled"
+        mode = "hiz"
+        environment = $common + @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SSR = "1"
+            SE_SSR_HIZ = "1"
+            SE_SSR_REFINEMENT = "1"
+            SE_SSR_CURRENT_HDR_SOURCE = "1"
+            SE_SSR_TEMPORAL_HISTORY_LOCK = "0"
+        }
+    },
+    [pscustomobject]@{
         name = "lighting-showcase-temporal-history-lock-disabled"
         executable = $showcaseExecutable
         scene = "LightingShowcase SSR temporal history lock control"
@@ -984,6 +1095,51 @@ if ($null -ne $fallbackBlendDefault -and $null -ne $fallbackBlendControl) {
             controlAveragePermille = $controlAverage
         }
         checks = $comparisonChecks
+    }
+}
+if ($VerifyHoleDiagnostics) {
+    $historyLockDefault = $reports |
+        Where-Object { $_.lane -eq "lighting-showcase-current-hdr-source-enabled" } |
+        Select-Object -First 1
+    $historyLockControl = $reports |
+        Where-Object { $_.lane -eq "lighting-showcase-current-hdr-history-lock-disabled" } |
+        Select-Object -First 1
+    if ($null -ne $historyLockDefault -and $null -ne $historyLockControl) {
+        $defaultMissCarried = [int]$historyLockDefault.metrics.holeDiagnosticsTemporalMissCarriedPixels
+        $controlMissCarried = [int]$historyLockControl.metrics.holeDiagnosticsTemporalMissCarriedPixels
+        $comparisonChecks = @(
+            (New-Check "SSR history-lock default/control active state differs" `
+                ($historyLockDefault.metrics.reconstructionTemporalHistoryLockEnabled -eq 1 -and
+                    $historyLockControl.metrics.reconstructionTemporalHistoryLockEnabled -eq 0) `
+                "default=$($historyLockDefault.metrics.reconstructionTemporalHistoryLockEnabled),control=$($historyLockControl.metrics.reconstructionTemporalHistoryLockEnabled)" `
+                "1/0"),
+            (New-Check "SSR history lock does not reduce miss-history coverage" `
+                ($defaultMissCarried -ge $controlMissCarried) `
+                "defaultMissCarried=$defaultMissCarried,controlMissCarried=$controlMissCarried" `
+                "default >= control")
+        )
+        $comparisonPassCount = @(
+            $comparisonChecks | Where-Object { $_.status -eq "pass" }
+        ).Count
+        $comparisonFailCount = @(
+            $comparisonChecks | Where-Object { $_.status -eq "fail" }
+        ).Count
+        $reports += [pscustomobject]@{
+            lane = "lighting-showcase-current-hdr-history-lock-comparison"
+            scene = "LightingShowcase SSR temporal history-lock data comparison"
+            executable = $showcaseExecutable
+            mode = "comparison"
+            csv = ""
+            log = ""
+            verdict = if ($comparisonFailCount -eq 0) { "pass" } else { "fail" }
+            passCount = $comparisonPassCount
+            failCount = $comparisonFailCount
+            metrics = [pscustomobject]@{
+                defaultMissCarried = $defaultMissCarried
+                controlMissCarried = $controlMissCarried
+            }
+            checks = $comparisonChecks
+        }
     }
 }
 $passCount = ($reports | ForEach-Object { $_.passCount } | Measure-Object -Sum).Sum

@@ -2967,6 +2967,16 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssr.reconstructionRawResolvedAliased ? "yes" : "no"
     );
     ImGui::Text(
+        "SSR diagnostics: contract %u, raw %u, temporal %u, resolved %u, temporal reject %u, spatial reject %u, miss carried %u",
+        stats.ssr.holeDiagnosticsContractVersion,
+        stats.ssr.holeDiagnosticsRawHitPixels,
+        stats.ssr.holeDiagnosticsTemporalValidPixels,
+        stats.ssr.holeDiagnosticsResolvedValidPixels,
+        stats.ssr.holeDiagnosticsRawHitTemporalRejectedPixels,
+        stats.ssr.holeDiagnosticsRawHitSpatialRejectedPixels,
+        stats.ssr.holeDiagnosticsTemporalMissCarriedPixels
+    );
+    ImGui::Text(
         "SSR history identity: %s, current image %u, source image %u, age %u frame",
         stats.ssr.sceneColorHistorySourceValid ? "valid" : "cold",
         stats.ssr.sceneColorHistoryCurrentImageIndex,

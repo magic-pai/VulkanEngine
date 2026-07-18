@@ -375,10 +375,12 @@ struct FrameSsrGpuDiagnosticsStats {
     u32 resolvedHolePixels = 0;
     u32 rawHitTemporalRejectedPixels = 0;
     u32 rawHitSpatialRejectedPixels = 0;
+    u32 temporalMissCarriedPixels = 0;
     u32 fallbackBlendResolvedPixels = 0;
     u32 fallbackBlendPartialPixels = 0;
     u32 fallbackBlendHighTrustPixels = 0;
     u32 fallbackBlendWeightSum64 = 0;
+    u32 contractVersion = 0;
 };
 
 struct FrameAutoExposureReadbackStats {

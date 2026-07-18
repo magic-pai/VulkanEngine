@@ -45,7 +45,7 @@ void VulkanSsrFeature::AppendFrameGraph(
                     "SSRHoleDiagnostics",
                     "SSRRaw, SSRHistoryColor, SSRResolved, LightTileDiagnostics",
                     "LightTileDiagnostics",
-                    "Debug-only SSR hit topology audit; no production image is modified."
+                    "Debug-only SSR hit topology and temporal/spatial reliability audit; no production image is modified."
                 );
             }
             return;

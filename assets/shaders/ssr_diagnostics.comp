@@ -9,6 +9,7 @@ layout(set = 0, binding = 3) buffer LightTileDiagnostics {
     uvec4 ssrCounters;
     uvec4 ssrTopologyCounters;
     uvec4 ssrFallbackCounters;
+    uvec4 ssrReliabilityCounters;
 } diagnostics;
 
 layout(set = 1, binding = 8) uniform sampler2D rawInput;
@@ -47,6 +48,7 @@ void main() {
 
     if (all(equal(pixel, ivec2(0)))) {
         diagnostics.ssrCounters.w = 0x53535244u;
+        diagnostics.ssrReliabilityCounters.w = 2u;
     }
 
     const float kRawHitThreshold = 0.0001;
@@ -81,6 +83,15 @@ void main() {
             diagnostics.ssrFallbackCounters.w,
             uint(clamp(round(resolved * 64.0), 0.0, 64.0))
         );
+    }
+    if (rawHit && !temporalValid) {
+        atomicAdd(diagnostics.ssrReliabilityCounters.x, 1u);
+    }
+    if (rawHit && temporalValid && !resolvedValid) {
+        atomicAdd(diagnostics.ssrReliabilityCounters.y, 1u);
+    }
+    if (!rawHit && temporalValid) {
+        atomicAdd(diagnostics.ssrReliabilityCounters.z, 1u);
     }
 
     uint neighborRawHits = 0u;

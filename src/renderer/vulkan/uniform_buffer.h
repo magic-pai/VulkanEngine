@@ -132,6 +132,7 @@ struct LightTileDiagnosticsBufferObject {
     alignas(16) glm::uvec4 ssrCounters{};
     alignas(16) glm::uvec4 ssrTopologyCounters{};
     alignas(16) glm::uvec4 ssrFallbackCounters{};
+    alignas(16) glm::uvec4 ssrReliabilityCounters{};
 };
 
 struct AutoExposureBufferObject {
@@ -263,7 +264,7 @@ static_assert(
 );
 
 static_assert(
-    sizeof(LightTileDiagnosticsBufferObject) == sizeof(glm::uvec4) * 5,
+    sizeof(LightTileDiagnosticsBufferObject) == sizeof(glm::uvec4) * 6,
     "LightTileDiagnosticsBufferObject layout must match the shader storage buffer"
 );
 

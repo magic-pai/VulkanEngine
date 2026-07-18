@@ -6261,17 +6261,11 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.holeDiagnosticsResolvedHolePixels =
         ssrGpuDiagnostics.resolvedHolePixels;
     frameStats.ssr.holeDiagnosticsRawHitTemporalRejectedPixels =
-        ssrGpuDiagnostics.rawHitPixels >= ssrGpuDiagnostics.temporalValidPixels
-            ? ssrGpuDiagnostics.rawHitPixels - ssrGpuDiagnostics.temporalValidPixels
-            : 0u;
+        ssrGpuDiagnostics.rawHitTemporalRejectedPixels;
     frameStats.ssr.holeDiagnosticsRawHitSpatialRejectedPixels =
-        ssrGpuDiagnostics.temporalValidPixels >= ssrGpuDiagnostics.resolvedValidPixels
-            ? ssrGpuDiagnostics.temporalValidPixels - ssrGpuDiagnostics.resolvedValidPixels
-            : 0u;
+        ssrGpuDiagnostics.rawHitSpatialRejectedPixels;
     frameStats.ssr.holeDiagnosticsTemporalMissCarriedPixels =
-        ssrGpuDiagnostics.temporalValidPixels >= ssrGpuDiagnostics.rawHitPixels
-            ? ssrGpuDiagnostics.temporalValidPixels - ssrGpuDiagnostics.rawHitPixels
-            : 0u;
+        ssrGpuDiagnostics.temporalMissCarriedPixels;
     frameStats.ssr.fallbackBlendResolvedPixels =
         ssrGpuDiagnostics.fallbackBlendResolvedPixels;
     frameStats.ssr.fallbackBlendPartialPixels =
@@ -6299,7 +6293,9 @@ void VulkanRenderer::DrawFrame() {
             ? 1u
             : 0u;
     frameStats.ssr.holeDiagnosticsContractVersion =
-        frameStats.ssr.holeDiagnosticsActive > 0u ? 1u : 0u;
+        frameStats.ssr.holeDiagnosticsActive > 0u
+            ? ssrGpuDiagnostics.contractVersion
+            : 0u;
     WriteFrameReflectionProbeStats(
         frameReflectionProbes,
         frameStats.reflectionProbe
@@ -7245,44 +7241,6 @@ void VulkanRenderer::DrawFrame() {
         m_RenderDebugSettings.forwardView == ForwardDebugView::TaaHistory ? 1u : 0u;
     frameStats.temporal.taaReprojectionDebugViewEnabled =
         m_RenderDebugSettings.forwardView == ForwardDebugView::TaaReprojection ? 1u : 0u;
-    const bool temporalHistoryReadyForConsumers =
-        frameStats.temporal.taaHistoryColorReady > 0 &&
-        frameStats.temporal.velocityCameraMotionReady > 0 &&
-        ssrSceneColorHistorySourceValid;
-    frameStats.temporal.temporalConsumerSsrReady =
-        temporalHistoryReadyForConsumers && frameStats.ssr.enabled > 0 ? 1u : 0u;
-    frameStats.ssr.sceneColorHistoryReady =
-        frameStats.temporal.temporalConsumerSsrReady;
-    frameStats.ssr.sceneColorHistorySourceValid =
-        ssrSceneColorHistorySourceValid ? 1u : 0u;
-    frameStats.ssr.sceneColorHistoryCurrentImageIndex = imageIndex;
-    frameStats.ssr.sceneColorHistorySourceImageIndex =
-        ssrSceneColorHistorySourceImageIndex;
-    frameStats.ssr.sceneColorHistoryFrameAge =
-        ssrSceneColorHistorySourceValid ? 1u : 0u;
-    frameStats.ssr.sceneColorHistoryActive =
-        frameStats.ssr.sceneColorHistoryRequested > 0 &&
-        frameStats.ssr.sceneColorHistoryDescriptorBound > 0 &&
-        frameStats.ssr.sceneColorHistoryReady > 0
-            ? 1u
-            : 0u;
-    if (frameStats.ssr.sceneColorHistoryActive > 0) {
-        frameStats.ssr.sceneColorHistoryFallbackReason = 0u;
-    } else if (frameStats.ssr.sceneColorHistoryRequested == 0u) {
-        frameStats.ssr.sceneColorHistoryFallbackReason = 1u;
-    } else if (frameStats.ssr.sceneColorHistoryDescriptorBound == 0u) {
-        frameStats.ssr.sceneColorHistoryFallbackReason = 2u;
-    } else if (frameStats.temporal.taaHistoryColorReady == 0u) {
-        frameStats.ssr.sceneColorHistoryFallbackReason = 3u;
-    } else {
-        frameStats.ssr.sceneColorHistoryFallbackReason = 4u;
-    }
-    frameStats.ssr.radianceSource =
-        frameStats.ssr.sceneColorHistoryActive > 0
-            ? 2u
-            : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u);
-    frameStats.temporal.temporalConsumerSsrActive =
-        frameStats.ssr.sceneColorHistoryActive;
     frameStats.temporal.temporalConsumerGtaoReady = 0u;
     frameStats.temporal.temporalConsumerMotionBlurReady = 0u;
     if (has3DMainPass && m_GBufferGraphicsPipeline != nullptr) {
@@ -7390,6 +7348,44 @@ void VulkanRenderer::DrawFrame() {
             : 0u,
         frameStats.temporal
     );
+    const bool temporalHistoryReadyForConsumers =
+        frameStats.temporal.taaHistoryColorReady > 0 &&
+        frameStats.temporal.velocityCameraMotionReady > 0 &&
+        ssrSceneColorHistorySourceValid;
+    frameStats.temporal.temporalConsumerSsrReady =
+        temporalHistoryReadyForConsumers && frameStats.ssr.enabled > 0 ? 1u : 0u;
+    frameStats.ssr.sceneColorHistoryReady =
+        frameStats.temporal.temporalConsumerSsrReady;
+    frameStats.ssr.sceneColorHistorySourceValid =
+        ssrSceneColorHistorySourceValid ? 1u : 0u;
+    frameStats.ssr.sceneColorHistoryCurrentImageIndex = imageIndex;
+    frameStats.ssr.sceneColorHistorySourceImageIndex =
+        ssrSceneColorHistorySourceImageIndex;
+    frameStats.ssr.sceneColorHistoryFrameAge =
+        ssrSceneColorHistorySourceValid ? 1u : 0u;
+    frameStats.ssr.sceneColorHistoryActive =
+        frameStats.ssr.sceneColorHistoryRequested > 0 &&
+        frameStats.ssr.sceneColorHistoryDescriptorBound > 0 &&
+        frameStats.ssr.sceneColorHistoryReady > 0
+            ? 1u
+            : 0u;
+    if (frameStats.ssr.sceneColorHistoryActive > 0) {
+        frameStats.ssr.sceneColorHistoryFallbackReason = 0u;
+    } else if (frameStats.ssr.sceneColorHistoryRequested == 0u) {
+        frameStats.ssr.sceneColorHistoryFallbackReason = 1u;
+    } else if (frameStats.ssr.sceneColorHistoryDescriptorBound == 0u) {
+        frameStats.ssr.sceneColorHistoryFallbackReason = 2u;
+    } else if (frameStats.temporal.taaHistoryColorReady == 0u) {
+        frameStats.ssr.sceneColorHistoryFallbackReason = 3u;
+    } else {
+        frameStats.ssr.sceneColorHistoryFallbackReason = 4u;
+    }
+    frameStats.ssr.radianceSource =
+        frameStats.ssr.sceneColorHistoryActive > 0
+            ? 2u
+            : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u);
+    frameStats.temporal.temporalConsumerSsrActive =
+        frameStats.ssr.sceneColorHistoryActive;
     frameStats.temporal.temporalConsumerDynamicResolutionReady =
         temporalUpscaleState.dynamicResolutionRequested &&
             temporalUpscaleState.temporalUpscaleContractReady
@@ -13140,6 +13136,10 @@ FrameSsrGpuDiagnosticsStats VulkanRenderer::ReadPreviousSsrGpuDiagnostics(
     stats.fallbackBlendPartialPixels = diagnostics.ssrFallbackCounters.y;
     stats.fallbackBlendHighTrustPixels = diagnostics.ssrFallbackCounters.z;
     stats.fallbackBlendWeightSum64 = diagnostics.ssrFallbackCounters.w;
+    stats.rawHitTemporalRejectedPixels = diagnostics.ssrReliabilityCounters.x;
+    stats.rawHitSpatialRejectedPixels = diagnostics.ssrReliabilityCounters.y;
+    stats.temporalMissCarriedPixels = diagnostics.ssrReliabilityCounters.z;
+    stats.contractVersion = diagnostics.ssrReliabilityCounters.w;
 #else
     (void)imageIndex;
 #endif

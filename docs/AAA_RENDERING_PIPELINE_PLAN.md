@@ -2,6 +2,23 @@
 
 ## Latest Completed Slice
 
+SSR consumer stats now publish after `WriteTemporalStats`, so
+`temporalConsumerSsrReady`, `sceneColorHistory*`, `radianceSource`, and
+`temporalConsumerSsrActive` now read the settled temporal state instead of a
+stale pre-writeback snapshot. The strict SSR health gate also accepts explicit
+executable paths, which lets the real LightingShowcase and Forward3D lanes run
+from the trusted Dev Drive copies when `build\Debug` is blocked by local
+policy.
+
+Trusted Dev Drive validation on
+`V:\SelfEngineRun\SelfEngineLightingShowcase.exe` and
+`V:\SelfEngineRun\SelfEngineForward3D.exe` reported
+`sceneColorHistoryReady=1`, `sceneColorHistoryActive=1`, `radianceSource=2`,
+`temporalConsumerSsrReady=1`, and `temporalConsumerSsrActive=1` for the
+current-HDR lane. The history-lock-off control still reported
+`reconstructionTemporalHistoryLockEnabled=0` and
+`holeDiagnosticsTemporalMissCarriedPixels=0`.
+
 SSR current-HDR hit radiance is no longer a production default. Visual
 validation showed that disabling only `SE_SSR_CURRENT_HDR_SOURCE` removed the
 skybox-like reflection fusion and white block artifacts in the real
