@@ -624,6 +624,28 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrClassifyTilesRayListCapacity << ','
         << ssr.fidelityFxSssrClassifyTilesDenoiserTileListCapacity << ','
         << ssr.fidelityFxSssrClassifyTilesMemoryBytes << ','
+        << ssr.fidelityFxSssrBlueNoiseResourcesReady << ','
+        << ssr.fidelityFxSssrBlueNoiseDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrBlueNoisePipelineReady << ','
+        << ssr.fidelityFxSssrBlueNoiseDispatches << ','
+        << ssr.fidelityFxSssrBlueNoiseDescriptorBinds << ','
+        << ssr.fidelityFxSssrBlueNoiseWidth << ','
+        << ssr.fidelityFxSssrBlueNoiseHeight << ','
+        << ssr.fidelityFxSssrBlueNoiseGroupCountX << ','
+        << ssr.fidelityFxSssrBlueNoiseGroupCountY << ','
+        << ssr.fidelityFxSssrBlueNoiseSobolEntryCount << ','
+        << ssr.fidelityFxSssrBlueNoiseRankingTileEntryCount << ','
+        << ssr.fidelityFxSssrBlueNoiseScramblingTileEntryCount << ','
+        << ssr.fidelityFxSssrBlueNoiseMemoryBytes << ','
+        << ssr.fidelityFxSssrIntersectResourcesReady << ','
+        << ssr.fidelityFxSssrIntersectDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrIntersectPipelineReady << ','
+        << ssr.fidelityFxSssrIntersectInputContractReady << ','
+        << ssr.fidelityFxSssrIntersectDispatches << ','
+        << ssr.fidelityFxSssrIntersectDescriptorBinds << ','
+        << ssr.fidelityFxSssrIntersectWidth << ','
+        << ssr.fidelityFxSssrIntersectHeight << ','
+        << ssr.fidelityFxSssrIntersectDepthPyramidMipCount << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1494,6 +1516,12 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ffxSssrClassifyTilesGroupCountY << ','
         << binds.ffxSssrPrepareIndirectArgsDispatches << ','
         << binds.ffxSssrPrepareIndirectArgsDescriptorBinds << ','
+        << binds.ffxSssrBlueNoiseDispatches << ','
+        << binds.ffxSssrBlueNoiseDescriptorBinds << ','
+        << binds.ffxSssrBlueNoiseGroupCountX << ','
+        << binds.ffxSssrBlueNoiseGroupCountY << ','
+        << binds.ffxSssrIntersectDispatches << ','
+        << binds.ffxSssrIntersectDescriptorBinds << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -1951,6 +1979,28 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_classify_tiles_ray_list_capacity,"
         << "ssr_ffx_sssr_classify_tiles_denoiser_tile_list_capacity,"
         << "ssr_ffx_sssr_classify_tiles_memory_bytes,"
+        << "ssr_ffx_sssr_blue_noise_resources_ready,"
+        << "ssr_ffx_sssr_blue_noise_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_blue_noise_pipeline_ready,"
+        << "ssr_ffx_sssr_blue_noise_dispatches,"
+        << "ssr_ffx_sssr_blue_noise_descriptor_binds,"
+        << "ssr_ffx_sssr_blue_noise_width,"
+        << "ssr_ffx_sssr_blue_noise_height,"
+        << "ssr_ffx_sssr_blue_noise_group_count_x,"
+        << "ssr_ffx_sssr_blue_noise_group_count_y,"
+        << "ssr_ffx_sssr_blue_noise_sobol_entry_count,"
+        << "ssr_ffx_sssr_blue_noise_ranking_tile_entry_count,"
+        << "ssr_ffx_sssr_blue_noise_scrambling_tile_entry_count,"
+        << "ssr_ffx_sssr_blue_noise_memory_bytes,"
+        << "ssr_ffx_sssr_intersect_resources_ready,"
+        << "ssr_ffx_sssr_intersect_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_intersect_pipeline_ready,"
+        << "ssr_ffx_sssr_intersect_input_contract_ready,"
+        << "ssr_ffx_sssr_intersect_dispatches,"
+        << "ssr_ffx_sssr_intersect_descriptor_binds,"
+        << "ssr_ffx_sssr_intersect_width,"
+        << "ssr_ffx_sssr_intersect_height,"
+        << "ssr_ffx_sssr_intersect_depth_pyramid_mip_count,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2679,6 +2729,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "ffx_sssr_classify_tiles_groups_y,"
         << "ffx_sssr_prepare_indirect_args_dispatches,"
         << "ffx_sssr_prepare_indirect_args_descriptor_binds,"
+        << "ffx_sssr_blue_noise_dispatches,"
+        << "ffx_sssr_blue_noise_descriptor_binds,"
+        << "ffx_sssr_blue_noise_groups_x,"
+        << "ffx_sssr_blue_noise_groups_y,"
+        << "ffx_sssr_intersect_dispatches,"
+        << "ffx_sssr_intersect_descriptor_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

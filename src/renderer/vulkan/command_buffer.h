@@ -27,7 +27,9 @@ class VulkanHdrRenderPass;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
 class VulkanFfxSssrClassifyTilesResources;
+class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrConstantsResources;
+class VulkanFfxSssrIntersectResources;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
@@ -323,6 +325,12 @@ public:
         const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline = nullptr,
         const VulkanFfxSssrPrepareIndirectArgsResources*
             ffxSssrPrepareIndirectArgsResources = nullptr,
+        const VulkanComputePipeline* ffxSssrBlueNoisePipeline = nullptr,
+        const VulkanFfxSssrBlueNoiseResources* ffxSssrBlueNoiseResources =
+            nullptr,
+        const VulkanComputePipeline* ffxSssrIntersectPipeline = nullptr,
+        const VulkanFfxSssrIntersectResources* ffxSssrIntersectResources =
+            nullptr,
         bool ffxSssrPrepareIndirectArgsEnabled = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,
         bool ssrReconstructionEnabled = false,

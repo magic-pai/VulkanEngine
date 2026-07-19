@@ -2,38 +2,47 @@
 
 ## Latest Completed Slice
 
-AMD FidelityFX SSSR has advanced from source/build integration into the first
-two official Vulkan command-stream passes. The engine vendors the official
-SSSR/DNSR/SPD shader subset, compiles eight FFX HLSL compute shaders to SPIR-V,
-creates a scene-independent `FidelityFxSssrAdapter`, and dispatches
-`ClassifyTiles.hlsl` followed by `PrepareIndirectArgs.hlsl` when
-`SE_SSR_BACKEND=ffx-sssr`.
+AMD FidelityFX SSSR has advanced from the first classify/indirect-args bridge
+into the official blue-noise and ray-intersection runtime bridge. The engine
+vendors the official SSSR/DNSR/SPD shader subset, compiles eight FFX HLSL
+compute shaders to SPIR-V, creates a scene-independent
+`FidelityFxSssrAdapter`, and dispatches `ClassifyTiles.hlsl`,
+`PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`, and
+`Intersect.hlsl` when `SE_SSR_BACKEND=ffx-sssr`.
 
 The bridge allocates the vendor-shaped constants buffer plus per-swapchain ray
 counter, ray list, denoiser tile list, extracted roughness, variance placeholder,
-intersection output, and indirect-args resources. AMD typed buffers are bound as
-`VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER`/`VK_FORMAT_R32_UINT`, and the
+intersection output, generated blue-noise texture, and indirect-args resources.
+AMD typed buffers are bound as `VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER` or
+`VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER` with `VK_FORMAT_R32_UINT`. The
 `RWTexture2D<float4>` intersection output is bound as
 `VK_FORMAT_R32G32B32A32_SFLOAT` to match the shader's `Rgba32f` SPIR-V storage
-image contract. The final reflection image still uses the stable internal
-probe/IBL and completed-history fallback until Intersect, Reproject,
+image contract. `PrepareBlueNoiseTexture` uses the official AMD 128x128 1spp
+Sobol/ranking/scrambling tables and writes a `VK_FORMAT_R32G32_SFLOAT`
+blue-noise texture. `Intersect` runs after HDR lighting so it can consume the
+lit scene color, depth pyramid, GBuffer normal, extracted roughness, environment
+map, generated blue noise, ray list, and prepared indirect ray count. Its output
+is currently an auditable intermediate; the final reflection image still uses
+the stable internal probe/IBL and completed-history fallback until Reproject,
 DNSR/ResolveTemporal, and final compositing are connected.
 
 Validation: `scripts\Test-FidelityFxSssrIntegration.ps1 -Strict
--OutputDirectory tmp\ffx_sssr_classify_tiles_v3` passed `71 pass / 0 fail`,
-with LightingShowcase and Forward3D FBX FFX lanes reporting contract `3`,
-constants `1/1`, ClassifyTiles resources/sets/pipeline/input `1/1/1/1`,
-dispatch/binds `1/2`, groups `160x90`, capacity `921600/14400`, and bounded GPU
-readback ray/tile counts. The internal-backend control reports requested/active
-`0/0`, FFX dispatch/binds `0/0`, group counts `0x0`, readback disabled, runtime
+-OutputDirectory tmp\ffx_sssr_intersect_bridge_default_exes` passed
+`89 pass / 0 fail`, with LightingShowcase and Forward3D FBX FFX lanes reporting
+contract `4`, constants `1/1`, ClassifyTiles resources/sets/pipeline/input
+`1/1/1/1`, ClassifyTiles dispatch/binds `1/2`, groups `160x90`, blue-noise
+resources/sets/pipeline `1/1/1`, blue-noise dispatch/binds `1/2`, groups
+`16x16`, official table counts `65536/131072/131072`, Intersect
+resources/sets/pipeline/input `1/1/1/1`, Intersect dispatch/binds `1/2`, extent
+`1280x720`, and depth pyramid mips `11`. The internal-backend control reports
+requested/active `0/0`, all FFX dispatch/binds `0/0`, readback disabled, runtime
 `0/0`, and fallback `1`. Existing SSR regression
-`scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict
--VerifyHoleDiagnostics -OutputDirectory tmp\ssr_refinement_after_ffx_classify_tiles`
-passed `861 pass / 0 fail`.
+`scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory
+tmp\ssr_regression_after_ffx_intersect` passed `691 pass / 0 fail`.
 
-The next SSR slice is to wire the official FFX Intersect pass and its
-depth-pyramid/ray-list/intersection-output contract, then keep advancing one
-official pass at a time behind the same data-first FFX/internal control matrix.
+The next SSR slice is to wire the official FFX Reproject pass and the required
+history/metadata/DNSR input contract, then keep advancing one official pass at a
+time behind the same data-first FFX/internal control matrix.
 
 ## Goal
 

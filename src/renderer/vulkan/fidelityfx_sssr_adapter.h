@@ -17,6 +17,7 @@ class VulkanCommandPool;
 class VulkanDevice;
 class VulkanImage;
 class VulkanPhysicalDevice;
+class VulkanDepthPyramid;
 class VulkanSceneRenderTargets;
 
 struct alignas(16) FfxSssrConstants {
@@ -183,6 +184,89 @@ private:
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
 
+class VulkanFfxSssrBlueNoiseDescriptorSetLayout {
+public:
+    explicit VulkanFfxSssrBlueNoiseDescriptorSetLayout(
+        const VulkanDevice& device
+    );
+    ~VulkanFfxSssrBlueNoiseDescriptorSetLayout();
+
+    SE_DISABLE_COPY(VulkanFfxSssrBlueNoiseDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanFfxSssrBlueNoiseDescriptorSetLayout);
+
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+class VulkanFfxSssrBlueNoiseResources {
+public:
+    VulkanFfxSssrBlueNoiseResources(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrBlueNoiseDescriptorSetLayout& descriptorSetLayout,
+        std::size_t count
+    );
+    ~VulkanFfxSssrBlueNoiseResources();
+
+    SE_DISABLE_COPY(VulkanFfxSssrBlueNoiseResources);
+    SE_DISABLE_MOVE(VulkanFfxSssrBlueNoiseResources);
+
+    VkDescriptorSet Handle(std::size_t imageIndex) const;
+    VkImage BlueNoiseImage(std::size_t imageIndex) const;
+    VkImageView BlueNoiseView(std::size_t imageIndex) const;
+    std::size_t Count() const;
+    VkExtent2D Extent() const;
+    u32 GroupCountX() const;
+    u32 GroupCountY() const;
+    u32 SobolEntryCount() const;
+    u32 RankingTileEntryCount() const;
+    u32 ScramblingTileEntryCount() const;
+    u64 TotalMemoryBytes() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrBlueNoiseDescriptorSetLayout& descriptorSetLayout,
+        std::size_t count
+    );
+    void Release();
+
+    static constexpr u32 kTextureSize = 128u;
+    static constexpr u32 kSobolEntryCount = 256u * 256u;
+    static constexpr u32 kTileEntryCount = kTextureSize * kTextureSize * 8u;
+
+private:
+    void CreateResources(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrBlueNoiseDescriptorSetLayout& descriptorSetLayout,
+        std::size_t count
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    VkExtent2D m_Extent{ kTextureSize, kTextureSize };
+    std::unique_ptr<VulkanBuffer> m_SobolBuffer;
+    std::unique_ptr<VulkanBuffer> m_RankingTileBuffer;
+    std::unique_ptr<VulkanBuffer> m_ScramblingTileBuffer;
+    VkBufferView m_SobolBufferView = VK_NULL_HANDLE;
+    VkBufferView m_RankingTileBufferView = VK_NULL_HANDLE;
+    VkBufferView m_ScramblingTileBufferView = VK_NULL_HANDLE;
+    std::vector<std::unique_ptr<VulkanImage>> m_BlueNoiseImages;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
 class VulkanFfxSssrClassifyTilesDescriptorSetLayout {
 public:
     explicit VulkanFfxSssrClassifyTilesDescriptorSetLayout(
@@ -223,9 +307,12 @@ public:
 
     VkDescriptorSet Handle(std::size_t imageIndex) const;
     VkBuffer RayListBuffer(std::size_t imageIndex) const;
+    VkBufferView RayListBufferView(std::size_t imageIndex) const;
     VkBuffer DenoiserTileListBuffer(std::size_t imageIndex) const;
     VkImage IntersectionOutputImage(std::size_t imageIndex) const;
+    VkImageView IntersectionOutputView(std::size_t imageIndex) const;
     VkImage ExtractedRoughnessImage(std::size_t imageIndex) const;
+    VkImageView ExtractedRoughnessView(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkExtent2D Extent() const;
     u32 GroupCountX() const;
@@ -277,6 +364,84 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_IntersectionOutputImages;
     std::vector<std::unique_ptr<VulkanImage>> m_ExtractedRoughnessImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceHistoryImages;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanFfxSssrIntersectDescriptorSetLayout {
+public:
+    explicit VulkanFfxSssrIntersectDescriptorSetLayout(
+        const VulkanDevice& device
+    );
+    ~VulkanFfxSssrIntersectDescriptorSetLayout();
+
+    SE_DISABLE_COPY(VulkanFfxSssrIntersectDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanFfxSssrIntersectDescriptorSetLayout);
+
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+class VulkanFfxSssrIntersectResources {
+public:
+    VulkanFfxSssrIntersectResources(
+        const VulkanDevice& device,
+        const VulkanFfxSssrIntersectDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrPrepareIndirectArgsResources& prepareResources,
+        const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        VkImageView environmentMapView,
+        VkSampler environmentMapSampler
+    );
+    ~VulkanFfxSssrIntersectResources();
+
+    SE_DISABLE_COPY(VulkanFfxSssrIntersectResources);
+    SE_DISABLE_MOVE(VulkanFfxSssrIntersectResources);
+
+    VkDescriptorSet Handle(std::size_t imageIndex) const;
+    std::size_t Count() const;
+    VkExtent2D Extent() const;
+    u32 DepthPyramidMipCount() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanFfxSssrIntersectDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrPrepareIndirectArgsResources& prepareResources,
+        const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        VkImageView environmentMapView,
+        VkSampler environmentMapSampler
+    );
+    void Release();
+
+private:
+    void CreateResources(
+        const VulkanDevice& device,
+        const VulkanFfxSssrIntersectDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrPrepareIndirectArgsResources& prepareResources,
+        const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanDepthPyramid& depthPyramid,
+        VkImageView environmentMapView,
+        VkSampler environmentMapSampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    VkExtent2D m_Extent{};
+    u32 m_DepthPyramidMipCount = 0u;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
 

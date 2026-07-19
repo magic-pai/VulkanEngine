@@ -2444,6 +2444,10 @@ void VulkanCommandBuffer::Record(
     const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline,
     const VulkanFfxSssrPrepareIndirectArgsResources*
         ffxSssrPrepareIndirectArgsResources,
+    const VulkanComputePipeline* ffxSssrBlueNoisePipeline,
+    const VulkanFfxSssrBlueNoiseResources* ffxSssrBlueNoiseResources,
+    const VulkanComputePipeline* ffxSssrIntersectPipeline,
+    const VulkanFfxSssrIntersectResources* ffxSssrIntersectResources,
     bool ffxSssrPrepareIndirectArgsEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
@@ -3188,6 +3192,22 @@ void VulkanCommandBuffer::Record(
         ffxSssrClassifyTilesResources->Count() > imageIndex &&
         ffxSssrClassifyTilesResources->GroupCountX() > 0u &&
         ffxSssrClassifyTilesResources->GroupCountY() > 0u;
+    const bool ffxSssrBlueNoiseReady =
+        ffxSssrClassifyTilesReady &&
+        ffxSssrBlueNoisePipeline != nullptr &&
+        ffxSssrBlueNoiseResources != nullptr &&
+        ffxSssrBlueNoiseResources->Count() > imageIndex &&
+        ffxSssrBlueNoiseResources->GroupCountX() > 0u &&
+        ffxSssrBlueNoiseResources->GroupCountY() > 0u;
+    const bool ffxSssrIntersectReady =
+        ffxSssrBlueNoiseReady &&
+        ffxSssrIntersectPipeline != nullptr &&
+        ffxSssrIntersectResources != nullptr &&
+        ffxSssrIntersectResources->Count() > imageIndex &&
+        ssrTargets != nullptr &&
+        ssrTargets->Count() > imageIndex &&
+        hdrRenderPass != nullptr &&
+        hdrFramebuffer != nullptr;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
@@ -3868,6 +3888,187 @@ void VulkanCommandBuffer::Record(
         }
 
         vkCmdEndRenderPass(commandBuffer);
+    }
+
+    if (ffxSssrIntersectReady) {
+        const VkDescriptorSet ffxConstantsDescriptorSet =
+            ffxSssrConstantsResources->Handle(imageIndex);
+
+        TransitionColorImage(
+            commandBuffer,
+            ssrTargets->HdrSceneColorImage(imageIndex),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+
+        BarrierSsrComputeImage(
+            commandBuffer,
+            ffxSssrBlueNoiseResources->BlueNoiseImage(imageIndex),
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        );
+
+        const VkDescriptorSet blueNoiseDescriptorSet =
+            ffxSssrBlueNoiseResources->Handle(imageIndex);
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrBlueNoisePipeline->Handle()
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrBlueNoisePipeline->Layout(),
+            0,
+            1,
+            &ffxConstantsDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrBlueNoisePipeline->Layout(),
+            1,
+            1,
+            &blueNoiseDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdDispatch(
+            commandBuffer,
+            ffxSssrBlueNoiseResources->GroupCountX(),
+            ffxSssrBlueNoiseResources->GroupCountY(),
+            1u
+        );
+
+        if (bindStats != nullptr) {
+            ++bindStats->ffxSssrBlueNoiseDispatches;
+            bindStats->ffxSssrBlueNoiseDescriptorBinds += 2u;
+            bindStats->ffxSssrBlueNoiseGroupCountX =
+                ffxSssrBlueNoiseResources->GroupCountX();
+            bindStats->ffxSssrBlueNoiseGroupCountY =
+                ffxSssrBlueNoiseResources->GroupCountY();
+        }
+
+        VkImageMemoryBarrier blueNoiseToIntersect{};
+        blueNoiseToIntersect.sType =
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        blueNoiseToIntersect.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        blueNoiseToIntersect.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        blueNoiseToIntersect.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        blueNoiseToIntersect.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        blueNoiseToIntersect.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        blueNoiseToIntersect.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        blueNoiseToIntersect.image =
+            ffxSssrBlueNoiseResources->BlueNoiseImage(imageIndex);
+        blueNoiseToIntersect.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_COLOR_BIT;
+        blueNoiseToIntersect.subresourceRange.baseMipLevel = 0;
+        blueNoiseToIntersect.subresourceRange.levelCount = 1;
+        blueNoiseToIntersect.subresourceRange.baseArrayLayer = 0;
+        blueNoiseToIntersect.subresourceRange.layerCount = 1;
+
+        VkImageMemoryBarrier roughnessToIntersect{};
+        roughnessToIntersect.sType =
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        roughnessToIntersect.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        roughnessToIntersect.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        roughnessToIntersect.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        roughnessToIntersect.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        roughnessToIntersect.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        roughnessToIntersect.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        roughnessToIntersect.image =
+            ffxSssrClassifyTilesResources->ExtractedRoughnessImage(imageIndex);
+        roughnessToIntersect.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_COLOR_BIT;
+        roughnessToIntersect.subresourceRange.baseMipLevel = 0;
+        roughnessToIntersect.subresourceRange.levelCount = 1;
+        roughnessToIntersect.subresourceRange.baseArrayLayer = 0;
+        roughnessToIntersect.subresourceRange.layerCount = 1;
+
+        VkImageMemoryBarrier intersectionForWrite = roughnessToIntersect;
+        intersectionForWrite.srcAccessMask =
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        intersectionForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        intersectionForWrite.image =
+            ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex);
+
+        std::array<VkImageMemoryBarrier, 3> imageBarriers{
+            blueNoiseToIntersect,
+            roughnessToIntersect,
+            intersectionForWrite
+        };
+        VkBufferMemoryBarrier rayListToIntersect{};
+        rayListToIntersect.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        rayListToIntersect.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        rayListToIntersect.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        rayListToIntersect.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        rayListToIntersect.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        rayListToIntersect.buffer =
+            ffxSssrClassifyTilesResources->RayListBuffer(imageIndex);
+        rayListToIntersect.offset = 0;
+        rayListToIntersect.size =
+            ffxSssrClassifyTilesResources->RayListBufferSize();
+
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+            0,
+            0,
+            nullptr,
+            1u,
+            &rayListToIntersect,
+            static_cast<u32>(imageBarriers.size()),
+            imageBarriers.data()
+        );
+
+        const VkDescriptorSet intersectDescriptorSet =
+            ffxSssrIntersectResources->Handle(imageIndex);
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrIntersectPipeline->Handle()
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrIntersectPipeline->Layout(),
+            0,
+            1,
+            &ffxConstantsDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrIntersectPipeline->Layout(),
+            1,
+            1,
+            &intersectDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdDispatchIndirect(
+            commandBuffer,
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(imageIndex),
+            0
+        );
+
+        if (bindStats != nullptr) {
+            ++bindStats->ffxSssrIntersectDispatches;
+            bindStats->ffxSssrIntersectDescriptorBinds += 2u;
+        }
     }
 
     // SSR radiance is resolved after Deferred has written the current HDR

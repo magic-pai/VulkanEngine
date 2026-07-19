@@ -32,8 +32,12 @@ class VulkanDepthBuffer;
 class VulkanDescriptorSetLayout;
 class VulkanFfxSssrClassifyTilesDescriptorSetLayout;
 class VulkanFfxSssrClassifyTilesResources;
+class VulkanFfxSssrBlueNoiseDescriptorSetLayout;
+class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrConstantsDescriptorSetLayout;
 class VulkanFfxSssrConstantsResources;
+class VulkanFfxSssrIntersectDescriptorSetLayout;
+class VulkanFfxSssrIntersectResources;
 class VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanDescriptorSets;
@@ -860,8 +864,12 @@ private:
         m_FfxSssrConstantsDescriptorSetLayout;
     std::unique_ptr<VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout>
         m_FfxSssrPrepareIndirectArgsDescriptorSetLayout;
+    std::unique_ptr<VulkanFfxSssrBlueNoiseDescriptorSetLayout>
+        m_FfxSssrBlueNoiseDescriptorSetLayout;
     std::unique_ptr<VulkanFfxSssrClassifyTilesDescriptorSetLayout>
         m_FfxSssrClassifyTilesDescriptorSetLayout;
+    std::unique_ptr<VulkanFfxSssrIntersectDescriptorSetLayout>
+        m_FfxSssrIntersectDescriptorSetLayout;
     std::unique_ptr<VulkanUniformBuffer> m_UniformBuffer;
     std::unique_ptr<VulkanUniformBuffer> m_OverlayUniformBuffer;
     std::unique_ptr<VulkanDescriptorSets> m_DescriptorSets;
@@ -877,8 +885,12 @@ private:
         m_FfxSssrConstantsResources;
     std::unique_ptr<VulkanFfxSssrPrepareIndirectArgsResources>
         m_FfxSssrPrepareIndirectArgsResources;
+    std::unique_ptr<VulkanFfxSssrBlueNoiseResources>
+        m_FfxSssrBlueNoiseResources;
     std::unique_ptr<VulkanFfxSssrClassifyTilesResources>
         m_FfxSssrClassifyTilesResources;
+    std::unique_ptr<VulkanFfxSssrIntersectResources>
+        m_FfxSssrIntersectResources;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;
     std::unique_ptr<VulkanBloomDescriptorSets> m_BloomDescriptorSets;
@@ -954,6 +966,8 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_SsrDiagnosticsComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrClassifyTilesPipeline;
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrPrepareIndirectArgsPipeline;
+    std::unique_ptr<VulkanComputePipeline> m_FfxSssrBlueNoisePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_FfxSssrIntersectPipeline;
     std::vector<bool> m_FfxSssrGpuReadbackReady;
     bool m_SsrReconstructionImagesInitialized = false;
     // IBL textures

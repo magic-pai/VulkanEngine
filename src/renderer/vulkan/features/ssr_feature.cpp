@@ -238,7 +238,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 3u;
+    ssr.fidelityFxSssrContractVersion = 4u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -286,6 +286,42 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrClassifyTilesDenoiserTileListCapacity;
     ssr.fidelityFxSssrClassifyTilesMemoryBytes =
         context.renderer.ffxSssrClassifyTilesMemoryBytes;
+    ssr.fidelityFxSssrBlueNoiseResourcesReady =
+        context.renderer.ffxSssrBlueNoiseResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrBlueNoiseDescriptorSetsReady =
+        context.renderer.ffxSssrBlueNoiseDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrBlueNoisePipelineReady =
+        context.renderer.ffxSssrBlueNoisePipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrBlueNoiseWidth =
+        context.renderer.ffxSssrBlueNoiseWidth;
+    ssr.fidelityFxSssrBlueNoiseHeight =
+        context.renderer.ffxSssrBlueNoiseHeight;
+    ssr.fidelityFxSssrBlueNoiseGroupCountX =
+        context.renderer.ffxSssrBlueNoiseGroupCountX;
+    ssr.fidelityFxSssrBlueNoiseGroupCountY =
+        context.renderer.ffxSssrBlueNoiseGroupCountY;
+    ssr.fidelityFxSssrBlueNoiseSobolEntryCount =
+        context.renderer.ffxSssrBlueNoiseSobolEntryCount;
+    ssr.fidelityFxSssrBlueNoiseRankingTileEntryCount =
+        context.renderer.ffxSssrBlueNoiseRankingTileEntryCount;
+    ssr.fidelityFxSssrBlueNoiseScramblingTileEntryCount =
+        context.renderer.ffxSssrBlueNoiseScramblingTileEntryCount;
+    ssr.fidelityFxSssrBlueNoiseMemoryBytes =
+        context.renderer.ffxSssrBlueNoiseMemoryBytes;
+    ssr.fidelityFxSssrIntersectResourcesReady =
+        context.renderer.ffxSssrIntersectResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrIntersectDescriptorSetsReady =
+        context.renderer.ffxSssrIntersectDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrIntersectPipelineReady =
+        context.renderer.ffxSssrIntersectPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrIntersectInputContractReady =
+        context.renderer.ffxSssrIntersectInputContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrIntersectWidth =
+        context.renderer.ffxSssrIntersectWidth;
+    ssr.fidelityFxSssrIntersectHeight =
+        context.renderer.ffxSssrIntersectHeight;
+    ssr.fidelityFxSssrIntersectDepthPyramidMipCount =
+        context.renderer.ffxSssrIntersectDepthPyramidMipCount;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -301,7 +337,19 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrClassifyTilesResourcesReady > 0u &&
         ssr.fidelityFxSssrClassifyTilesDescriptorSetsReady > 0u &&
         ssr.fidelityFxSssrClassifyTilesPipelineReady > 0u &&
-        ssr.fidelityFxSssrClassifyTilesInputContractReady > 0u
+        ssr.fidelityFxSssrClassifyTilesInputContractReady > 0u &&
+        ssr.fidelityFxSssrBlueNoiseResourcesReady > 0u &&
+        ssr.fidelityFxSssrBlueNoiseDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrBlueNoisePipelineReady > 0u &&
+        ssr.fidelityFxSssrBlueNoiseWidth == 128u &&
+        ssr.fidelityFxSssrBlueNoiseHeight == 128u &&
+        ssr.fidelityFxSssrBlueNoiseSobolEntryCount == 256u * 256u &&
+        ssr.fidelityFxSssrBlueNoiseRankingTileEntryCount == 128u * 128u * 8u &&
+        ssr.fidelityFxSssrBlueNoiseScramblingTileEntryCount == 128u * 128u * 8u &&
+        ssr.fidelityFxSssrIntersectResourcesReady > 0u &&
+        ssr.fidelityFxSssrIntersectDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrIntersectPipelineReady > 0u &&
+        ssr.fidelityFxSssrIntersectInputContractReady > 0u
             ? 1u
             : 0u;
     ssr.fidelityFxSssrRuntimeActive = 0u;

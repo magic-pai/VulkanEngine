@@ -56,6 +56,24 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrClassifyTilesRayListCapacity = 0;
     u32 ffxSssrClassifyTilesDenoiserTileListCapacity = 0;
     u64 ffxSssrClassifyTilesMemoryBytes = 0;
+    bool ffxSssrBlueNoiseResourcesReady = false;
+    bool ffxSssrBlueNoiseDescriptorSetsReady = false;
+    bool ffxSssrBlueNoisePipelineReady = false;
+    u32 ffxSssrBlueNoiseWidth = 0;
+    u32 ffxSssrBlueNoiseHeight = 0;
+    u32 ffxSssrBlueNoiseGroupCountX = 0;
+    u32 ffxSssrBlueNoiseGroupCountY = 0;
+    u32 ffxSssrBlueNoiseSobolEntryCount = 0;
+    u32 ffxSssrBlueNoiseRankingTileEntryCount = 0;
+    u32 ffxSssrBlueNoiseScramblingTileEntryCount = 0;
+    u64 ffxSssrBlueNoiseMemoryBytes = 0;
+    bool ffxSssrIntersectResourcesReady = false;
+    bool ffxSssrIntersectDescriptorSetsReady = false;
+    bool ffxSssrIntersectPipelineReady = false;
+    bool ffxSssrIntersectInputContractReady = false;
+    u32 ffxSssrIntersectWidth = 0;
+    u32 ffxSssrIntersectHeight = 0;
+    u32 ffxSssrIntersectDepthPyramidMipCount = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

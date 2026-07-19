@@ -108,10 +108,16 @@ function Invoke-StaticChecks {
     $cmakeSource = Get-Content -Raw -LiteralPath $cmakePath
     $adapterSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\fidelityfx_sssr_adapter.cpp")
+    $adapterHeader = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\fidelityfx_sssr_adapter.h")
     $rendererSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\renderer.cpp")
     $classifyShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\ClassifyTiles.hlsl")
+    $blueNoiseShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\PrepareBlueNoiseTexture.hlsl")
+    $intersectShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\Intersect.hlsl")
     $commonShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Common.hlsl")
     $sssrHeader = Get-Content -Raw -LiteralPath (
@@ -130,7 +136,9 @@ function Invoke-StaticChecks {
         "include\ffx-dnsr\ffx_denoiser_reflections_resolve_temporal.h",
         "include\ffx-spd\ffx_a.h",
         "include\ffx-spd\ffx_spd.h",
+        "data\blue_noise_tables_128x128_1spp.inl",
         "shaders\ClassifyTiles.hlsl",
+        "shaders\PrepareBlueNoiseTexture.hlsl",
         "shaders\Intersect.hlsl",
         "shaders\Reproject.hlsl",
         "shaders\ResolveTemporal.hlsl",
@@ -207,6 +215,28 @@ function Invoke-StaticChecks {
         "roughness=$($classifyShader -match 'Texture2D<float4> g_roughness'),rayList=$($classifyShader -match 'RWBuffer<uint> g_ray_list'),roughOut=$($classifyShader -match 'RWTexture2D<float> g_extracted_roughness')" `
         "true/true/true"
     $checks += New-Check `
+        "FFX SSSR PrepareBlueNoiseTexture shader contract present" `
+        ($blueNoiseShader -match "Buffer<uint> g_sobol_buffer" -and
+            $blueNoiseShader -match "Buffer<uint> g_ranking_tile_buffer" -and
+            $blueNoiseShader -match "Buffer<uint> g_scrambling_tile_buffer" -and
+            $blueNoiseShader -match "RWTexture2D<float2> g_blue_noise_texture" -and
+            $blueNoiseShader -match "numthreads\(8, 8, 1\)") `
+        "sobol=$($blueNoiseShader -match 'Buffer<uint> g_sobol_buffer'),ranking=$($blueNoiseShader -match 'Buffer<uint> g_ranking_tile_buffer'),scrambling=$($blueNoiseShader -match 'Buffer<uint> g_scrambling_tile_buffer'),blueNoise=$($blueNoiseShader -match 'RWTexture2D<float2> g_blue_noise_texture')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "FFX SSSR Intersect shader contract present" `
+        ($intersectShader -match "Texture2D<float4> g_lit_scene" -and
+            $intersectShader -match "Texture2D<float> g_depth_buffer_hierarchy" -and
+            $intersectShader -match "Texture2D<float4> g_normal" -and
+            $intersectShader -match "Texture2D<float> g_roughness" -and
+            $intersectShader -match "TextureCube g_environment_map" -and
+            $intersectShader -match "Texture2D<float2> g_blue_noise_texture" -and
+            $intersectShader -match "Buffer<uint> g_ray_list" -and
+            $intersectShader -match "RWTexture2D<float4> g_intersection_output" -and
+            $intersectShader -match "RWBuffer<uint> g_ray_counter") `
+        "lit=$($intersectShader -match 'Texture2D<float4> g_lit_scene'),depth=$($intersectShader -match 'Texture2D<float> g_depth_buffer_hierarchy'),rayList=$($intersectShader -match 'Buffer<uint> g_ray_list'),output=$($intersectShader -match 'RWTexture2D<float4> g_intersection_output')" `
+        "true/true/true/true"
+    $checks += New-Check `
         "SelfEngine FFX ClassifyTiles descriptors match typed-buffer contract" `
         ($adapterSource -match "VulkanFfxSssrClassifyTilesDescriptorSetLayout" -and
             $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER" -and
@@ -216,6 +246,28 @@ function Invoke-StaticChecks {
             $adapterSource -match "VK_FORMAT_R32_SFLOAT") `
         "classifyLayout=$($adapterSource -match 'VulkanFfxSssrClassifyTilesDescriptorSetLayout'),typed=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER'),r32=$($adapterSource -match 'VK_FORMAT_R32_SFLOAT')" `
         "true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX blue-noise descriptors match AMD table contract" `
+        ($adapterSource -match "VulkanFfxSssrBlueNoiseDescriptorSetLayout" -and
+            $adapterSource -match "data/blue_noise_tables_128x128_1spp.inl" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER" -and
+            $adapterSource -match "VK_FORMAT_R32G32_SFLOAT" -and
+            $adapterHeader -match "kSobolEntryCount = 256u \* 256u" -and
+            $adapterHeader -match "kTileEntryCount = kTextureSize \* kTextureSize \* 8u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrBlueNoiseDescriptorSetLayout'),tables=$($adapterSource -match 'data/blue_noise_tables_128x128_1spp.inl'),typed=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER'),format=$($adapterSource -match 'VK_FORMAT_R32G32_SFLOAT')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Intersect descriptors match official shader contract" `
+        ($adapterSource -match "VulkanFfxSssrIntersectDescriptorSetLayout" -and
+            $adapterSource -match "VulkanFfxSssrIntersectResources" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER" -and
+            $adapterSource -match "IntersectionOutputView" -and
+            $adapterSource -match "ExtractedRoughnessView" -and
+            $rendererSource -match "ffx_sssr_Intersect.hlsl.spv" -and
+            $rendererSource -match "ffx_sssr_PrepareBlueNoiseTexture.hlsl.spv") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrIntersectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrIntersectResources'),rayListTyped=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER'),intersectSpv=$($rendererSource -match 'ffx_sssr_Intersect.hlsl.spv')" `
+        "true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
@@ -260,15 +312,9 @@ function Invoke-RuntimeLane {
     $Environment["SE_BENCHMARK_CSV"] = $csvPath
     $previous = Set-ProcessEnvironment -Values $Environment
     try {
-        $process = Start-Process `
-            -FilePath $Executable `
-            -PassThru `
-            -Wait `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath
-        if ($process.ExitCode -ne 0) {
-            throw "$Name exited with code $($process.ExitCode)"
+        & cmd.exe /d /c "`"$Executable`" > `"$stdoutPath`" 2> `"$stderrPath`""
+        if ($LASTEXITCODE -ne 0) {
+            throw "$Name exited with code $LASTEXITCODE"
         }
     } finally {
         Restore-ProcessEnvironment -Values $previous
@@ -328,6 +374,34 @@ function Invoke-RuntimeLane {
     $classifyBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_classify_tiles_descriptor_binds"
     $classifyBindGroupCountX = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_x"
     $classifyBindGroupCountY = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_y"
+    $blueNoiseResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_resources_ready"
+    $blueNoiseDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_descriptor_sets_ready"
+    $blueNoisePipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_pipeline_ready"
+    $blueNoiseDispatches = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_dispatches"
+    $blueNoiseDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_descriptor_binds"
+    $blueNoiseWidth = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_width"
+    $blueNoiseHeight = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_height"
+    $blueNoiseGroupCountX = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_group_count_x"
+    $blueNoiseGroupCountY = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_group_count_y"
+    $blueNoiseSobolEntryCount = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_sobol_entry_count"
+    $blueNoiseRankingTileEntryCount = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_ranking_tile_entry_count"
+    $blueNoiseScramblingTileEntryCount = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_scrambling_tile_entry_count"
+    $blueNoiseMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_blue_noise_memory_bytes"
+    $blueNoiseBindDispatches = Get-UIntMetric $last "ffx_sssr_blue_noise_dispatches"
+    $blueNoiseBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_blue_noise_descriptor_binds"
+    $blueNoiseBindGroupCountX = Get-UIntMetric $last "ffx_sssr_blue_noise_groups_x"
+    $blueNoiseBindGroupCountY = Get-UIntMetric $last "ffx_sssr_blue_noise_groups_y"
+    $intersectResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_intersect_resources_ready"
+    $intersectDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_intersect_descriptor_sets_ready"
+    $intersectPipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_intersect_pipeline_ready"
+    $intersectInputContractReady = Get-UIntMetric $last "ssr_ffx_sssr_intersect_input_contract_ready"
+    $intersectDispatches = Get-UIntMetric $last "ssr_ffx_sssr_intersect_dispatches"
+    $intersectDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_intersect_descriptor_binds"
+    $intersectWidth = Get-UIntMetric $last "ssr_ffx_sssr_intersect_width"
+    $intersectHeight = Get-UIntMetric $last "ssr_ffx_sssr_intersect_height"
+    $intersectDepthPyramidMipCount = Get-UIntMetric $last "ssr_ffx_sssr_intersect_depth_pyramid_mip_count"
+    $intersectBindDispatches = Get-UIntMetric $last "ffx_sssr_intersect_dispatches"
+    $intersectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_intersect_descriptor_binds"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
@@ -365,6 +439,40 @@ function Invoke-RuntimeLane {
             $classifyBindDispatches -eq 0 -and
             $classifyBindDescriptorBinds -eq 0
     }
+    $blueNoiseDispatchStateMatches = $false
+    $blueNoiseExpectedLabel = "0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $blueNoiseDispatchStateMatches =
+            $blueNoiseDispatches -gt 0 -and
+            $blueNoiseDescriptorBinds -gt 0 -and
+            $blueNoiseBindDispatches -eq $blueNoiseDispatches -and
+            $blueNoiseBindDescriptorBinds -eq $blueNoiseDescriptorBinds -and
+            $blueNoiseBindGroupCountX -eq $blueNoiseGroupCountX -and
+            $blueNoiseBindGroupCountY -eq $blueNoiseGroupCountY
+        $blueNoiseExpectedLabel = ">0/>0 mirrored with matching 16x16 groups"
+    } else {
+        $blueNoiseDispatchStateMatches =
+            $blueNoiseDispatches -eq 0 -and
+            $blueNoiseDescriptorBinds -eq 0 -and
+            $blueNoiseBindDispatches -eq 0 -and
+            $blueNoiseBindDescriptorBinds -eq 0
+    }
+    $intersectDispatchStateMatches = $false
+    $intersectExpectedLabel = "0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $intersectDispatchStateMatches =
+            $intersectDispatches -gt 0 -and
+            $intersectDescriptorBinds -gt 0 -and
+            $intersectBindDispatches -eq $intersectDispatches -and
+            $intersectBindDescriptorBinds -eq $intersectDescriptorBinds
+        $intersectExpectedLabel = ">0/>0 mirrored"
+    } else {
+        $intersectDispatchStateMatches =
+            $intersectDispatches -eq 0 -and
+            $intersectDescriptorBinds -eq 0 -and
+            $intersectBindDispatches -eq 0 -and
+            $intersectBindDescriptorBinds -eq 0
+    }
     $expectedRayCapacity = $classifyWidth * $classifyHeight
     $expectedTileCapacity =
         [uint32]([Math]::Ceiling($classifyWidth / 8.0) *
@@ -372,7 +480,7 @@ function Invoke-RuntimeLane {
     $expectedClassifyGroupsX = [uint32][Math]::Ceiling($classifyWidth / 8.0)
     $expectedClassifyGroupsY = [uint32][Math]::Ceiling($classifyHeight / 8.0)
     $classifyGroupStateMatches = $false
-    $classifyGroupExpectedLabel = "resource extent valid, dispatch groups suppressed"
+    $classifyGroupExpectedLabel = "resource ceil groups, dispatch binds suppressed"
     if ($ExpectPrepareDispatch) {
         $classifyGroupStateMatches =
             $classifyGroupCountX -eq $expectedClassifyGroupsX -and
@@ -404,6 +512,34 @@ function Invoke-RuntimeLane {
             $classifyRayCount -eq 0 -and
             $classifyDenoiserTileCount -eq 0
     }
+    $expectedBlueNoiseGroupCountX = 0
+    $expectedBlueNoiseGroupCountY = 0
+    if ($ExpectPrepareDispatch) {
+        $expectedBlueNoiseGroupCountX = 16
+        $expectedBlueNoiseGroupCountY = 16
+    }
+    $blueNoiseGroupExpectedLabel =
+        "${expectedBlueNoiseGroupCountX}x${expectedBlueNoiseGroupCountY}"
+    $blueNoiseResourceContractMatches =
+        $blueNoiseResourcesReady -eq 1 -and
+        $blueNoiseDescriptorSetsReady -eq 1 -and
+        $blueNoisePipelineReady -eq 1 -and
+        $blueNoiseWidth -eq 128 -and
+        $blueNoiseHeight -eq 128 -and
+        $blueNoiseGroupCountX -eq $expectedBlueNoiseGroupCountX -and
+        $blueNoiseGroupCountY -eq $expectedBlueNoiseGroupCountY -and
+        $blueNoiseSobolEntryCount -eq (256 * 256) -and
+        $blueNoiseRankingTileEntryCount -eq (128 * 128 * 8) -and
+        $blueNoiseScramblingTileEntryCount -eq (128 * 128 * 8) -and
+        $blueNoiseMemoryBytes -gt 0
+    $intersectResourceContractMatches =
+        $intersectResourcesReady -eq 1 -and
+        $intersectDescriptorSetsReady -eq 1 -and
+        $intersectPipelineReady -eq 1 -and
+        $intersectInputContractReady -eq 1 -and
+        $intersectWidth -eq $classifyWidth -and
+        $intersectHeight -eq $classifyHeight -and
+        $intersectDepthPyramidMipCount -gt 1
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -413,8 +549,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 3 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "3/1"),
+            ($contractVersion -eq 4 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "4/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -456,6 +592,22 @@ function Invoke-RuntimeLane {
             $classifyReadbackMatches `
             "valid=$classifyReadbackValid,rays=$classifyRayCount/$classifyRayListCapacity,tiles=$classifyDenoiserTileCount/$classifyDenoiserTileListCapacity" `
             $classifyReadbackExpected),
+        (New-Check "$Name blue-noise resource contract" `
+            $blueNoiseResourceContractMatches `
+            "resources=$blueNoiseResourcesReady,sets=$blueNoiseDescriptorSetsReady,pipeline=$blueNoisePipelineReady,extent=${blueNoiseWidth}x${blueNoiseHeight},groups=${blueNoiseGroupCountX}x${blueNoiseGroupCountY},tables=$blueNoiseSobolEntryCount/$blueNoiseRankingTileEntryCount/$blueNoiseScramblingTileEntryCount,bytes=$blueNoiseMemoryBytes" `
+            "1/1/1,128x128,$blueNoiseGroupExpectedLabel,65536/131072/131072,bytes>0"),
+        (New-Check "$Name blue-noise dispatch/bind state" `
+            $blueNoiseDispatchStateMatches `
+            "stats=$blueNoiseDispatches/$blueNoiseDescriptorBinds,binds=$blueNoiseBindDispatches/$blueNoiseBindDescriptorBinds,groups=${blueNoiseBindGroupCountX}x${blueNoiseBindGroupCountY}" `
+            $blueNoiseExpectedLabel),
+        (New-Check "$Name intersect resource contract" `
+            $intersectResourceContractMatches `
+            "resources=$intersectResourcesReady,sets=$intersectDescriptorSetsReady,pipeline=$intersectPipelineReady,input=$intersectInputContractReady,extent=${intersectWidth}x${intersectHeight},depthMips=$intersectDepthPyramidMipCount" `
+            "1/1/1/1,extent==classify,mips>1"),
+        (New-Check "$Name intersect dispatch/bind state" `
+            $intersectDispatchStateMatches `
+            "stats=$intersectDispatches/$intersectDescriptorBinds,binds=$intersectBindDispatches/$intersectBindDescriptorBinds" `
+            $intersectExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -513,6 +665,34 @@ function Invoke-RuntimeLane {
             classifyTilesBindDescriptorBinds = $classifyBindDescriptorBinds
             classifyTilesBindGroupCountX = $classifyBindGroupCountX
             classifyTilesBindGroupCountY = $classifyBindGroupCountY
+            blueNoiseResourcesReady = $blueNoiseResourcesReady
+            blueNoiseDescriptorSetsReady = $blueNoiseDescriptorSetsReady
+            blueNoisePipelineReady = $blueNoisePipelineReady
+            blueNoiseDispatches = $blueNoiseDispatches
+            blueNoiseDescriptorBinds = $blueNoiseDescriptorBinds
+            blueNoiseWidth = $blueNoiseWidth
+            blueNoiseHeight = $blueNoiseHeight
+            blueNoiseGroupCountX = $blueNoiseGroupCountX
+            blueNoiseGroupCountY = $blueNoiseGroupCountY
+            blueNoiseSobolEntryCount = $blueNoiseSobolEntryCount
+            blueNoiseRankingTileEntryCount = $blueNoiseRankingTileEntryCount
+            blueNoiseScramblingTileEntryCount = $blueNoiseScramblingTileEntryCount
+            blueNoiseMemoryBytes = $blueNoiseMemoryBytes
+            blueNoiseBindDispatches = $blueNoiseBindDispatches
+            blueNoiseBindDescriptorBinds = $blueNoiseBindDescriptorBinds
+            blueNoiseBindGroupCountX = $blueNoiseBindGroupCountX
+            blueNoiseBindGroupCountY = $blueNoiseBindGroupCountY
+            intersectResourcesReady = $intersectResourcesReady
+            intersectDescriptorSetsReady = $intersectDescriptorSetsReady
+            intersectPipelineReady = $intersectPipelineReady
+            intersectInputContractReady = $intersectInputContractReady
+            intersectDispatches = $intersectDispatches
+            intersectDescriptorBinds = $intersectDescriptorBinds
+            intersectWidth = $intersectWidth
+            intersectHeight = $intersectHeight
+            intersectDepthPyramidMipCount = $intersectDepthPyramidMipCount
+            intersectBindDispatches = $intersectBindDispatches
+            intersectBindDescriptorBinds = $intersectBindDescriptorBinds
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
             fallbackReason = $fallbackReason

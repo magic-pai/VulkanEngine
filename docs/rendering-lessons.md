@@ -2475,3 +2475,29 @@ Prevention:
 Validation:
 - Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed after `ssr_spatial.comp.spv` regenerated.
 - `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_spatial_variance_clamp_health` passed `469 / 0`.
+
+## 2026-07-19 - FidelityFX SSSR Passes Need Producer/Consumer Gates Before Visibility
+
+Symptom:
+- The project was replacing an unstable custom SSR path with AMD FidelityFX SSSR, but a partial bridge could look like progress without proving that official intermediate resources were actually produced and consumed.
+
+False leads:
+- Treating source vendoring, shader compilation, or a single visible scene as enough evidence that the third-party SSR path was functionally integrated.
+
+Cause:
+- FidelityFX SSSR is a multi-pass contract. `ClassifyTiles`, `PrepareIndirectArgs`, `PrepareBlueNoiseTexture`, `Intersect`, and later DNSR/reprojection passes each need explicit Vulkan descriptors, resource formats, dispatch ordering, and fallback controls.
+
+Control test:
+- `SE_SSR_BACKEND=ffx-sssr` must activate the official pass chain in both LightingShowcase and Forward3D FBX lanes; `SE_SSR_BACKEND=selfengine` must keep the same resources available but suppress all FFX dispatch/bind counts.
+
+Fix:
+- Add official AMD 128x128 1spp blue-noise tables, `PrepareBlueNoiseTexture` resources, and `Intersect` resources/dispatches behind the FFX backend.
+- Extend `RendererStats`, benchmark CSV, and `scripts\Test-FidelityFxSssrIntegration.ps1` so the bridge reports contract `4`, blue-noise table counts, blue-noise `16x16` groups, Intersect input readiness, indirect dispatch activity, and internal-backend suppression.
+
+Prevention:
+- Advance third-party renderer integrations one official pass at a time. Do not connect a new pass to the visible image until data proves its producer, consumer, dimensions, formats, descriptors, dispatches, and fallback lane are correct across two real scenes.
+
+Validation:
+- `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` Debug builds passed.
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ffx_sssr_intersect_bridge_default_exes` passed `89 / 0`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_regression_after_ffx_intersect` passed `691 / 0`.

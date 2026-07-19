@@ -31,9 +31,10 @@ older sample toolchain where vector ternaries were accepted.
 Current integration state:
 - The third-party source and HLSL shader compilation path are part of the
   SelfEngine build.
-- The runtime bridge now executes the first two official command-stream passes
-  when `SE_SSR_BACKEND=ffx-sssr`: `ClassifyTiles.hlsl` followed by
-  `PrepareIndirectArgs.hlsl`.
+- The runtime bridge now executes the first four official command-stream
+  passes when `SE_SSR_BACKEND=ffx-sssr`: `ClassifyTiles.hlsl`,
+  `PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`, and
+  `Intersect.hlsl`.
 - SelfEngine creates the vendor-shaped constants buffer, the per-swapchain ray
   counter, ray list, denoiser tile list, extracted roughness image, variance
   placeholder, and intersection output resources. AMD typed `RWBuffer<uint>`
@@ -45,10 +46,22 @@ Current integration state:
   placeholders. Its `RWTexture2D<float4>` intersection output is bound as
   `VK_FORMAT_R32G32B32A32_SFLOAT`; Vulkan storage image validation rejects a
   half-float `R16G16B16A16` binding for that SPIR-V `Rgba32f` declaration.
+- `PrepareBlueNoiseTexture.hlsl` uses the official 128x128 1spp Sobol,
+  ranking, and scrambling tables extracted from the AMD sample at the commit
+  above. The tables are vendored in `data/blue_noise_tables_128x128_1spp.inl`
+  and bound as `VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER`; the generated
+  blue-noise image is `VK_FORMAT_R32G32_SFLOAT` and dispatches as `16x16`
+  groups.
+- `Intersect.hlsl` consumes the lit HDR scene color, depth pyramid, GBuffer
+  normal, extracted roughness, environment cubemap, generated blue noise, ray
+  list, and ray counter, then writes the existing `ClassifyTiles` intersection
+  output image through the official descriptor layout. The dispatch is indirect
+  and uses the `PrepareIndirectArgs` output buffer.
 - The runtime bridge is data-gated by
   `scripts\Test-FidelityFxSssrIntegration.ps1`, including source/build checks,
   LightingShowcase and Forward3D FBX FFX lanes, and an internal-backend control
-  lane that proves the FFX dispatch is suppressed when not requested.
+  lane that proves the FFX dispatches are suppressed when not requested.
 - Runtime image contribution remains on the existing stable probe/IBL fallback
-  until the remaining FidelityFX Intersect, Reproject, Prefilter,
-  ResolveTemporal/DNSR, and final resolve path are wired and validated.
+  until the remaining FidelityFX Reproject, Prefilter, ResolveTemporal/DNSR,
+  and final resolve path are wired and validated. The current Intersect output
+  is intentionally an auditable intermediate, not the final visible reflection.

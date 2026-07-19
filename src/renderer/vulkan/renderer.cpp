@@ -5511,6 +5511,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_SsrTemporalComputePipeline.reset();
     m_SsrSpatialComputePipeline.reset();
     m_SsrDiagnosticsComputePipeline.reset();
+    m_FfxSssrIntersectPipeline.reset();
+    m_FfxSssrBlueNoisePipeline.reset();
     m_FfxSssrClassifyTilesPipeline.reset();
     m_FfxSssrPrepareIndirectArgsPipeline.reset();
     m_GBufferGraphicsPipeline.reset();
@@ -5570,7 +5572,9 @@ VulkanRenderer::~VulkanRenderer() {
     m_TemporalUpscaleBloomDescriptorSets.reset();
     m_BloomDescriptorSets.reset();
     m_WeightedTranslucencyDescriptorSets.reset();
+    m_FfxSssrIntersectResources.reset();
     m_FfxSssrClassifyTilesResources.reset();
+    m_FfxSssrBlueNoiseResources.reset();
     m_FfxSssrPrepareIndirectArgsResources.reset();
     m_FfxSssrConstantsResources.reset();
     m_SsrReconstructionDescriptorSets.reset();
@@ -5613,7 +5617,9 @@ VulkanRenderer::~VulkanRenderer() {
     m_LocalShadowBuffer.reset();
     m_BonePaletteFallbackDescriptorSet.reset();
     m_UniformBuffer.reset();
+    m_FfxSssrIntersectDescriptorSetLayout.reset();
     m_FfxSssrClassifyTilesDescriptorSetLayout.reset();
+    m_FfxSssrBlueNoiseDescriptorSetLayout.reset();
     m_FfxSssrPrepareIndirectArgsDescriptorSetLayout.reset();
     m_FfxSssrConstantsDescriptorSetLayout.reset();
     m_SsrReconstructionDescriptorSetLayout.reset();
@@ -6067,7 +6073,65 @@ void VulkanRenderer::DrawFrame() {
             : 0u,
         m_FfxSssrClassifyTilesResources != nullptr
             ? m_FfxSssrClassifyTilesResources->TotalMemoryBytes()
-            : 0ull
+            : 0ull,
+        m_FfxSssrBlueNoiseResources != nullptr &&
+            m_Swapchain != nullptr &&
+            m_FfxSssrBlueNoiseResources->Count() ==
+                m_Swapchain->Images().size(),
+        m_FfxSssrBlueNoiseResources != nullptr &&
+            m_FfxSssrBlueNoiseResources->Count() > 0u,
+        m_FfxSssrBlueNoisePipeline != nullptr,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->Extent().width
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->Extent().height
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->GroupCountX()
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->GroupCountY()
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->SobolEntryCount()
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->RankingTileEntryCount()
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->ScramblingTileEntryCount()
+            : 0u,
+        m_FfxSssrBlueNoiseResources != nullptr
+            ? m_FfxSssrBlueNoiseResources->TotalMemoryBytes()
+            : 0ull,
+        m_FfxSssrIntersectResources != nullptr &&
+            m_SceneRenderTargets != nullptr &&
+            m_FfxSssrIntersectResources->Count() ==
+                m_SceneRenderTargets->Count(),
+        m_FfxSssrIntersectResources != nullptr &&
+            m_FfxSssrIntersectResources->Count() > 0u,
+        m_FfxSssrIntersectPipeline != nullptr,
+        m_FfxSssrIntersectResources != nullptr &&
+            m_SceneRenderTargets != nullptr &&
+            m_SsrDepthPyramid != nullptr &&
+            m_IblPrefilteredView != VK_NULL_HANDLE &&
+            m_IblSampler != VK_NULL_HANDLE &&
+            !ExtentsDiffer(
+                m_FfxSssrIntersectResources->Extent(),
+                m_SceneRenderTargets->Extent()
+            ) &&
+            m_FfxSssrIntersectResources->DepthPyramidMipCount() ==
+                m_SsrDepthPyramid->MipCount(),
+        m_FfxSssrIntersectResources != nullptr
+            ? m_FfxSssrIntersectResources->Extent().width
+            : 0u,
+        m_FfxSssrIntersectResources != nullptr
+            ? m_FfxSssrIntersectResources->Extent().height
+            : 0u,
+        m_FfxSssrIntersectResources != nullptr
+            ? m_FfxSssrIntersectResources->DepthPyramidMipCount()
+            : 0u
     };
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
@@ -8240,6 +8304,18 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
             ? m_FfxSssrPrepareIndirectArgsResources.get()
             : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrBlueNoisePipeline.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrBlueNoiseResources.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrIntersectPipeline.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrIntersectResources.get()
+            : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0,
         has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
         frameStats.ssr.reconstructionActive > 0,
@@ -8275,9 +8351,23 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.ffxSssrPrepareIndirectArgsDispatches;
     frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds =
         frameStats.binds.ffxSssrPrepareIndirectArgsDescriptorBinds;
+    frameStats.ssr.fidelityFxSssrBlueNoiseDispatches =
+        frameStats.binds.ffxSssrBlueNoiseDispatches;
+    frameStats.ssr.fidelityFxSssrBlueNoiseDescriptorBinds =
+        frameStats.binds.ffxSssrBlueNoiseDescriptorBinds;
+    frameStats.ssr.fidelityFxSssrBlueNoiseGroupCountX =
+        frameStats.binds.ffxSssrBlueNoiseGroupCountX;
+    frameStats.ssr.fidelityFxSssrBlueNoiseGroupCountY =
+        frameStats.binds.ffxSssrBlueNoiseGroupCountY;
+    frameStats.ssr.fidelityFxSssrIntersectDispatches =
+        frameStats.binds.ffxSssrIntersectDispatches;
+    frameStats.ssr.fidelityFxSssrIntersectDescriptorBinds =
+        frameStats.binds.ffxSssrIntersectDescriptorBinds;
     frameStats.ssr.fidelityFxSssrRuntimeActive =
         frameStats.ssr.fidelityFxSssrClassifyTilesDispatches > 0u &&
-            frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u
+            frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u &&
+            frameStats.ssr.fidelityFxSssrBlueNoiseDispatches > 0u &&
+            frameStats.ssr.fidelityFxSssrIntersectDispatches > 0u
             ? 1u
             : 0u;
     if (frameStats.ssr.fidelityFxSssrRuntimeActive > 0u) {
@@ -9011,8 +9101,16 @@ void VulkanRenderer::CreateSwapchainResources() {
         std::make_unique<VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout>(
             m_Device
         );
+    m_FfxSssrBlueNoiseDescriptorSetLayout =
+        std::make_unique<VulkanFfxSssrBlueNoiseDescriptorSetLayout>(
+            m_Device
+        );
     m_FfxSssrClassifyTilesDescriptorSetLayout =
         std::make_unique<VulkanFfxSssrClassifyTilesDescriptorSetLayout>(
+            m_Device
+        );
+    m_FfxSssrIntersectDescriptorSetLayout =
+        std::make_unique<VulkanFfxSssrIntersectDescriptorSetLayout>(
             m_Device
         );
     m_UniformBuffer = std::make_unique<VulkanUniformBuffer>(
@@ -9343,6 +9441,14 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_FfxSssrPrepareIndirectArgsDescriptorSetLayout,
             m_Swapchain->Images().size()
         );
+    m_FfxSssrBlueNoiseResources =
+        std::make_unique<VulkanFfxSssrBlueNoiseResources>(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrBlueNoiseDescriptorSetLayout,
+            m_Swapchain->Images().size()
+        );
     m_FfxSssrClassifyTilesResources =
         std::make_unique<VulkanFfxSssrClassifyTilesResources>(
             m_Device,
@@ -9351,6 +9457,18 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_FfxSssrClassifyTilesDescriptorSetLayout,
             *m_FfxSssrPrepareIndirectArgsResources,
             *m_SceneRenderTargets,
+            m_IblPrefilteredView,
+            m_IblSampler
+        );
+    m_FfxSssrIntersectResources =
+        std::make_unique<VulkanFfxSssrIntersectResources>(
+            m_Device,
+            *m_FfxSssrIntersectDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_FfxSssrBlueNoiseResources,
+            *m_SceneRenderTargets,
+            *m_SsrDepthPyramid,
             m_IblPrefilteredView,
             m_IblSampler
         );
@@ -9800,6 +9918,22 @@ void VulkanRenderer::CreateSwapchainResources() {
             );
     }
     {
+        const std::array<VkDescriptorSetLayout, 2> ffxBlueNoiseLayouts = {
+            m_FfxSssrConstantsDescriptorSetLayout->Handle(),
+            m_FfxSssrBlueNoiseDescriptorSetLayout->Handle()
+        };
+        m_FfxSssrBlueNoisePipeline =
+            std::make_unique<VulkanComputePipeline>(
+                m_Device,
+                std::span<const VkDescriptorSetLayout>(
+                    ffxBlueNoiseLayouts.data(),
+                    ffxBlueNoiseLayouts.size()
+                ),
+                std::string(SE_SHADER_DIR) +
+                    "/ffx_sssr_PrepareBlueNoiseTexture.hlsl.spv"
+            );
+    }
+    {
         const std::array<VkDescriptorSetLayout, 2> ffxClassifyLayouts = {
             m_FfxSssrConstantsDescriptorSetLayout->Handle(),
             m_FfxSssrClassifyTilesDescriptorSetLayout->Handle()
@@ -9813,6 +9947,22 @@ void VulkanRenderer::CreateSwapchainResources() {
                 ),
                 std::string(SE_SHADER_DIR) +
                     "/ffx_sssr_ClassifyTiles.hlsl.spv"
+            );
+    }
+    {
+        const std::array<VkDescriptorSetLayout, 2> ffxIntersectLayouts = {
+            m_FfxSssrConstantsDescriptorSetLayout->Handle(),
+            m_FfxSssrIntersectDescriptorSetLayout->Handle()
+        };
+        m_FfxSssrIntersectPipeline =
+            std::make_unique<VulkanComputePipeline>(
+                m_Device,
+                std::span<const VkDescriptorSetLayout>(
+                    ffxIntersectLayouts.data(),
+                    ffxIntersectLayouts.size()
+                ),
+                std::string(SE_SHADER_DIR) +
+                    "/ffx_sssr_Intersect.hlsl.spv"
             );
     }
 #if !defined(NDEBUG)
@@ -10084,8 +10234,14 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_WeightedTranslucencyDescriptorSets != nullptr) {
         m_WeightedTranslucencyDescriptorSets->Release();
     }
+    if (m_FfxSssrIntersectResources != nullptr) {
+        m_FfxSssrIntersectResources->Release();
+    }
     if (m_FfxSssrClassifyTilesResources != nullptr) {
         m_FfxSssrClassifyTilesResources->Release();
+    }
+    if (m_FfxSssrBlueNoiseResources != nullptr) {
+        m_FfxSssrBlueNoiseResources->Release();
     }
     if (m_FfxSssrPrepareIndirectArgsResources != nullptr) {
         m_FfxSssrPrepareIndirectArgsResources->Release();
@@ -10517,6 +10673,16 @@ void VulkanRenderer::RecreateSwapchain() {
             m_Swapchain->Images().size()
         );
     }
+    if (m_FfxSssrBlueNoiseResources != nullptr &&
+        m_FfxSssrBlueNoiseDescriptorSetLayout != nullptr) {
+        m_FfxSssrBlueNoiseResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrBlueNoiseDescriptorSetLayout,
+            m_Swapchain->Images().size()
+        );
+    }
     if (m_FfxSssrClassifyTilesResources != nullptr &&
         m_FfxSssrClassifyTilesDescriptorSetLayout != nullptr &&
         m_FfxSssrPrepareIndirectArgsResources != nullptr &&
@@ -10530,6 +10696,27 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_FfxSssrClassifyTilesDescriptorSetLayout,
             *m_FfxSssrPrepareIndirectArgsResources,
             *m_SceneRenderTargets,
+            m_IblPrefilteredView,
+            m_IblSampler
+        );
+    }
+    if (m_FfxSssrIntersectResources != nullptr &&
+        m_FfxSssrIntersectDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_FfxSssrBlueNoiseResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SsrDepthPyramid != nullptr &&
+        m_IblPrefilteredView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE) {
+        m_FfxSssrIntersectResources->Recreate(
+            m_Device,
+            *m_FfxSssrIntersectDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_FfxSssrBlueNoiseResources,
+            *m_SceneRenderTargets,
+            *m_SsrDepthPyramid,
             m_IblPrefilteredView,
             m_IblSampler
         );
