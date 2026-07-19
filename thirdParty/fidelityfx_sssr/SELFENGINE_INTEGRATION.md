@@ -31,10 +31,10 @@ older sample toolchain where vector ternaries were accepted.
 Current integration state:
 - The third-party source and HLSL shader compilation path are part of the
   SelfEngine build.
-- The runtime bridge now executes the first five official command-stream
+- The runtime bridge now executes the first six official command-stream
   passes when `SE_SSR_BACKEND=ffx-sssr`: `ClassifyTiles.hlsl`,
   `PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`,
-  `Intersect.hlsl`, and `Reproject.hlsl`.
+  `Intersect.hlsl`, `Reproject.hlsl`, and `Prefilter.hlsl`.
 - SelfEngine creates the vendor-shaped constants buffer, the per-swapchain ray
   counter, ray list, denoiser tile list, extracted roughness image, variance
   placeholder, and intersection output resources. AMD typed `RWBuffer<uint>`
@@ -63,6 +63,12 @@ Current integration state:
   radiance, average radiance, variance, and sample-count images. The dispatch
   is indirect at byte offset `12`, matching the second three-uint dispatch
   record written by `PrepareIndirectArgs.hlsl`.
+- `Prefilter.hlsl` consumes current radiance from the Intersect output,
+  average radiance plus variance/sample-count from Reproject, current depth,
+  extracted roughness, GBuffer normal, and the denoiser tile list. It writes
+  prefiltered radiance, variance, and sample-count carrier images with typed
+  Vulkan storage formats (`R32G32B32A32_SFLOAT` and `R32_SFLOAT`). The dispatch
+  also uses the denoiser indirect record at byte offset `12`.
 - The runtime bridge is data-gated by
   `scripts\Test-FidelityFxSssrIntegration.ps1`, including source/build checks,
   LightingShowcase and Forward3D FBX FFX lanes, and an internal-backend control
@@ -70,6 +76,6 @@ Current integration state:
   gate also requires the FFX FrameGraph resources and official pass split to be
   validation-clean.
 - Runtime image contribution remains on the existing stable probe/IBL fallback
-  until the remaining FidelityFX Prefilter, ResolveTemporal/DNSR, history swap,
-  and final resolve path are wired and validated. The current Reproject output
-  is intentionally an auditable intermediate, not the final visible reflection.
+  until the remaining FidelityFX ResolveTemporal/DNSR, real history swap, and
+  final resolve path are wired and validated. The current Prefilter output is
+  intentionally an auditable intermediate, not the final visible reflection.

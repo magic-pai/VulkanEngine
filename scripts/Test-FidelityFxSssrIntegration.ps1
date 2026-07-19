@@ -122,6 +122,8 @@ function Invoke-StaticChecks {
         Join-Path $vendorRoot "shaders\Intersect.hlsl")
     $reprojectShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Reproject.hlsl")
+    $prefilterShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\Prefilter.hlsl")
     $commonShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Common.hlsl")
     $sssrHeader = Get-Content -Raw -LiteralPath (
@@ -136,6 +138,7 @@ function Invoke-StaticChecks {
         "SELFENGINE_INTEGRATION.md",
         "include\ffx-sssr\ffx_sssr.h",
         "include\ffx-dnsr\ffx_denoiser_reflections_common.h",
+        "include\ffx-dnsr\ffx_denoiser_reflections_prefilter.h",
         "include\ffx-dnsr\ffx_denoiser_reflections_reproject.h",
         "include\ffx-dnsr\ffx_denoiser_reflections_resolve_temporal.h",
         "include\ffx-spd\ffx_a.h",
@@ -145,6 +148,7 @@ function Invoke-StaticChecks {
         "shaders\PrepareBlueNoiseTexture.hlsl",
         "shaders\Intersect.hlsl",
         "shaders\Reproject.hlsl",
+        "shaders\Prefilter.hlsl",
         "shaders\ResolveTemporal.hlsl",
         "shaders\DepthDownsample.hlsl"
     )
@@ -257,6 +261,22 @@ function Invoke-StaticChecks {
         "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float3> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float3> g_out_average_radiance'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
         "true/true/true/true"
     $checks += New-Check `
+        "FFX SSSR Prefilter shader contract present" `
+        ($prefilterShader -match "Texture2D<float> g_depth_buffer" -and
+            $prefilterShader -match "Texture2D<float> g_roughness" -and
+            $prefilterShader -match "Texture2D<float3> g_normal" -and
+            $prefilterShader -match "Texture2D<float3> g_average_radiance" -and
+            $prefilterShader -match "Texture2D<float4> g_in_radiance" -and
+            $prefilterShader -match "Texture2D<float> g_in_variance" -and
+            $prefilterShader -match "Texture2D<float> g_in_sample_count" -and
+            $prefilterShader -match "RWTexture2D<float4> g_out_radiance" -and
+            $prefilterShader -match "RWTexture2D<float> g_out_variance" -and
+            $prefilterShader -match "RWTexture2D<float> g_out_sample_count" -and
+            $prefilterShader -match "Buffer<uint> g_denoiser_tile_list" -and
+            $prefilterShader -match "numthreads\(8, 8, 1\)") `
+        "depth=$($prefilterShader -match 'Texture2D<float> g_depth_buffer'),avg=$($prefilterShader -match 'Texture2D<float3> g_average_radiance'),inRadiance=$($prefilterShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($prefilterShader -match 'RWTexture2D<float4> g_out_radiance')/$($prefilterShader -match 'RWTexture2D<float> g_out_variance'),tiles=$($prefilterShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "true/true/true/true/true"
+    $checks += New-Check `
         "SelfEngine FFX ClassifyTiles descriptors match typed-buffer contract" `
         ($adapterSource -match "VulkanFfxSssrClassifyTilesDescriptorSetLayout" -and
             $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER" -and
@@ -300,6 +320,22 @@ function Invoke-StaticChecks {
             $commandBufferSource -match "sizeof\(u32\) \* 3u") `
         "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u')" `
         "true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Prefilter descriptors match official shader contract" `
+        ($adapterSource -match "VulkanFfxSssrPrefilterDescriptorSetLayout" -and
+            $adapterSource -match "VulkanFfxSssrPrefilterResources" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE" -and
+            $adapterSource -match "VK_FORMAT_R32G32B32A32_SFLOAT" -and
+            $adapterSource -match "reprojectResources\.AverageRadianceView" -and
+            $adapterSource -match "classifyResources\.IntersectionOutputView" -and
+            $adapterSource -match "reprojectResources\.VarianceView" -and
+            $adapterSource -match "reprojectResources\.SampleCountView" -and
+            $rendererSource -match "ffx_sssr_Prefilter.hlsl.spv" -and
+            $commandBufferSource -match "ffxSssrPrefilterDispatches" -and
+            $commandBufferSource -match "sizeof\(u32\) \* 3u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrPrefilterDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrPrefilterResources'),avgInput=$($adapterSource -match 'reprojectResources\.AverageRadianceView'),currentRadiance=$($adapterSource -match 'classifyResources\.IntersectionOutputView'),prefilterSpv=$($rendererSource -match 'ffx_sssr_Prefilter.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrPrefilterDispatches')" `
+        "true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
@@ -450,6 +486,18 @@ function Invoke-RuntimeLane {
     $reprojectIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_reproject_indirect_args_offset_bytes"
     $reprojectBindDispatches = Get-UIntMetric $last "ffx_sssr_reproject_dispatches"
     $reprojectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_reproject_descriptor_binds"
+    $prefilterResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_resources_ready"
+    $prefilterDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_descriptor_sets_ready"
+    $prefilterPipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_pipeline_ready"
+    $prefilterInputContractReady = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_input_contract_ready"
+    $prefilterDispatches = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_dispatches"
+    $prefilterDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_descriptor_binds"
+    $prefilterWidth = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_width"
+    $prefilterHeight = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_height"
+    $prefilterMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_memory_bytes"
+    $prefilterIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_indirect_args_offset_bytes"
+    $prefilterBindDispatches = Get-UIntMetric $last "ffx_sssr_prefilter_dispatches"
+    $prefilterBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_prefilter_descriptor_binds"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
@@ -538,6 +586,22 @@ function Invoke-RuntimeLane {
             $reprojectBindDispatches -eq 0 -and
             $reprojectBindDescriptorBinds -eq 0
     }
+    $prefilterDispatchStateMatches = $false
+    $prefilterExpectedLabel = "0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $prefilterDispatchStateMatches =
+            $prefilterDispatches -gt 0 -and
+            $prefilterDescriptorBinds -gt 0 -and
+            $prefilterBindDispatches -eq $prefilterDispatches -and
+            $prefilterBindDescriptorBinds -eq $prefilterDescriptorBinds
+        $prefilterExpectedLabel = ">0/>0 mirrored"
+    } else {
+        $prefilterDispatchStateMatches =
+            $prefilterDispatches -eq 0 -and
+            $prefilterDescriptorBinds -eq 0 -and
+            $prefilterBindDispatches -eq 0 -and
+            $prefilterBindDescriptorBinds -eq 0
+    }
     $expectedRayCapacity = $classifyWidth * $classifyHeight
     $expectedTileCapacity =
         [uint32]([Math]::Ceiling($classifyWidth / 8.0) *
@@ -620,6 +684,18 @@ function Invoke-RuntimeLane {
         $reprojectHistorySource -eq 1 -and
         $reprojectMemoryBytes -gt $classifyMemoryBytes -and
         $reprojectIndirectArgsOffsetBytes -eq 12
+    $prefilterResourceContractMatches =
+        $prefilterResourcesReady -eq 1 -and
+        $prefilterDescriptorSetsReady -eq 1 -and
+        $prefilterPipelineReady -eq 1 -and
+        $prefilterInputContractReady -eq 1 -and
+        $prefilterWidth -eq $classifyWidth -and
+        $prefilterHeight -eq $classifyHeight -and
+        $prefilterWidth -eq $reprojectWidth -and
+        $prefilterHeight -eq $reprojectHeight -and
+        $prefilterMemoryBytes -gt 0 -and
+        $prefilterMemoryBytes -lt $reprojectMemoryBytes -and
+        $prefilterIndirectArgsOffsetBytes -eq 12
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -629,8 +705,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 5 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "5/1"),
+            ($contractVersion -eq 6 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "6/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -696,6 +772,14 @@ function Invoke-RuntimeLane {
             $reprojectDispatchStateMatches `
             "stats=$reprojectDispatches/$reprojectDescriptorBinds,binds=$reprojectBindDispatches/$reprojectBindDescriptorBinds" `
             $reprojectExpectedLabel),
+        (New-Check "$Name prefilter resource contract" `
+            $prefilterResourceContractMatches `
+            "resources=$prefilterResourcesReady,sets=$prefilterDescriptorSetsReady,pipeline=$prefilterPipelineReady,input=$prefilterInputContractReady,extent=${prefilterWidth}x${prefilterHeight},bytes=$prefilterMemoryBytes,offset=$prefilterIndirectArgsOffsetBytes" `
+            "1/1/1/1,extent==classify/reproject,0<bytes<reproject,offset=12"),
+        (New-Check "$Name prefilter dispatch/bind state" `
+            $prefilterDispatchStateMatches `
+            "stats=$prefilterDispatches/$prefilterDescriptorBinds,binds=$prefilterBindDispatches/$prefilterBindDescriptorBinds" `
+            $prefilterExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -800,6 +884,18 @@ function Invoke-RuntimeLane {
             reprojectIndirectArgsOffsetBytes = $reprojectIndirectArgsOffsetBytes
             reprojectBindDispatches = $reprojectBindDispatches
             reprojectBindDescriptorBinds = $reprojectBindDescriptorBinds
+            prefilterResourcesReady = $prefilterResourcesReady
+            prefilterDescriptorSetsReady = $prefilterDescriptorSetsReady
+            prefilterPipelineReady = $prefilterPipelineReady
+            prefilterInputContractReady = $prefilterInputContractReady
+            prefilterDispatches = $prefilterDispatches
+            prefilterDescriptorBinds = $prefilterDescriptorBinds
+            prefilterWidth = $prefilterWidth
+            prefilterHeight = $prefilterHeight
+            prefilterMemoryBytes = $prefilterMemoryBytes
+            prefilterIndirectArgsOffsetBytes = $prefilterIndirectArgsOffsetBytes
+            prefilterBindDispatches = $prefilterBindDispatches
+            prefilterBindDescriptorBinds = $prefilterBindDescriptorBinds
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
             frameGraphValidationIssues = $frameGraphIssues

@@ -2,6 +2,35 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-20 - FidelityFX SSSR Prefilter Must Stay An Audited Intermediate
+
+Symptom:
+- The SSSR mainline needed to advance from Reproject toward production DNSR without again exposing half-connected SSR output as visible reflection quality.
+
+False leads:
+- Treating Prefilter as a visual-quality fix by itself.
+- Binding Reprojected history radiance as the current radiance input to Prefilter.
+
+Cause:
+- AMD's DNSR chain separates current radiance, reprojected history, average radiance, variance, and sample count. Prefilter consumes current Intersect radiance plus Reproject variance/average/sample-count, then writes an intermediate for ResolveTemporal.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_prefilter_bridge` and require both FFX real-scene lanes to report contract `6`, Prefilter dispatch `1`, descriptor binds `2`, offset `12`, and FrameGraph validation `0`; the internal-backend control must keep Prefilter dispatch/binds at `0/0`.
+
+Fix:
+- Added the official `Prefilter.hlsl` Vulkan descriptor/resources/pipeline/dispatch bridge.
+- Registered `FidelityFXSSSRPrefilter` and its resource producers in FrameGraph.
+- Extended RendererStats, benchmark CSV, and the strict FFX integration gate with Prefilter resource, extent, memory, offset, dispatch, and bind checks.
+
+Prevention:
+- Keep every third-party SSR/DNSR pass as an auditable producer/consumer step before connecting it to the visible image.
+- Do not promote a pass to runtime-active unless all prior official passes and the new pass dispatch in both target and control scenes.
+
+Validation:
+- Debug `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` builds passed.
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_prefilter_bridge` passed `110 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\ssr_regression_after_ffx_prefilter` passed `691 pass / 0 fail`.
+
 ## 2026-07-20 - FidelityFX SSSR Reproject Needs FrameGraph Resource Proof
 
 Symptom:

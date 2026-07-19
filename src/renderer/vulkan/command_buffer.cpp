@@ -2450,6 +2450,8 @@ void VulkanCommandBuffer::Record(
     const VulkanFfxSssrIntersectResources* ffxSssrIntersectResources,
     const VulkanComputePipeline* ffxSssrReprojectPipeline,
     const VulkanFfxSssrReprojectResources* ffxSssrReprojectResources,
+    const VulkanComputePipeline* ffxSssrPrefilterPipeline,
+    const VulkanFfxSssrPrefilterResources* ffxSssrPrefilterResources,
     bool ffxSssrPrepareIndirectArgsEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
@@ -3215,6 +3217,11 @@ void VulkanCommandBuffer::Record(
         ffxSssrReprojectPipeline != nullptr &&
         ffxSssrReprojectResources != nullptr &&
         ffxSssrReprojectResources->Count() > imageIndex;
+    const bool ffxSssrPrefilterReady =
+        ffxSssrReprojectReady &&
+        ffxSssrPrefilterPipeline != nullptr &&
+        ffxSssrPrefilterResources != nullptr &&
+        ffxSssrPrefilterResources->Count() > imageIndex;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
@@ -4206,6 +4213,124 @@ void VulkanCommandBuffer::Record(
             if (bindStats != nullptr) {
                 ++bindStats->ffxSssrReprojectDispatches;
                 bindStats->ffxSssrReprojectDescriptorBinds += 2u;
+            }
+
+            if (ffxSssrPrefilterReady) {
+                std::array<VkImageMemoryBarrier, 6> prefilterImageBarriers{};
+                auto setPrefilterImageBarrier = [&](
+                    std::size_t barrierIndex,
+                    VkImage image,
+                    VkAccessFlags sourceAccess,
+                    VkAccessFlags destinationAccess
+                ) {
+                    VkImageMemoryBarrier& barrier =
+                        prefilterImageBarriers[barrierIndex];
+                    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                    barrier.srcAccessMask = sourceAccess;
+                    barrier.dstAccessMask = destinationAccess;
+                    barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    barrier.image = image;
+                    barrier.subresourceRange.aspectMask =
+                        VK_IMAGE_ASPECT_COLOR_BIT;
+                    barrier.subresourceRange.baseMipLevel = 0u;
+                    barrier.subresourceRange.levelCount = 1u;
+                    barrier.subresourceRange.baseArrayLayer = 0u;
+                    barrier.subresourceRange.layerCount = 1u;
+                };
+                setPrefilterImageBarrier(
+                    0u,
+                    ffxSssrReprojectResources->AverageRadianceImage(
+                        imageIndex
+                    ),
+                    VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setPrefilterImageBarrier(
+                    1u,
+                    ffxSssrReprojectResources->VarianceImage(imageIndex),
+                    VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setPrefilterImageBarrier(
+                    2u,
+                    ffxSssrReprojectResources->SampleCountImage(imageIndex),
+                    VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setPrefilterImageBarrier(
+                    3u,
+                    ffxSssrPrefilterResources->RadianceImage(imageIndex),
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_WRITE_BIT
+                );
+                setPrefilterImageBarrier(
+                    4u,
+                    ffxSssrPrefilterResources->VarianceImage(imageIndex),
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_WRITE_BIT
+                );
+                setPrefilterImageBarrier(
+                    5u,
+                    ffxSssrPrefilterResources->SampleCountImage(imageIndex),
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_SHADER_WRITE_BIT
+                );
+                vkCmdPipelineBarrier(
+                    commandBuffer,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                    0,
+                    0,
+                    nullptr,
+                    0,
+                    nullptr,
+                    static_cast<u32>(prefilterImageBarriers.size()),
+                    prefilterImageBarriers.data()
+                );
+
+                const VkDescriptorSet prefilterDescriptorSet =
+                    ffxSssrPrefilterResources->Handle(imageIndex);
+                vkCmdBindPipeline(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_COMPUTE,
+                    ffxSssrPrefilterPipeline->Handle()
+                );
+                vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_COMPUTE,
+                    ffxSssrPrefilterPipeline->Layout(),
+                    0,
+                    1,
+                    &ffxConstantsDescriptorSet,
+                    0,
+                    nullptr
+                );
+                vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_COMPUTE,
+                    ffxSssrPrefilterPipeline->Layout(),
+                    1,
+                    1,
+                    &prefilterDescriptorSet,
+                    0,
+                    nullptr
+                );
+                vkCmdDispatchIndirect(
+                    commandBuffer,
+                    ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(
+                        imageIndex
+                    ),
+                    kFfxSssrDenoiserIndirectArgsOffset
+                );
+
+                if (bindStats != nullptr) {
+                    ++bindStats->ffxSssrPrefilterDispatches;
+                    bindStats->ffxSssrPrefilterDescriptorBinds += 2u;
+                }
             }
         }
     }

@@ -191,6 +191,33 @@ void AppendFfxSssrFrameGraphResources(RenderFrameGraphPlan& plan) {
         "storage image",
         "internal resolution"
     );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX PrefilteredRadiance",
+        "R32G32B32A32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX PrefilteredVariance",
+        "R32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX PrefilteredSampleCount",
+        "R32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
 }
 
 } // namespace
@@ -261,7 +288,19 @@ void VulkanSsrFeature::AppendFrameGraph(
             "FidelityFXSSSRReproject",
             "FrameConstants, SceneDepth, FFX ExtractedRoughness, GBufferNormalRoughness, FFX IntersectOutput, Velocity, FFX BlueNoise, FFX DenoiserTiles, FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory, FFX IntersectArgs",
             "FFX ReprojectedRadiance, FFX AverageRadiance, FFX Variance, FFX SampleCount",
-            "AMD FidelityFX SSSR Reproject bridge consumes denoiser tiles through the second indirect dispatch record. DNSR Prefilter/ResolveTemporal and final image contribution are still pending."
+            "AMD FidelityFX SSSR Reproject bridge consumes denoiser tiles through the second indirect dispatch record and prepares DNSR variance and history inputs."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRPrefilter",
+            "FrameConstants, SceneDepth, FFX ExtractedRoughness, GBufferNormalRoughness, FFX AverageRadiance, FFX IntersectOutput, FFX Variance, FFX SampleCount, FFX DenoiserTiles, FFX IntersectArgs",
+            "FFX PrefilteredRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount",
+            "AMD FidelityFX SSSR Prefilter bridge applies the official DNSR spatial prefilter as an auditable intermediate. ResolveTemporal, real history swap, and final image contribution are still pending."
         );
     }
     if (context.stats.ssr.colorResolveEnabled > 0) {
@@ -474,7 +513,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 5u;
+    ssr.fidelityFxSssrContractVersion = 6u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -582,6 +621,22 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrReprojectMemoryBytes;
     ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes =
         context.renderer.ffxSssrReprojectIndirectArgsOffsetBytes;
+    ssr.fidelityFxSssrPrefilterResourcesReady =
+        context.renderer.ffxSssrPrefilterResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrefilterDescriptorSetsReady =
+        context.renderer.ffxSssrPrefilterDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrefilterPipelineReady =
+        context.renderer.ffxSssrPrefilterPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrefilterInputContractReady =
+        context.renderer.ffxSssrPrefilterInputContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrefilterWidth =
+        context.renderer.ffxSssrPrefilterWidth;
+    ssr.fidelityFxSssrPrefilterHeight =
+        context.renderer.ffxSssrPrefilterHeight;
+    ssr.fidelityFxSssrPrefilterMemoryBytes =
+        context.renderer.ffxSssrPrefilterMemoryBytes;
+    ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes =
+        context.renderer.ffxSssrPrefilterIndirectArgsOffsetBytes;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -615,7 +670,12 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrReprojectPipelineReady > 0u &&
         ssr.fidelityFxSssrReprojectInputContractReady > 0u &&
         ssr.fidelityFxSssrReprojectHistoryReady > 0u &&
-        ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes == sizeof(u32) * 3u
+        ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes == sizeof(u32) * 3u &&
+        ssr.fidelityFxSssrPrefilterResourcesReady > 0u &&
+        ssr.fidelityFxSssrPrefilterDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrPrefilterPipelineReady > 0u &&
+        ssr.fidelityFxSssrPrefilterInputContractReady > 0u &&
+        ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes == sizeof(u32) * 3u
             ? 1u
             : 0u;
     ssr.fidelityFxSssrRuntimeActive = 0u;

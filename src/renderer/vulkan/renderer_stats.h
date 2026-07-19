@@ -434,6 +434,16 @@ struct RendererSsrStats {
     u32 fidelityFxSssrReprojectHistorySource = 0;
     u64 fidelityFxSssrReprojectMemoryBytes = 0;
     u32 fidelityFxSssrReprojectIndirectArgsOffsetBytes = 0;
+    u32 fidelityFxSssrPrefilterResourcesReady = 0;
+    u32 fidelityFxSssrPrefilterDescriptorSetsReady = 0;
+    u32 fidelityFxSssrPrefilterPipelineReady = 0;
+    u32 fidelityFxSssrPrefilterInputContractReady = 0;
+    u32 fidelityFxSssrPrefilterDispatches = 0;
+    u32 fidelityFxSssrPrefilterDescriptorBinds = 0;
+    u32 fidelityFxSssrPrefilterWidth = 0;
+    u32 fidelityFxSssrPrefilterHeight = 0;
+    u64 fidelityFxSssrPrefilterMemoryBytes = 0;
+    u32 fidelityFxSssrPrefilterIndirectArgsOffsetBytes = 0;
     u32 fidelityFxSssrRayCounterReadbackValid = 0;
     u32 fidelityFxSssrClassifiedRayCount = 0;
     u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
@@ -955,6 +965,8 @@ struct RendererBindStats {
     u32 ffxSssrIntersectDescriptorBinds = 0;
     u32 ffxSssrReprojectDispatches = 0;
     u32 ffxSssrReprojectDescriptorBinds = 0;
+    u32 ffxSssrPrefilterDispatches = 0;
+    u32 ffxSssrPrefilterDescriptorBinds = 0;
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;

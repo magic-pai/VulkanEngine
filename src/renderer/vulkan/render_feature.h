@@ -86,6 +86,14 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrReprojectHistorySource = 0;
     u64 ffxSssrReprojectMemoryBytes = 0;
     u32 ffxSssrReprojectIndirectArgsOffsetBytes = 0;
+    bool ffxSssrPrefilterResourcesReady = false;
+    bool ffxSssrPrefilterDescriptorSetsReady = false;
+    bool ffxSssrPrefilterPipelineReady = false;
+    bool ffxSssrPrefilterInputContractReady = false;
+    u32 ffxSssrPrefilterWidth = 0;
+    u32 ffxSssrPrefilterHeight = 0;
+    u64 ffxSssrPrefilterMemoryBytes = 0;
+    u32 ffxSssrPrefilterIndirectArgsOffsetBytes = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

@@ -660,6 +660,16 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrReprojectHistorySource << ','
         << ssr.fidelityFxSssrReprojectMemoryBytes << ','
         << ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes << ','
+        << ssr.fidelityFxSssrPrefilterResourcesReady << ','
+        << ssr.fidelityFxSssrPrefilterDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrPrefilterPipelineReady << ','
+        << ssr.fidelityFxSssrPrefilterInputContractReady << ','
+        << ssr.fidelityFxSssrPrefilterDispatches << ','
+        << ssr.fidelityFxSssrPrefilterDescriptorBinds << ','
+        << ssr.fidelityFxSssrPrefilterWidth << ','
+        << ssr.fidelityFxSssrPrefilterHeight << ','
+        << ssr.fidelityFxSssrPrefilterMemoryBytes << ','
+        << ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1538,6 +1548,8 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ffxSssrIntersectDescriptorBinds << ','
         << binds.ffxSssrReprojectDispatches << ','
         << binds.ffxSssrReprojectDescriptorBinds << ','
+        << binds.ffxSssrPrefilterDispatches << ','
+        << binds.ffxSssrPrefilterDescriptorBinds << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -2031,6 +2043,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_reproject_history_source,"
         << "ssr_ffx_sssr_reproject_memory_bytes,"
         << "ssr_ffx_sssr_reproject_indirect_args_offset_bytes,"
+        << "ssr_ffx_sssr_prefilter_resources_ready,"
+        << "ssr_ffx_sssr_prefilter_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_prefilter_pipeline_ready,"
+        << "ssr_ffx_sssr_prefilter_input_contract_ready,"
+        << "ssr_ffx_sssr_prefilter_dispatches,"
+        << "ssr_ffx_sssr_prefilter_descriptor_binds,"
+        << "ssr_ffx_sssr_prefilter_width,"
+        << "ssr_ffx_sssr_prefilter_height,"
+        << "ssr_ffx_sssr_prefilter_memory_bytes,"
+        << "ssr_ffx_sssr_prefilter_indirect_args_offset_bytes,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2767,6 +2789,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ffx_sssr_intersect_descriptor_binds,"
         << "ffx_sssr_reproject_dispatches,"
         << "ffx_sssr_reproject_descriptor_binds,"
+        << "ffx_sssr_prefilter_dispatches,"
+        << "ffx_sssr_prefilter_descriptor_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

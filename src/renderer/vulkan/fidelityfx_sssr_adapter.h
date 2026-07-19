@@ -486,9 +486,13 @@ public:
 
     VkDescriptorSet Handle(std::size_t imageIndex) const;
     VkImage ReprojectedRadianceImage(std::size_t imageIndex) const;
+    VkImageView ReprojectedRadianceView(std::size_t imageIndex) const;
     VkImage AverageRadianceImage(std::size_t imageIndex) const;
+    VkImageView AverageRadianceView(std::size_t imageIndex) const;
     VkImage VarianceImage(std::size_t imageIndex) const;
+    VkImageView VarianceView(std::size_t imageIndex) const;
     VkImage SampleCountImage(std::size_t imageIndex) const;
+    VkImageView SampleCountView(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkExtent2D Extent() const;
     VkExtent2D AverageExtent() const;
@@ -529,6 +533,89 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_SampleCountHistoryImages;
     std::vector<std::unique_ptr<VulkanImage>> m_ReprojectedRadianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_AverageRadianceImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_VarianceImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_SampleCountImages;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanFfxSssrPrefilterDescriptorSetLayout {
+public:
+    explicit VulkanFfxSssrPrefilterDescriptorSetLayout(
+        const VulkanDevice& device
+    );
+    ~VulkanFfxSssrPrefilterDescriptorSetLayout();
+
+    SE_DISABLE_COPY(VulkanFfxSssrPrefilterDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanFfxSssrPrefilterDescriptorSetLayout);
+
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+class VulkanFfxSssrPrefilterResources {
+public:
+    VulkanFfxSssrPrefilterResources(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrPrefilterDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+    ~VulkanFfxSssrPrefilterResources();
+
+    SE_DISABLE_COPY(VulkanFfxSssrPrefilterResources);
+    SE_DISABLE_MOVE(VulkanFfxSssrPrefilterResources);
+
+    VkDescriptorSet Handle(std::size_t imageIndex) const;
+    VkImage RadianceImage(std::size_t imageIndex) const;
+    VkImageView RadianceView(std::size_t imageIndex) const;
+    VkImage VarianceImage(std::size_t imageIndex) const;
+    VkImageView VarianceView(std::size_t imageIndex) const;
+    VkImage SampleCountImage(std::size_t imageIndex) const;
+    VkImageView SampleCountView(std::size_t imageIndex) const;
+    std::size_t Count() const;
+    VkExtent2D Extent() const;
+    u64 TotalMemoryBytes() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrPrefilterDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+    void Release();
+
+private:
+    void CreateResources(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        const VulkanFfxSssrPrefilterDescriptorSetLayout& descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    VkExtent2D m_Extent{};
+    std::vector<std::unique_ptr<VulkanImage>> m_RadianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SampleCountImages;
     std::vector<VkDescriptorSet> m_DescriptorSets;
