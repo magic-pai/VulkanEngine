@@ -839,13 +839,25 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneGeometrySignature << ','
         << reflectionProbe.capturedSceneAffectedLocalLightCount << ','
         << reflectionProbe.capturedSceneAffectedRenderableCount << ','
+        << reflectionProbe.capturedSceneLocalLightIdentityMask << ','
+        << reflectionProbe.capturedSceneGeometryIdentityMask << ','
+        << reflectionProbe.capturedSceneLocalLightRegionMask << ','
+        << reflectionProbe.capturedSceneGeometryRegionMask << ','
+        << reflectionProbe.capturedSceneDirtyLocalLightCount << ','
+        << reflectionProbe.capturedSceneDirtyRenderableCount << ','
         << reflectionProbe.capturedSceneRefreshPriority << ','
         << reflectionProbe.capturedSceneMinimumRefreshIntervalFrames << ','
         << reflectionProbe.capturedSceneRefreshDeferredCount << ','
         << reflectionProbe.capturedSceneSelectiveInvalidationEnabled << ','
         << reflectionProbe.capturedSceneRefreshDeferredByBudget << ','
+        << reflectionProbe.capturedSceneLocalLightDirty << ','
+        << reflectionProbe.capturedSceneGeometryDirty << ','
+        << reflectionProbe.capturedSceneLocalityIgnoredLightRevision << ','
+        << reflectionProbe.capturedSceneLocalityIgnoredGeometryRevision << ','
         << reflectionProbe.capturedSceneLocalityIgnoredLightRevisionCount << ','
         << reflectionProbe.capturedSceneLocalityIgnoredGeometryRevisionCount << ','
+        << reflectionProbe.capturedSceneDirtyLocalLightProbeCount << ','
+        << reflectionProbe.capturedSceneDirtyGeometryProbeCount << ','
         << reflectionProbe.forcedRefreshRequested << ','
         << reflectionProbe.sceneDirtyRequested << ','
         << reflectionProbe.authoredCubemapLoadedCount << ','
@@ -2075,13 +2087,25 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_geometry_signature,"
         << "reflection_probe_captured_scene_affected_local_light_count,"
         << "reflection_probe_captured_scene_affected_renderable_count,"
+        << "reflection_probe_captured_scene_local_light_identity_mask,"
+        << "reflection_probe_captured_scene_geometry_identity_mask,"
+        << "reflection_probe_captured_scene_local_light_region_mask,"
+        << "reflection_probe_captured_scene_geometry_region_mask,"
+        << "reflection_probe_captured_scene_dirty_local_light_count,"
+        << "reflection_probe_captured_scene_dirty_renderable_count,"
         << "reflection_probe_captured_scene_refresh_priority,"
         << "reflection_probe_captured_scene_minimum_refresh_interval_frames,"
         << "reflection_probe_captured_scene_refresh_deferred_count,"
         << "reflection_probe_captured_scene_selective_invalidation_enabled,"
         << "reflection_probe_captured_scene_refresh_deferred_by_budget,"
+        << "reflection_probe_captured_scene_local_light_dirty,"
+        << "reflection_probe_captured_scene_geometry_dirty,"
+        << "reflection_probe_captured_scene_locality_ignored_light_revision,"
+        << "reflection_probe_captured_scene_locality_ignored_geometry_revision,"
         << "reflection_probe_captured_scene_locality_ignored_light_revision_count,"
         << "reflection_probe_captured_scene_locality_ignored_geometry_revision_count,"
+        << "reflection_probe_captured_scene_dirty_local_light_probe_count,"
+        << "reflection_probe_captured_scene_dirty_geometry_probe_count,"
         << "reflection_probe_forced_refresh_requested,"
         << "reflection_probe_scene_dirty_requested,"
         << "reflection_probe_authored_cubemap_loaded_count,"

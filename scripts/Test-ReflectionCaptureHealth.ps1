@@ -173,6 +173,22 @@ function Test-AnyValue {
     return $false
 }
 
+function Test-AnyGreater {
+    param(
+        [Parameter(Mandatory = $true)]$Rows,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][double]$Threshold
+    )
+
+    foreach ($row in $Rows) {
+        $value = Get-Number -Row $row -Name $Name
+        if (-not [double]::IsNaN($value) -and $value -gt $Threshold) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-AnyMask {
     param(
         [Parameter(Mandatory = $true)]$Rows,
@@ -495,13 +511,25 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_geometry_signature",
         "reflection_probe_captured_scene_affected_local_light_count",
         "reflection_probe_captured_scene_affected_renderable_count",
+        "reflection_probe_captured_scene_local_light_identity_mask",
+        "reflection_probe_captured_scene_geometry_identity_mask",
+        "reflection_probe_captured_scene_local_light_region_mask",
+        "reflection_probe_captured_scene_geometry_region_mask",
+        "reflection_probe_captured_scene_dirty_local_light_count",
+        "reflection_probe_captured_scene_dirty_renderable_count",
         "reflection_probe_captured_scene_refresh_priority",
         "reflection_probe_captured_scene_minimum_refresh_interval_frames",
         "reflection_probe_captured_scene_refresh_deferred_count",
         "reflection_probe_captured_scene_selective_invalidation_enabled",
         "reflection_probe_captured_scene_refresh_deferred_by_budget",
+        "reflection_probe_captured_scene_local_light_dirty",
+        "reflection_probe_captured_scene_geometry_dirty",
+        "reflection_probe_captured_scene_locality_ignored_light_revision",
+        "reflection_probe_captured_scene_locality_ignored_geometry_revision",
         "reflection_probe_captured_scene_locality_ignored_light_revision_count",
-        "reflection_probe_captured_scene_locality_ignored_geometry_revision_count"
+        "reflection_probe_captured_scene_locality_ignored_geometry_revision_count",
+        "reflection_probe_captured_scene_dirty_local_light_probe_count",
+        "reflection_probe_captured_scene_dirty_geometry_probe_count"
     )
     $metrics = @{}
     foreach ($column in $columns) {
@@ -1037,6 +1065,15 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "locality" -Name "out-of-range probe ignores the global light revision" `
             -Passed ($metrics["reflection_probe_captured_scene_locality_ignored_light_revision_count"].max -ge 1) `
             -Actual $metrics["reflection_probe_captured_scene_locality_ignored_light_revision_count"].max -Expected ">= 1"
+        Add-BooleanCheck -Checks $checks -Area "locality" -Name "near probe records local light attribution" `
+            -Passed (
+                (Test-AnyValue -Rows $rows -Name "reflection_probe_captured_scene_local_light_dirty" -Expected 1) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_dirty_local_light_count" -Threshold 0) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_local_light_identity_mask" -Threshold 0) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_local_light_region_mask" -Threshold 0)
+            ) `
+            -Actual "dirty=$($metrics['reflection_probe_captured_scene_local_light_dirty'].max),count=$($metrics['reflection_probe_captured_scene_dirty_local_light_count'].max),identity=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_local_light_identity_mask'].max, 16)),region=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_local_light_region_mask'].max, 16))" `
+            -Expected "dirty/count/identity/region > 0"
     }
     "selective-fallback" {
         Add-BooleanCheck -Checks $checks -Area "fallback" -Name "global fallback receives moving-light invalidation" `
@@ -1060,6 +1097,15 @@ function New-ReflectionCaptureReport {
         Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "render dirty flag recorded" `
             -Passed (Test-AnyMask -Rows $rows -Name "reflection_probe_captured_scene_dirty_mask" -Mask 4) `
             -Actual $metrics["reflection_probe_captured_scene_dirty_mask"].max -Expected "mask 0x4"
+        Add-BooleanCheck -Checks $checks -Area "invalidation" -Name "object motion records geometry attribution" `
+            -Passed (
+                (Test-AnyValue -Rows $rows -Name "reflection_probe_captured_scene_geometry_dirty" -Expected 1) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_dirty_renderable_count" -Threshold 0) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_geometry_identity_mask" -Threshold 0) -and
+                (Test-AnyGreater -Rows $rows -Name "reflection_probe_captured_scene_geometry_region_mask" -Threshold 0)
+            ) `
+            -Actual "dirty=$($metrics['reflection_probe_captured_scene_geometry_dirty'].max),count=$($metrics['reflection_probe_captured_scene_dirty_renderable_count'].max),identity=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_geometry_identity_mask'].max, 16)),region=0x$([Convert]::ToString([int]$metrics['reflection_probe_captured_scene_geometry_region_mask'].max, 16))" `
+            -Expected "dirty/count/identity/region > 0"
         Add-BooleanCheck -Checks $checks -Area "snapshot" -Name "object refresh completes a fresh shadow snapshot" `
             -Passed (
                 $metrics["reflection_probe_captured_scene_shadow_snapshot_build_count"].max -eq 1 -and

@@ -3419,8 +3419,40 @@ bool ReflectionProbeCaptureResourceReady(
     return false;
 }
 
+u32 ReflectionProbeInfluenceBit(u64 key) {
+    return 1u << static_cast<u32>(key & 31ull);
+}
+
+u32 ReflectionProbeRegionMaskForPoint(
+    const RendererReflectionProbe& probe,
+    const glm::vec3& point
+) {
+    const glm::vec3 delta = point - probe.center;
+    const u32 region =
+        (delta.x >= 0.0f ? 1u : 0u) |
+        (delta.y >= 0.0f ? 2u : 0u) |
+        (delta.z >= 0.0f ? 4u : 0u);
+    return 1u << region;
+}
+
+u32 ReflectionProbeRenderableIdentityBit(const RenderCommand& command) {
+#if !defined(NDEBUG)
+    if (command.debugRenderableIdentity != 0u) {
+        return ReflectionProbeInfluenceBit(command.debugRenderableIdentity);
+    }
+#endif
+    u64 key = 0x9e3779b97f4a7c15ull;
+    key = HashCombine(key, static_cast<u64>(command.submissionIndex + 1u));
+    key = HashCombine(key, static_cast<u64>(command.meshSortKey));
+    key = HashCombine(key, static_cast<u64>(command.materialSortKey));
+    key = HashCombine(key, static_cast<u64>(command.drawOrder));
+    return ReflectionProbeInfluenceBit(key);
+}
+
 CapturedReflectionProbeLightSample CapturedReflectionProbeLightSampleFor(
-    const RendererLocalLight& light
+    const RendererLocalLight& light,
+    const RendererReflectionProbe& probe,
+    std::size_t lightIndex
 ) {
     CapturedReflectionProbeLightSample sample{};
     sample.position = { light.position.x, light.position.y, light.position.z };
@@ -3431,6 +3463,13 @@ CapturedReflectionProbeLightSample CapturedReflectionProbeLightSampleFor(
     sample.width = light.width;
     sample.height = light.height;
     sample.kind = static_cast<u32>(light.kind);
+    sample.identityMask = ReflectionProbeInfluenceBit(
+        static_cast<u64>(lightIndex + 1u)
+    );
+    sample.regionMask = ReflectionProbeRegionMaskForPoint(
+        probe,
+        light.position
+    );
     return sample;
 }
 
@@ -3477,7 +3516,11 @@ std::vector<CapturedReflectionProbeLightSample> CapturedReflectionProbeLights(
         if (!LocalLightMayInfluenceReflectionProbe(light, probe)) {
             continue;
         }
-        samples.push_back(CapturedReflectionProbeLightSampleFor(light));
+        samples.push_back(CapturedReflectionProbeLightSampleFor(
+            light,
+            probe,
+            index
+        ));
     }
     return samples;
 }
@@ -3507,12 +3550,16 @@ u64 HashCapturedLightSample(
     seed = HashCombine(seed, FloatBits(light.width));
     seed = HashCombine(seed, FloatBits(light.height));
     seed = HashCombine(seed, light.kind);
+    seed = HashCombine(seed, light.identityMask);
+    seed = HashCombine(seed, light.regionMask);
     return seed;
 }
 
 struct CapturedReflectionProbeGeometrySample {
     u32 signature = 0;
     u32 affectedRenderableCount = 0;
+    u32 affectedRenderableIdentityMask = 0;
+    u32 affectedRenderableRegionMask = 0;
 };
 
 CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
@@ -3531,8 +3578,16 @@ CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
             continue;
         }
         signature = HashShadowCommand(signature, command);
+        sample.affectedRenderableIdentityMask |=
+            ReflectionProbeRenderableIdentityBit(command);
+        sample.affectedRenderableRegionMask |= ReflectionProbeRegionMaskForPoint(
+            probe,
+            CommandBoundsCenter(command)
+        );
         ++sample.affectedRenderableCount;
     }
+    signature = HashCombine(signature, sample.affectedRenderableIdentityMask);
+    signature = HashCombine(signature, sample.affectedRenderableRegionMask);
     signature = HashCombine(signature, sample.affectedRenderableCount);
     sample.signature = static_cast<u32>(signature ^ (signature >> 32u));
     if (sample.signature == 0u) {
@@ -3630,7 +3685,11 @@ CapturedReflectionProbeSceneSample CapturedReflectionProbeSceneSampleFor(
     signature = HashCombine(signature, static_cast<u64>(lightSamples.size()));
     for (const CapturedReflectionProbeLightSample& light : lightSamples) {
         signature = HashCapturedLightSample(signature, light);
+        sample.localLightIdentityMask |= light.identityMask;
+        sample.localLightRegionMask |= light.regionMask;
     }
+    signature = HashCombine(signature, sample.localLightIdentityMask);
+    signature = HashCombine(signature, sample.localLightRegionMask);
     sample.localLightSignature = static_cast<u32>(
         signature ^ (signature >> 32u)
     );
@@ -3666,6 +3725,11 @@ CapturedSceneRefreshRequest CapturedSceneRefreshRequestFor(
     request.geometrySignature = geometrySample.signature;
     request.affectedLocalLightCount = sample.affectedLocalLightCount;
     request.affectedRenderableCount = geometrySample.affectedRenderableCount;
+    request.localLightIdentityMask = sample.localLightIdentityMask;
+    request.geometryIdentityMask =
+        geometrySample.affectedRenderableIdentityMask;
+    request.localLightRegionMask = sample.localLightRegionMask;
+    request.geometryRegionMask = geometrySample.affectedRenderableRegionMask;
     request.refreshPriority = ReflectionCaptureRefreshPriority(
         probe,
         sample,
@@ -6754,6 +6818,18 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.affectedLocalLightCount;
     frameStats.reflectionProbe.capturedSceneAffectedRenderableCount =
         capturedSceneAudit.affectedRenderableCount;
+    frameStats.reflectionProbe.capturedSceneLocalLightIdentityMask =
+        capturedSceneAudit.localLightIdentityMask;
+    frameStats.reflectionProbe.capturedSceneGeometryIdentityMask =
+        capturedSceneAudit.geometryIdentityMask;
+    frameStats.reflectionProbe.capturedSceneLocalLightRegionMask =
+        capturedSceneAudit.localLightRegionMask;
+    frameStats.reflectionProbe.capturedSceneGeometryRegionMask =
+        capturedSceneAudit.geometryRegionMask;
+    frameStats.reflectionProbe.capturedSceneDirtyLocalLightCount =
+        capturedSceneAudit.dirtyLocalLightCount;
+    frameStats.reflectionProbe.capturedSceneDirtyRenderableCount =
+        capturedSceneAudit.dirtyRenderableCount;
     frameStats.reflectionProbe.capturedSceneRefreshPriority =
         capturedSceneAudit.refreshPriority;
     frameStats.reflectionProbe.capturedSceneMinimumRefreshIntervalFrames =
@@ -6764,10 +6840,22 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.selectiveInvalidationEnabled ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneRefreshDeferredByBudget =
         capturedSceneAudit.refreshDeferredByBudget ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneLocalLightDirty =
+        capturedSceneAudit.localLightDirty ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneGeometryDirty =
+        capturedSceneAudit.geometryDirty ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneLocalityIgnoredLightRevision =
+        capturedSceneAudit.localityIgnoredLightRevision ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneLocalityIgnoredGeometryRevision =
+        capturedSceneAudit.localityIgnoredGeometryRevision ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneLocalityIgnoredLightRevisionCount =
         m_ReflectionProbeResources.CapturedSceneLocalityIgnoredLightRevisionCount();
     frameStats.reflectionProbe.capturedSceneLocalityIgnoredGeometryRevisionCount =
         m_ReflectionProbeResources.CapturedSceneLocalityIgnoredGeometryRevisionCount();
+    frameStats.reflectionProbe.capturedSceneDirtyLocalLightProbeCount =
+        m_ReflectionProbeResources.CapturedSceneDirtyLocalLightProbeCount();
+    frameStats.reflectionProbe.capturedSceneDirtyGeometryProbeCount =
+        m_ReflectionProbeResources.CapturedSceneDirtyGeometryProbeCount();
     const bool reflectionProbeCubemapReady = selectedCapturedSceneProbe
         ? capturedSceneCubemapReady
         : LocalReflectionProbeCubemapReady();

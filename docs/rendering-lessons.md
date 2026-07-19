@@ -87,6 +87,36 @@ Validation:
 - Debug build passed.
 - Direct CSV checks on `default-object-motion` and `imported-dynamic` both showed `qualityGate=1/1/0`, `qualityMasks=255/255/0`, `qualityMode=1`, `recommendedPreset=12`, and `velocity/object motion ready=1/1`.
 
+## 2026-07-19 - Captured Probe Locality Needs Identity And Region Masks
+
+Symptom:
+- The captured-scene locality lane could prove a distant probe ignored a global light revision, but it still did not explain which local lights or renderables made the near probe dirty.
+- Aggregate signatures and counts were not enough to separate local influence from a generic scene-wide invalidation.
+
+False leads:
+- Treating global revision counters or a single selected probe audit as sufficient locality proof.
+- Assuming the existing affected-count fields explained both the producer identity and the spatial region.
+
+Cause:
+- The refresh contract recorded signatures and counts, but not explicit identity masks, region masks, or per-probe dirty/ignored flags.
+
+Control test:
+- Run `selective-locality-control` and `moving-rigid-refresh`; the near probe should show local-light or geometry dirty attribution while the distant probe still ignores the unrelated global revision.
+- Run `SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF=1` to verify the fallback clears the locality-ignore evidence.
+
+Fix:
+- Added identity and region masks for captured local lights and renderables.
+- Added per-probe dirty and ignored flags plus CSV/ImGui visibility and strict script checks.
+
+Prevention:
+- For spatial cache invalidation, record both identity and region evidence before trusting a global revision signal.
+- Multi-probe assertions must check per-resource dirty attribution, not only aggregate refresh counts.
+
+Validation:
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\reflection_capture_dirty_attribution` passed `955 pass / 0 warn / 0 fail`.
+- Selective locality lane recorded probe count `2`, light revision delta `9`, ignored-light count `1`, local-light dirty `1`, and dirty local-light count `5`.
+- Moving-rigid lane recorded render revision delta `24`, geometry dirty `1`, and dirty renderable count `5`.
+
 ## 2026-07-19 - SSR Current HDR Radiance Is Not A Safe Default Source
 
 Symptom:

@@ -2411,6 +2411,10 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     audit.geometrySignature = refreshRequest.geometrySignature;
     audit.affectedLocalLightCount = refreshRequest.affectedLocalLightCount;
     audit.affectedRenderableCount = refreshRequest.affectedRenderableCount;
+    audit.localLightIdentityMask = refreshRequest.localLightIdentityMask;
+    audit.geometryIdentityMask = refreshRequest.geometryIdentityMask;
+    audit.localLightRegionMask = refreshRequest.localLightRegionMask;
+    audit.geometryRegionMask = refreshRequest.geometryRegionMask;
     audit.refreshPriority = refreshRequest.refreshPriority;
     audit.minimumRefreshIntervalFrames =
         refreshRequest.minimumRefreshIntervalFrames;
@@ -2434,6 +2438,23 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
             refreshRequest.renderRevision != resource->renderRevision;
         const bool lightChanged =
             refreshRequest.lightRevision != resource->lightRevision;
+        const bool globalGeometryChanged = membershipChanged || renderChanged;
+        audit.localityIgnoredLightRevision =
+            lightChanged &&
+            refreshRequest.selectiveInvalidationEnabled &&
+            !localLightsChanged;
+        audit.localityIgnoredGeometryRevision =
+            globalGeometryChanged &&
+            refreshRequest.selectiveInvalidationEnabled &&
+            !geometryChanged;
+        audit.localLightDirty = lightChanged &&
+            (!refreshRequest.selectiveInvalidationEnabled || localLightsChanged);
+        audit.geometryDirty = globalGeometryChanged &&
+            (!refreshRequest.selectiveInvalidationEnabled || geometryChanged);
+        audit.dirtyLocalLightCount =
+            audit.localLightDirty ? refreshRequest.affectedLocalLightCount : 0u;
+        audit.dirtyRenderableCount =
+            audit.geometryDirty ? refreshRequest.affectedRenderableCount : 0u;
         if (membershipChanged &&
             (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
             audit.dirtyMask |= CapturedSceneDirtyMembership;
@@ -2526,6 +2547,10 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     resource->renderRevision = refreshRequest.renderRevision;
     resource->localLightSignature = refreshRequest.localLightSignature;
     resource->geometrySignature = refreshRequest.geometrySignature;
+    resource->localLightIdentityMask = refreshRequest.localLightIdentityMask;
+    resource->geometryIdentityMask = refreshRequest.geometryIdentityMask;
+    resource->localLightRegionMask = refreshRequest.localLightRegionMask;
+    resource->geometryRegionMask = refreshRequest.geometryRegionMask;
     resource->lastRefreshCompletedFrame = refreshRequest.schedulerFrame;
     resource->activeBackend = CapturedSceneCaptureBackend::AnalyticCpu;
     ++resource->uploadCount;
@@ -3142,6 +3167,10 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
     audit.geometrySignature = refreshRequest.geometrySignature;
     audit.affectedLocalLightCount = refreshRequest.affectedLocalLightCount;
     audit.affectedRenderableCount = refreshRequest.affectedRenderableCount;
+    audit.localLightIdentityMask = refreshRequest.localLightIdentityMask;
+    audit.geometryIdentityMask = refreshRequest.geometryIdentityMask;
+    audit.localLightRegionMask = refreshRequest.localLightRegionMask;
+    audit.geometryRegionMask = refreshRequest.geometryRegionMask;
     audit.refreshPriority = refreshRequest.refreshPriority;
     audit.minimumRefreshIntervalFrames = refreshRequest.minimumRefreshIntervalFrames;
     audit.refreshDeferredCount = resource.refreshDeferredCount;
@@ -3186,6 +3215,23 @@ bool VulkanReflectionProbeResources::CapturedSceneRefreshRequested(
         refreshRequest.renderRevision != resource.renderRevision;
     const bool lightChanged =
         refreshRequest.lightRevision != resource.lightRevision;
+    const bool globalGeometryChanged = membershipChanged || renderChanged;
+    audit.localityIgnoredLightRevision =
+        lightChanged &&
+        refreshRequest.selectiveInvalidationEnabled &&
+        !localLightsChanged;
+    audit.localityIgnoredGeometryRevision =
+        globalGeometryChanged &&
+        refreshRequest.selectiveInvalidationEnabled &&
+        !geometryChanged;
+    audit.localLightDirty = lightChanged &&
+        (!refreshRequest.selectiveInvalidationEnabled || localLightsChanged);
+    audit.geometryDirty = globalGeometryChanged &&
+        (!refreshRequest.selectiveInvalidationEnabled || geometryChanged);
+    audit.dirtyLocalLightCount =
+        audit.localLightDirty ? refreshRequest.affectedLocalLightCount : 0u;
+    audit.dirtyRenderableCount =
+        audit.geometryDirty ? refreshRequest.affectedRenderableCount : 0u;
     if (membershipChanged &&
         (!refreshRequest.selectiveInvalidationEnabled || geometryChanged)) {
         audit.dirtyMask |= CapturedSceneDirtyMembership;
@@ -3360,6 +3406,11 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
             resource->refreshRequest.affectedLocalLightCount;
         audit.affectedRenderableCount =
             resource->refreshRequest.affectedRenderableCount;
+        audit.localLightIdentityMask =
+            resource->refreshRequest.localLightIdentityMask;
+        audit.geometryIdentityMask = resource->refreshRequest.geometryIdentityMask;
+        audit.localLightRegionMask = resource->refreshRequest.localLightRegionMask;
+        audit.geometryRegionMask = resource->refreshRequest.geometryRegionMask;
         audit.refreshPriority = resource->refreshRequest.refreshPriority;
         audit.minimumRefreshIntervalFrames =
             resource->refreshRequest.minimumRefreshIntervalFrames;
@@ -4199,6 +4250,11 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->renderRevision = resource->refreshRequest.renderRevision;
     resource->localLightSignature = resource->refreshRequest.localLightSignature;
     resource->geometrySignature = resource->refreshRequest.geometrySignature;
+    resource->localLightIdentityMask =
+        resource->refreshRequest.localLightIdentityMask;
+    resource->geometryIdentityMask = resource->refreshRequest.geometryIdentityMask;
+    resource->localLightRegionMask = resource->refreshRequest.localLightRegionMask;
+    resource->geometryRegionMask = resource->refreshRequest.geometryRegionMask;
     resource->lastRefreshCompletedFrame = schedulerFrame;
     resource->activeBackend = CapturedSceneCaptureBackend::RasterizedGpu;
     ++resource->uploadCount;
@@ -4809,9 +4865,7 @@ u32 VulkanReflectionProbeResources::CapturedSceneLocalityIgnoredLightRevisionCou
     u32 count = 0u;
     for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
         (void)sceneIndex;
-        if (resource.audit.selectiveInvalidationEnabled &&
-            resource.audit.lightRevision != resource.lightRevision &&
-            resource.audit.localLightSignature == resource.localLightSignature) {
+        if (resource.audit.localityIgnoredLightRevision) {
             ++count;
         }
     }
@@ -4822,11 +4876,29 @@ u32 VulkanReflectionProbeResources::CapturedSceneLocalityIgnoredGeometryRevision
     u32 count = 0u;
     for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
         (void)sceneIndex;
-        const bool globalGeometryChanged =
-            resource.audit.membershipRevision != resource.membershipRevision ||
-            resource.audit.renderRevision != resource.renderRevision;
-        if (resource.audit.selectiveInvalidationEnabled && globalGeometryChanged &&
-            resource.audit.geometrySignature == resource.geometrySignature) {
+        if (resource.audit.localityIgnoredGeometryRevision) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneDirtyLocalLightProbeCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        if (resource.audit.localLightDirty) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+u32 VulkanReflectionProbeResources::CapturedSceneDirtyGeometryProbeCount() const {
+    u32 count = 0u;
+    for (const auto& [sceneIndex, resource] : m_CapturedSceneProbeResources) {
+        (void)sceneIndex;
+        if (resource.audit.geometryDirty) {
             ++count;
         }
     }

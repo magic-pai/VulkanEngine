@@ -88,6 +88,8 @@ struct CapturedReflectionProbeLightSample {
     f32 width = 0.0f;
     f32 height = 0.0f;
     u32 kind = 0;
+    u32 identityMask = 0;
+    u32 regionMask = 0;
 };
 
 struct CapturedReflectionProbeSceneSample {
@@ -101,6 +103,8 @@ struct CapturedReflectionProbeSceneSample {
     f32 directionalIntensity = 0.0f;
     u32 localLightSignature = 0;
     u32 affectedLocalLightCount = 0;
+    u32 localLightIdentityMask = 0;
+    u32 localLightRegionMask = 0;
     u32 signature = 0;
 };
 
@@ -172,6 +176,10 @@ struct CapturedSceneRefreshRequest {
     u32 geometrySignature = 0;
     u32 affectedLocalLightCount = 0;
     u32 affectedRenderableCount = 0;
+    u32 localLightIdentityMask = 0;
+    u32 geometryIdentityMask = 0;
+    u32 localLightRegionMask = 0;
+    u32 geometryRegionMask = 0;
     u32 refreshPriority = 0;
     u32 minimumRefreshIntervalFrames = 0;
     u64 schedulerFrame = 0;
@@ -199,6 +207,12 @@ struct CapturedSceneCaptureAudit {
     u32 geometrySignature = 0;
     u32 affectedLocalLightCount = 0;
     u32 affectedRenderableCount = 0;
+    u32 localLightIdentityMask = 0;
+    u32 geometryIdentityMask = 0;
+    u32 localLightRegionMask = 0;
+    u32 geometryRegionMask = 0;
+    u32 dirtyLocalLightCount = 0;
+    u32 dirtyRenderableCount = 0;
     u32 refreshPriority = 0;
     u32 minimumRefreshIntervalFrames = 0;
     u32 refreshDeferredCount = 0;
@@ -287,6 +301,10 @@ struct CapturedSceneCaptureAudit {
     bool shadowSnapshotPersistentEnabled = false;
     bool shadowSnapshotPersistentHit = false;
     bool selectiveInvalidationEnabled = false;
+    bool localLightDirty = false;
+    bool geometryDirty = false;
+    bool localityIgnoredLightRevision = false;
+    bool localityIgnoredGeometryRevision = false;
     bool refreshDeferredByBudget = false;
 };
 
@@ -491,6 +509,8 @@ public:
     u32 CapturedSceneRefreshCheckCount() const;
     u32 CapturedSceneLocalityIgnoredLightRevisionCount() const;
     u32 CapturedSceneLocalityIgnoredGeometryRevisionCount() const;
+    u32 CapturedSceneDirtyLocalLightProbeCount() const;
+    u32 CapturedSceneDirtyGeometryProbeCount() const;
     u32 CapturedSceneSignature() const;
     const CapturedSceneCaptureAudit& CapturedSceneAudit() const;
     const CapturedSceneCaptureAudit& CapturedSceneAudit(i32 probeSceneIndex) const;
@@ -532,6 +552,10 @@ private:
         u64 lastRefreshCompletedFrame = 0;
         u32 localLightSignature = 0;
         u32 geometrySignature = 0;
+        u32 localLightIdentityMask = 0;
+        u32 geometryIdentityMask = 0;
+        u32 localLightRegionMask = 0;
+        u32 geometryRegionMask = 0;
         u32 refreshDeferredCount = 0;
         u32 uploadCount = 0;
         u32 refreshCheckCount = 0;

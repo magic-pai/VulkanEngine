@@ -3403,6 +3403,17 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.reflectionProbe.capturedSceneLocalityIgnoredGeometryRevisionCount
     );
     ImGui::Text(
+        "Captured scene dirty attribution: light/geo dirty %u/%u, counts %u/%u, identity masks 0x%X/0x%X, region masks 0x%X/0x%X",
+        stats.reflectionProbe.capturedSceneLocalLightDirty,
+        stats.reflectionProbe.capturedSceneGeometryDirty,
+        stats.reflectionProbe.capturedSceneDirtyLocalLightCount,
+        stats.reflectionProbe.capturedSceneDirtyRenderableCount,
+        stats.reflectionProbe.capturedSceneLocalLightIdentityMask,
+        stats.reflectionProbe.capturedSceneGeometryIdentityMask,
+        stats.reflectionProbe.capturedSceneLocalLightRegionMask,
+        stats.reflectionProbe.capturedSceneGeometryRegionMask
+    );
+    ImGui::Text(
         "Reflection probe spatial policy: box projection %s, parallax %s, influence mode %u",
         stats.reflectionProbe.boxProjectionEnabled ? "on" : "off",
         stats.reflectionProbe.parallaxCorrectionEnabled ? "on" : "off",
