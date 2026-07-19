@@ -126,6 +126,11 @@ bool TemporalHistoryLockEnabled() {
     return mod(encoded, 2.0) > 0.5;
 }
 
+bool TemporalMissHistoryRejectEnabled() {
+    float encoded = floor(abs(frame.ssrControls.w) / 65536.0);
+    return mod(encoded, 2.0) > 0.5;
+}
+
 float CurrentHdrRadianceTrust(float traceConfidence) {
     float confidence = clamp(traceConfidence, 0.0, 1.0);
     // Current HDR is a high-detail radiance source, so low-confidence SSR
@@ -308,6 +313,13 @@ void main() {
     float historyLock = TemporalHistoryLockEnabled()
         ? max(history.a * historyPersistence, historyValidity)
         : historyValidity;
+    if (TemporalMissHistoryRejectEnabled() && currentHitValid < 0.5) {
+        // When the current trace misses, stale history should fall away faster
+        // if the reprojected sample is weak or the receiver is moving.
+        float missHistoryReject = mix(0.18, 0.72, historyValidity) *
+            mix(0.25, 1.0, motionConfidence);
+        historyLock *= missHistoryReject;
+    }
 
     // Keep a validated history sample for a short grace period when the
     // current SSR ray misses. Hi-Z crossings can toggle at grazing angles;

@@ -8180,9 +8180,12 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.reconstructionHistoryReset =
         frameStats.temporal.historyReset;
     frameStats.ssr.reconstructionTemporalContractVersion =
-        frameStats.ssr.reconstructionActive > 0 ? 10u : 0u;
+        frameStats.ssr.reconstructionActive > 0 ? 11u : 0u;
     frameStats.ssr.reconstructionTemporalMissHistoryRejectEnabled =
-        0u;
+        frameStats.ssr.reconstructionActive > 0 &&
+            m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled
+            ? 1u
+            : 0u;
     frameStats.ssr.reconstructionTemporalPreviousViewDepthEnabled =
         frameStats.ssr.reconstructionActive > 0 ? 1u : 0u;
     frameStats.ssr.reconstructionTemporalHistoryLockEnabled =
@@ -11382,6 +11385,14 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
     if (EnvironmentFlagEnabled("SE_SSR_TEMPORAL_HISTORY_LOCK_OFF")) {
         m_ShadowSettings.ssrTemporalHistoryLockEnabled = false;
     }
+    if (const std::optional<bool> ssrTemporalMissHistoryReject =
+            EnvironmentFlagOverride("SE_SSR_TEMPORAL_MISS_HISTORY_REJECT")) {
+        m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled =
+            *ssrTemporalMissHistoryReject;
+    }
+    if (EnvironmentFlagEnabled("SE_SSR_TEMPORAL_MISS_HISTORY_REJECT_OFF")) {
+        m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled = false;
+    }
     if (const std::optional<f32> ssrHiZSteps =
             EnvironmentFloatOverride("SE_SSR_HIZ_STEPS")) {
         m_ShadowSettings.ssrStepCount = static_cast<u32>(std::clamp(
@@ -12785,7 +12796,8 @@ void VulkanRenderer::UpdateUniformBuffer(
         (m_ShadowSettings.ssrCurrentHdrRadianceFilterEnabled ? 4096.0f : 0.0f) +
         (m_ShadowSettings.ssrSpatialVarianceClampEnabled ? 8192.0f : 0.0f) +
         (m_ShadowSettings.ssrProbeFallbackBlendEnabled ? 16384.0f : 0.0f) +
-        (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f);
+        (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f) +
+        (m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled ? 65536.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
@@ -12979,7 +12991,8 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         (m_ShadowSettings.ssrCurrentHdrRadianceFilterEnabled ? 4096.0f : 0.0f) +
         (m_ShadowSettings.ssrSpatialVarianceClampEnabled ? 8192.0f : 0.0f) +
         (m_ShadowSettings.ssrProbeFallbackBlendEnabled ? 16384.0f : 0.0f) +
-        (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f);
+        (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f) +
+        (m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled ? 65536.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),

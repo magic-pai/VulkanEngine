@@ -2,6 +2,33 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - SSR Miss-History Rejection Needs A Radiance-Source-Aware Gate
+
+Symptom:
+- Adding the SSR temporal miss-history reject control made the old current-HDR debug lanes report raw SSR hits but zero temporal/resolved SSR coverage.
+- Forward3D current-HDR lanes also produced zero high-trust temporal coverage, so a miss-carried-pixel comparison could not prove the new control by itself.
+
+False leads:
+- Treating the new `65536` packed control bit as a trace-step or lower-bit decode regression.
+- Requiring the experimental current-HDR radiance source to produce visible SSR coverage in every health lane.
+
+Cause:
+- The new miss-reject policy correctly decays carried history on current trace misses, but the current-HDR radiance source is still experimental and disabled by default. In the current LightingShowcase/Forward3D lanes, raw hit confidence does not reliably reach the temporal radiance trust threshold.
+
+Control test:
+- Compare `SE_SSR_TEMPORAL_MISS_HISTORY_REJECT=1/0` under current-HDR enabled lanes and inspect `ssr_reconstruction_temporal_miss_history_reject_enabled`, temporal/resolved coverage, and miss-carried pixels.
+
+Fix:
+- Add `ssrTemporalMissHistoryRejectEnabled`, `SE_SSR_TEMPORAL_MISS_HISTORY_REJECT`, packed bit `65536`, temporal contract version `11`, and a shader-side history-lock decay on current misses using history validity and motion confidence.
+- Update `Test-SsrRefinementHealth.ps1` so current-HDR lanes assert bounded diagnostics instead of assuming that the experimental radiance source must seed coverage.
+
+Prevention:
+- Do not use an experimental radiance source lane as proof of final SSR temporal quality. First validate the source trust contract, then validate temporal rejection/denoise behavior on top of it.
+
+Validation:
+- Debug MSBuild passed for `SelfEngineForward3D` and `SelfEngineLightingShowcase`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics -OutputDirectory tmp\ssr_temporal_miss_history_reject_health_v3` passed `796 pass / 0 fail`.
+
 ## 2026-07-19 - Reflection Receiver Gates Need Debug Builds And Steady-State Readiness
 
 Symptom:

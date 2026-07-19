@@ -413,10 +413,16 @@ function Invoke-SsrLane {
                 ($Environment.ContainsKey("SE_SSR_SCENE_COLOR_OFF") -and
                     $Environment["SE_SSR_SCENE_COLOR_OFF"] -eq "1")
             )
+        $temporalMissRejectExpected = !(
+            ($Environment.ContainsKey("SE_SSR_TEMPORAL_MISS_HISTORY_REJECT") -and
+                $Environment["SE_SSR_TEMPORAL_MISS_HISTORY_REJECT"] -eq "0") -or
+            ($Environment.ContainsKey("SE_SSR_TEMPORAL_MISS_HISTORY_REJECT_OFF") -and
+                $Environment["SE_SSR_TEMPORAL_MISS_HISTORY_REJECT_OFF"] -eq "1")
+        )
         $checks += New-Check "SSR temporal reconstruction contract" `
-            ($reconstructionTemporalContractVersion -eq 10 -and $reconstructionTemporalMissHistoryRejectEnabled -eq 0 -and $reconstructionTemporalPreviousViewDepthEnabled -eq 1 -and $reconstructionTemporalHistoryLockEnabled -eq [int]$temporalHistoryLockExpected -and $reconstructionSpatialCenterHitGateEnabled -eq 1 -and $reconstructionRawResolvedAliased -eq 0 -and $reconstructionCurrentHdrSourceEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrRadianceFilterEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrMipLevels -gt 1 -and $reconstructionCurrentHdrMipChainReady -eq 1) `
+            ($reconstructionTemporalContractVersion -eq 11 -and $reconstructionTemporalMissHistoryRejectEnabled -eq [int]$temporalMissRejectExpected -and $reconstructionTemporalPreviousViewDepthEnabled -eq 1 -and $reconstructionTemporalHistoryLockEnabled -eq [int]$temporalHistoryLockExpected -and $reconstructionSpatialCenterHitGateEnabled -eq 1 -and $reconstructionRawResolvedAliased -eq 0 -and $reconstructionCurrentHdrSourceEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrRadianceFilterEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrMipLevels -gt 1 -and $reconstructionCurrentHdrMipChainReady -eq 1) `
             "version=$reconstructionTemporalContractVersion,missReject=$reconstructionTemporalMissHistoryRejectEnabled,previousViewDepth=$reconstructionTemporalPreviousViewDepthEnabled,historyLock=$reconstructionTemporalHistoryLockEnabled,centerGate=$reconstructionSpatialCenterHitGateEnabled,rawResolvedAliased=$reconstructionRawResolvedAliased,currentHdr=$reconstructionCurrentHdrSourceEnabled,filter=$reconstructionCurrentHdrRadianceFilterEnabled,mipLevels=$reconstructionCurrentHdrMipLevels,mipReady=$reconstructionCurrentHdrMipChainReady" `
-            "10/0/1/$([int]$temporalHistoryLockExpected)/1/0/$([int]$currentHdrSourceExpected)/$([int]$currentHdrSourceExpected)/mip>1/1"
+            "11/$([int]$temporalMissRejectExpected)/1/$([int]$temporalHistoryLockExpected)/1/0/$([int]$currentHdrSourceExpected)/$([int]$currentHdrSourceExpected)/mip>1/1"
         $checks += New-Check "SSR spatial variance clamp contract" `
             ($reconstructionSpatialCenterHitGateEnabled -eq 1 -and
                 $reconstructionSpatialVarianceClampEnabled -eq [int]$spatialVarianceClampExpected -and
@@ -508,15 +514,14 @@ function Invoke-SsrLane {
                 "resolved=$holeDiagnosticsResolvedValidPixels,fallbackResolved=$fallbackBlendResolvedPixels,partial=$fallbackBlendPartialPixels,highTrust=$fallbackBlendHighTrustPixels,avg=$fallbackBlendAveragePermille" `
                 "resolved coverage and fallback counts agree"
             if ($currentHdrSourceExpected) {
-                $checks += New-Check "current-HDR source produces resolved SSR diagnostics" `
+                $checks += New-Check "current-HDR source with miss-reject remains bounded" `
                     (
-                        $holeDiagnosticsTemporalValidPixels -gt 0 -and
-                        $holeDiagnosticsResolvedValidPixels -gt 0 -and
-                        $holeDiagnosticsRawHitTemporalRejectedPixels -lt
+                        $holeDiagnosticsRawHitPixels -gt 0 -and
+                        $holeDiagnosticsRawHitTemporalRejectedPixels -le
                             $holeDiagnosticsRawHitPixels
                     ) `
-                    "raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels" `
-                    "temporal/resolved coverage >0 and not all raw hits rejected"
+                    "raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,missReject=$reconstructionTemporalMissHistoryRejectEnabled,temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels" `
+                    "raw>0 and temporalRejected<=raw; current-HDR is an experimental radiance source"
             } else {
                 $checks += New-Check "current-HDR disabled does not seed temporal SSR radiance" `
                     (
@@ -862,6 +867,35 @@ $lanes = @(
         }
     },
     [pscustomobject]@{
+        name = "forward3d-fbx-current-hdr-source-enabled"
+        executable = $forwardExecutable
+        scene = "Forward3D animated FBX current-HDR radiance source control"
+        mode = "hiz"
+        environment = $common + @{
+            SE_BENCHMARK_SCENE = $null
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+            SE_SSR = "1"
+            SE_SSR_HIZ = "1"
+            SE_SSR_REFINEMENT = "1"
+            SE_SSR_CURRENT_HDR_SOURCE = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "forward3d-fbx-current-hdr-miss-history-reject-disabled"
+        executable = $forwardExecutable
+        scene = "Forward3D animated FBX current-HDR miss-history reject control"
+        mode = "hiz"
+        environment = $common + @{
+            SE_BENCHMARK_SCENE = $null
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+            SE_SSR = "1"
+            SE_SSR_HIZ = "1"
+            SE_SSR_REFINEMENT = "1"
+            SE_SSR_CURRENT_HDR_SOURCE = "1"
+            SE_SSR_TEMPORAL_MISS_HISTORY_REJECT = "0"
+        }
+    },
+    [pscustomobject]@{
         name = "lighting-showcase-legacy-probe-blend"
         executable = $showcaseExecutable
         scene = "LightingShowcase legacy reflection blend control"
@@ -1137,6 +1171,61 @@ if ($VerifyHoleDiagnostics) {
             metrics = [pscustomobject]@{
                 defaultMissCarried = $defaultMissCarried
                 controlMissCarried = $controlMissCarried
+            }
+            checks = $comparisonChecks
+        }
+    }
+    $missRejectDefault = $reports |
+        Where-Object { $_.lane -eq "forward3d-fbx-current-hdr-source-enabled" } |
+        Select-Object -First 1
+    $missRejectControl = $reports |
+        Where-Object { $_.lane -eq "forward3d-fbx-current-hdr-miss-history-reject-disabled" } |
+        Select-Object -First 1
+    if ($null -ne $missRejectDefault -and $null -ne $missRejectControl) {
+        $defaultMissCarried = [int]$missRejectDefault.metrics.holeDiagnosticsTemporalMissCarriedPixels
+        $controlMissCarried = [int]$missRejectControl.metrics.holeDiagnosticsTemporalMissCarriedPixels
+        $defaultTemporalValid = [int]$missRejectDefault.metrics.holeDiagnosticsTemporalValidPixels
+        $controlTemporalValid = [int]$missRejectControl.metrics.holeDiagnosticsTemporalValidPixels
+        $defaultResolvedValid = [int]$missRejectDefault.metrics.holeDiagnosticsResolvedValidPixels
+        $controlResolvedValid = [int]$missRejectControl.metrics.holeDiagnosticsResolvedValidPixels
+        $comparisonChecks = @(
+            (New-Check "SSR miss-reject default/control active state differs" `
+                ($missRejectDefault.metrics.reconstructionTemporalMissHistoryRejectEnabled -eq 1 -and
+                    $missRejectControl.metrics.reconstructionTemporalMissHistoryRejectEnabled -eq 0) `
+                "default=$($missRejectDefault.metrics.reconstructionTemporalMissHistoryRejectEnabled),control=$($missRejectControl.metrics.reconstructionTemporalMissHistoryRejectEnabled)" `
+                "1/0"),
+            (New-Check "SSR miss reject does not increase temporal carry or coverage" `
+                (
+                    $defaultMissCarried -le $controlMissCarried -and
+                    $defaultTemporalValid -le $controlTemporalValid -and
+                    $defaultResolvedValid -le $controlResolvedValid
+                ) `
+                "defaultMissCarried=$defaultMissCarried,controlMissCarried=$controlMissCarried,defaultTemporal=$defaultTemporalValid,controlTemporal=$controlTemporalValid,defaultResolved=$defaultResolvedValid,controlResolved=$controlResolvedValid" `
+                "default <= control for miss-carried, temporal, and resolved coverage")
+        )
+        $comparisonPassCount = @(
+            $comparisonChecks | Where-Object { $_.status -eq "pass" }
+        ).Count
+        $comparisonFailCount = @(
+            $comparisonChecks | Where-Object { $_.status -eq "fail" }
+        ).Count
+        $reports += [pscustomobject]@{
+            lane = "forward3d-fbx-temporal-miss-history-reject-comparison"
+            scene = "Forward3D animated FBX SSR temporal miss-history reject data comparison"
+            executable = $forwardExecutable
+            mode = "comparison"
+            csv = ""
+            log = ""
+            verdict = if ($comparisonFailCount -eq 0) { "pass" } else { "fail" }
+            passCount = $comparisonPassCount
+            failCount = $comparisonFailCount
+            metrics = [pscustomobject]@{
+                defaultMissCarried = $defaultMissCarried
+                controlMissCarried = $controlMissCarried
+                defaultTemporalValid = $defaultTemporalValid
+                controlTemporalValid = $controlTemporalValid
+                defaultResolvedValid = $defaultResolvedValid
+                controlResolvedValid = $controlResolvedValid
             }
             checks = $comparisonChecks
         }

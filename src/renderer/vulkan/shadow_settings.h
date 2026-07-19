@@ -106,6 +106,7 @@ struct VulkanShadowSettings {
     bool ssrSpatialVarianceClampEnabled = true;
     bool ssrProbeFallbackBlendEnabled = true;
     bool ssrTemporalHistoryLockEnabled = true;
+    bool ssrTemporalMissHistoryRejectEnabled = true;
     bool ssrHitValidationEnabled = true;
     bool ssrDeferredReceiverReprojectionEnabled = true;
     bool reflectionProbeFallbackEnabled = true;
@@ -226,6 +227,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrSpatialVarianceClampEnabled = false;
         settings.ssrProbeFallbackBlendEnabled = false;
         settings.ssrTemporalHistoryLockEnabled = false;
+        settings.ssrTemporalMissHistoryRejectEnabled = false;
         settings.cascadeCount = 0;
         settings.cascadeSplitLambda = 0.0f;
         settings.cascadeMaxDistance = 0.0f;
@@ -287,6 +289,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrThickness = 0.12f;
         settings.ssrStepCount = 8;
         settings.ssrTemporalHistoryLockEnabled = true;
+        settings.ssrTemporalMissHistoryRejectEnabled = true;
         settings.cascadeCount = 1;
         settings.cascadeSplitLambda = 0.55f;
         settings.cascadeMaxDistance = 90.0f;
@@ -348,6 +351,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrThickness = 0.08f;
         settings.ssrStepCount = 12;
         settings.ssrTemporalHistoryLockEnabled = true;
+        settings.ssrTemporalMissHistoryRejectEnabled = true;
         settings.cascadeCount = 3;
         settings.cascadeSplitLambda = 0.68f;
         settings.cascadeMaxDistance = 180.0f;
@@ -409,6 +413,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrThickness = 0.06f;
         settings.ssrStepCount = 18;
         settings.ssrTemporalHistoryLockEnabled = true;
+        settings.ssrTemporalMissHistoryRejectEnabled = true;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.72f;
         settings.cascadeMaxDistance = 300.0f;
@@ -470,6 +475,7 @@ inline void ApplyShadowQualityPreset(
         settings.ssrThickness = 0.05f;
         settings.ssrStepCount = 22;
         settings.ssrTemporalHistoryLockEnabled = true;
+        settings.ssrTemporalMissHistoryRejectEnabled = true;
         settings.cascadeCount = 4;
         settings.cascadeSplitLambda = 0.78f;
         settings.cascadeMaxDistance = 360.0f;
