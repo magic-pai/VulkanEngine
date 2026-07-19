@@ -84,6 +84,48 @@ function Get-UIntMetric {
     return [uint32]$Row.PSObject.Properties[$Name].Value
 }
 
+function Get-UIntRangeMetric {
+    param([object[]]$Rows, [string]$Name)
+
+    $values = @()
+    foreach ($row in $Rows) {
+        $property = $row.PSObject.Properties[$Name]
+        if ($null -eq $property) {
+            continue
+        }
+        $values += [uint32]$property.Value
+    }
+    if ($values.Count -eq 0) {
+        return [pscustomobject]@{
+            Count = 0
+            Minimum = [uint32]0
+            Maximum = [uint32]0
+            Delta = [uint32]0
+            Average = 0.0
+        }
+    }
+
+    $range = $values | Measure-Object -Minimum -Maximum -Average
+    return [pscustomobject]@{
+        Count = [int]$values.Count
+        Minimum = [uint32]$range.Minimum
+        Maximum = [uint32]$range.Maximum
+        Delta = [uint32]([uint64]$range.Maximum - [uint64]$range.Minimum)
+        Average = [double]$range.Average
+    }
+}
+
+function Get-PermilleDelta {
+    param([uint32]$Delta, [uint32]$Total)
+
+    if ($Total -eq 0) {
+        return [uint32]0
+    }
+    return [uint32][Math]::Round(
+        ([double]$Delta * 1000.0) / [double]$Total
+    )
+}
+
 function New-Check {
     param(
         [string]$Name,
@@ -97,6 +139,40 @@ function New-Check {
         status = if ($Passed) { "pass" } else { "fail" }
         actual = $Actual
         expected = $Expected
+    }
+}
+
+function Invoke-SsrShaderContract {
+    $shaderPath = Join-Path $projectRoot "assets\shaders\ssr_temporal.comp"
+    $shaderSource = Get-Content -Raw -LiteralPath $shaderPath
+    $usesRawTraceRgbAsRadiance =
+        $shaderSource -match "RgbToYCoCg\s*\(\s*sampleValue\.rgb\s*\)"
+    $samplesNeighborHitRadiance =
+        $shaderSource -match
+            "SampleCurrentHitRadiance\s*\(\s*sampleHitUv\s*,\s*sampleRoughness\s*\)"
+    $checks = @(
+        (New-Check "SSR temporal neighborhood samples hit radiance" `
+            ($samplesNeighborHitRadiance -and -not $usesRawTraceRgbAsRadiance) `
+            "samplesNeighborHitRadiance=$samplesNeighborHitRadiance,usesRawTraceRgbAsRadiance=$usesRawTraceRgbAsRadiance" `
+            "true/false")
+    )
+    $passCount = @($checks | Where-Object { $_.status -eq "pass" }).Count
+    $failCount = @($checks | Where-Object { $_.status -eq "fail" }).Count
+    return [pscustomobject]@{
+        lane = "ssr-temporal-shader-contract"
+        scene = "Shader static contract"
+        executable = ""
+        mode = "static"
+        csv = ""
+        log = ""
+        verdict = if ($failCount -eq 0) { "pass" } else { "fail" }
+        passCount = $passCount
+        failCount = $failCount
+        metrics = [pscustomobject]@{
+            samplesNeighborHitRadiance = [int]$samplesNeighborHitRadiance
+            usesRawTraceRgbAsRadiance = [int]$usesRawTraceRgbAsRadiance
+        }
+        checks = $checks
     }
 }
 
@@ -308,6 +384,30 @@ function Invoke-SsrLane {
     $holeDiagnosticsRawHitTemporalRejectedPixels = Get-UIntMetric $last "ssr_hole_diagnostics_raw_hit_temporal_rejected_pixels"
     $holeDiagnosticsRawHitSpatialRejectedPixels = Get-UIntMetric $last "ssr_hole_diagnostics_raw_hit_spatial_rejected_pixels"
     $holeDiagnosticsTemporalMissCarriedPixels = Get-UIntMetric $last "ssr_hole_diagnostics_temporal_miss_carried_pixels"
+    $validStaticDiagnosticRows = @(
+        $rows | Where-Object {
+            [uint32]$_.ssr_hole_diagnostics_readback_valid -eq 1 -and
+                [uint32]$_.ssr_hole_diagnostics_pixel_count -gt 0
+        }
+    )
+    $staticPixelCountRange =
+        Get-UIntRangeMetric $validStaticDiagnosticRows "ssr_hole_diagnostics_pixel_count"
+    $staticRawHitRange =
+        Get-UIntRangeMetric $validStaticDiagnosticRows "ssr_hole_diagnostics_raw_hit_pixels"
+    $staticHighConfidenceRange =
+        Get-UIntRangeMetric $validStaticDiagnosticRows "ssr_hole_diagnostics_raw_high_confidence_pixels"
+    $staticTemporalValidRange =
+        Get-UIntRangeMetric $validStaticDiagnosticRows "ssr_hole_diagnostics_temporal_valid_pixels"
+    $staticResolvedValidRange =
+        Get-UIntRangeMetric $validStaticDiagnosticRows "ssr_hole_diagnostics_resolved_valid_pixels"
+    $staticRawHitDeltaPermille =
+        Get-PermilleDelta $staticRawHitRange.Delta $staticPixelCountRange.Maximum
+    $staticHighConfidenceDeltaPermille =
+        Get-PermilleDelta $staticHighConfidenceRange.Delta $staticPixelCountRange.Maximum
+    $staticTemporalValidDeltaPermille =
+        Get-PermilleDelta $staticTemporalValidRange.Delta $staticPixelCountRange.Maximum
+    $staticResolvedValidDeltaPermille =
+        Get-PermilleDelta $staticResolvedValidRange.Delta $staticPixelCountRange.Maximum
     $receiverAuditRequested = Get-UIntMetric $last "reflection_probe_receiver_audit_requested"
     $receiverAuditProductionBlend = Get-UIntMetric $last "reflection_probe_receiver_audit_production_blend"
     $receiverAuditIndependentIblEnergy = Get-UIntMetric $last "reflection_probe_receiver_audit_independent_ibl_energy"
@@ -420,9 +520,9 @@ function Invoke-SsrLane {
                 $Environment["SE_SSR_TEMPORAL_MISS_HISTORY_REJECT_OFF"] -eq "1")
         )
         $checks += New-Check "SSR temporal reconstruction contract" `
-            ($reconstructionTemporalContractVersion -eq 11 -and $reconstructionTemporalMissHistoryRejectEnabled -eq [int]$temporalMissRejectExpected -and $reconstructionTemporalPreviousViewDepthEnabled -eq 1 -and $reconstructionTemporalHistoryLockEnabled -eq [int]$temporalHistoryLockExpected -and $reconstructionSpatialCenterHitGateEnabled -eq 1 -and $reconstructionRawResolvedAliased -eq 0 -and $reconstructionCurrentHdrSourceEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrRadianceFilterEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrMipLevels -gt 1 -and $reconstructionCurrentHdrMipChainReady -eq 1) `
+            ($reconstructionTemporalContractVersion -eq 13 -and $reconstructionTemporalMissHistoryRejectEnabled -eq [int]$temporalMissRejectExpected -and $reconstructionTemporalPreviousViewDepthEnabled -eq 1 -and $reconstructionTemporalHistoryLockEnabled -eq [int]$temporalHistoryLockExpected -and $reconstructionSpatialCenterHitGateEnabled -eq 1 -and $reconstructionRawResolvedAliased -eq 0 -and $reconstructionCurrentHdrSourceEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrRadianceFilterEnabled -eq [int]$currentHdrSourceExpected -and $reconstructionCurrentHdrMipLevels -gt 1 -and $reconstructionCurrentHdrMipChainReady -eq 1) `
             "version=$reconstructionTemporalContractVersion,missReject=$reconstructionTemporalMissHistoryRejectEnabled,previousViewDepth=$reconstructionTemporalPreviousViewDepthEnabled,historyLock=$reconstructionTemporalHistoryLockEnabled,centerGate=$reconstructionSpatialCenterHitGateEnabled,rawResolvedAliased=$reconstructionRawResolvedAliased,currentHdr=$reconstructionCurrentHdrSourceEnabled,filter=$reconstructionCurrentHdrRadianceFilterEnabled,mipLevels=$reconstructionCurrentHdrMipLevels,mipReady=$reconstructionCurrentHdrMipChainReady" `
-            "11/$([int]$temporalMissRejectExpected)/1/$([int]$temporalHistoryLockExpected)/1/0/$([int]$currentHdrSourceExpected)/$([int]$currentHdrSourceExpected)/mip>1/1"
+            "13/$([int]$temporalMissRejectExpected)/1/$([int]$temporalHistoryLockExpected)/1/0/$([int]$currentHdrSourceExpected)/$([int]$currentHdrSourceExpected)/mip>1/1"
         $checks += New-Check "SSR spatial variance clamp contract" `
             ($reconstructionSpatialCenterHitGateEnabled -eq 1 -and
                 $reconstructionSpatialVarianceClampEnabled -eq [int]$spatialVarianceClampExpected -and
@@ -513,6 +613,18 @@ function Invoke-SsrLane {
                 ) `
                 "resolved=$holeDiagnosticsResolvedValidPixels,fallbackResolved=$fallbackBlendResolvedPixels,partial=$fallbackBlendPartialPixels,highTrust=$fallbackBlendHighTrustPixels,avg=$fallbackBlendAveragePermille" `
                 "resolved coverage and fallback counts agree"
+            $checks += New-Check "SSR static diagnostic readback has repeated frames" `
+                ($staticRawHitRange.Count -ge 4) `
+                "validFrames=$($staticRawHitRange.Count)" `
+                ">=4"
+            $checks += New-Check "SSR static raw-hit coverage drift is bounded" `
+                ($staticRawHitDeltaPermille -le 5) `
+                "raw=$($staticRawHitRange.Minimum)..$($staticRawHitRange.Maximum),delta=$($staticRawHitRange.Delta),permille=$staticRawHitDeltaPermille" `
+                "<=5 permille of pixels"
+            $checks += New-Check "SSR static resolved coverage drift is bounded" `
+                ($staticResolvedValidDeltaPermille -le 1) `
+                "resolved=$($staticResolvedValidRange.Minimum)..$($staticResolvedValidRange.Maximum),delta=$($staticResolvedValidRange.Delta),permille=$staticResolvedValidDeltaPermille" `
+                "<=1 permille of pixels"
             if ($currentHdrSourceExpected) {
                 $checks += New-Check "current-HDR source with miss-reject remains bounded" `
                     (
@@ -523,6 +635,11 @@ function Invoke-SsrLane {
                     "raw=$holeDiagnosticsRawHitPixels,temporal=$holeDiagnosticsTemporalValidPixels,resolved=$holeDiagnosticsResolvedValidPixels,missReject=$reconstructionTemporalMissHistoryRejectEnabled,temporalRejected=$holeDiagnosticsRawHitTemporalRejectedPixels" `
                     "raw>0 and temporalRejected<=raw; current-HDR is an experimental radiance source"
             } else {
+                $checks += New-Check "production SSR excludes current-HDR radiance" `
+                    ($reconstructionCurrentHdrSourceEnabled -eq 0 -and
+                        $radianceSource -ne 3) `
+                    "currentHdr=$reconstructionCurrentHdrSourceEnabled,source=$radianceSource" `
+                    "0/source!=3"
                 $checks += New-Check "current-HDR disabled does not seed temporal SSR radiance" `
                     (
                         $holeDiagnosticsTemporalValidPixels -eq 0 -and
@@ -726,6 +843,25 @@ function Invoke-SsrLane {
             reconstructionCurrentHdrRadianceFilterEnabled = $reconstructionCurrentHdrRadianceFilterEnabled
             reconstructionCurrentHdrMipLevels = $reconstructionCurrentHdrMipLevels
             reconstructionCurrentHdrMipChainReady = $reconstructionCurrentHdrMipChainReady
+            staticDiagnosticFrameCount = $staticRawHitRange.Count
+            staticDiagnosticPixelMinimum = $staticPixelCountRange.Minimum
+            staticDiagnosticPixelMaximum = $staticPixelCountRange.Maximum
+            staticRawHitMinimum = $staticRawHitRange.Minimum
+            staticRawHitMaximum = $staticRawHitRange.Maximum
+            staticRawHitDelta = $staticRawHitRange.Delta
+            staticRawHitDeltaPermille = $staticRawHitDeltaPermille
+            staticHighConfidenceMinimum = $staticHighConfidenceRange.Minimum
+            staticHighConfidenceMaximum = $staticHighConfidenceRange.Maximum
+            staticHighConfidenceDelta = $staticHighConfidenceRange.Delta
+            staticHighConfidenceDeltaPermille = $staticHighConfidenceDeltaPermille
+            staticTemporalValidMinimum = $staticTemporalValidRange.Minimum
+            staticTemporalValidMaximum = $staticTemporalValidRange.Maximum
+            staticTemporalValidDelta = $staticTemporalValidRange.Delta
+            staticTemporalValidDeltaPermille = $staticTemporalValidDeltaPermille
+            staticResolvedValidMinimum = $staticResolvedValidRange.Minimum
+            staticResolvedValidMaximum = $staticResolvedValidRange.Maximum
+            staticResolvedValidDelta = $staticResolvedValidRange.Delta
+            staticResolvedValidDeltaPermille = $staticResolvedValidDeltaPermille
             fallbackBlendRequested = $fallbackBlendRequested
             fallbackBlendActive = $fallbackBlendActive
             fallbackBlendContractVersion = $fallbackBlendContractVersion
@@ -1102,6 +1238,7 @@ $lanes = @(
 )
 
 $reports = @()
+$reports += Invoke-SsrShaderContract
 foreach ($lane in $lanes) {
     $reports += Invoke-SsrLane `
         -Name $lane.name `

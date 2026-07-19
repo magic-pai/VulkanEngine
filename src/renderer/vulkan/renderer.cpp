@@ -8176,7 +8176,7 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.reconstructionHistoryReset =
         frameStats.temporal.historyReset;
     frameStats.ssr.reconstructionTemporalContractVersion =
-        frameStats.ssr.reconstructionActive > 0 ? 11u : 0u;
+        frameStats.ssr.reconstructionActive > 0 ? 13u : 0u;
     frameStats.ssr.reconstructionTemporalMissHistoryRejectEnabled =
         frameStats.ssr.reconstructionActive > 0 &&
             m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled

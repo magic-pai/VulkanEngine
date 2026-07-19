@@ -2,6 +2,41 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - SSR Trace Payload Is Not Radiance
+
+Symptom:
+- LightingShowcase glossy spheres showed white wall/floor blocks and strong reflection flicker, including while the camera was not moving, when `SE_SSR_CURRENT_HDR_SOURCE=1` was forced on.
+- The same scene looked stable when production reflection fell back to probe/IBL instead of current-HDR hit radiance.
+
+False leads:
+- Treating receiver roughness trust as enough to make the current-HDR radiance source production-safe.
+- Continuing to tune trace confidence and radiance filters after current-HDR had already been proven experimental.
+
+Cause:
+- `ssr_temporal.comp` used `rawInput.rgb` in the temporal neighborhood clamp as though it were reflected color. The raw SSR trace payload stores hit UV and validity, not radiance, so it could clamp history against screen-space coordinates and produce blocky, view-dependent artifacts.
+- The current-HDR radiance source is still not a production default for glossy reflections; it remains a Debug opt-in source until foreground/background rejection and temporal stability are proven.
+
+Control test:
+- Force `SE_SSR_CURRENT_HDR_SOURCE=1` in LightingShowcase to reproduce the white blocks, then run the production default with current-HDR disabled and compare against probe/IBL reflection.
+- Run `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics -OutputDirectory tmp\ssr_production_fallback_static_health`.
+
+Fix:
+- Change the temporal neighborhood clamp to resolve neighbor hit radiance through each neighbor's hit UV before converting to YCoCg.
+- Add a static shader contract to the SSR health gate that fails if raw trace RGB is used as radiance.
+- Add frozen-scene static diagnostic ranges for SSR raw, high-confidence, temporal, and resolved coverage.
+- Remove the failed current-HDR roughness-trust control path and keep production defaults on probe/IBL or completed scene-color history fallback, not current-HDR.
+
+Prevention:
+- Never treat trace payload channels as color unless the payload contract explicitly says they contain radiance.
+- Do not promote current-HDR SSR radiance to the production path until data proves foreground/background rejection, stable source sampling, and static-frame coverage stability.
+- Use probe/IBL/captured reflection as the stable glossy baseline while SSR matures as a diagnostically isolated enhancement layer.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed after `ssr_temporal.comp.spv` regenerated.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics -OutputDirectory tmp\ssr_production_fallback_static_health` passed `861 pass / 0 fail`.
+- Key metrics: shader contract `samplesNeighborHitRadiance=1`, `usesRawTraceRgbAsRadiance=0`; production LightingShowcase `radianceSource=2/currentHdr=0`; scene-color-history-disabled control `radianceSource=1/currentHdr=0`; current-HDR opt-in remains explicit at `radianceSource=3`.
+- User accepted the real LightingShowcase production-default window as visually normal.
+
 ## 2026-07-19 - SSR Miss-History Rejection Needs A Radiance-Source-Aware Gate
 
 Symptom:

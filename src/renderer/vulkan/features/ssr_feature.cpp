@@ -24,7 +24,7 @@ void VulkanSsrFeature::AppendFrameGraph(
                 "SSRTemporal",
                 "HDRSceneColor, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, GBufferEmissive, Velocity, SceneDepth, SSRRaw, SSRHistoryColor, SSRHistoryMetadata",
                 "SSRHistoryColor, SSRHistoryMetadata",
-                "Post-lighting SSR temporal accumulation samples the current HDR hit radiance and validates motion, previous-view depth, normal, roughness, and a motion-aware history lock."
+                "SSR temporal accumulation validates motion, previous-view depth, normal, roughness, and history lock state; current-HDR hit radiance is an explicit experimental input, not the production default."
             );
             AppendRenderFrameGraphPass(
                 context.plan,

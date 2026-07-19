@@ -2948,7 +2948,7 @@ void DrawPerformanceStats(const RendererStats& stats) {
         SsrRadianceSourceName(stats.ssr.radianceSource)
     );
     ImGui::Text(
-        "SSR current HDR: source %s, radiance filter %s, mip %u, ready %s",
+        "SSR current HDR: source %s, filter %s, mip %u, ready %s",
         stats.ssr.reconstructionCurrentHdrSourceEnabled ? "on" : "off",
         stats.ssr.reconstructionCurrentHdrRadianceFilterEnabled ? "on" : "off",
         stats.ssr.reconstructionCurrentHdrMipLevels,

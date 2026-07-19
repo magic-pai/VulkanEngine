@@ -131,10 +131,18 @@ bool TemporalMissHistoryRejectEnabled() {
     return mod(encoded, 2.0) > 0.5;
 }
 
+bool CurrentHdrHitUvInBounds(vec2 hitUv) {
+    ivec2 sceneExtent = textureSize(currentHdrSceneColor, 0);
+    ivec2 safeExtent = max(sceneExtent, ivec2(1));
+    vec2 texelSize = 1.0 / vec2(safeExtent);
+    return all(greaterThan(hitUv, vec2(texelSize))) &&
+        all(lessThan(hitUv, vec2(1.0) - texelSize));
+}
+
 float CurrentHdrRadianceTrust(float traceConfidence) {
     float confidence = clamp(traceConfidence, 0.0, 1.0);
-    // Current HDR is a high-detail radiance source, so low-confidence SSR
-    // hits should fade back to probe/IBL instead of seeding bright fragments.
+    // Current HDR is a high-detail radiance source, so weak SSR hits should
+    // fade back to probe/IBL instead of seeding bright fragments.
     if (confidence < 0.45) {
         return 0.0;
     }
@@ -145,8 +153,7 @@ vec3 SampleCurrentHitRadiance(vec2 hitUv, float roughness) {
     ivec2 sceneExtent = textureSize(currentHdrSceneColor, 0);
     ivec2 safeExtent = max(sceneExtent, ivec2(1));
     vec2 texelSize = 1.0 / vec2(safeExtent);
-    if (any(lessThanEqual(hitUv, vec2(texelSize))) ||
-        any(greaterThanEqual(hitUv, vec2(1.0) - texelSize))) {
+    if (!CurrentHdrHitUvInBounds(hitUv)) {
         return vec3(0.0);
     }
 
@@ -275,15 +282,30 @@ void main() {
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             ivec2 samplePixel = clamp(pixel + ivec2(x, y), ivec2(0), extent - 1);
-            vec4 sampleValue = texelFetch(rawInput, samplePixel, 0);
-            if (sampleValue.a <= 0.0001) {
+            vec4 sampleTrace = texelFetch(rawInput, samplePixel, 0);
+            float sampleTraceConfidence = clamp(sampleTrace.a, 0.0, 1.0);
+            if (sampleTraceConfidence <= 0.0001) {
                 continue;
             }
-            vec3 ycocg = RgbToYCoCg(sampleValue.rgb);
+
+            float sampleRoughness =
+                clamp(texelFetch(normalRoughness, samplePixel, 0).w, 0.0, 1.0);
+            float sampleConfidence = currentSceneColorEnabled
+                ? CurrentHdrRadianceTrust(sampleTraceConfidence)
+                : 0.0;
+            vec2 sampleHitUv = sampleTrace.xy;
+            if (sampleConfidence <= 0.0001 ||
+                !CurrentHdrHitUvInBounds(sampleHitUv)) {
+                continue;
+            }
+
+            vec3 sampleRadiance =
+                SampleCurrentHitRadiance(sampleHitUv, sampleRoughness);
+            vec3 ycocg = RgbToYCoCg(sampleRadiance);
             neighborhoodMin = min(neighborhoodMin, ycocg);
             neighborhoodMax = max(neighborhoodMax, ycocg);
-            neighborhoodMean += ycocg * sampleValue.a;
-            neighborhoodWeight += sampleValue.a;
+            neighborhoodMean += ycocg * sampleConfidence;
+            neighborhoodWeight += sampleConfidence;
         }
     }
 
