@@ -14,6 +14,20 @@ void VulkanSsrFeature::AppendFrameGraph(
     if (context.stage != VulkanRenderFeatureFrameGraphStage::Lighting) {
         return;
     }
+    if (context.stats.ssr.backendRequestedProvider == 1u) {
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRAdapter",
+            "FrameConstants, FFX RayCounter, FFX IntersectArgs",
+            "FFX IntersectArgs",
+            "AMD FidelityFX SSSR source and shader build contract is present; the prepare-indirect-args bridge is active as the first runtime slice. Full tracing, DNSR, and final image contribution are still pending."
+        );
+    }
     if (context.stats.ssr.colorResolveEnabled > 0) {
         if (context.stats.ssr.reconstructionActive > 0) {
             AppendRenderFrameGraphPass(
@@ -220,6 +234,54 @@ void VulkanSsrFeature::WriteStats(
         ssr.sceneColorHistoryRequested == 0u
             ? 1u
             : (ssr.sceneColorHistoryDescriptorBound == 0u ? 2u : 3u);
+    ssr.backendRequestedProvider =
+        settings.ssrFidelityFxBackendRequested ? 1u : 0u;
+    ssr.backendActiveProvider = 0u;
+#if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
+    ssr.fidelityFxSssrContractVersion = 2u;
+    ssr.fidelityFxSssrSourceReady = 1u;
+    ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
+    ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
+    ssr.fidelityFxSssrDenoiserDependencyReady = 1u;
+    ssr.fidelityFxSssrSpdDependencyReady = 1u;
+#else
+    ssr.fidelityFxSssrContractVersion = 0u;
+    ssr.fidelityFxSssrSourceReady = 0u;
+    ssr.fidelityFxSssrShaderBuildIntegrated = 0u;
+    ssr.fidelityFxSssrShaderCount = 0u;
+    ssr.fidelityFxSssrDenoiserDependencyReady = 0u;
+    ssr.fidelityFxSssrSpdDependencyReady = 0u;
+#endif
+    ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady =
+        context.renderer.ffxSssrPrepareIndirectArgsResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady =
+        context.renderer.ffxSssrPrepareIndirectArgsDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady =
+        context.renderer.ffxSssrPrepareIndirectArgsPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrPrepareIndirectArgsBufferBytes =
+        context.renderer.ffxSssrPrepareIndirectArgsBufferBytes;
+    ssr.fidelityFxSssrRuntimeDispatchReady =
+        ssr.backendRequestedProvider > 0u &&
+        ssr.colorResolveEnabled > 0u &&
+        ssr.fidelityFxSssrSourceReady > 0u &&
+        ssr.fidelityFxSssrShaderBuildIntegrated > 0u &&
+        ssr.fidelityFxSssrDenoiserDependencyReady > 0u &&
+        ssr.fidelityFxSssrSpdDependencyReady > 0u &&
+        ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady > 0u &&
+        ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady > 0u
+            ? 1u
+            : 0u;
+    ssr.fidelityFxSssrRuntimeActive = 0u;
+    ssr.fidelityFxSssrFallbackReason =
+        ssr.backendRequestedProvider == 0u
+            ? 1u
+            : (ssr.fidelityFxSssrSourceReady == 0u ||
+                    ssr.fidelityFxSssrShaderBuildIntegrated == 0u ||
+                    ssr.fidelityFxSssrDenoiserDependencyReady == 0u ||
+                    ssr.fidelityFxSssrSpdDependencyReady == 0u
+                ? 3u
+                : (ssr.fidelityFxSssrRuntimeDispatchReady > 0u ? 0u : 2u));
 }
 
 }

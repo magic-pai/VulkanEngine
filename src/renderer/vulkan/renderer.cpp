@@ -14,6 +14,7 @@
 #include "renderer/vulkan/features/reflection_probe_fallback_feature.h"
 #include "renderer/vulkan/features/ssao_feature.h"
 #include "renderer/vulkan/features/ssr_feature.h"
+#include "renderer/vulkan/fidelityfx_sssr_adapter.h"
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/frame_graph.h"
@@ -5510,6 +5511,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_SsrTemporalComputePipeline.reset();
     m_SsrSpatialComputePipeline.reset();
     m_SsrDiagnosticsComputePipeline.reset();
+    m_FfxSssrPrepareIndirectArgsPipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
     m_ForwardResidualVelocityGraphicsPipeline.reset();
@@ -5567,6 +5569,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_TemporalUpscaleBloomDescriptorSets.reset();
     m_BloomDescriptorSets.reset();
     m_WeightedTranslucencyDescriptorSets.reset();
+    m_FfxSssrPrepareIndirectArgsResources.reset();
     m_SsrReconstructionDescriptorSets.reset();
     m_HiZDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
@@ -5607,6 +5610,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_LocalShadowBuffer.reset();
     m_BonePaletteFallbackDescriptorSet.reset();
     m_UniformBuffer.reset();
+    m_FfxSssrPrepareIndirectArgsDescriptorSetLayout.reset();
     m_SsrReconstructionDescriptorSetLayout.reset();
     m_HiZDescriptorSetLayout.reset();
     m_MaterialDescriptorSetLayout.reset();
@@ -6004,7 +6008,17 @@ void VulkanRenderer::DrawFrame() {
             m_SsrSpatialComputePipeline != nullptr,
         m_SceneRenderTargets != nullptr
             ? static_cast<u32>(m_SceneRenderTargets->Count())
-            : 0u
+            : 0u,
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+            m_Swapchain != nullptr &&
+            m_FfxSssrPrepareIndirectArgsResources->Count() ==
+                m_Swapchain->Images().size(),
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+            m_FfxSssrPrepareIndirectArgsResources->Count() > 0u,
+        m_FfxSssrPrepareIndirectArgsPipeline != nullptr,
+        m_FfxSssrPrepareIndirectArgsResources != nullptr
+            ? m_FfxSssrPrepareIndirectArgsResources->TotalMemoryBytes()
+            : 0ull
     };
     const FrameMaterialSet frameMaterialSet = has3DMainPass
         ? BuildFrameMaterialSet(mainCommands)
@@ -8157,6 +8171,13 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.reconstructionActive > 0
             ? m_SsrReconstructionDescriptorSets.get()
             : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrPrepareIndirectArgsPipeline.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrPrepareIndirectArgsResources.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0,
         has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
         frameStats.ssr.reconstructionActive > 0,
         m_SsrReconstructionImagesInitialized,
@@ -8173,6 +8194,22 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.ssrReconstructionSpatialDispatches;
     frameStats.ssr.reconstructionHistoryCopies =
         frameStats.binds.ssrReconstructionHistoryCopies;
+    frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches =
+        frameStats.binds.ffxSssrPrepareIndirectArgsDispatches;
+    frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds =
+        frameStats.binds.ffxSssrPrepareIndirectArgsDescriptorBinds;
+    frameStats.ssr.fidelityFxSssrRuntimeActive =
+        frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u
+            ? 1u
+            : 0u;
+    if (frameStats.ssr.fidelityFxSssrRuntimeActive > 0u) {
+        frameStats.ssr.backendActiveProvider = 1u;
+        frameStats.ssr.fidelityFxSssrFallbackReason = 0u;
+    } else if (frameStats.ssr.backendRequestedProvider > 0u &&
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u) {
+        frameStats.ssr.backendActiveProvider = 0u;
+        frameStats.ssr.fidelityFxSssrFallbackReason = 2u;
+    }
     frameStats.ssr.reconstructionHistoryReset =
         frameStats.temporal.historyReset;
     frameStats.ssr.reconstructionTemporalContractVersion =
@@ -8886,6 +8923,10 @@ void VulkanRenderer::CreateSwapchainResources() {
     m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
     m_SsrReconstructionDescriptorSetLayout =
         std::make_unique<VulkanSsrReconstructionDescriptorSetLayout>(m_Device);
+    m_FfxSssrPrepareIndirectArgsDescriptorSetLayout =
+        std::make_unique<VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout>(
+            m_Device
+        );
     m_UniformBuffer = std::make_unique<VulkanUniformBuffer>(
         m_Device,
         m_PhysicalDevice,
@@ -9198,6 +9239,13 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_SceneRenderTargets,
             *m_SsrDepthPyramid,
             *m_SceneTargetSampler
+        );
+    m_FfxSssrPrepareIndirectArgsResources =
+        std::make_unique<VulkanFfxSssrPrepareIndirectArgsResources>(
+            m_Device,
+            m_PhysicalDevice,
+            *m_FfxSssrPrepareIndirectArgsDescriptorSetLayout,
+            m_Swapchain->Images().size()
         );
     m_HdrDescriptorSets = std::make_unique<VulkanHdrDescriptorSets>(
         m_Device,
@@ -9628,6 +9676,22 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_SsrReconstructionDescriptorSetLayout,
         std::string(SE_SHADER_DIR) + "/ssr_spatial.comp.spv"
     );
+    {
+        const std::array<VkDescriptorSetLayout, 2> ffxPrepareLayouts = {
+            m_DescriptorSetLayout->Handle(),
+            m_FfxSssrPrepareIndirectArgsDescriptorSetLayout->Handle()
+        };
+        m_FfxSssrPrepareIndirectArgsPipeline =
+            std::make_unique<VulkanComputePipeline>(
+                m_Device,
+                std::span<const VkDescriptorSetLayout>(
+                    ffxPrepareLayouts.data(),
+                    ffxPrepareLayouts.size()
+                ),
+                std::string(SE_SHADER_DIR) +
+                    "/ffx_sssr_PrepareIndirectArgs.hlsl.spv"
+            );
+    }
 #if !defined(NDEBUG)
     m_SsrDiagnosticsComputePipeline = std::make_unique<VulkanComputePipeline>(
         m_Device,
@@ -9896,6 +9960,9 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_WeightedTranslucencyDescriptorSets != nullptr) {
         m_WeightedTranslucencyDescriptorSets->Release();
+    }
+    if (m_FfxSssrPrepareIndirectArgsResources != nullptr) {
+        m_FfxSssrPrepareIndirectArgsResources->Release();
     }
     if (m_OverlayDescriptorSets != nullptr) {
         m_OverlayDescriptorSets->Release();
@@ -10300,6 +10367,15 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneRenderTargets,
             *m_SsrDepthPyramid,
             *m_SceneTargetSampler
+        );
+    }
+    if (m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_FfxSssrPrepareIndirectArgsDescriptorSetLayout != nullptr) {
+        m_FfxSssrPrepareIndirectArgsResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            *m_FfxSssrPrepareIndirectArgsDescriptorSetLayout,
+            m_Swapchain->Images().size()
         );
     }
     if (m_GBufferDescriptorSets != nullptr &&
@@ -11310,6 +11386,27 @@ void VulkanRenderer::ApplyEnvironmentRenderSettings() {
             m_ShadowSettings.ssrThickness = defaults.ssrThickness;
             m_ShadowSettings.ssrStepCount = defaults.ssrStepCount;
         }
+    }
+    {
+        const std::string ssrBackend =
+            LowercaseAscii(ReadEnvironmentString("SE_SSR_BACKEND"));
+        if (ssrBackend == "ffx" ||
+            ssrBackend == "ffx-sssr" ||
+            ssrBackend == "fidelityfx" ||
+            ssrBackend == "fidelityfx-sssr") {
+            m_ShadowSettings.ssrFidelityFxBackendRequested = true;
+        } else if (ssrBackend == "selfengine" ||
+            ssrBackend == "internal" ||
+            ssrBackend == "legacy") {
+            m_ShadowSettings.ssrFidelityFxBackendRequested = false;
+        }
+    }
+    if (const std::optional<bool> ssrFidelityFx =
+            EnvironmentFlagOverride("SE_SSR_FFX")) {
+        m_ShadowSettings.ssrFidelityFxBackendRequested = *ssrFidelityFx;
+    }
+    if (EnvironmentFlagEnabled("SE_SSR_FFX_OFF")) {
+        m_ShadowSettings.ssrFidelityFxBackendRequested = false;
     }
     if (const std::optional<bool> ssrRefinement =
             EnvironmentFlagOverride("SE_SSR_REFINEMENT")) {

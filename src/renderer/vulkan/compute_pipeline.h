@@ -41,6 +41,12 @@ public:
         const std::string& computeShaderPath
     );
 
+    VulkanComputePipeline(
+        const VulkanDevice& device,
+        std::span<const VkDescriptorSetLayout> descriptorSetLayouts,
+        const std::string& computeShaderPath
+    );
+
     ~VulkanComputePipeline();
 
     SE_DISABLE_COPY(VulkanComputePipeline);
@@ -65,6 +71,11 @@ public:
         const VulkanDescriptorSetLayout& frameDescriptorSetLayout,
         const VulkanSsrReconstructionDescriptorSetLayout&
             reconstructionDescriptorSetLayout,
+        const std::string& computeShaderPath
+    );
+    void Recreate(
+        const VulkanDevice& device,
+        std::span<const VkDescriptorSetLayout> descriptorSetLayouts,
         const std::string& computeShaderPath
     );
     void Release();

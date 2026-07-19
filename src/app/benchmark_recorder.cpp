@@ -595,6 +595,23 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.sceneColorHistorySourceImageIndex << ','
         << ssr.sceneColorHistoryFrameAge << ','
         << ssr.radianceSource << ','
+        << ssr.backendRequestedProvider << ','
+        << ssr.backendActiveProvider << ','
+        << ssr.fidelityFxSssrContractVersion << ','
+        << ssr.fidelityFxSssrSourceReady << ','
+        << ssr.fidelityFxSssrShaderBuildIntegrated << ','
+        << ssr.fidelityFxSssrShaderCount << ','
+        << ssr.fidelityFxSssrDenoiserDependencyReady << ','
+        << ssr.fidelityFxSssrSpdDependencyReady << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsDispatches << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds << ','
+        << ssr.fidelityFxSssrPrepareIndirectArgsBufferBytes << ','
+        << ssr.fidelityFxSssrRuntimeDispatchReady << ','
+        << ssr.fidelityFxSssrRuntimeActive << ','
+        << ssr.fidelityFxSssrFallbackReason << ','
         << ssr.strength << ','
         << ssr.rayLength << ','
         << ssr.thickness << ','
@@ -1453,6 +1470,8 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ssrReconstructionTemporalDispatches << ','
         << binds.ssrReconstructionSpatialDispatches << ','
         << binds.ssrReconstructionHistoryCopies << ','
+        << binds.ffxSssrPrepareIndirectArgsDispatches << ','
+        << binds.ffxSssrPrepareIndirectArgsDescriptorBinds << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -1881,6 +1900,23 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_scene_color_history_current_image_index,"
         << "ssr_scene_color_history_source_image_index,"
         << "ssr_scene_color_history_frame_age,ssr_radiance_source,"
+        << "ssr_backend_requested_provider,"
+        << "ssr_backend_active_provider,"
+        << "ssr_ffx_sssr_contract_version,"
+        << "ssr_ffx_sssr_source_ready,"
+        << "ssr_ffx_sssr_shader_build_integrated,"
+        << "ssr_ffx_sssr_shader_count,"
+        << "ssr_ffx_sssr_denoiser_dependency_ready,"
+        << "ssr_ffx_sssr_spd_dependency_ready,"
+        << "ssr_ffx_sssr_prepare_indirect_args_resources_ready,"
+        << "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready,"
+        << "ssr_ffx_sssr_prepare_indirect_args_dispatches,"
+        << "ssr_ffx_sssr_prepare_indirect_args_descriptor_binds,"
+        << "ssr_ffx_sssr_prepare_indirect_args_buffer_bytes,"
+        << "ssr_ffx_sssr_runtime_dispatch_ready,"
+        << "ssr_ffx_sssr_runtime_active,"
+        << "ssr_ffx_sssr_fallback_reason,"
         << "ssr_strength,"
         << "ssr_ray_length,ssr_thickness,ssr_step_count,"
         << "ssr_hole_diagnostics_requested,ssr_hole_diagnostics_active,"
@@ -2597,6 +2633,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_reconstruction_temporal_dispatches,"
         << "ssr_reconstruction_spatial_dispatches,"
         << "ssr_reconstruction_history_copies,"
+        << "ffx_sssr_prepare_indirect_args_dispatches,"
+        << "ffx_sssr_prepare_indirect_args_descriptor_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

@@ -368,6 +368,25 @@ struct RendererSsrStats {
     u32 sceneColorHistoryFrameAge = 0;
     // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history, 3 = active current-HDR source.
     u32 radianceSource = 0;
+    // 0 = SelfEngine internal SSR, 1 = AMD FidelityFX SSSR.
+    u32 backendRequestedProvider = 0;
+    u32 backendActiveProvider = 0;
+    u32 fidelityFxSssrContractVersion = 0;
+    u32 fidelityFxSssrSourceReady = 0;
+    u32 fidelityFxSssrShaderBuildIntegrated = 0;
+    u32 fidelityFxSssrShaderCount = 0;
+    u32 fidelityFxSssrDenoiserDependencyReady = 0;
+    u32 fidelityFxSssrSpdDependencyReady = 0;
+    u32 fidelityFxSssrPrepareIndirectArgsResourcesReady = 0;
+    u32 fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady = 0;
+    u32 fidelityFxSssrPrepareIndirectArgsPipelineReady = 0;
+    u32 fidelityFxSssrPrepareIndirectArgsDispatches = 0;
+    u32 fidelityFxSssrPrepareIndirectArgsDescriptorBinds = 0;
+    u64 fidelityFxSssrPrepareIndirectArgsBufferBytes = 0;
+    u32 fidelityFxSssrRuntimeDispatchReady = 0;
+    u32 fidelityFxSssrRuntimeActive = 0;
+    // 0 = none, 1 = not requested, 2 = prepare-args bridge unavailable, 3 = source/build unavailable.
+    u32 fidelityFxSssrFallbackReason = 0;
     f32 strength = 0.0f;
     f32 rayLength = 0.0f;
     f32 thickness = 0.0f;
@@ -868,6 +887,8 @@ struct RendererBindStats {
     u32 ssrReconstructionTemporalDispatches = 0;
     u32 ssrReconstructionSpatialDispatches = 0;
     u32 ssrReconstructionHistoryCopies = 0;
+    u32 ffxSssrPrepareIndirectArgsDispatches = 0;
+    u32 ffxSssrPrepareIndirectArgsDescriptorBinds = 0;
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;

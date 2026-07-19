@@ -109,6 +109,7 @@ struct VulkanShadowSettings {
     bool ssrTemporalMissHistoryRejectEnabled = true;
     bool ssrHitValidationEnabled = true;
     bool ssrDeferredReceiverReprojectionEnabled = true;
+    bool ssrFidelityFxBackendRequested = false;
     bool reflectionProbeFallbackEnabled = true;
     f32 reflectionProbeDiffuseIntensity = 1.0f;
     f32 reflectionProbeSpecularIntensity = 1.0f;

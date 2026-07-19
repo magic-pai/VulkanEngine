@@ -2,6 +2,33 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - FidelityFX RWBuffer Maps To Vulkan Storage Texel Buffers
+
+Symptom:
+- The first AMD FidelityFX SSSR runtime bridge aborted in Debug validation while creating the `PrepareIndirectArgs.hlsl` compute pipeline.
+- Validation reported descriptor type mismatches for `g_ray_counter` and `g_intersect_args`: SelfEngine provided storage buffers, but SPIR-V required storage texel buffers.
+
+False leads:
+- Assuming HLSL `RWBuffer<uint>` should map to `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` because the resource is backed by a VkBuffer.
+
+Cause:
+- DXC emits HLSL typed `RWBuffer<uint>` as `OpTypeImage` with `Dim=Buffer`, which Vulkan validates as `VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER`, not a raw/storage buffer descriptor.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1` with `SE_SSR_BACKEND=ffx-sssr`; the FFX lane should create the pipeline and dispatch after descriptor type correction, while the internal-backend lane should suppress FFX dispatch.
+
+Fix:
+- Bind the FFX ray-counter and indirect-args resources as storage texel buffers with `VK_FORMAT_R32_UINT` buffer views, while retaining transfer/indirect usage for clears and future indirect dispatch consumers.
+- Add CSV fields for prepare-args resources, descriptor sets, pipeline readiness, dispatches, binds, and buffer bytes.
+
+Prevention:
+- For every third-party shader pass, verify descriptor kinds from SPIR-V/reflection or Vulkan validation before writing SelfEngine descriptor layouts.
+- Do not infer Vulkan descriptor type solely from HLSL spelling or CPU resource class name.
+
+Validation:
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_runtime_prepare_args_v3` passed `52 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics -OutputDirectory tmp\ssr_refinement_after_ffx_prepare_args` passed `861 pass / 0 fail`.
+
 ## 2026-07-19 - SSR Trace Payload Is Not Radiance
 
 Symptom:

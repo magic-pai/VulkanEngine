@@ -46,6 +46,10 @@ find_program(GLSLC_EXECUTABLE glslc
     HINTS "$ENV{VULKAN_SDK}/Bin"
     REQUIRED
 )
+find_program(DXC_EXECUTABLE dxc
+    HINTS "$ENV{VULKAN_SDK}/Bin"
+    REQUIRED
+)
 
 if(WIN32)
     find_program(POWERSHELL_EXECUTABLE powershell REQUIRED)
@@ -103,6 +107,24 @@ set(SHADER_SOURCES
 )
 
 set(SHADER_OUTPUTS)
+set(FFX_SSSR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/fidelityfx_sssr)
+set(FFX_SSSR_SHADER_SOURCE_DIR ${FFX_SSSR_SOURCE_DIR}/shaders)
+set(FFX_SSSR_INCLUDE_DIRS
+    ${FFX_SSSR_SHADER_SOURCE_DIR}
+    ${FFX_SSSR_SOURCE_DIR}/include/ffx-sssr
+    ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr
+    ${FFX_SSSR_SOURCE_DIR}/include/ffx-spd
+)
+set(FFX_SSSR_HLSL_SHADERS
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/ClassifyTiles.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/PrepareBlueNoiseTexture.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/PrepareIndirectArgs.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/Intersect.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/Reproject.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/Prefilter.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/ResolveTemporal.hlsl
+    ${FFX_SSSR_SHADER_SOURCE_DIR}/DepthDownsample.hlsl
+)
 set(LOCAL_SHADOW_CONSUMER_SHADERS
     forward_3d.frag
     deferred_lighting.frag
@@ -141,6 +163,42 @@ foreach(SHADER_SOURCE ${SHADER_SOURCES})
     endif()
 
     list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
+endforeach()
+
+foreach(FFX_SSSR_SHADER_SOURCE ${FFX_SSSR_HLSL_SHADERS})
+    get_filename_component(FFX_SSSR_SHADER_FILE_NAME ${FFX_SSSR_SHADER_SOURCE} NAME)
+    set(FFX_SSSR_SHADER_OUTPUT
+        ${SHADER_OUTPUT_DIR}/ffx_sssr_${FFX_SSSR_SHADER_FILE_NAME}.spv)
+
+    set(FFX_SSSR_INCLUDE_ARGS)
+    foreach(FFX_SSSR_INCLUDE_DIR ${FFX_SSSR_INCLUDE_DIRS})
+        list(APPEND FFX_SSSR_INCLUDE_ARGS -I${FFX_SSSR_INCLUDE_DIR})
+    endforeach()
+
+    add_custom_command(
+        OUTPUT ${FFX_SSSR_SHADER_OUTPUT}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+        COMMAND ${DXC_EXECUTABLE}
+            -spirv
+            "-fspv-target-env=vulkan1.2"
+            -T cs_6_6
+            -E main
+            ${FFX_SSSR_INCLUDE_ARGS}
+            ${FFX_SSSR_SHADER_SOURCE}
+            -Fo ${FFX_SSSR_SHADER_OUTPUT}
+        DEPENDS
+            ${FFX_SSSR_SHADER_SOURCE}
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-sssr/ffx_sssr.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_common.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_config.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_prefilter.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_reproject.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_resolve_temporal.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-spd/ffx_a.h
+            ${FFX_SSSR_SOURCE_DIR}/include/ffx-spd/ffx_spd.h
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUTS ${FFX_SSSR_SHADER_OUTPUT})
 endforeach()
 
 add_custom_target(SelfEngineShaders DEPENDS ${SHADER_OUTPUTS})
@@ -189,6 +247,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/render_resources_2d.cpp
     src/renderer/vulkan/render_targets.cpp
     src/renderer/vulkan/reflection_probe_resources.cpp
+    src/renderer/vulkan/fidelityfx_sssr_adapter.cpp
     src/renderer/vulkan/depth_buffer.cpp
     src/renderer/vulkan/surface.cpp
     src/renderer/vulkan/pipeline_spec.cpp
@@ -289,6 +348,8 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D Sel
     target_compile_definitions(${SELFENGINE_TARGET} PRIVATE
         SE_SHADER_DIR="${SHADER_OUTPUT_DIR}"
         SE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        SE_ENABLE_FIDELITYFX_SSSR=1
+        SE_FIDELITYFX_SSSR_SHADER_COUNT=8
     )
     set_target_properties(${SELFENGINE_TARGET} PROPERTIES
         CXX_SCAN_FOR_MODULES OFF

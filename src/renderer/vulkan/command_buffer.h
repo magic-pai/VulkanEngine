@@ -26,6 +26,7 @@ class VulkanHdrDescriptorSets;
 class VulkanHdrRenderPass;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
+class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
 class VulkanMaterialDescriptorSets;
@@ -312,6 +313,10 @@ public:
         const VulkanComputePipeline* ssrSpatialPipeline = nullptr,
         const VulkanComputePipeline* ssrDiagnosticsPipeline = nullptr,
         const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets = nullptr,
+        const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline = nullptr,
+        const VulkanFfxSssrPrepareIndirectArgsResources*
+            ffxSssrPrepareIndirectArgsResources = nullptr,
+        bool ffxSssrPrepareIndirectArgsEnabled = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,
         bool ssrReconstructionEnabled = false,
         bool ssrImagesInitialized = false,

@@ -39,6 +39,10 @@ struct VulkanRenderFeatureContext {
     bool ssrReconstructionDescriptorSetsReady = false;
     bool ssrReconstructionPipelinesAvailable = false;
     u32 ssrReconstructionImageCount = 0;
+    bool ffxSssrPrepareIndirectArgsResourcesReady = false;
+    bool ffxSssrPrepareIndirectArgsDescriptorSetsReady = false;
+    bool ffxSssrPrepareIndirectArgsPipelineReady = false;
+    u64 ffxSssrPrepareIndirectArgsBufferBytes = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

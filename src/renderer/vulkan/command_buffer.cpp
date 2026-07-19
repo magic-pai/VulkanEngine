@@ -6,6 +6,7 @@
 #include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/descriptor_sets.h"
 #include "renderer/vulkan/device.h"
+#include "renderer/vulkan/fidelityfx_sssr_adapter.h"
 #include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/framebuffer.h"
@@ -2437,6 +2438,10 @@ void VulkanCommandBuffer::Record(
     const VulkanComputePipeline* ssrSpatialPipeline,
     const VulkanComputePipeline* ssrDiagnosticsPipeline,
     const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets,
+    const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline,
+    const VulkanFfxSssrPrepareIndirectArgsResources*
+        ffxSssrPrepareIndirectArgsResources,
+    bool ffxSssrPrepareIndirectArgsEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
     bool ssrImagesInitialized,
@@ -3164,6 +3169,128 @@ void VulkanCommandBuffer::Record(
             *ssrTargets,
             ssrImagesInitialized
         );
+    }
+
+    const bool ffxSssrPrepareIndirectArgsReady =
+        ffxSssrPrepareIndirectArgsEnabled &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        ffxSssrPrepareIndirectArgsPipeline != nullptr &&
+        ffxSssrPrepareIndirectArgsResources != nullptr &&
+        ffxSssrPrepareIndirectArgsResources->Count() > imageIndex;
+    if (ffxSssrPrepareIndirectArgsReady) {
+        const VkBuffer rayCounterBuffer =
+            ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
+        const VkBuffer indirectArgsBuffer =
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(imageIndex);
+        vkCmdFillBuffer(
+            commandBuffer,
+            rayCounterBuffer,
+            0,
+            ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize(),
+            0u
+        );
+        vkCmdFillBuffer(
+            commandBuffer,
+            indirectArgsBuffer,
+            0,
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize(),
+            0u
+        );
+
+        std::array<VkBufferMemoryBarrier, 2> transferToCompute{};
+        transferToCompute[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        transferToCompute[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        transferToCompute[0].dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        transferToCompute[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        transferToCompute[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        transferToCompute[0].buffer = rayCounterBuffer;
+        transferToCompute[0].offset = 0;
+        transferToCompute[0].size =
+            ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize();
+        transferToCompute[1] = transferToCompute[0];
+        transferToCompute[1].buffer = indirectArgsBuffer;
+        transferToCompute[1].size =
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize();
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            static_cast<u32>(transferToCompute.size()),
+            transferToCompute.data(),
+            0,
+            nullptr
+        );
+
+        const VkDescriptorSet frameDescriptorSet =
+            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        const VkDescriptorSet ffxDescriptorSet =
+            ffxSssrPrepareIndirectArgsResources->Handle(imageIndex);
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrPrepareIndirectArgsPipeline->Handle()
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrPrepareIndirectArgsPipeline->Layout(),
+            0,
+            1,
+            &frameDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_COMPUTE,
+            ffxSssrPrepareIndirectArgsPipeline->Layout(),
+            1,
+            1,
+            &ffxDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdDispatch(commandBuffer, 1u, 1u, 1u);
+
+        std::array<VkBufferMemoryBarrier, 2> computeToConsumer{};
+        computeToConsumer[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        computeToConsumer[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        computeToConsumer[0].dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT |
+            VK_ACCESS_SHADER_WRITE_BIT |
+            VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        computeToConsumer[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        computeToConsumer[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        computeToConsumer[0].buffer = rayCounterBuffer;
+        computeToConsumer[0].offset = 0;
+        computeToConsumer[0].size =
+            ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize();
+        computeToConsumer[1] = computeToConsumer[0];
+        computeToConsumer[1].buffer = indirectArgsBuffer;
+        computeToConsumer[1].size =
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize();
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+            0,
+            0,
+            nullptr,
+            static_cast<u32>(computeToConsumer.size()),
+            computeToConsumer.data(),
+            0,
+            nullptr
+        );
+
+        if (bindStats != nullptr) {
+            ++bindStats->ffxSssrPrepareIndirectArgsDispatches;
+            bindStats->ffxSssrPrepareIndirectArgsDescriptorBinds += 2u;
+        }
     }
 
     const bool ssrReconstructionReady =
