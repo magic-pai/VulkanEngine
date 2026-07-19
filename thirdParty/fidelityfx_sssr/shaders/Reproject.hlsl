@@ -42,8 +42,8 @@ THE SOFTWARE.
 [[vk::binding(13, 1)]] SamplerState g_linear_sampler                            : register(s0);
 
 // Outputs
-[[vk::binding(14, 1)]] RWTexture2D<float3> g_out_reprojected_radiance		    : register(u0);
-[[vk::binding(15, 1)]] RWTexture2D<float3> g_out_average_radiance	            : register(u1);
+[[vk::binding(14, 1)]] RWTexture2D<float4> g_out_reprojected_radiance		    : register(u0);
+[[vk::binding(15, 1)]] RWTexture2D<float4> g_out_average_radiance	            : register(u1);
 [[vk::binding(16, 1)]] RWTexture2D<float> g_out_variance		                : register(u2);
 [[vk::binding(17, 1)]] RWTexture2D<float> g_out_sample_count		            : register(u3);
 
@@ -67,8 +67,8 @@ float2 FFX_DNSR_Reflections_LoadMotionVector(int2 pixel_coordinate) { return g_m
 min16float3 FFX_DNSR_Reflections_SamplePreviousAverageRadiance(float2 uv) { return (min16float3)g_average_radiance_history.SampleLevel(g_linear_sampler, uv, 0.0f).xyz; }
 min16float FFX_DNSR_Reflections_SampleVarianceHistory(float2 uv) { return (min16float)g_variance_history.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float FFX_DNSR_Reflections_LoadRayLength(int2 pixel_coordinate) { return (min16float)g_in_radiance.Load(int3(pixel_coordinate, 0)).w; }
-void FFX_DNSR_Reflections_StoreRadianceReprojected(int2 pixel_coordinate, min16float3 value) { g_out_reprojected_radiance[pixel_coordinate] = value; }
-void FFX_DNSR_Reflections_StoreAverageRadiance(int2 pixel_coordinate, min16float3 value) { g_out_average_radiance[pixel_coordinate] = value; }
+void FFX_DNSR_Reflections_StoreRadianceReprojected(int2 pixel_coordinate, min16float3 value) { g_out_reprojected_radiance[pixel_coordinate] = value.xyzz; }
+void FFX_DNSR_Reflections_StoreAverageRadiance(int2 pixel_coordinate, min16float3 value) { g_out_average_radiance[pixel_coordinate] = value.xyzz; }
 void FFX_DNSR_Reflections_StoreVariance(int2 pixel_coordinate, min16float value) { g_out_variance[pixel_coordinate] = value; }
 void FFX_DNSR_Reflections_StoreNumSamples(int2 pixel_coordinate, min16float value) { g_out_sample_count[pixel_coordinate] = value; }
 #include "ffx_denoiser_reflections_reproject.h"

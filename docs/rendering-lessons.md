@@ -2,6 +2,38 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-20 - FidelityFX SSSR ResolveTemporal Must Be Validation-Clean History
+
+Symptom:
+- The FFX ResolveTemporal bridge reported a correct CSV contract, but stderr still contained Vulkan validation errors in the FFX lanes.
+
+False leads:
+- Treating CSV pass counts and FrameGraph validation as enough proof.
+- Binding Reproject `RWTexture2D<float3>` outputs to RGBA32F images without checking the SPIR-V write component count.
+- Switching those resources to RGB32F without checking device sampled/storage format support.
+
+Cause:
+- Vulkan validation rejects a three-component `OpImageWrite` into a four-component RGBA image view. The current device also does not support RGB32F sampled/storage images, so the portable Vulkan bridge must keep RGBA32F resources and patch the vendored Reproject shader callbacks to write `value.xyzz`.
+- The FFX Intersect lit-scene input only needs mip0, but binding the full HDR scene-color view before mip generation exposed undefined higher mips to validation.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_resolve_temporal_bridge` and require both FFX real-scene lanes to report contract `7`, ResolveTemporal ready `1/1/1/1/1`, dispatch/bind/history-copy `1/2/10`, and Vulkan validation diagnostics `0`; the internal-backend control must keep dispatch/binds/history-copy at `0/0/0`.
+
+Fix:
+- Added the official ResolveTemporal descriptor/resources/pipeline/dispatch bridge and wrote its output into the Reproject history resource set.
+- Patched `thirdParty/fidelityfx_sssr/shaders/Reproject.hlsl` to use RGBA storage outputs with `.xyzz` stores while preserving RGB radiance semantics.
+- Bound Intersect's lit-scene input to the HDR scene-color mip0 attachment view.
+- Extended the FFX integration gate to fail on Vulkan validation diagnostics.
+
+Prevention:
+- Every third-party compute pass must prove both CSV resource/dispatch contracts and clean Vulkan validation logs before becoming a completed slice.
+- When HLSL storage-image component counts and Vulkan image formats disagree, fix the shader/resource contract deliberately; do not rely on “larger format is safer.”
+
+Validation:
+- Debug `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` builds passed.
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_resolve_temporal_bridge` passed `121 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\ssr_regression_after_ffx_resolve_temporal` passed `691 pass / 0 fail`.
+
 ## 2026-07-20 - FidelityFX SSSR Prefilter Must Stay An Audited Intermediate
 
 Symptom:

@@ -1347,6 +1347,153 @@ void CopySsrHistoryToOtherImages(
     }
 }
 
+void CopyFfxSssrImage(
+    VkCommandBuffer commandBuffer,
+    VkImage source,
+    VkImage destination,
+    VkExtent2D extent
+) {
+    VkImageCopy copy{};
+    copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.srcSubresource.layerCount = 1;
+    copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.dstSubresource.layerCount = 1;
+    copy.extent = { extent.width, extent.height, 1 };
+
+    constexpr VkAccessFlags kGeneralAccess =
+        VK_ACCESS_SHADER_READ_BIT |
+        VK_ACCESS_SHADER_WRITE_BIT |
+        VK_ACCESS_TRANSFER_WRITE_BIT;
+    constexpr VkPipelineStageFlags kGeneralStages =
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    TransitionColorImage(
+        commandBuffer,
+        source,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        kGeneralAccess,
+        VK_ACCESS_TRANSFER_READ_BIT,
+        kGeneralStages,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        destination,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        kGeneralAccess,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        kGeneralStages,
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    );
+    vkCmdCopyImage(
+        commandBuffer,
+        source,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        destination,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &copy
+    );
+    TransitionColorImage(
+        commandBuffer,
+        destination,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+    );
+    TransitionColorImage(
+        commandBuffer,
+        source,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_LAYOUT_GENERAL,
+        VK_ACCESS_TRANSFER_READ_BIT,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+    );
+}
+
+u32 CopyFfxSssrCurrentDenoiserStateToHistory(
+    VkCommandBuffer commandBuffer,
+    const VulkanFfxSssrReprojectResources& reprojectResources,
+    const VulkanFfxSssrPrefilterResources& prefilterResources,
+    std::size_t imageIndex
+) {
+    if (imageIndex >= reprojectResources.Count() ||
+        imageIndex >= prefilterResources.Count()) {
+        return 0u;
+    }
+
+    CopyFfxSssrImage(
+        commandBuffer,
+        reprojectResources.AverageRadianceImage(imageIndex),
+        reprojectResources.AverageRadianceHistoryImage(imageIndex),
+        reprojectResources.AverageExtent()
+    );
+    CopyFfxSssrImage(
+        commandBuffer,
+        prefilterResources.SampleCountImage(imageIndex),
+        reprojectResources.SampleCountHistoryImage(imageIndex),
+        reprojectResources.Extent()
+    );
+    return 2u;
+}
+
+u32 CopyFfxSssrHistoryToOtherImages(
+    VkCommandBuffer commandBuffer,
+    const VulkanFfxSssrReprojectResources& reprojectResources,
+    std::size_t sourceIndex
+) {
+    if (reprojectResources.Count() <= 1 ||
+        sourceIndex >= reprojectResources.Count()) {
+        return 0u;
+    }
+
+    u32 copyCount = 0u;
+    for (std::size_t destinationIndex = 0;
+         destinationIndex < reprojectResources.Count();
+         ++destinationIndex) {
+        if (destinationIndex == sourceIndex) {
+            continue;
+        }
+
+        CopyFfxSssrImage(
+            commandBuffer,
+            reprojectResources.RadianceHistoryImage(sourceIndex),
+            reprojectResources.RadianceHistoryImage(destinationIndex),
+            reprojectResources.Extent()
+        );
+        CopyFfxSssrImage(
+            commandBuffer,
+            reprojectResources.AverageRadianceHistoryImage(sourceIndex),
+            reprojectResources.AverageRadianceHistoryImage(destinationIndex),
+            reprojectResources.AverageExtent()
+        );
+        CopyFfxSssrImage(
+            commandBuffer,
+            reprojectResources.VarianceHistoryImage(sourceIndex),
+            reprojectResources.VarianceHistoryImage(destinationIndex),
+            reprojectResources.Extent()
+        );
+        CopyFfxSssrImage(
+            commandBuffer,
+            reprojectResources.SampleCountHistoryImage(sourceIndex),
+            reprojectResources.SampleCountHistoryImage(destinationIndex),
+            reprojectResources.Extent()
+        );
+        copyCount += 4u;
+    }
+    return copyCount;
+}
+
 VkImage TemporalHistoryCopySourceImage(
     const VulkanSceneRenderTargets& renderTargets,
     std::size_t sourceImageIndex,
@@ -2452,6 +2599,9 @@ void VulkanCommandBuffer::Record(
     const VulkanFfxSssrReprojectResources* ffxSssrReprojectResources,
     const VulkanComputePipeline* ffxSssrPrefilterPipeline,
     const VulkanFfxSssrPrefilterResources* ffxSssrPrefilterResources,
+    const VulkanComputePipeline* ffxSssrResolveTemporalPipeline,
+    const VulkanFfxSssrResolveTemporalResources*
+        ffxSssrResolveTemporalResources,
     bool ffxSssrPrepareIndirectArgsEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
@@ -3222,6 +3372,11 @@ void VulkanCommandBuffer::Record(
         ffxSssrPrefilterPipeline != nullptr &&
         ffxSssrPrefilterResources != nullptr &&
         ffxSssrPrefilterResources->Count() > imageIndex;
+    const bool ffxSssrResolveTemporalReady =
+        ffxSssrPrefilterReady &&
+        ffxSssrResolveTemporalPipeline != nullptr &&
+        ffxSssrResolveTemporalResources != nullptr &&
+        ffxSssrResolveTemporalResources->Count() > imageIndex;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
@@ -4330,6 +4485,178 @@ void VulkanCommandBuffer::Record(
                 if (bindStats != nullptr) {
                     ++bindStats->ffxSssrPrefilterDispatches;
                     bindStats->ffxSssrPrefilterDescriptorBinds += 2u;
+                }
+
+                if (ffxSssrResolveTemporalReady) {
+                    u32 historyCopies =
+                        CopyFfxSssrCurrentDenoiserStateToHistory(
+                            commandBuffer,
+                            *ffxSssrReprojectResources,
+                            *ffxSssrPrefilterResources,
+                            imageIndex
+                        );
+
+                    std::array<VkImageMemoryBarrier, 9> resolveImageBarriers{};
+                    auto setResolveImageBarrier = [&](
+                        std::size_t barrierIndex,
+                        VkImage image,
+                        VkAccessFlags sourceAccess,
+                        VkAccessFlags destinationAccess
+                    ) {
+                        VkImageMemoryBarrier& barrier =
+                            resolveImageBarriers[barrierIndex];
+                        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                        barrier.srcAccessMask = sourceAccess;
+                        barrier.dstAccessMask = destinationAccess;
+                        barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                        barrier.srcQueueFamilyIndex =
+                            VK_QUEUE_FAMILY_IGNORED;
+                        barrier.dstQueueFamilyIndex =
+                            VK_QUEUE_FAMILY_IGNORED;
+                        barrier.image = image;
+                        barrier.subresourceRange.aspectMask =
+                            VK_IMAGE_ASPECT_COLOR_BIT;
+                        barrier.subresourceRange.baseMipLevel = 0u;
+                        barrier.subresourceRange.levelCount = 1u;
+                        barrier.subresourceRange.baseArrayLayer = 0u;
+                        barrier.subresourceRange.layerCount = 1u;
+                    };
+                    setResolveImageBarrier(
+                        0u,
+                        ffxSssrClassifyTilesResources
+                            ->ExtractedRoughnessImage(imageIndex),
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        1u,
+                        ffxSssrReprojectResources->AverageRadianceImage(
+                            imageIndex
+                        ),
+                        VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_READ_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        2u,
+                        ffxSssrPrefilterResources->RadianceImage(imageIndex),
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        3u,
+                        ffxSssrReprojectResources
+                            ->ReprojectedRadianceImage(imageIndex),
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        4u,
+                        ffxSssrPrefilterResources->VarianceImage(imageIndex),
+                        VK_ACCESS_SHADER_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        5u,
+                        ffxSssrPrefilterResources->SampleCountImage(
+                            imageIndex
+                        ),
+                        VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_READ_BIT,
+                        VK_ACCESS_SHADER_READ_BIT
+                    );
+                    setResolveImageBarrier(
+                        6u,
+                        ffxSssrReprojectResources->RadianceHistoryImage(
+                            imageIndex
+                        ),
+                        VK_ACCESS_SHADER_READ_BIT |
+                            VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_SHADER_WRITE_BIT
+                    );
+                    setResolveImageBarrier(
+                        7u,
+                        ffxSssrReprojectResources->VarianceHistoryImage(
+                            imageIndex
+                        ),
+                        VK_ACCESS_SHADER_READ_BIT |
+                            VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_SHADER_WRITE_BIT
+                    );
+                    setResolveImageBarrier(
+                        8u,
+                        ffxSssrReprojectResources->SampleCountHistoryImage(
+                            imageIndex
+                        ),
+                        VK_ACCESS_SHADER_READ_BIT |
+                            VK_ACCESS_SHADER_WRITE_BIT |
+                            VK_ACCESS_TRANSFER_WRITE_BIT,
+                        VK_ACCESS_SHADER_WRITE_BIT
+                    );
+
+                    vkCmdPipelineBarrier(
+                        commandBuffer,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                            VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        static_cast<u32>(resolveImageBarriers.size()),
+                        resolveImageBarriers.data()
+                    );
+
+                    const VkDescriptorSet resolveTemporalDescriptorSet =
+                        ffxSssrResolveTemporalResources->Handle(imageIndex);
+                    vkCmdBindPipeline(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_COMPUTE,
+                        ffxSssrResolveTemporalPipeline->Handle()
+                    );
+                    vkCmdBindDescriptorSets(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_COMPUTE,
+                        ffxSssrResolveTemporalPipeline->Layout(),
+                        0,
+                        1,
+                        &ffxConstantsDescriptorSet,
+                        0,
+                        nullptr
+                    );
+                    vkCmdBindDescriptorSets(
+                        commandBuffer,
+                        VK_PIPELINE_BIND_POINT_COMPUTE,
+                        ffxSssrResolveTemporalPipeline->Layout(),
+                        1,
+                        1,
+                        &resolveTemporalDescriptorSet,
+                        0,
+                        nullptr
+                    );
+                    vkCmdDispatchIndirect(
+                        commandBuffer,
+                        ffxSssrPrepareIndirectArgsResources
+                            ->IndirectArgsBuffer(imageIndex),
+                        kFfxSssrDenoiserIndirectArgsOffset
+                    );
+                    historyCopies += CopyFfxSssrHistoryToOtherImages(
+                        commandBuffer,
+                        *ffxSssrReprojectResources,
+                        imageIndex
+                    );
+
+                    if (bindStats != nullptr) {
+                        ++bindStats->ffxSssrResolveTemporalDispatches;
+                        bindStats->ffxSssrResolveTemporalDescriptorBinds += 2u;
+                        bindStats->ffxSssrResolveTemporalHistoryCopies +=
+                            historyCopies;
+                    }
                 }
             }
         }

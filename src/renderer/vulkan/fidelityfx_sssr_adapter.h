@@ -493,6 +493,14 @@ public:
     VkImageView VarianceView(std::size_t imageIndex) const;
     VkImage SampleCountImage(std::size_t imageIndex) const;
     VkImageView SampleCountView(std::size_t imageIndex) const;
+    VkImage RadianceHistoryImage(std::size_t imageIndex) const;
+    VkImageView RadianceHistoryView(std::size_t imageIndex) const;
+    VkImage AverageRadianceHistoryImage(std::size_t imageIndex) const;
+    VkImageView AverageRadianceHistoryView(std::size_t imageIndex) const;
+    VkImage VarianceHistoryImage(std::size_t imageIndex) const;
+    VkImageView VarianceHistoryView(std::size_t imageIndex) const;
+    VkImage SampleCountHistoryImage(std::size_t imageIndex) const;
+    VkImageView SampleCountHistoryView(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkExtent2D Extent() const;
     VkExtent2D AverageExtent() const;
@@ -618,6 +626,80 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_RadianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SampleCountImages;
+    std::vector<VkDescriptorSet> m_DescriptorSets;
+};
+
+class VulkanFfxSssrResolveTemporalDescriptorSetLayout {
+public:
+    explicit VulkanFfxSssrResolveTemporalDescriptorSetLayout(
+        const VulkanDevice& device
+    );
+    ~VulkanFfxSssrResolveTemporalDescriptorSetLayout();
+
+    SE_DISABLE_COPY(VulkanFfxSssrResolveTemporalDescriptorSetLayout);
+    SE_DISABLE_MOVE(VulkanFfxSssrResolveTemporalDescriptorSetLayout);
+
+    VkDescriptorSetLayout Handle() const;
+    void Release();
+
+private:
+    void CreateDescriptorSetLayout(const VulkanDevice& device);
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
+};
+
+class VulkanFfxSssrResolveTemporalResources {
+public:
+    VulkanFfxSssrResolveTemporalResources(
+        const VulkanDevice& device,
+        const VulkanFfxSssrResolveTemporalDescriptorSetLayout&
+            descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanFfxSssrPrefilterResources& prefilterResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+    ~VulkanFfxSssrResolveTemporalResources();
+
+    SE_DISABLE_COPY(VulkanFfxSssrResolveTemporalResources);
+    SE_DISABLE_MOVE(VulkanFfxSssrResolveTemporalResources);
+
+    VkDescriptorSet Handle(std::size_t imageIndex) const;
+    std::size_t Count() const;
+    VkExtent2D Extent() const;
+    u64 TotalMemoryBytes() const;
+
+    void Recreate(
+        const VulkanDevice& device,
+        const VulkanFfxSssrResolveTemporalDescriptorSetLayout&
+            descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanFfxSssrPrefilterResources& prefilterResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+    void Release();
+
+private:
+    void CreateResources(
+        const VulkanDevice& device,
+        const VulkanFfxSssrResolveTemporalDescriptorSetLayout&
+            descriptorSetLayout,
+        const VulkanFfxSssrClassifyTilesResources& classifyResources,
+        const VulkanFfxSssrReprojectResources& reprojectResources,
+        const VulkanFfxSssrPrefilterResources& prefilterResources,
+        const VulkanSceneRenderTargets& renderTargets,
+        VkSampler linearSampler
+    );
+
+private:
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    VkExtent2D m_Extent{};
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
 

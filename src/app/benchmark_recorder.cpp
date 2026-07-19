@@ -670,6 +670,18 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrPrefilterHeight << ','
         << ssr.fidelityFxSssrPrefilterMemoryBytes << ','
         << ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes << ','
+        << ssr.fidelityFxSssrResolveTemporalResourcesReady << ','
+        << ssr.fidelityFxSssrResolveTemporalDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrResolveTemporalPipelineReady << ','
+        << ssr.fidelityFxSssrResolveTemporalInputContractReady << ','
+        << ssr.fidelityFxSssrResolveTemporalHistoryWritebackReady << ','
+        << ssr.fidelityFxSssrResolveTemporalDispatches << ','
+        << ssr.fidelityFxSssrResolveTemporalDescriptorBinds << ','
+        << ssr.fidelityFxSssrResolveTemporalWidth << ','
+        << ssr.fidelityFxSssrResolveTemporalHeight << ','
+        << ssr.fidelityFxSssrResolveTemporalMemoryBytes << ','
+        << ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes << ','
+        << ssr.fidelityFxSssrResolveTemporalHistoryCopies << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1550,6 +1562,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ffxSssrReprojectDescriptorBinds << ','
         << binds.ffxSssrPrefilterDispatches << ','
         << binds.ffxSssrPrefilterDescriptorBinds << ','
+        << binds.ffxSssrResolveTemporalDispatches << ','
+        << binds.ffxSssrResolveTemporalDescriptorBinds << ','
+        << binds.ffxSssrResolveTemporalHistoryCopies << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -2053,6 +2068,18 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_prefilter_height,"
         << "ssr_ffx_sssr_prefilter_memory_bytes,"
         << "ssr_ffx_sssr_prefilter_indirect_args_offset_bytes,"
+        << "ssr_ffx_sssr_resolve_temporal_resources_ready,"
+        << "ssr_ffx_sssr_resolve_temporal_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_resolve_temporal_pipeline_ready,"
+        << "ssr_ffx_sssr_resolve_temporal_input_contract_ready,"
+        << "ssr_ffx_sssr_resolve_temporal_history_writeback_ready,"
+        << "ssr_ffx_sssr_resolve_temporal_dispatches,"
+        << "ssr_ffx_sssr_resolve_temporal_descriptor_binds,"
+        << "ssr_ffx_sssr_resolve_temporal_width,"
+        << "ssr_ffx_sssr_resolve_temporal_height,"
+        << "ssr_ffx_sssr_resolve_temporal_memory_bytes,"
+        << "ssr_ffx_sssr_resolve_temporal_indirect_args_offset_bytes,"
+        << "ssr_ffx_sssr_resolve_temporal_history_copies,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2791,6 +2818,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "ffx_sssr_reproject_descriptor_binds,"
         << "ffx_sssr_prefilter_dispatches,"
         << "ffx_sssr_prefilter_descriptor_binds,"
+        << "ffx_sssr_resolve_temporal_dispatches,"
+        << "ffx_sssr_resolve_temporal_descriptor_binds,"
+        << "ffx_sssr_resolve_temporal_history_copies,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

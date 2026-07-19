@@ -94,6 +94,15 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrPrefilterHeight = 0;
     u64 ffxSssrPrefilterMemoryBytes = 0;
     u32 ffxSssrPrefilterIndirectArgsOffsetBytes = 0;
+    bool ffxSssrResolveTemporalResourcesReady = false;
+    bool ffxSssrResolveTemporalDescriptorSetsReady = false;
+    bool ffxSssrResolveTemporalPipelineReady = false;
+    bool ffxSssrResolveTemporalInputContractReady = false;
+    bool ffxSssrResolveTemporalHistoryWritebackReady = false;
+    u32 ffxSssrResolveTemporalWidth = 0;
+    u32 ffxSssrResolveTemporalHeight = 0;
+    u64 ffxSssrResolveTemporalMemoryBytes = 0;
+    u32 ffxSssrResolveTemporalIndirectArgsOffsetBytes = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

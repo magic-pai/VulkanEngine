@@ -124,6 +124,8 @@ function Invoke-StaticChecks {
         Join-Path $vendorRoot "shaders\Reproject.hlsl")
     $prefilterShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Prefilter.hlsl")
+    $resolveTemporalShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\ResolveTemporal.hlsl")
     $commonShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Common.hlsl")
     $sssrHeader = Get-Content -Raw -LiteralPath (
@@ -252,14 +254,16 @@ function Invoke-StaticChecks {
             $reprojectShader -match "Texture2D<float4> g_in_radiance" -and
             $reprojectShader -match "Texture2D<float2> g_motion_vector" -and
             $reprojectShader -match "Texture2D<float2> g_blue_noise_texture" -and
-            $reprojectShader -match "RWTexture2D<float3> g_out_reprojected_radiance" -and
-            $reprojectShader -match "RWTexture2D<float3> g_out_average_radiance" -and
+            $reprojectShader -match "RWTexture2D<float4> g_out_reprojected_radiance" -and
+            $reprojectShader -match "RWTexture2D<float4> g_out_average_radiance" -and
             $reprojectShader -match "RWTexture2D<float> g_out_variance" -and
             $reprojectShader -match "RWTexture2D<float> g_out_sample_count" -and
             $reprojectShader -match "Buffer<uint> g_denoiser_tile_list" -and
+            $reprojectShader -match "g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz" -and
+            $reprojectShader -match "g_out_average_radiance\[pixel_coordinate\] = value\.xyzz" -and
             $reprojectShader -match "numthreads\(8, 8, 1\)") `
-        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float3> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float3> g_out_average_radiance'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
-        "true/true/true/true"
+        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float4> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float4> g_out_average_radiance'),rgbaStores=$($reprojectShader -match 'g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz')/$($reprojectShader -match 'g_out_average_radiance\[pixel_coordinate\] = value\.xyzz'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "true/true/true/true/true"
     $checks += New-Check `
         "FFX SSSR Prefilter shader contract present" `
         ($prefilterShader -match "Texture2D<float> g_depth_buffer" -and
@@ -276,6 +280,21 @@ function Invoke-StaticChecks {
             $prefilterShader -match "numthreads\(8, 8, 1\)") `
         "depth=$($prefilterShader -match 'Texture2D<float> g_depth_buffer'),avg=$($prefilterShader -match 'Texture2D<float3> g_average_radiance'),inRadiance=$($prefilterShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($prefilterShader -match 'RWTexture2D<float4> g_out_radiance')/$($prefilterShader -match 'RWTexture2D<float> g_out_variance'),tiles=$($prefilterShader -match 'Buffer<uint> g_denoiser_tile_list')" `
         "true/true/true/true/true"
+    $checks += New-Check `
+        "FFX SSSR ResolveTemporal shader contract present" `
+        ($resolveTemporalShader -match "Texture2D<float> g_roughness" -and
+            $resolveTemporalShader -match "Texture2D<float3> g_average_radiance" -and
+            $resolveTemporalShader -match "Texture2D<float4> g_in_radiance" -and
+            $resolveTemporalShader -match "Texture2D<float4> g_in_reprojected_radiance" -and
+            $resolveTemporalShader -match "Texture2D<float> g_in_variance" -and
+            $resolveTemporalShader -match "Texture2D<float> g_in_sample_count" -and
+            $resolveTemporalShader -match "RWTexture2D<float4> g_out_radiance" -and
+            $resolveTemporalShader -match "RWTexture2D<float> g_out_variance" -and
+            $resolveTemporalShader -match "RWTexture2D<float> g_out_sample_count" -and
+            $resolveTemporalShader -match "Buffer<uint> g_denoiser_tile_list" -and
+            $resolveTemporalShader -match "numthreads\(8, 8, 1\)") `
+        "roughness=$($resolveTemporalShader -match 'Texture2D<float> g_roughness'),avg=$($resolveTemporalShader -match 'Texture2D<float3> g_average_radiance'),in=$($resolveTemporalShader -match 'Texture2D<float4> g_in_radiance'),reprojected=$($resolveTemporalShader -match 'Texture2D<float4> g_in_reprojected_radiance'),outputs=$($resolveTemporalShader -match 'RWTexture2D<float4> g_out_radiance')/$($resolveTemporalShader -match 'RWTexture2D<float> g_out_variance')/$($resolveTemporalShader -match 'RWTexture2D<float> g_out_sample_count'),tiles=$($resolveTemporalShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX ClassifyTiles descriptors match typed-buffer contract" `
         ($adapterSource -match "VulkanFfxSssrClassifyTilesDescriptorSetLayout" -and
@@ -318,7 +337,7 @@ function Invoke-StaticChecks {
             $adapterSource -match "DenoiserTileListBufferView" -and
             $rendererSource -match "ffx_sssr_Reproject.hlsl.spv" -and
             $commandBufferSource -match "sizeof\(u32\) \* 3u") `
-        "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u')" `
+        "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),rgba32=$($adapterSource -match 'VK_FORMAT_R32G32B32A32_SFLOAT'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u')" `
         "true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX Prefilter descriptors match official shader contract" `
@@ -336,6 +355,25 @@ function Invoke-StaticChecks {
             $commandBufferSource -match "sizeof\(u32\) \* 3u") `
         "layout=$($adapterSource -match 'VulkanFfxSssrPrefilterDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrPrefilterResources'),avgInput=$($adapterSource -match 'reprojectResources\.AverageRadianceView'),currentRadiance=$($adapterSource -match 'classifyResources\.IntersectionOutputView'),prefilterSpv=$($rendererSource -match 'ffx_sssr_Prefilter.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrPrefilterDispatches')" `
         "true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX ResolveTemporal descriptors write audited history" `
+        ($adapterSource -match "VulkanFfxSssrResolveTemporalDescriptorSetLayout" -and
+            $adapterSource -match "VulkanFfxSssrResolveTemporalResources" -and
+            $adapterSource -match "reprojectResources\.AverageRadianceView" -and
+            $adapterSource -match "prefilterResources\.RadianceView" -and
+            $adapterSource -match "reprojectResources\.ReprojectedRadianceView" -and
+            $adapterSource -match "prefilterResources\.VarianceView" -and
+            $adapterSource -match "prefilterResources\.SampleCountView" -and
+            $adapterSource -match "reprojectResources\.RadianceHistoryView" -and
+            $adapterSource -match "reprojectResources\.VarianceHistoryView" -and
+            $adapterSource -match "reprojectResources\.SampleCountHistoryView" -and
+            $rendererSource -match "ffx_sssr_ResolveTemporal.hlsl.spv" -and
+            $commandBufferSource -match "CopyFfxSssrCurrentDenoiserStateToHistory" -and
+            $commandBufferSource -match "CopyFfxSssrHistoryToOtherImages" -and
+            $commandBufferSource -match "ffxSssrResolveTemporalDispatches" -and
+            $commandBufferSource -match "sizeof\(u32\) \* 3u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrResolveTemporalDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrResolveTemporalResources'),prefilterInput=$($adapterSource -match 'prefilterResources\.RadianceView'),historyOut=$($adapterSource -match 'reprojectResources\.RadianceHistoryView'),resolveSpv=$($rendererSource -match 'ffx_sssr_ResolveTemporal.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrResolveTemporalDispatches'),copies=$($commandBufferSource -match 'CopyFfxSssrHistoryToOtherImages')" `
+        "true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
@@ -498,10 +536,35 @@ function Invoke-RuntimeLane {
     $prefilterIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_indirect_args_offset_bytes"
     $prefilterBindDispatches = Get-UIntMetric $last "ffx_sssr_prefilter_dispatches"
     $prefilterBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_prefilter_descriptor_binds"
+    $resolveTemporalResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_resources_ready"
+    $resolveTemporalDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_descriptor_sets_ready"
+    $resolveTemporalPipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_pipeline_ready"
+    $resolveTemporalInputContractReady = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_input_contract_ready"
+    $resolveTemporalHistoryWritebackReady = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_history_writeback_ready"
+    $resolveTemporalDispatches = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_dispatches"
+    $resolveTemporalDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_descriptor_binds"
+    $resolveTemporalWidth = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_width"
+    $resolveTemporalHeight = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_height"
+    $resolveTemporalMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_memory_bytes"
+    $resolveTemporalIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_indirect_args_offset_bytes"
+    $resolveTemporalHistoryCopies = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_history_copies"
+    $resolveTemporalBindDispatches = Get-UIntMetric $last "ffx_sssr_resolve_temporal_dispatches"
+    $resolveTemporalBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_resolve_temporal_descriptor_binds"
+    $resolveTemporalBindHistoryCopies = Get-UIntMetric $last "ffx_sssr_resolve_temporal_history_copies"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
     $frameGraphIssues = Get-UIntMetric $last "framegraph_validation_issues"
+    $validationDiagnostics = @()
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path -LiteralPath $path) {
+            $validationDiagnostics += @(
+                Select-String `
+                    -LiteralPath $path `
+                    -Pattern "\[Vulkan Validation\]|VUID-|validation error"
+            )
+        }
+    }
     $prepareDispatchStateMatches = $false
     $prepareExpectedLabel = "0/0 mirrored"
     if ($ExpectPrepareDispatch) {
@@ -602,6 +665,26 @@ function Invoke-RuntimeLane {
             $prefilterBindDispatches -eq 0 -and
             $prefilterBindDescriptorBinds -eq 0
     }
+    $resolveTemporalDispatchStateMatches = $false
+    $resolveTemporalExpectedLabel = "0/0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $resolveTemporalDispatchStateMatches =
+            $resolveTemporalDispatches -gt 0 -and
+            $resolveTemporalDescriptorBinds -gt 0 -and
+            $resolveTemporalHistoryCopies -gt 0 -and
+            $resolveTemporalBindDispatches -eq $resolveTemporalDispatches -and
+            $resolveTemporalBindDescriptorBinds -eq $resolveTemporalDescriptorBinds -and
+            $resolveTemporalBindHistoryCopies -eq $resolveTemporalHistoryCopies
+        $resolveTemporalExpectedLabel = ">0/>0/>0 mirrored"
+    } else {
+        $resolveTemporalDispatchStateMatches =
+            $resolveTemporalDispatches -eq 0 -and
+            $resolveTemporalDescriptorBinds -eq 0 -and
+            $resolveTemporalHistoryCopies -eq 0 -and
+            $resolveTemporalBindDispatches -eq 0 -and
+            $resolveTemporalBindDescriptorBinds -eq 0 -and
+            $resolveTemporalBindHistoryCopies -eq 0
+    }
     $expectedRayCapacity = $classifyWidth * $classifyHeight
     $expectedTileCapacity =
         [uint32]([Math]::Ceiling($classifyWidth / 8.0) *
@@ -696,6 +779,20 @@ function Invoke-RuntimeLane {
         $prefilterMemoryBytes -gt 0 -and
         $prefilterMemoryBytes -lt $reprojectMemoryBytes -and
         $prefilterIndirectArgsOffsetBytes -eq 12
+    $resolveTemporalResourceContractMatches =
+        $resolveTemporalResourcesReady -eq 1 -and
+        $resolveTemporalDescriptorSetsReady -eq 1 -and
+        $resolveTemporalPipelineReady -eq 1 -and
+        $resolveTemporalInputContractReady -eq 1 -and
+        $resolveTemporalHistoryWritebackReady -eq 1 -and
+        $resolveTemporalWidth -eq $classifyWidth -and
+        $resolveTemporalHeight -eq $classifyHeight -and
+        $resolveTemporalWidth -eq $reprojectWidth -and
+        $resolveTemporalHeight -eq $reprojectHeight -and
+        $resolveTemporalWidth -eq $prefilterWidth -and
+        $resolveTemporalHeight -eq $prefilterHeight -and
+        $resolveTemporalMemoryBytes -eq 0 -and
+        $resolveTemporalIndirectArgsOffsetBytes -eq 12
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -705,8 +802,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 6 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "6/1"),
+            ($contractVersion -eq 7 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "7/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -780,6 +877,14 @@ function Invoke-RuntimeLane {
             $prefilterDispatchStateMatches `
             "stats=$prefilterDispatches/$prefilterDescriptorBinds,binds=$prefilterBindDispatches/$prefilterBindDescriptorBinds" `
             $prefilterExpectedLabel),
+        (New-Check "$Name resolve-temporal resource/history contract" `
+            $resolveTemporalResourceContractMatches `
+            "resources=$resolveTemporalResourcesReady,sets=$resolveTemporalDescriptorSetsReady,pipeline=$resolveTemporalPipelineReady,input=$resolveTemporalInputContractReady,history=$resolveTemporalHistoryWritebackReady,extent=${resolveTemporalWidth}x${resolveTemporalHeight},bytes=$resolveTemporalMemoryBytes,offset=$resolveTemporalIndirectArgsOffsetBytes" `
+            "1/1/1/1/1,extent==classify/reproject/prefilter,bytes=0,offset=12"),
+        (New-Check "$Name resolve-temporal dispatch/bind/history-copy state" `
+            $resolveTemporalDispatchStateMatches `
+            "stats=$resolveTemporalDispatches/$resolveTemporalDescriptorBinds/$resolveTemporalHistoryCopies,binds=$resolveTemporalBindDispatches/$resolveTemporalBindDescriptorBinds/$resolveTemporalBindHistoryCopies" `
+            $resolveTemporalExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -788,6 +893,9 @@ function Invoke-RuntimeLane {
         (New-Check "$Name frame graph validation clean" `
             ($frameGraphIssues -eq 0) `
             "$frameGraphIssues" "0"),
+        (New-Check "$Name Vulkan validation diagnostics clean" `
+            ($validationDiagnostics.Count -eq 0) `
+            "$($validationDiagnostics.Count)" "0"),
         (New-Check "$Name fallback reason" `
             ($fallbackReason -eq $ExpectedFallbackReason) `
             "$fallbackReason" "$ExpectedFallbackReason")
@@ -896,9 +1004,25 @@ function Invoke-RuntimeLane {
             prefilterIndirectArgsOffsetBytes = $prefilterIndirectArgsOffsetBytes
             prefilterBindDispatches = $prefilterBindDispatches
             prefilterBindDescriptorBinds = $prefilterBindDescriptorBinds
+            resolveTemporalResourcesReady = $resolveTemporalResourcesReady
+            resolveTemporalDescriptorSetsReady = $resolveTemporalDescriptorSetsReady
+            resolveTemporalPipelineReady = $resolveTemporalPipelineReady
+            resolveTemporalInputContractReady = $resolveTemporalInputContractReady
+            resolveTemporalHistoryWritebackReady = $resolveTemporalHistoryWritebackReady
+            resolveTemporalDispatches = $resolveTemporalDispatches
+            resolveTemporalDescriptorBinds = $resolveTemporalDescriptorBinds
+            resolveTemporalWidth = $resolveTemporalWidth
+            resolveTemporalHeight = $resolveTemporalHeight
+            resolveTemporalMemoryBytes = $resolveTemporalMemoryBytes
+            resolveTemporalIndirectArgsOffsetBytes = $resolveTemporalIndirectArgsOffsetBytes
+            resolveTemporalHistoryCopies = $resolveTemporalHistoryCopies
+            resolveTemporalBindDispatches = $resolveTemporalBindDispatches
+            resolveTemporalBindDescriptorBinds = $resolveTemporalBindDescriptorBinds
+            resolveTemporalBindHistoryCopies = $resolveTemporalBindHistoryCopies
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
             frameGraphValidationIssues = $frameGraphIssues
+            validationDiagnostics = $validationDiagnostics.Count
             fallbackReason = $fallbackReason
         }
         checks = $checks

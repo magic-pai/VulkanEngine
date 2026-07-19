@@ -23,6 +23,11 @@ SelfEngine compatibility patches:
   uses `select` for `uint2` round-up instead of a vector ternary.
 - `include/ffx-sssr/ffx_sssr.h`
   uses `select` for vector conditions in ray traversal setup.
+- `shaders/Reproject.hlsl` declares the two RGB radiance storage outputs as
+  `RWTexture2D<float4>` and stores `value.xyzz`. This keeps the AMD RGB
+  radiance algorithm unchanged while matching the RGBA32F Vulkan storage image
+  used by SelfEngine; RGB32F sampled/storage images are not portable on the
+  current device.
 
 The patches are semantic-preserving HLSL-to-SPIR-V compatibility changes for
 the Vulkan SDK DXC path used by SelfEngine. The original AMD source targets an
@@ -31,10 +36,11 @@ older sample toolchain where vector ternaries were accepted.
 Current integration state:
 - The third-party source and HLSL shader compilation path are part of the
   SelfEngine build.
-- The runtime bridge now executes the first six official command-stream
+- The runtime bridge now executes the first seven command-stream
   passes when `SE_SSR_BACKEND=ffx-sssr`: `ClassifyTiles.hlsl`,
   `PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`,
-  `Intersect.hlsl`, `Reproject.hlsl`, and `Prefilter.hlsl`.
+  `Intersect.hlsl`, `Reproject.hlsl`, `Prefilter.hlsl`, and
+  `ResolveTemporal.hlsl`.
 - SelfEngine creates the vendor-shaped constants buffer, the per-swapchain ray
   counter, ray list, denoiser tile list, extracted roughness image, variance
   placeholder, and intersection output resources. AMD typed `RWBuffer<uint>`
@@ -69,13 +75,19 @@ Current integration state:
   prefiltered radiance, variance, and sample-count carrier images with typed
   Vulkan storage formats (`R32G32B32A32_SFLOAT` and `R32_SFLOAT`). The dispatch
   also uses the denoiser indirect record at byte offset `12`.
+- `ResolveTemporal.hlsl` consumes extracted roughness, Reproject average
+  radiance, Prefilter radiance/variance/sample-count, Reprojected radiance, and
+  the denoiser tile list. It writes RadianceHistory, VarianceHistory, and
+  SampleCountHistory in the existing Reproject history resource set. The bridge
+  copies AverageRadiance to AverageRadianceHistory before resolve and mirrors
+  the updated FFX history state to the other swapchain slots after resolve.
 - The runtime bridge is data-gated by
   `scripts\Test-FidelityFxSssrIntegration.ps1`, including source/build checks,
   LightingShowcase and Forward3D FBX FFX lanes, and an internal-backend control
   lane that proves the FFX dispatches are suppressed when not requested. The
-  gate also requires the FFX FrameGraph resources and official pass split to be
-  validation-clean.
+  gate also requires the FFX FrameGraph resources, pass split, history writeback,
+  and Vulkan validation logs to be clean.
 - Runtime image contribution remains on the existing stable probe/IBL fallback
-  until the remaining FidelityFX ResolveTemporal/DNSR, real history swap, and
-  final resolve path are wired and validated. The current Prefilter output is
-  intentionally an auditable intermediate, not the final visible reflection.
+  until the final FFX resolve/composite path is wired and validated. The current
+  ResolveTemporal output is intentionally an auditable history producer, not the
+  final visible reflection.

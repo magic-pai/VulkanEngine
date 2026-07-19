@@ -44,6 +44,8 @@ class VulkanFfxSssrReprojectDescriptorSetLayout;
 class VulkanFfxSssrReprojectResources;
 class VulkanFfxSssrPrefilterDescriptorSetLayout;
 class VulkanFfxSssrPrefilterResources;
+class VulkanFfxSssrResolveTemporalDescriptorSetLayout;
+class VulkanFfxSssrResolveTemporalResources;
 class VulkanDescriptorSets;
 class VulkanHiZDescriptorSetLayout;
 class VulkanSsrReconstructionDescriptorSetLayout;
@@ -878,6 +880,8 @@ private:
         m_FfxSssrReprojectDescriptorSetLayout;
     std::unique_ptr<VulkanFfxSssrPrefilterDescriptorSetLayout>
         m_FfxSssrPrefilterDescriptorSetLayout;
+    std::unique_ptr<VulkanFfxSssrResolveTemporalDescriptorSetLayout>
+        m_FfxSssrResolveTemporalDescriptorSetLayout;
     std::unique_ptr<VulkanUniformBuffer> m_UniformBuffer;
     std::unique_ptr<VulkanUniformBuffer> m_OverlayUniformBuffer;
     std::unique_ptr<VulkanDescriptorSets> m_DescriptorSets;
@@ -903,6 +907,8 @@ private:
         m_FfxSssrReprojectResources;
     std::unique_ptr<VulkanFfxSssrPrefilterResources>
         m_FfxSssrPrefilterResources;
+    std::unique_ptr<VulkanFfxSssrResolveTemporalResources>
+        m_FfxSssrResolveTemporalResources;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;
     std::unique_ptr<VulkanBloomDescriptorSets> m_BloomDescriptorSets;
@@ -982,6 +988,7 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrIntersectPipeline;
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrReprojectPipeline;
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrPrefilterPipeline;
+    std::unique_ptr<VulkanComputePipeline> m_FfxSssrResolveTemporalPipeline;
     std::vector<bool> m_FfxSssrGpuReadbackReady;
     bool m_SsrReconstructionImagesInitialized = false;
     // IBL textures

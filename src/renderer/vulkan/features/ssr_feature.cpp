@@ -302,6 +302,18 @@ void VulkanSsrFeature::AppendFrameGraph(
             "FFX PrefilteredRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount",
             "AMD FidelityFX SSSR Prefilter bridge applies the official DNSR spatial prefilter as an auditable intermediate. ResolveTemporal, real history swap, and final image contribution are still pending."
         );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRResolveTemporal",
+            "FrameConstants, FFX ExtractedRoughness, FFX AverageRadiance, FFX PrefilteredRadiance, FFX ReprojectedRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount, FFX DenoiserTiles, FFX IntersectArgs",
+            "FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory",
+            "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into the history images consumed by the next Reproject pass. Final visible composition remains disconnected until the full FFX chain is validated."
+        );
     }
     if (context.stats.ssr.colorResolveEnabled > 0) {
         if (context.stats.ssr.reconstructionActive > 0) {
@@ -513,7 +525,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 6u;
+    ssr.fidelityFxSssrContractVersion = 7u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -637,6 +649,24 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrPrefilterMemoryBytes;
     ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes =
         context.renderer.ffxSssrPrefilterIndirectArgsOffsetBytes;
+    ssr.fidelityFxSssrResolveTemporalResourcesReady =
+        context.renderer.ffxSssrResolveTemporalResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalDescriptorSetsReady =
+        context.renderer.ffxSssrResolveTemporalDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalPipelineReady =
+        context.renderer.ffxSssrResolveTemporalPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalInputContractReady =
+        context.renderer.ffxSssrResolveTemporalInputContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalHistoryWritebackReady =
+        context.renderer.ffxSssrResolveTemporalHistoryWritebackReady ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalWidth =
+        context.renderer.ffxSssrResolveTemporalWidth;
+    ssr.fidelityFxSssrResolveTemporalHeight =
+        context.renderer.ffxSssrResolveTemporalHeight;
+    ssr.fidelityFxSssrResolveTemporalMemoryBytes =
+        context.renderer.ffxSssrResolveTemporalMemoryBytes;
+    ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes =
+        context.renderer.ffxSssrResolveTemporalIndirectArgsOffsetBytes;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -675,7 +705,13 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrPrefilterDescriptorSetsReady > 0u &&
         ssr.fidelityFxSssrPrefilterPipelineReady > 0u &&
         ssr.fidelityFxSssrPrefilterInputContractReady > 0u &&
-        ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes == sizeof(u32) * 3u
+        ssr.fidelityFxSssrPrefilterIndirectArgsOffsetBytes == sizeof(u32) * 3u &&
+        ssr.fidelityFxSssrResolveTemporalResourcesReady > 0u &&
+        ssr.fidelityFxSssrResolveTemporalDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrResolveTemporalPipelineReady > 0u &&
+        ssr.fidelityFxSssrResolveTemporalInputContractReady > 0u &&
+        ssr.fidelityFxSssrResolveTemporalHistoryWritebackReady > 0u &&
+        ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes == sizeof(u32) * 3u
             ? 1u
             : 0u;
     ssr.fidelityFxSssrRuntimeActive = 0u;
