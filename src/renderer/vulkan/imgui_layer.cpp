@@ -74,6 +74,21 @@ const char* ReflectionCaptureSourceName(u32 source) {
     }
 }
 
+const char* SsrRadianceSourceName(u32 source) {
+    switch (source) {
+    case 0:
+        return "off";
+    case 1:
+        return "probe/IBL fallback";
+    case 2:
+        return "scene-color history";
+    case 3:
+        return "current-HDR source";
+    default:
+        return "unknown";
+    }
+}
+
 const char* ReflectionCaptureFallbackReasonName(u32 reason) {
     switch (reason) {
     case 0:
@@ -2923,13 +2938,14 @@ void DrawPerformanceStats(const RendererStats& stats) {
         stats.ssr.originBiasMaximumPixels
     );
     ImGui::Text(
-        "SSR radiance: history %s/%s/%s, active %s, fallback %u, source %u",
+        "SSR radiance: history %s/%s/%s, active %s, fallback %u, source %u (%s)",
         stats.ssr.sceneColorHistoryRequested ? "requested" : "off",
         stats.ssr.sceneColorHistoryDescriptorBound ? "bound" : "unbound",
         stats.ssr.sceneColorHistoryReady ? "ready" : "cold",
         stats.ssr.sceneColorHistoryActive ? "yes" : "no",
         stats.ssr.sceneColorHistoryFallbackReason,
-        stats.ssr.radianceSource
+        stats.ssr.radianceSource,
+        SsrRadianceSourceName(stats.ssr.radianceSource)
     );
     ImGui::Text(
         "SSR current HDR: source %s, radiance filter %s, mip %u, ready %s",

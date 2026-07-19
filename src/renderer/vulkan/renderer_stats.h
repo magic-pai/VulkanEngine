@@ -366,7 +366,7 @@ struct RendererSsrStats {
     u32 sceneColorHistoryCurrentImageIndex = 0;
     u32 sceneColorHistorySourceImageIndex = 0;
     u32 sceneColorHistoryFrameAge = 0;
-    // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history.
+    // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history, 3 = active current-HDR source.
     u32 radianceSource = 0;
     f32 strength = 0.0f;
     f32 rayLength = 0.0f;

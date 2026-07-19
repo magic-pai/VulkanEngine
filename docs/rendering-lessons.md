@@ -195,9 +195,10 @@ Prevention:
 - If a data gate disagrees with a valid visual window, check stat ordering before adding more rendering knobs.
 
 Validation:
-- Current release LightingShowcase current-HDR enabled lane on a trusted Dev Drive reported `sceneColorHistoryReady=1`, `sceneColorHistoryActive=1`, `radianceSource=2`, `temporalConsumerSsrReady=1`, and `temporalConsumerSsrActive=1`.
-- Current release Forward3D animated FBX lane on the same Dev Drive reported the same contract values.
-- The history-lock-off control reported `reconstructionTemporalHistoryLockEnabled=0` and `holeDiagnosticsTemporalMissCarriedPixels=0`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics` passed `796 pass / 0 fail`.
+- Current release LightingShowcase current-HDR enabled lane reported `sceneColorHistoryReady=1`, `sceneColorHistoryActive=1`, `radianceSource=3`, `reconstructionCurrentHdrSourceEnabled=1`, and `reconstructionCurrentHdrMipChainReady=1`.
+- Current release Forward3D animated FBX current-HDR lane reported the same contract values, and the user accepted the real Forward3D visual window.
+- The history-lock-off control still reported `reconstructionTemporalHistoryLockEnabled=0` and `holeDiagnosticsTemporalMissCarriedPixels=0`.
 
 ## 2026-07-17 - Local PCSS Needs Descriptor And Cold-Compile Contracts
 

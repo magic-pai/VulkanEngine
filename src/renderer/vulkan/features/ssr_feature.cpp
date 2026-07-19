@@ -220,7 +220,6 @@ void VulkanSsrFeature::WriteStats(
         ssr.sceneColorHistoryRequested == 0u
             ? 1u
             : (ssr.sceneColorHistoryDescriptorBound == 0u ? 2u : 3u);
-    ssr.radianceSource = ssr.colorResolveEnabled > 0 ? 1u : 0u;
 }
 
 }

@@ -7468,10 +7468,6 @@ void VulkanRenderer::DrawFrame() {
     } else {
         frameStats.ssr.sceneColorHistoryFallbackReason = 4u;
     }
-    frameStats.ssr.radianceSource =
-        frameStats.ssr.sceneColorHistoryActive > 0
-            ? 2u
-            : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u);
     frameStats.temporal.temporalConsumerSsrActive =
         frameStats.ssr.sceneColorHistoryActive;
     frameStats.temporal.temporalConsumerDynamicResolutionReady =
@@ -8227,6 +8223,14 @@ void VulkanRenderer::DrawFrame() {
             : 0u;
     frameStats.ssr.reconstructionCurrentHdrMipChainReady =
         frameStats.ssr.reconstructionCurrentHdrMipLevels > 1u ? 1u : 0u;
+    frameStats.ssr.radianceSource =
+        frameStats.ssr.reconstructionCurrentHdrSourceEnabled > 0 &&
+        frameStats.ssr.sceneColorHistoryActive > 0 &&
+        frameStats.ssr.reconstructionCurrentHdrMipChainReady > 0
+            ? 3u
+            : (frameStats.ssr.sceneColorHistoryActive > 0
+                ? 2u
+                : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u));
     frameStats.ssr.fallbackBlendRequested =
         m_ShadowSettings.ssrProbeFallbackBlendEnabled ? 1u : 0u;
     frameStats.ssr.fallbackBlendActive =

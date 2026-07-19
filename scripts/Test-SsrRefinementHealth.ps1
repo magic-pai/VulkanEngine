@@ -574,7 +574,30 @@ function Invoke-SsrLane {
             $checks += New-Check "SSR hole diagnostics contract active" ($holeDiagnosticsRequested -eq 1 -and $holeDiagnosticsActive -eq 1 -and $holeDiagnosticsContractVersion -eq 2) "requested/active/version=$holeDiagnosticsRequested/$holeDiagnosticsActive/$holeDiagnosticsContractVersion" "1/1/2"
             $checks += New-Check "SSR hole diagnostics readback valid" ($holeDiagnosticsReadbackValid -eq 1 -and $holeDiagnosticsPixelCount -gt 0) "valid=$holeDiagnosticsReadbackValid,pixels=$holeDiagnosticsPixelCount" "1,pixels>0"
         }
-        $checks += New-Check "completed scene-color history radiance active" ($sceneColorHistoryRequested -eq 1 -and $sceneColorHistoryDescriptorBound -eq 1 -and $sceneColorHistoryReady -eq 1 -and $sceneColorHistoryActive -eq 1 -and $sceneColorHistoryFallbackReason -eq 0 -and $radianceSource -eq 2) "requested=$sceneColorHistoryRequested,bound=$sceneColorHistoryDescriptorBound,ready=$sceneColorHistoryReady,active=$sceneColorHistoryActive,fallback=$sceneColorHistoryFallbackReason,source=$radianceSource" "1/1/1/1/0/2"
+        if ($currentHdrSourceExpected) {
+            $checks += New-Check "current-HDR source radiance active" `
+                ($sceneColorHistoryRequested -eq 1 -and
+                    $sceneColorHistoryDescriptorBound -eq 1 -and
+                    $sceneColorHistoryReady -eq 1 -and
+                    $sceneColorHistoryActive -eq 1 -and
+                    $sceneColorHistoryFallbackReason -eq 0 -and
+                    $reconstructionCurrentHdrSourceEnabled -eq 1 -and
+                    $reconstructionCurrentHdrRadianceFilterEnabled -eq 1 -and
+                    $reconstructionCurrentHdrMipChainReady -eq 1 -and
+                    $radianceSource -eq 3) `
+                "requested=$sceneColorHistoryRequested,bound=$sceneColorHistoryDescriptorBound,ready=$sceneColorHistoryReady,active=$sceneColorHistoryActive,fallback=$sceneColorHistoryFallbackReason,currentHdr=$reconstructionCurrentHdrSourceEnabled/filter=$reconstructionCurrentHdrRadianceFilterEnabled,mipReady=$reconstructionCurrentHdrMipChainReady,source=$radianceSource" `
+                "1/1/1/1/0/1/1/1/3"
+        } else {
+            $checks += New-Check "completed scene-color history radiance active" `
+                ($sceneColorHistoryRequested -eq 1 -and
+                    $sceneColorHistoryDescriptorBound -eq 1 -and
+                    $sceneColorHistoryReady -eq 1 -and
+                    $sceneColorHistoryActive -eq 1 -and
+                    $sceneColorHistoryFallbackReason -eq 0 -and
+                    $radianceSource -eq 2) `
+                "requested=$sceneColorHistoryRequested,bound=$sceneColorHistoryDescriptorBound,ready=$sceneColorHistoryReady,active=$sceneColorHistoryActive,fallback=$sceneColorHistoryFallbackReason,source=$radianceSource" `
+                "1/1/1/1/0/2"
+        }
         $checks += New-Check "scene-color history is previous submitted frame" ($sceneColorHistorySourceValid -eq 1 -and $sceneColorHistoryFrameAge -eq 1 -and $sceneColorHistoryCurrentImageIndex -lt $pyramidImageCount -and $sceneColorHistorySourceImageIndex -lt $pyramidImageCount) "valid=$sceneColorHistorySourceValid,current=$sceneColorHistoryCurrentImageIndex,source=$sceneColorHistorySourceImageIndex,age=$sceneColorHistoryFrameAge" "valid indices, age=1"
         $checks += New-Check "SSR temporal consumer active" ($temporalSsrReady -eq 1 -and $temporalSsrActive -eq 1) "ready=$temporalSsrReady,active=$temporalSsrActive" "1/1"
         $checks += New-Check "SSR inputs ready" ($inputsReady -eq 1) $inputsReady "1"
