@@ -646,6 +646,20 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrIntersectWidth << ','
         << ssr.fidelityFxSssrIntersectHeight << ','
         << ssr.fidelityFxSssrIntersectDepthPyramidMipCount << ','
+        << ssr.fidelityFxSssrReprojectResourcesReady << ','
+        << ssr.fidelityFxSssrReprojectDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrReprojectPipelineReady << ','
+        << ssr.fidelityFxSssrReprojectInputContractReady << ','
+        << ssr.fidelityFxSssrReprojectDispatches << ','
+        << ssr.fidelityFxSssrReprojectDescriptorBinds << ','
+        << ssr.fidelityFxSssrReprojectWidth << ','
+        << ssr.fidelityFxSssrReprojectHeight << ','
+        << ssr.fidelityFxSssrReprojectAverageWidth << ','
+        << ssr.fidelityFxSssrReprojectAverageHeight << ','
+        << ssr.fidelityFxSssrReprojectHistoryReady << ','
+        << ssr.fidelityFxSssrReprojectHistorySource << ','
+        << ssr.fidelityFxSssrReprojectMemoryBytes << ','
+        << ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1522,6 +1536,8 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ffxSssrBlueNoiseGroupCountY << ','
         << binds.ffxSssrIntersectDispatches << ','
         << binds.ffxSssrIntersectDescriptorBinds << ','
+        << binds.ffxSssrReprojectDispatches << ','
+        << binds.ffxSssrReprojectDescriptorBinds << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -2001,6 +2017,20 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_intersect_width,"
         << "ssr_ffx_sssr_intersect_height,"
         << "ssr_ffx_sssr_intersect_depth_pyramid_mip_count,"
+        << "ssr_ffx_sssr_reproject_resources_ready,"
+        << "ssr_ffx_sssr_reproject_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_reproject_pipeline_ready,"
+        << "ssr_ffx_sssr_reproject_input_contract_ready,"
+        << "ssr_ffx_sssr_reproject_dispatches,"
+        << "ssr_ffx_sssr_reproject_descriptor_binds,"
+        << "ssr_ffx_sssr_reproject_width,"
+        << "ssr_ffx_sssr_reproject_height,"
+        << "ssr_ffx_sssr_reproject_average_width,"
+        << "ssr_ffx_sssr_reproject_average_height,"
+        << "ssr_ffx_sssr_reproject_history_ready,"
+        << "ssr_ffx_sssr_reproject_history_source,"
+        << "ssr_ffx_sssr_reproject_memory_bytes,"
+        << "ssr_ffx_sssr_reproject_indirect_args_offset_bytes,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2735,6 +2765,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ffx_sssr_blue_noise_groups_y,"
         << "ffx_sssr_intersect_dispatches,"
         << "ffx_sssr_intersect_descriptor_binds,"
+        << "ffx_sssr_reproject_dispatches,"
+        << "ffx_sssr_reproject_descriptor_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

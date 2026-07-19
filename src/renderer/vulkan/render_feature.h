@@ -74,6 +74,18 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrIntersectWidth = 0;
     u32 ffxSssrIntersectHeight = 0;
     u32 ffxSssrIntersectDepthPyramidMipCount = 0;
+    bool ffxSssrReprojectResourcesReady = false;
+    bool ffxSssrReprojectDescriptorSetsReady = false;
+    bool ffxSssrReprojectPipelineReady = false;
+    bool ffxSssrReprojectInputContractReady = false;
+    u32 ffxSssrReprojectWidth = 0;
+    u32 ffxSssrReprojectHeight = 0;
+    u32 ffxSssrReprojectAverageWidth = 0;
+    u32 ffxSssrReprojectAverageHeight = 0;
+    bool ffxSssrReprojectHistoryReady = false;
+    u32 ffxSssrReprojectHistorySource = 0;
+    u64 ffxSssrReprojectMemoryBytes = 0;
+    u32 ffxSssrReprojectIndirectArgsOffsetBytes = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

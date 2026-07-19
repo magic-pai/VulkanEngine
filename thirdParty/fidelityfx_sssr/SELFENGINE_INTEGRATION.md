@@ -31,10 +31,10 @@ older sample toolchain where vector ternaries were accepted.
 Current integration state:
 - The third-party source and HLSL shader compilation path are part of the
   SelfEngine build.
-- The runtime bridge now executes the first four official command-stream
+- The runtime bridge now executes the first five official command-stream
   passes when `SE_SSR_BACKEND=ffx-sssr`: `ClassifyTiles.hlsl`,
-  `PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`, and
-  `Intersect.hlsl`.
+  `PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`,
+  `Intersect.hlsl`, and `Reproject.hlsl`.
 - SelfEngine creates the vendor-shaped constants buffer, the per-swapchain ray
   counter, ray list, denoiser tile list, extracted roughness image, variance
   placeholder, and intersection output resources. AMD typed `RWBuffer<uint>`
@@ -57,11 +57,19 @@ Current integration state:
   list, and ray counter, then writes the existing `ClassifyTiles` intersection
   output image through the official descriptor layout. The dispatch is indirect
   and uses the `PrepareIndirectArgs` output buffer.
+- `Reproject.hlsl` consumes the intersection output, extracted roughness,
+  current scene depth, GBuffer normal, motion vectors, generated blue noise,
+  denoiser tile list, and bootstrap history images. It writes reprojected
+  radiance, average radiance, variance, and sample-count images. The dispatch
+  is indirect at byte offset `12`, matching the second three-uint dispatch
+  record written by `PrepareIndirectArgs.hlsl`.
 - The runtime bridge is data-gated by
   `scripts\Test-FidelityFxSssrIntegration.ps1`, including source/build checks,
   LightingShowcase and Forward3D FBX FFX lanes, and an internal-backend control
-  lane that proves the FFX dispatches are suppressed when not requested.
+  lane that proves the FFX dispatches are suppressed when not requested. The
+  gate also requires the FFX FrameGraph resources and official pass split to be
+  validation-clean.
 - Runtime image contribution remains on the existing stable probe/IBL fallback
-  until the remaining FidelityFX Reproject, Prefilter, ResolveTemporal/DNSR,
-  and final resolve path are wired and validated. The current Intersect output
+  until the remaining FidelityFX Prefilter, ResolveTemporal/DNSR, history swap,
+  and final resolve path are wired and validated. The current Reproject output
   is intentionally an auditable intermediate, not the final visible reflection.

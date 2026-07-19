@@ -2,6 +2,34 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-20 - FidelityFX SSSR Reproject Needs FrameGraph Resource Proof
+
+Symptom:
+- The official FidelityFX SSSR Reproject runtime bridge reported valid resources, descriptors, and dispatches, but the FFX backend lanes still had FrameGraph validation issues.
+
+False leads:
+- Treating a passing dispatch/resource health gate as enough proof that the pass chain was fully auditable.
+
+Cause:
+- The SSSR FrameGraph path described one monolithic adapter pass with resource names such as `GBuffer`, `DepthPyramid`, and `BlueNoise` that were not registered in the current FrameGraph. The missing refs were not asserted by the FFX integration script.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_reproject_bridge` and require both FFX backend lanes and the internal-backend control to report `framegraph_validation_issues=0`.
+
+Fix:
+- Split the FrameGraph description into the official `ClassifyTiles`, `PrepareIndirectArgs`, `PrepareBlueNoiseTexture`, `Intersect`, and `Reproject` passes.
+- Register the FFX ray counter, indirect args, ray list, denoiser tiles, extracted roughness, blue noise, intersection output, bootstrap histories, and Reproject output images as physical resources.
+- Tighten `Test-FidelityFxSssrIntegration.ps1` so FrameGraph validation cleanliness is part of the strict FFX gate.
+
+Prevention:
+- Every third-party renderer pass must be visible as producer/consumer data, not only as Vulkan dispatch counts.
+- Do not let a strict integration gate pass while the FrameGraph reports missing resource refs for that same feature.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed.
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_reproject_bridge` passed `100 pass / 0 fail` with official pass dispatches `1/1/1/1/1`, Reproject offset `12`, extents `1280x720` and `160x90`, and FrameGraph validation `0`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\ssr_regression_after_ffx_reproject` passed `691 pass / 0 fail`.
+
 ## 2026-07-19 - FidelityFX Storage Image Format Must Match SPIR-V Declaration
 
 Symptom:

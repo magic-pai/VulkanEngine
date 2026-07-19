@@ -2645,4 +2645,16 @@ void AppendRenderFrameGraphPass(
     );
 }
 
+void AppendRenderFrameGraphResource(
+    RenderFrameGraphPlan& plan,
+    RenderGraphResourceStatus status,
+    RenderGraphResourceLifetime lifetime,
+    std::string_view name,
+    std::string_view format,
+    std::string_view usage,
+    std::string_view scale
+) {
+    AppendResource(plan, status, lifetime, name, format, usage, scale);
+}
+
 }

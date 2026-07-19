@@ -2448,6 +2448,8 @@ void VulkanCommandBuffer::Record(
     const VulkanFfxSssrBlueNoiseResources* ffxSssrBlueNoiseResources,
     const VulkanComputePipeline* ffxSssrIntersectPipeline,
     const VulkanFfxSssrIntersectResources* ffxSssrIntersectResources,
+    const VulkanComputePipeline* ffxSssrReprojectPipeline,
+    const VulkanFfxSssrReprojectResources* ffxSssrReprojectResources,
     bool ffxSssrPrepareIndirectArgsEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
@@ -3208,6 +3210,11 @@ void VulkanCommandBuffer::Record(
         ssrTargets->Count() > imageIndex &&
         hdrRenderPass != nullptr &&
         hdrFramebuffer != nullptr;
+    const bool ffxSssrReprojectReady =
+        ffxSssrIntersectReady &&
+        ffxSssrReprojectPipeline != nullptr &&
+        ffxSssrReprojectResources != nullptr &&
+        ffxSssrReprojectResources->Count() > imageIndex;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
@@ -4068,6 +4075,138 @@ void VulkanCommandBuffer::Record(
         if (bindStats != nullptr) {
             ++bindStats->ffxSssrIntersectDispatches;
             bindStats->ffxSssrIntersectDescriptorBinds += 2u;
+        }
+
+        if (ffxSssrReprojectReady) {
+            std::array<VkImageMemoryBarrier, 5> reprojectImageBarriers{};
+            auto setReprojectImageBarrier = [&](
+                std::size_t barrierIndex,
+                VkImage image,
+                VkAccessFlags sourceAccess,
+                VkAccessFlags destinationAccess
+            ) {
+                VkImageMemoryBarrier& barrier =
+                    reprojectImageBarriers[barrierIndex];
+                barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barrier.srcAccessMask = sourceAccess;
+                barrier.dstAccessMask = destinationAccess;
+                barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.image = image;
+                barrier.subresourceRange.aspectMask =
+                    VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.baseMipLevel = 0u;
+                barrier.subresourceRange.levelCount = 1u;
+                barrier.subresourceRange.baseArrayLayer = 0u;
+                barrier.subresourceRange.layerCount = 1u;
+            };
+            setReprojectImageBarrier(
+                0u,
+                ffxSssrClassifyTilesResources->IntersectionOutputImage(
+                    imageIndex
+                ),
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT
+            );
+            setReprojectImageBarrier(
+                1u,
+                ffxSssrReprojectResources->ReprojectedRadianceImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT
+            );
+            setReprojectImageBarrier(
+                2u,
+                ffxSssrReprojectResources->AverageRadianceImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT
+            );
+            setReprojectImageBarrier(
+                3u,
+                ffxSssrReprojectResources->VarianceImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT
+            );
+            setReprojectImageBarrier(
+                4u,
+                ffxSssrReprojectResources->SampleCountImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT
+            );
+
+            VkBufferMemoryBarrier denoiserTilesToReproject{};
+            denoiserTilesToReproject.sType =
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            denoiserTilesToReproject.srcAccessMask =
+                VK_ACCESS_SHADER_WRITE_BIT;
+            denoiserTilesToReproject.dstAccessMask =
+                VK_ACCESS_SHADER_READ_BIT;
+            denoiserTilesToReproject.srcQueueFamilyIndex =
+                VK_QUEUE_FAMILY_IGNORED;
+            denoiserTilesToReproject.dstQueueFamilyIndex =
+                VK_QUEUE_FAMILY_IGNORED;
+            denoiserTilesToReproject.buffer =
+                ffxSssrClassifyTilesResources->DenoiserTileListBuffer(imageIndex);
+            denoiserTilesToReproject.offset = 0u;
+            denoiserTilesToReproject.size =
+                ffxSssrClassifyTilesResources->DenoiserTileListBufferSize();
+
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                0,
+                0,
+                nullptr,
+                1u,
+                &denoiserTilesToReproject,
+                static_cast<u32>(reprojectImageBarriers.size()),
+                reprojectImageBarriers.data()
+            );
+
+            const VkDescriptorSet reprojectDescriptorSet =
+                ffxSssrReprojectResources->Handle(imageIndex);
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrReprojectPipeline->Handle()
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrReprojectPipeline->Layout(),
+                0,
+                1,
+                &ffxConstantsDescriptorSet,
+                0,
+                nullptr
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrReprojectPipeline->Layout(),
+                1,
+                1,
+                &reprojectDescriptorSet,
+                0,
+                nullptr
+            );
+            constexpr VkDeviceSize kFfxSssrDenoiserIndirectArgsOffset =
+                sizeof(u32) * 3u;
+            vkCmdDispatchIndirect(
+                commandBuffer,
+                ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(
+                    imageIndex
+                ),
+                kFfxSssrDenoiserIndirectArgsOffset
+            );
+
+            if (bindStats != nullptr) {
+                ++bindStats->ffxSssrReprojectDispatches;
+                bindStats->ffxSssrReprojectDescriptorBinds += 2u;
+            }
         }
     }
 

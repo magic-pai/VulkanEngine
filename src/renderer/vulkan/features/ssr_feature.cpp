@@ -8,6 +8,193 @@
 
 namespace se {
 
+namespace {
+
+void AppendFfxSssrFrameGraphResources(RenderFrameGraphPlan& plan) {
+    constexpr RenderGraphResourceStatus kPhysical =
+        RenderGraphResourceStatus::Physical;
+    constexpr RenderGraphResourceLifetime kPerFrame =
+        RenderGraphResourceLifetime::PerFrame;
+    constexpr RenderGraphResourceLifetime kHistory =
+        RenderGraphResourceLifetime::PersistentHistory;
+    constexpr RenderGraphResourceLifetime kCache =
+        RenderGraphResourceLifetime::PersistentCache;
+
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FrameConstants",
+        "uniform buffer",
+        "sampled by per-frame shader constants",
+        "per swapchain frame"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kCache,
+        "FFX SobolBuffer",
+        "R32_UINT",
+        "uniform texel buffer",
+        "128x128 1spp blue-noise table"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kCache,
+        "FFX RankingTileBuffer",
+        "R32_UINT",
+        "uniform texel buffer",
+        "128x128x8 blue-noise table"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kCache,
+        "FFX ScramblingTileBuffer",
+        "R32_UINT",
+        "uniform texel buffer",
+        "128x128x8 blue-noise table"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX RayCounter",
+        "R32_UINT",
+        "storage texel buffer, transfer, indirect args",
+        "per swapchain frame"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX IntersectArgs",
+        "R32_UINT",
+        "storage texel buffer, indirect args",
+        "two dispatch records"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX RayList",
+        "R32_UINT",
+        "storage texel buffer",
+        "internal resolution pixels"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX DenoiserTiles",
+        "R32_UINT",
+        "storage/uniform texel buffer",
+        "8x8 tile grid"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX ExtractedRoughness",
+        "R32_SFLOAT",
+        "storage image, sampled",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX BlueNoise",
+        "R32G32_SFLOAT",
+        "storage image, sampled",
+        "128x128"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX IntersectOutput",
+        "R32G32B32A32_SFLOAT",
+        "storage image, sampled",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kHistory,
+        "FFX RadianceHistory",
+        "R32G32B32A32_SFLOAT",
+        "sampled placeholder history",
+        "internal resolution history"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kHistory,
+        "FFX AverageRadianceHistory",
+        "R32G32B32A32_SFLOAT",
+        "sampled placeholder average history",
+        "8x8 tile history"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kHistory,
+        "FFX VarianceHistory",
+        "R32_SFLOAT",
+        "sampled placeholder variance history",
+        "internal resolution history"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kHistory,
+        "FFX SampleCountHistory",
+        "R32_SFLOAT",
+        "sampled placeholder sample-count history",
+        "internal resolution history"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX ReprojectedRadiance",
+        "R32G32B32A32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX AverageRadiance",
+        "R32G32B32A32_SFLOAT",
+        "storage image",
+        "8x8 tile grid"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX Variance",
+        "R32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kPerFrame,
+        "FFX SampleCount",
+        "R32_SFLOAT",
+        "storage image",
+        "internal resolution"
+    );
+}
+
+} // namespace
+
 void VulkanSsrFeature::AppendFrameGraph(
     const VulkanRenderFeatureFrameGraphContext& context
 ) const {
@@ -15,6 +202,7 @@ void VulkanSsrFeature::AppendFrameGraph(
         return;
     }
     if (context.stats.ssr.backendRequestedProvider == 1u) {
+        AppendFfxSssrFrameGraphResources(context.plan);
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,
@@ -22,10 +210,58 @@ void VulkanSsrFeature::AppendFrameGraph(
                 ? RenderFramePassStatus::Active
                 : RenderFramePassStatus::Roadmap,
             RenderFramePassQueue::Compute,
-            "FidelityFXSSSRAdapter",
-            "FrameConstants, FFX RayCounter, FFX IntersectArgs",
+            "FidelityFXSSSRClassifyTiles",
+            "FrameConstants, GBufferNormalRoughness, SceneDepth, PrefilteredEnvironmentMap, FFX VarianceHistory",
+            "FFX RayCounter, FFX RayList, FFX DenoiserTiles, FFX ExtractedRoughness, FFX IntersectOutput",
+            "AMD FidelityFX SSSR ClassifyTiles bridge classifies rays and denoiser tiles from scene depth, roughness, normal, and variance inputs."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRPrepareIndirectArgs",
+            "FrameConstants, FFX RayCounter",
             "FFX IntersectArgs",
-            "AMD FidelityFX SSSR source and shader build contract is present; the prepare-indirect-args bridge is active as the first runtime slice. Full tracing, DNSR, and final image contribution are still pending."
+            "AMD FidelityFX SSSR PrepareIndirectArgs bridge writes the Intersect and Reproject indirect dispatch records."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRPrepareBlueNoise",
+            "FrameConstants, FFX SobolBuffer, FFX RankingTileBuffer, FFX ScramblingTileBuffer",
+            "FFX BlueNoise",
+            "AMD FidelityFX SSSR PrepareBlueNoiseTexture bridge expands the official 128x128 1spp tables for runtime sampling."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRIntersect",
+            "FrameConstants, HDRSceneColor, SSRDepthPyramid, GBufferNormalRoughness, FFX ExtractedRoughness, PrefilteredEnvironmentMap, FFX BlueNoise, FFX RayList, FFX IntersectArgs",
+            "FFX IntersectOutput, FFX RayCounter",
+            "AMD FidelityFX SSSR Intersect bridge consumes the official ray list and writes the intersection payload; it is still an auditable intermediate."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Compute,
+            "FidelityFXSSSRReproject",
+            "FrameConstants, SceneDepth, FFX ExtractedRoughness, GBufferNormalRoughness, FFX IntersectOutput, Velocity, FFX BlueNoise, FFX DenoiserTiles, FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory, FFX IntersectArgs",
+            "FFX ReprojectedRadiance, FFX AverageRadiance, FFX Variance, FFX SampleCount",
+            "AMD FidelityFX SSSR Reproject bridge consumes denoiser tiles through the second indirect dispatch record. DNSR Prefilter/ResolveTemporal and final image contribution are still pending."
         );
     }
     if (context.stats.ssr.colorResolveEnabled > 0) {
@@ -238,7 +474,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 4u;
+    ssr.fidelityFxSssrContractVersion = 5u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -322,6 +558,30 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrIntersectHeight;
     ssr.fidelityFxSssrIntersectDepthPyramidMipCount =
         context.renderer.ffxSssrIntersectDepthPyramidMipCount;
+    ssr.fidelityFxSssrReprojectResourcesReady =
+        context.renderer.ffxSssrReprojectResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectDescriptorSetsReady =
+        context.renderer.ffxSssrReprojectDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectPipelineReady =
+        context.renderer.ffxSssrReprojectPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectInputContractReady =
+        context.renderer.ffxSssrReprojectInputContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectWidth =
+        context.renderer.ffxSssrReprojectWidth;
+    ssr.fidelityFxSssrReprojectHeight =
+        context.renderer.ffxSssrReprojectHeight;
+    ssr.fidelityFxSssrReprojectAverageWidth =
+        context.renderer.ffxSssrReprojectAverageWidth;
+    ssr.fidelityFxSssrReprojectAverageHeight =
+        context.renderer.ffxSssrReprojectAverageHeight;
+    ssr.fidelityFxSssrReprojectHistoryReady =
+        context.renderer.ffxSssrReprojectHistoryReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectHistorySource =
+        context.renderer.ffxSssrReprojectHistorySource;
+    ssr.fidelityFxSssrReprojectMemoryBytes =
+        context.renderer.ffxSssrReprojectMemoryBytes;
+    ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes =
+        context.renderer.ffxSssrReprojectIndirectArgsOffsetBytes;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -349,7 +609,13 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrIntersectResourcesReady > 0u &&
         ssr.fidelityFxSssrIntersectDescriptorSetsReady > 0u &&
         ssr.fidelityFxSssrIntersectPipelineReady > 0u &&
-        ssr.fidelityFxSssrIntersectInputContractReady > 0u
+        ssr.fidelityFxSssrIntersectInputContractReady > 0u &&
+        ssr.fidelityFxSssrReprojectResourcesReady > 0u &&
+        ssr.fidelityFxSssrReprojectDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrReprojectPipelineReady > 0u &&
+        ssr.fidelityFxSssrReprojectInputContractReady > 0u &&
+        ssr.fidelityFxSssrReprojectHistoryReady > 0u &&
+        ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes == sizeof(u32) * 3u
             ? 1u
             : 0u;
     ssr.fidelityFxSssrRuntimeActive = 0u;

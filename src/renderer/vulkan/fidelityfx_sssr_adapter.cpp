@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 
 namespace se {
 
@@ -1039,6 +1040,16 @@ VkBuffer VulkanFfxSssrClassifyTilesResources::DenoiserTileListBuffer(
     return m_DenoiserTileListBuffers[imageIndex]->Handle();
 }
 
+VkBufferView VulkanFfxSssrClassifyTilesResources::DenoiserTileListBufferView(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_DenoiserTileListBufferViews.size(),
+        "FidelityFX SSSR denoiser tile-list buffer-view image index is out of range"
+    );
+    return m_DenoiserTileListBufferViews[imageIndex];
+}
+
 VkImage VulkanFfxSssrClassifyTilesResources::IntersectionOutputImage(
     std::size_t imageIndex
 ) const {
@@ -1767,6 +1778,473 @@ void VulkanFfxSssrIntersectResources::CreateResources(
         writes[9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
         writes[9].descriptorCount = 1u;
         writes[9].pTexelBufferView = &rayCounterBufferView;
+
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            static_cast<u32>(writes.size()),
+            writes.data(),
+            0u,
+            nullptr
+        );
+    }
+}
+
+VulkanFfxSssrReprojectDescriptorSetLayout::
+VulkanFfxSssrReprojectDescriptorSetLayout(const VulkanDevice& device)
+    : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanFfxSssrReprojectDescriptorSetLayout::
+~VulkanFfxSssrReprojectDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanFfxSssrReprojectDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanFfxSssrReprojectDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanFfxSssrReprojectDescriptorSetLayout::CreateDescriptorSetLayout(
+    const VulkanDevice& device
+) {
+    std::array<VkDescriptorSetLayoutBinding, 19> bindings{};
+    auto setBinding = [&](u32 binding, VkDescriptorType type) {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType = type;
+        bindings[binding].descriptorCount = 1u;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[binding].pImmutableSamplers = nullptr;
+    };
+    for (u32 binding = 0u; binding <= 12u; ++binding) {
+        setBinding(binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+    }
+    setBinding(13u, VK_DESCRIPTOR_TYPE_SAMPLER);
+    for (u32 binding = 14u; binding <= 17u; ++binding) {
+        setBinding(binding, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    }
+    setBinding(18u, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create Vulkan FidelityFX SSSR reproject descriptor set layout"
+        );
+    }
+}
+
+VulkanFfxSssrReprojectResources::VulkanFfxSssrReprojectResources(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    const VulkanFfxSssrReprojectDescriptorSetLayout& descriptorSetLayout,
+    const VulkanFfxSssrClassifyTilesResources& classifyResources,
+    const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+    const VulkanSceneRenderTargets& renderTargets,
+    VkSampler linearSampler
+) : m_Device(device.Handle()) {
+    CreateResources(
+        device,
+        physicalDevice,
+        commandPool,
+        descriptorSetLayout,
+        classifyResources,
+        blueNoiseResources,
+        renderTargets,
+        linearSampler
+    );
+}
+
+VulkanFfxSssrReprojectResources::~VulkanFfxSssrReprojectResources() {
+    Release();
+}
+
+VkDescriptorSet VulkanFfxSssrReprojectResources::Handle(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_DescriptorSets.size(),
+        "FidelityFX SSSR reproject descriptor image index is out of range"
+    );
+    return m_DescriptorSets[imageIndex];
+}
+
+VkImage VulkanFfxSssrReprojectResources::ReprojectedRadianceImage(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_ReprojectedRadianceImages.size(),
+        "FidelityFX SSSR reprojected-radiance image index is out of range"
+    );
+    return m_ReprojectedRadianceImages[imageIndex]->Handle();
+}
+
+VkImage VulkanFfxSssrReprojectResources::AverageRadianceImage(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_AverageRadianceImages.size(),
+        "FidelityFX SSSR average-radiance image index is out of range"
+    );
+    return m_AverageRadianceImages[imageIndex]->Handle();
+}
+
+VkImage VulkanFfxSssrReprojectResources::VarianceImage(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_VarianceImages.size(),
+        "FidelityFX SSSR variance image index is out of range"
+    );
+    return m_VarianceImages[imageIndex]->Handle();
+}
+
+VkImage VulkanFfxSssrReprojectResources::SampleCountImage(
+    std::size_t imageIndex
+) const {
+    SE_ASSERT(
+        imageIndex < m_SampleCountImages.size(),
+        "FidelityFX SSSR sample-count image index is out of range"
+    );
+    return m_SampleCountImages[imageIndex]->Handle();
+}
+
+std::size_t VulkanFfxSssrReprojectResources::Count() const {
+    return m_DescriptorSets.size();
+}
+
+VkExtent2D VulkanFfxSssrReprojectResources::Extent() const {
+    return m_Extent;
+}
+
+VkExtent2D VulkanFfxSssrReprojectResources::AverageExtent() const {
+    return m_AverageExtent;
+}
+
+u64 VulkanFfxSssrReprojectResources::TotalMemoryBytes() const {
+    const u64 fullPixels =
+        static_cast<u64>(m_Extent.width) * static_cast<u64>(m_Extent.height);
+    const u64 averagePixels =
+        static_cast<u64>(m_AverageExtent.width) *
+        static_cast<u64>(m_AverageExtent.height);
+    const u64 fullBytes =
+        fullPixels *
+        (sizeof(f32) * 4ull * 2ull + sizeof(f32) * 4ull);
+    const u64 averageBytes =
+        averagePixels * sizeof(f32) * 4ull * 2ull;
+    return static_cast<u64>(Count()) * (fullBytes + averageBytes);
+}
+
+void VulkanFfxSssrReprojectResources::Recreate(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    const VulkanFfxSssrReprojectDescriptorSetLayout& descriptorSetLayout,
+    const VulkanFfxSssrClassifyTilesResources& classifyResources,
+    const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+    const VulkanSceneRenderTargets& renderTargets,
+    VkSampler linearSampler
+) {
+    Release();
+    m_Device = device.Handle();
+    CreateResources(
+        device,
+        physicalDevice,
+        commandPool,
+        descriptorSetLayout,
+        classifyResources,
+        blueNoiseResources,
+        renderTargets,
+        linearSampler
+    );
+}
+
+void VulkanFfxSssrReprojectResources::Release() {
+    m_DescriptorSets.clear();
+    m_SampleCountImages.clear();
+    m_VarianceImages.clear();
+    m_AverageRadianceImages.clear();
+    m_ReprojectedRadianceImages.clear();
+    m_SampleCountHistoryImages.clear();
+    m_VarianceHistoryImages.clear();
+    m_AverageRadianceHistoryImages.clear();
+    m_RadianceHistoryImages.clear();
+    if (m_DescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        m_DescriptorPool = VK_NULL_HANDLE;
+    }
+    m_Extent = {};
+    m_AverageExtent = {};
+}
+
+void VulkanFfxSssrReprojectResources::CreateResources(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    const VulkanFfxSssrReprojectDescriptorSetLayout& descriptorSetLayout,
+    const VulkanFfxSssrClassifyTilesResources& classifyResources,
+    const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
+    const VulkanSceneRenderTargets& renderTargets,
+    VkSampler linearSampler
+) {
+    const std::size_t count = renderTargets.Count();
+    SE_ASSERT(count > 0, "FidelityFX SSSR reproject resource count must be greater than zero");
+    SE_ASSERT(
+        classifyResources.Count() == count &&
+            blueNoiseResources.Count() == count,
+        "FidelityFX SSSR reproject resources require matching per-frame producers"
+    );
+    SE_ASSERT(
+        linearSampler != VK_NULL_HANDLE,
+        "FidelityFX SSSR reproject resources require a valid linear sampler"
+    );
+
+    m_Extent = renderTargets.Extent();
+    if (m_Extent.width == 0u ||
+        m_Extent.height == 0u ||
+        FfxExtentsDiffer(m_Extent, classifyResources.Extent())) {
+        throw std::runtime_error(
+            "FidelityFX SSSR reproject resources require matching render and classify extents"
+        );
+    }
+    m_AverageExtent = {
+        std::max(1u, classifyResources.GroupCountX()),
+        std::max(1u, classifyResources.GroupCountY())
+    };
+
+    const VkImageUsageFlags imageUsage =
+        VK_IMAGE_USAGE_STORAGE_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    auto makeImage = [&](
+        VkExtent2D extent,
+        VkFormat format,
+        const char* errorPrefix
+    ) {
+        auto image = std::make_unique<VulkanImage>(
+            device,
+            physicalDevice,
+            extent,
+            format,
+            VK_IMAGE_TILING_OPTIMAL,
+            imageUsage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT
+        );
+        try {
+            image->TransitionLayout(
+                device,
+                commandPool,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL
+            );
+        } catch (const std::exception& exception) {
+            throw std::runtime_error(
+                std::string(errorPrefix) + ": " + exception.what()
+            );
+        }
+        return image;
+    };
+
+    m_RadianceHistoryImages.reserve(count);
+    m_AverageRadianceHistoryImages.reserve(count);
+    m_VarianceHistoryImages.reserve(count);
+    m_SampleCountHistoryImages.reserve(count);
+    m_ReprojectedRadianceImages.reserve(count);
+    m_AverageRadianceImages.reserve(count);
+    m_VarianceImages.reserve(count);
+    m_SampleCountImages.reserve(count);
+
+    for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
+        m_RadianceHistoryImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR radiance-history image"
+        ));
+        m_AverageRadianceHistoryImages.push_back(makeImage(
+            m_AverageExtent,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR average-radiance-history image"
+        ));
+        m_VarianceHistoryImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR variance-history image"
+        ));
+        m_SampleCountHistoryImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR sample-count-history image"
+        ));
+        m_ReprojectedRadianceImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR reprojected-radiance image"
+        ));
+        m_AverageRadianceImages.push_back(makeImage(
+            m_AverageExtent,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR average-radiance image"
+        ));
+        m_VarianceImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR variance image"
+        ));
+        m_SampleCountImages.push_back(makeImage(
+            m_Extent,
+            VK_FORMAT_R32_SFLOAT,
+            "Failed to initialize FidelityFX SSSR sample-count image"
+        ));
+    }
+
+    std::array<VkDescriptorPoolSize, 4> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    poolSizes[0].descriptorCount = static_cast<u32>(count * 13u);
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+    poolSizes[1].descriptorCount = static_cast<u32>(count);
+    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[2].descriptorCount = static_cast<u32>(count * 4u);
+    poolSizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+    poolSizes[3].descriptorCount = static_cast<u32>(count);
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = static_cast<u32>(count);
+    if (vkCreateDescriptorPool(
+            device.Handle(),
+            &poolInfo,
+            nullptr,
+            &m_DescriptorPool
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create Vulkan FidelityFX SSSR reproject descriptor pool"
+        );
+    }
+
+    std::vector<VkDescriptorSetLayout> layouts(
+        count,
+        descriptorSetLayout.Handle()
+    );
+    m_DescriptorSets.resize(count);
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_DescriptorPool;
+    allocateInfo.descriptorSetCount = static_cast<u32>(count);
+    allocateInfo.pSetLayouts = layouts.data();
+    if (vkAllocateDescriptorSets(
+            device.Handle(),
+            &allocateInfo,
+            m_DescriptorSets.data()
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to allocate Vulkan FidelityFX SSSR reproject descriptor sets"
+        );
+    }
+
+    for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
+        std::array<VkDescriptorImageInfo, 13> sampledImages{};
+        sampledImages[0].imageLayout =
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        sampledImages[0].imageView = renderTargets.SceneDepthView(imageIndex);
+        sampledImages[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[1].imageView =
+            classifyResources.ExtractedRoughnessView(imageIndex);
+        sampledImages[2].imageLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        sampledImages[2].imageView =
+            renderTargets.GBufferNormalRoughnessView(imageIndex);
+        sampledImages[3] = sampledImages[0];
+        sampledImages[4] = sampledImages[1];
+        sampledImages[5] = sampledImages[2];
+        sampledImages[6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[6].imageView =
+            classifyResources.IntersectionOutputView(imageIndex);
+        sampledImages[7].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[7].imageView =
+            m_RadianceHistoryImages[imageIndex]->View();
+        sampledImages[8].imageLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        sampledImages[8].imageView = renderTargets.VelocityView(imageIndex);
+        sampledImages[9].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[9].imageView =
+            m_AverageRadianceHistoryImages[imageIndex]->View();
+        sampledImages[10].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[10].imageView =
+            m_VarianceHistoryImages[imageIndex]->View();
+        sampledImages[11].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[11].imageView =
+            m_SampleCountHistoryImages[imageIndex]->View();
+        sampledImages[12].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[12].imageView =
+            blueNoiseResources.BlueNoiseView(imageIndex);
+
+        VkDescriptorImageInfo samplerInfo{};
+        samplerInfo.sampler = linearSampler;
+
+        std::array<VkDescriptorImageInfo, 4> storageImages{};
+        storageImages[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        storageImages[0].imageView =
+            m_ReprojectedRadianceImages[imageIndex]->View();
+        storageImages[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        storageImages[1].imageView =
+            m_AverageRadianceImages[imageIndex]->View();
+        storageImages[2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        storageImages[2].imageView =
+            m_VarianceImages[imageIndex]->View();
+        storageImages[3].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        storageImages[3].imageView =
+            m_SampleCountImages[imageIndex]->View();
+
+        VkBufferView denoiserTileListView =
+            classifyResources.DenoiserTileListBufferView(imageIndex);
+
+        std::array<VkWriteDescriptorSet, 19> writes{};
+        for (u32 binding = 0u; binding <= 12u; ++binding) {
+            writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[binding].dstSet = m_DescriptorSets[imageIndex];
+            writes[binding].dstBinding = binding;
+            writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[binding].descriptorCount = 1u;
+            writes[binding].pImageInfo = &sampledImages[binding];
+        }
+        writes[13].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[13].dstSet = m_DescriptorSets[imageIndex];
+        writes[13].dstBinding = 13u;
+        writes[13].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        writes[13].descriptorCount = 1u;
+        writes[13].pImageInfo = &samplerInfo;
+
+        for (u32 binding = 14u; binding <= 17u; ++binding) {
+            writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[binding].dstSet = m_DescriptorSets[imageIndex];
+            writes[binding].dstBinding = binding;
+            writes[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[binding].descriptorCount = 1u;
+            writes[binding].pImageInfo = &storageImages[binding - 14u];
+        }
+        writes[18].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[18].dstSet = m_DescriptorSets[imageIndex];
+        writes[18].dstBinding = 18u;
+        writes[18].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+        writes[18].descriptorCount = 1u;
+        writes[18].pTexelBufferView = &denoiserTileListView;
 
         vkUpdateDescriptorSets(
             device.Handle(),

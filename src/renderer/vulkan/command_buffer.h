@@ -31,6 +31,7 @@ class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrConstantsResources;
 class VulkanFfxSssrIntersectResources;
 class VulkanFfxSssrPrepareIndirectArgsResources;
+class VulkanFfxSssrReprojectResources;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
 class VulkanMaterialDescriptorSets;
@@ -330,6 +331,9 @@ public:
             nullptr,
         const VulkanComputePipeline* ffxSssrIntersectPipeline = nullptr,
         const VulkanFfxSssrIntersectResources* ffxSssrIntersectResources =
+            nullptr,
+        const VulkanComputePipeline* ffxSssrReprojectPipeline = nullptr,
+        const VulkanFfxSssrReprojectResources* ffxSssrReprojectResources =
             nullptr,
         bool ffxSssrPrepareIndirectArgsEnabled = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,

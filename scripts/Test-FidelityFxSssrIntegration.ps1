@@ -112,12 +112,16 @@ function Invoke-StaticChecks {
         Join-Path $projectRoot "src\renderer\vulkan\fidelityfx_sssr_adapter.h")
     $rendererSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\renderer.cpp")
+    $commandBufferSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\command_buffer.cpp")
     $classifyShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\ClassifyTiles.hlsl")
     $blueNoiseShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\PrepareBlueNoiseTexture.hlsl")
     $intersectShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Intersect.hlsl")
+    $reprojectShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\Reproject.hlsl")
     $commonShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\Common.hlsl")
     $sssrHeader = Get-Content -Raw -LiteralPath (
@@ -237,6 +241,22 @@ function Invoke-StaticChecks {
         "lit=$($intersectShader -match 'Texture2D<float4> g_lit_scene'),depth=$($intersectShader -match 'Texture2D<float> g_depth_buffer_hierarchy'),rayList=$($intersectShader -match 'Buffer<uint> g_ray_list'),output=$($intersectShader -match 'RWTexture2D<float4> g_intersection_output')" `
         "true/true/true/true"
     $checks += New-Check `
+        "FFX SSSR Reproject shader contract present" `
+        ($reprojectShader -match "Texture2D<float> g_depth_buffer" -and
+            $reprojectShader -match "Texture2D<float> g_roughness" -and
+            $reprojectShader -match "Texture2D<float3> g_normal" -and
+            $reprojectShader -match "Texture2D<float4> g_in_radiance" -and
+            $reprojectShader -match "Texture2D<float2> g_motion_vector" -and
+            $reprojectShader -match "Texture2D<float2> g_blue_noise_texture" -and
+            $reprojectShader -match "RWTexture2D<float3> g_out_reprojected_radiance" -and
+            $reprojectShader -match "RWTexture2D<float3> g_out_average_radiance" -and
+            $reprojectShader -match "RWTexture2D<float> g_out_variance" -and
+            $reprojectShader -match "RWTexture2D<float> g_out_sample_count" -and
+            $reprojectShader -match "Buffer<uint> g_denoiser_tile_list" -and
+            $reprojectShader -match "numthreads\(8, 8, 1\)") `
+        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float3> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float3> g_out_average_radiance'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "true/true/true/true"
+    $checks += New-Check `
         "SelfEngine FFX ClassifyTiles descriptors match typed-buffer contract" `
         ($adapterSource -match "VulkanFfxSssrClassifyTilesDescriptorSetLayout" -and
             $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER" -and
@@ -268,6 +288,18 @@ function Invoke-StaticChecks {
             $rendererSource -match "ffx_sssr_PrepareBlueNoiseTexture.hlsl.spv") `
         "layout=$($adapterSource -match 'VulkanFfxSssrIntersectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrIntersectResources'),rayListTyped=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER'),intersectSpv=$($rendererSource -match 'ffx_sssr_Intersect.hlsl.spv')" `
         "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Reproject descriptors match official shader contract" `
+        ($adapterSource -match "VulkanFfxSssrReprojectDescriptorSetLayout" -and
+            $adapterSource -match "VulkanFfxSssrReprojectResources" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE" -and
+            $adapterSource -match "VK_FORMAT_R32G32B32A32_SFLOAT" -and
+            $adapterSource -match "DenoiserTileListBufferView" -and
+            $rendererSource -match "ffx_sssr_Reproject.hlsl.spv" -and
+            $commandBufferSource -match "sizeof\(u32\) \* 3u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u')" `
+        "true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
@@ -402,9 +434,26 @@ function Invoke-RuntimeLane {
     $intersectDepthPyramidMipCount = Get-UIntMetric $last "ssr_ffx_sssr_intersect_depth_pyramid_mip_count"
     $intersectBindDispatches = Get-UIntMetric $last "ffx_sssr_intersect_dispatches"
     $intersectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_intersect_descriptor_binds"
+    $reprojectResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_resources_ready"
+    $reprojectDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_descriptor_sets_ready"
+    $reprojectPipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_pipeline_ready"
+    $reprojectInputContractReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_input_contract_ready"
+    $reprojectDispatches = Get-UIntMetric $last "ssr_ffx_sssr_reproject_dispatches"
+    $reprojectDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_reproject_descriptor_binds"
+    $reprojectWidth = Get-UIntMetric $last "ssr_ffx_sssr_reproject_width"
+    $reprojectHeight = Get-UIntMetric $last "ssr_ffx_sssr_reproject_height"
+    $reprojectAverageWidth = Get-UIntMetric $last "ssr_ffx_sssr_reproject_average_width"
+    $reprojectAverageHeight = Get-UIntMetric $last "ssr_ffx_sssr_reproject_average_height"
+    $reprojectHistoryReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_history_ready"
+    $reprojectHistorySource = Get-UIntMetric $last "ssr_ffx_sssr_reproject_history_source"
+    $reprojectMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_reproject_memory_bytes"
+    $reprojectIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_reproject_indirect_args_offset_bytes"
+    $reprojectBindDispatches = Get-UIntMetric $last "ffx_sssr_reproject_dispatches"
+    $reprojectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_reproject_descriptor_binds"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
+    $frameGraphIssues = Get-UIntMetric $last "framegraph_validation_issues"
     $prepareDispatchStateMatches = $false
     $prepareExpectedLabel = "0/0 mirrored"
     if ($ExpectPrepareDispatch) {
@@ -473,6 +522,22 @@ function Invoke-RuntimeLane {
             $intersectBindDispatches -eq 0 -and
             $intersectBindDescriptorBinds -eq 0
     }
+    $reprojectDispatchStateMatches = $false
+    $reprojectExpectedLabel = "0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $reprojectDispatchStateMatches =
+            $reprojectDispatches -gt 0 -and
+            $reprojectDescriptorBinds -gt 0 -and
+            $reprojectBindDispatches -eq $reprojectDispatches -and
+            $reprojectBindDescriptorBinds -eq $reprojectDescriptorBinds
+        $reprojectExpectedLabel = ">0/>0 mirrored"
+    } else {
+        $reprojectDispatchStateMatches =
+            $reprojectDispatches -eq 0 -and
+            $reprojectDescriptorBinds -eq 0 -and
+            $reprojectBindDispatches -eq 0 -and
+            $reprojectBindDescriptorBinds -eq 0
+    }
     $expectedRayCapacity = $classifyWidth * $classifyHeight
     $expectedTileCapacity =
         [uint32]([Math]::Ceiling($classifyWidth / 8.0) *
@@ -540,6 +605,21 @@ function Invoke-RuntimeLane {
         $intersectWidth -eq $classifyWidth -and
         $intersectHeight -eq $classifyHeight -and
         $intersectDepthPyramidMipCount -gt 1
+    $reprojectResourceContractMatches =
+        $reprojectResourcesReady -eq 1 -and
+        $reprojectDescriptorSetsReady -eq 1 -and
+        $reprojectPipelineReady -eq 1 -and
+        $reprojectInputContractReady -eq 1 -and
+        $reprojectWidth -eq $classifyWidth -and
+        $reprojectHeight -eq $classifyHeight -and
+        $reprojectWidth -eq $intersectWidth -and
+        $reprojectHeight -eq $intersectHeight -and
+        $reprojectAverageWidth -eq $expectedClassifyGroupsX -and
+        $reprojectAverageHeight -eq $expectedClassifyGroupsY -and
+        $reprojectHistoryReady -eq 1 -and
+        $reprojectHistorySource -eq 1 -and
+        $reprojectMemoryBytes -gt $classifyMemoryBytes -and
+        $reprojectIndirectArgsOffsetBytes -eq 12
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -549,8 +629,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 4 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "4/1"),
+            ($contractVersion -eq 5 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "5/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -608,11 +688,22 @@ function Invoke-RuntimeLane {
             $intersectDispatchStateMatches `
             "stats=$intersectDispatches/$intersectDescriptorBinds,binds=$intersectBindDispatches/$intersectBindDescriptorBinds" `
             $intersectExpectedLabel),
+        (New-Check "$Name reproject resource contract" `
+            $reprojectResourceContractMatches `
+            "resources=$reprojectResourcesReady,sets=$reprojectDescriptorSetsReady,pipeline=$reprojectPipelineReady,input=$reprojectInputContractReady,extent=${reprojectWidth}x${reprojectHeight},average=${reprojectAverageWidth}x${reprojectAverageHeight},history=$reprojectHistoryReady/source$reprojectHistorySource,bytes=$reprojectMemoryBytes,offset=$reprojectIndirectArgsOffsetBytes" `
+            "1/1/1/1,extent==classify/intersect,average==ceil8,history=1/source1,bytes>classify,offset=12"),
+        (New-Check "$Name reproject dispatch/bind state" `
+            $reprojectDispatchStateMatches `
+            "stats=$reprojectDispatches/$reprojectDescriptorBinds,binds=$reprojectBindDispatches/$reprojectBindDescriptorBinds" `
+            $reprojectExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
             "dispatch=$dispatchReady,active=$runtimeActive" `
             "$ExpectedDispatchReady/$ExpectedRuntimeActive"),
+        (New-Check "$Name frame graph validation clean" `
+            ($frameGraphIssues -eq 0) `
+            "$frameGraphIssues" "0"),
         (New-Check "$Name fallback reason" `
             ($fallbackReason -eq $ExpectedFallbackReason) `
             "$fallbackReason" "$ExpectedFallbackReason")
@@ -693,8 +784,25 @@ function Invoke-RuntimeLane {
             intersectDepthPyramidMipCount = $intersectDepthPyramidMipCount
             intersectBindDispatches = $intersectBindDispatches
             intersectBindDescriptorBinds = $intersectBindDescriptorBinds
+            reprojectResourcesReady = $reprojectResourcesReady
+            reprojectDescriptorSetsReady = $reprojectDescriptorSetsReady
+            reprojectPipelineReady = $reprojectPipelineReady
+            reprojectInputContractReady = $reprojectInputContractReady
+            reprojectDispatches = $reprojectDispatches
+            reprojectDescriptorBinds = $reprojectDescriptorBinds
+            reprojectWidth = $reprojectWidth
+            reprojectHeight = $reprojectHeight
+            reprojectAverageWidth = $reprojectAverageWidth
+            reprojectAverageHeight = $reprojectAverageHeight
+            reprojectHistoryReady = $reprojectHistoryReady
+            reprojectHistorySource = $reprojectHistorySource
+            reprojectMemoryBytes = $reprojectMemoryBytes
+            reprojectIndirectArgsOffsetBytes = $reprojectIndirectArgsOffsetBytes
+            reprojectBindDispatches = $reprojectBindDispatches
+            reprojectBindDescriptorBinds = $reprojectBindDescriptorBinds
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
+            frameGraphValidationIssues = $frameGraphIssues
             fallbackReason = $fallbackReason
         }
         checks = $checks
