@@ -5511,6 +5511,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_SsrTemporalComputePipeline.reset();
     m_SsrSpatialComputePipeline.reset();
     m_SsrDiagnosticsComputePipeline.reset();
+    m_FfxSssrClassifyTilesPipeline.reset();
     m_FfxSssrPrepareIndirectArgsPipeline.reset();
     m_GBufferGraphicsPipeline.reset();
     m_DoubleSidedGBufferGraphicsPipeline.reset();
@@ -5569,7 +5570,9 @@ VulkanRenderer::~VulkanRenderer() {
     m_TemporalUpscaleBloomDescriptorSets.reset();
     m_BloomDescriptorSets.reset();
     m_WeightedTranslucencyDescriptorSets.reset();
+    m_FfxSssrClassifyTilesResources.reset();
     m_FfxSssrPrepareIndirectArgsResources.reset();
+    m_FfxSssrConstantsResources.reset();
     m_SsrReconstructionDescriptorSets.reset();
     m_HiZDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
@@ -5610,7 +5613,9 @@ VulkanRenderer::~VulkanRenderer() {
     m_LocalShadowBuffer.reset();
     m_BonePaletteFallbackDescriptorSet.reset();
     m_UniformBuffer.reset();
+    m_FfxSssrClassifyTilesDescriptorSetLayout.reset();
     m_FfxSssrPrepareIndirectArgsDescriptorSetLayout.reset();
+    m_FfxSssrConstantsDescriptorSetLayout.reset();
     m_SsrReconstructionDescriptorSetLayout.reset();
     m_HiZDescriptorSetLayout.reset();
     m_MaterialDescriptorSetLayout.reset();
@@ -5686,6 +5691,8 @@ void VulkanRenderer::DrawFrame() {
         ReadPreviousLightTileGpuStats(imageIndex);
     const FrameSsrGpuDiagnosticsStats ssrGpuDiagnostics =
         ReadPreviousSsrGpuDiagnostics(imageIndex);
+    const FrameFfxSssrGpuReadbackStats ffxSssrGpuReadback =
+        ReadPreviousFfxSssrGpuReadback(imageIndex);
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -6009,6 +6016,12 @@ void VulkanRenderer::DrawFrame() {
         m_SceneRenderTargets != nullptr
             ? static_cast<u32>(m_SceneRenderTargets->Count())
             : 0u,
+        m_FfxSssrConstantsResources != nullptr &&
+            m_Swapchain != nullptr &&
+            m_FfxSssrConstantsResources->Count() ==
+                m_Swapchain->Images().size(),
+        m_FfxSssrConstantsResources != nullptr &&
+            m_FfxSssrConstantsResources->Count() > 0u,
         m_FfxSssrPrepareIndirectArgsResources != nullptr &&
             m_Swapchain != nullptr &&
             m_FfxSssrPrepareIndirectArgsResources->Count() ==
@@ -6018,6 +6031,42 @@ void VulkanRenderer::DrawFrame() {
         m_FfxSssrPrepareIndirectArgsPipeline != nullptr,
         m_FfxSssrPrepareIndirectArgsResources != nullptr
             ? m_FfxSssrPrepareIndirectArgsResources->TotalMemoryBytes()
+            : 0ull,
+        m_FfxSssrClassifyTilesResources != nullptr &&
+            m_SceneRenderTargets != nullptr &&
+            m_FfxSssrClassifyTilesResources->Count() ==
+                m_SceneRenderTargets->Count(),
+        m_FfxSssrClassifyTilesResources != nullptr &&
+            m_FfxSssrClassifyTilesResources->Count() > 0u,
+        m_FfxSssrClassifyTilesPipeline != nullptr,
+        m_FfxSssrClassifyTilesResources != nullptr &&
+            m_SceneRenderTargets != nullptr &&
+            m_IblPrefilteredView != VK_NULL_HANDLE &&
+            m_IblSampler != VK_NULL_HANDLE &&
+            !ExtentsDiffer(
+                m_FfxSssrClassifyTilesResources->Extent(),
+                m_SceneRenderTargets->Extent()
+            ),
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->Extent().width
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->Extent().height
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->GroupCountX()
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->GroupCountY()
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->RayListCapacity()
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->DenoiserTileListCapacity()
+            : 0u,
+        m_FfxSssrClassifyTilesResources != nullptr
+            ? m_FfxSssrClassifyTilesResources->TotalMemoryBytes()
             : 0ull
     };
     const FrameMaterialSet frameMaterialSet = has3DMainPass
@@ -6079,6 +6128,11 @@ void VulkanRenderer::DrawFrame() {
         frameLights,
         frameReflectionProbes,
         shadowSamplingEnabled,
+        &temporalState
+    );
+    UpdateFfxSssrConstants(
+        imageIndex,
+        mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         &temporalState
     );
     UpdateOverlayUniformBuffer(
@@ -8172,6 +8226,15 @@ void VulkanRenderer::DrawFrame() {
             ? m_SsrReconstructionDescriptorSets.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrConstantsResources.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrClassifyTilesPipeline.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+            ? m_FfxSssrClassifyTilesResources.get()
+            : nullptr,
+        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
             ? m_FfxSssrPrepareIndirectArgsPipeline.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
@@ -8194,12 +8257,27 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.ssrReconstructionSpatialDispatches;
     frameStats.ssr.reconstructionHistoryCopies =
         frameStats.binds.ssrReconstructionHistoryCopies;
+    frameStats.ssr.fidelityFxSssrClassifyTilesDispatches =
+        frameStats.binds.ffxSssrClassifyTilesDispatches;
+    frameStats.ssr.fidelityFxSssrClassifyTilesDescriptorBinds =
+        frameStats.binds.ffxSssrClassifyTilesDescriptorBinds;
+    frameStats.ssr.fidelityFxSssrClassifyTilesGroupCountX =
+        frameStats.binds.ffxSssrClassifyTilesGroupCountX;
+    frameStats.ssr.fidelityFxSssrClassifyTilesGroupCountY =
+        frameStats.binds.ffxSssrClassifyTilesGroupCountY;
+    frameStats.ssr.fidelityFxSssrRayCounterReadbackValid =
+        ffxSssrGpuReadback.valid ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrClassifiedRayCount =
+        ffxSssrGpuReadback.preparedRayCount;
+    frameStats.ssr.fidelityFxSssrClassifiedDenoiserTileCount =
+        ffxSssrGpuReadback.preparedDenoiserTileCount;
     frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches =
         frameStats.binds.ffxSssrPrepareIndirectArgsDispatches;
     frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds =
         frameStats.binds.ffxSssrPrepareIndirectArgsDescriptorBinds;
     frameStats.ssr.fidelityFxSssrRuntimeActive =
-        frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u
+        frameStats.ssr.fidelityFxSssrClassifyTilesDispatches > 0u &&
+            frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u
             ? 1u
             : 0u;
     if (frameStats.ssr.fidelityFxSssrRuntimeActive > 0u) {
@@ -8469,6 +8547,10 @@ void VulkanRenderer::DrawFrame() {
         m_LightTileGpuReadbackReady[imageIndex] =
             recordLightTileCullCompute ||
             frameStats.ssr.holeDiagnosticsActive > 0u;
+    }
+    if (imageIndex < m_FfxSssrGpuReadbackReady.size()) {
+        m_FfxSssrGpuReadbackReady[imageIndex] =
+            frameStats.ssr.fidelityFxSssrRuntimeActive > 0u;
     }
 
     sectionEnd = FrameClock::now();
@@ -8923,8 +9005,14 @@ void VulkanRenderer::CreateSwapchainResources() {
     m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
     m_SsrReconstructionDescriptorSetLayout =
         std::make_unique<VulkanSsrReconstructionDescriptorSetLayout>(m_Device);
+    m_FfxSssrConstantsDescriptorSetLayout =
+        std::make_unique<VulkanFfxSssrConstantsDescriptorSetLayout>(m_Device);
     m_FfxSssrPrepareIndirectArgsDescriptorSetLayout =
         std::make_unique<VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout>(
+            m_Device
+        );
+    m_FfxSssrClassifyTilesDescriptorSetLayout =
+        std::make_unique<VulkanFfxSssrClassifyTilesDescriptorSetLayout>(
             m_Device
         );
     m_UniformBuffer = std::make_unique<VulkanUniformBuffer>(
@@ -8932,6 +9020,13 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_PhysicalDevice,
         m_Swapchain->Images().size()
     );
+    m_FfxSssrConstantsResources =
+        std::make_unique<VulkanFfxSssrConstantsResources>(
+            m_Device,
+            m_PhysicalDevice,
+            *m_FfxSssrConstantsDescriptorSetLayout,
+            m_Swapchain->Images().size()
+        );
     m_LightBuffer = std::make_unique<VulkanLightBuffer>(
         m_Device,
         m_PhysicalDevice,
@@ -8948,6 +9043,7 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_Swapchain->Images().size()
     );
     m_LightTileGpuReadbackReady.assign(m_Swapchain->Images().size(), false);
+    m_FfxSssrGpuReadbackReady.assign(m_Swapchain->Images().size(), false);
     m_MaterialBuffer = std::make_unique<VulkanMaterialBuffer>(
         m_Device,
         m_PhysicalDevice,
@@ -9246,6 +9342,17 @@ void VulkanRenderer::CreateSwapchainResources() {
             m_PhysicalDevice,
             *m_FfxSssrPrepareIndirectArgsDescriptorSetLayout,
             m_Swapchain->Images().size()
+        );
+    m_FfxSssrClassifyTilesResources =
+        std::make_unique<VulkanFfxSssrClassifyTilesResources>(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrClassifyTilesDescriptorSetLayout,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_SceneRenderTargets,
+            m_IblPrefilteredView,
+            m_IblSampler
         );
     m_HdrDescriptorSets = std::make_unique<VulkanHdrDescriptorSets>(
         m_Device,
@@ -9678,7 +9785,7 @@ void VulkanRenderer::CreateSwapchainResources() {
     );
     {
         const std::array<VkDescriptorSetLayout, 2> ffxPrepareLayouts = {
-            m_DescriptorSetLayout->Handle(),
+            m_FfxSssrConstantsDescriptorSetLayout->Handle(),
             m_FfxSssrPrepareIndirectArgsDescriptorSetLayout->Handle()
         };
         m_FfxSssrPrepareIndirectArgsPipeline =
@@ -9690,6 +9797,22 @@ void VulkanRenderer::CreateSwapchainResources() {
                 ),
                 std::string(SE_SHADER_DIR) +
                     "/ffx_sssr_PrepareIndirectArgs.hlsl.spv"
+            );
+    }
+    {
+        const std::array<VkDescriptorSetLayout, 2> ffxClassifyLayouts = {
+            m_FfxSssrConstantsDescriptorSetLayout->Handle(),
+            m_FfxSssrClassifyTilesDescriptorSetLayout->Handle()
+        };
+        m_FfxSssrClassifyTilesPipeline =
+            std::make_unique<VulkanComputePipeline>(
+                m_Device,
+                std::span<const VkDescriptorSetLayout>(
+                    ffxClassifyLayouts.data(),
+                    ffxClassifyLayouts.size()
+                ),
+                std::string(SE_SHADER_DIR) +
+                    "/ffx_sssr_ClassifyTiles.hlsl.spv"
             );
     }
 #if !defined(NDEBUG)
@@ -9961,8 +10084,14 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_WeightedTranslucencyDescriptorSets != nullptr) {
         m_WeightedTranslucencyDescriptorSets->Release();
     }
+    if (m_FfxSssrClassifyTilesResources != nullptr) {
+        m_FfxSssrClassifyTilesResources->Release();
+    }
     if (m_FfxSssrPrepareIndirectArgsResources != nullptr) {
         m_FfxSssrPrepareIndirectArgsResources->Release();
+    }
+    if (m_FfxSssrConstantsResources != nullptr) {
+        m_FfxSssrConstantsResources->Release();
     }
     if (m_OverlayDescriptorSets != nullptr) {
         m_OverlayDescriptorSets->Release();
@@ -10015,6 +10144,7 @@ void VulkanRenderer::RecreateSwapchain() {
         );
     }
     m_LightTileGpuReadbackReady.assign(m_Swapchain->Images().size(), false);
+    m_FfxSssrGpuReadbackReady.assign(m_Swapchain->Images().size(), false);
     if (m_MaterialBuffer != nullptr) {
         m_MaterialBuffer->Recreate(m_Device, m_PhysicalDevice, m_Swapchain->Images().size());
     }
@@ -10376,6 +10506,32 @@ void VulkanRenderer::RecreateSwapchain() {
             m_PhysicalDevice,
             *m_FfxSssrPrepareIndirectArgsDescriptorSetLayout,
             m_Swapchain->Images().size()
+        );
+    }
+    if (m_FfxSssrConstantsResources != nullptr &&
+        m_FfxSssrConstantsDescriptorSetLayout != nullptr) {
+        m_FfxSssrConstantsResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            *m_FfxSssrConstantsDescriptorSetLayout,
+            m_Swapchain->Images().size()
+        );
+    }
+    if (m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrClassifyTilesDescriptorSetLayout != nullptr &&
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_IblPrefilteredView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE) {
+        m_FfxSssrClassifyTilesResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrClassifyTilesDescriptorSetLayout,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_SceneRenderTargets,
+            m_IblPrefilteredView,
+            m_IblSampler
         );
     }
     if (m_GBufferDescriptorSets != nullptr &&
@@ -13012,6 +13168,73 @@ void VulkanRenderer::UpdateUniformBuffer(
     m_UniformBuffer->Update(imageIndex, uniformData);
 }
 
+void VulkanRenderer::UpdateFfxSssrConstants(
+    std::size_t imageIndex,
+    const FrameMatrices* matrices,
+    const FrameTemporalState* temporalState
+) const {
+    if (m_FfxSssrConstantsResources == nullptr ||
+        m_SceneRenderTargets == nullptr ||
+        imageIndex >= m_FfxSssrConstantsResources->Count()) {
+        return;
+    }
+
+    const VkExtent2D extent = m_SceneRenderTargets->Extent();
+    if (extent.width == 0u || extent.height == 0u) {
+        return;
+    }
+
+    glm::mat4 view{ 1.0f };
+    glm::mat4 proj{ 1.0f };
+    if (matrices != nullptr) {
+        view = matrices->view;
+        proj = matrices->proj;
+    }
+    if (temporalState != nullptr && temporalState->jitterApplied) {
+        ApplyProjectionJitter(proj, temporalState->jitterUv);
+    }
+
+    glm::mat4 previousView = view;
+    glm::mat4 previousProj = proj;
+    if (temporalState != nullptr && temporalState->historyValid) {
+        previousView = temporalState->previousMatrices.view;
+        previousProj = temporalState->previousMatrices.proj;
+    }
+
+    FfxSssrConstants constants{};
+    constants.view = view;
+    constants.proj = proj;
+    constants.invView = glm::inverse(view);
+    constants.invProj = glm::inverse(proj);
+    constants.invViewProj = glm::inverse(proj * view);
+    constants.prevViewProj = previousProj * previousView;
+    constants.bufferDimensions = glm::uvec2(extent.width, extent.height);
+    constants.invBufferDimensions = glm::vec2(
+        1.0f / static_cast<f32>(extent.width),
+        1.0f / static_cast<f32>(extent.height)
+    );
+    constants.temporalStabilityFactor = 0.95f;
+    constants.depthBufferThickness = std::clamp(
+        m_ShadowSettings.ssrThickness,
+        0.001f,
+        0.5f
+    );
+    constants.roughnessThreshold = 0.6f;
+    constants.temporalVarianceThreshold = 0.0f;
+    constants.frameIndex = m_TemporalFrameCounter;
+    constants.maxTraversalIntersections = std::clamp<u32>(
+        m_ShadowSettings.ssrStepCount,
+        1u,
+        64u
+    );
+    constants.minTraversalOccupancy = 4u;
+    constants.mostDetailedMip = 0u;
+    constants.samplesPerQuad = 1u;
+    constants.temporalVarianceGuidedTracingEnabled = 0u;
+
+    m_FfxSssrConstantsResources->Update(imageIndex, constants);
+}
+
 void VulkanRenderer::UpdateOverlayUniformBuffer(
     std::size_t imageIndex,
     const FrameMatrices* matrices,
@@ -13345,6 +13568,27 @@ FrameSsrGpuDiagnosticsStats VulkanRenderer::ReadPreviousSsrGpuDiagnostics(
 #else
     (void)imageIndex;
 #endif
+    return stats;
+}
+
+FrameFfxSssrGpuReadbackStats VulkanRenderer::ReadPreviousFfxSssrGpuReadback(
+    std::size_t imageIndex
+) const {
+    FrameFfxSssrGpuReadbackStats stats{};
+    if (m_FfxSssrPrepareIndirectArgsResources == nullptr ||
+        imageIndex >= m_FfxSssrGpuReadbackReady.size() ||
+        !m_FfxSssrGpuReadbackReady[imageIndex] ||
+        imageIndex >= m_FfxSssrPrepareIndirectArgsResources->Count()) {
+        return stats;
+    }
+
+    const std::array<u32, 4> values =
+        m_FfxSssrPrepareIndirectArgsResources->RayCounterValues(imageIndex);
+    stats.valid = true;
+    stats.pendingRayCount = values[0];
+    stats.preparedRayCount = values[1];
+    stats.pendingDenoiserTileCount = values[2];
+    stats.preparedDenoiserTileCount = values[3];
     return stats;
 }
 

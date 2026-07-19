@@ -2438,6 +2438,9 @@ void VulkanCommandBuffer::Record(
     const VulkanComputePipeline* ssrSpatialPipeline,
     const VulkanComputePipeline* ssrDiagnosticsPipeline,
     const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets,
+    const VulkanFfxSssrConstantsResources* ffxSssrConstantsResources,
+    const VulkanComputePipeline* ffxSssrClassifyTilesPipeline,
+    const VulkanFfxSssrClassifyTilesResources* ffxSssrClassifyTilesResources,
     const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline,
     const VulkanFfxSssrPrepareIndirectArgsResources*
         ffxSssrPrepareIndirectArgsResources,
@@ -3173,15 +3176,25 @@ void VulkanCommandBuffer::Record(
 
     const bool ffxSssrPrepareIndirectArgsReady =
         ffxSssrPrepareIndirectArgsEnabled &&
-        deferredLightingFrameDescriptorSets != nullptr &&
+        ffxSssrConstantsResources != nullptr &&
+        ffxSssrConstantsResources->Count() > imageIndex &&
         ffxSssrPrepareIndirectArgsPipeline != nullptr &&
         ffxSssrPrepareIndirectArgsResources != nullptr &&
         ffxSssrPrepareIndirectArgsResources->Count() > imageIndex;
+    const bool ffxSssrClassifyTilesReady =
+        ffxSssrPrepareIndirectArgsReady &&
+        ffxSssrClassifyTilesPipeline != nullptr &&
+        ffxSssrClassifyTilesResources != nullptr &&
+        ffxSssrClassifyTilesResources->Count() > imageIndex &&
+        ffxSssrClassifyTilesResources->GroupCountX() > 0u &&
+        ffxSssrClassifyTilesResources->GroupCountY() > 0u;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
         const VkBuffer indirectArgsBuffer =
             ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(imageIndex);
+        const VkDescriptorSet ffxConstantsDescriptorSet =
+            ffxSssrConstantsResources->Handle(imageIndex);
         vkCmdFillBuffer(
             commandBuffer,
             rayCounterBuffer,
@@ -3196,22 +3209,57 @@ void VulkanCommandBuffer::Record(
             ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize(),
             0u
         );
+        if (ffxSssrClassifyTilesReady) {
+            vkCmdFillBuffer(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->RayListBuffer(imageIndex),
+                0,
+                ffxSssrClassifyTilesResources->RayListBufferSize(),
+                0u
+            );
+            vkCmdFillBuffer(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->DenoiserTileListBuffer(imageIndex),
+                0,
+                ffxSssrClassifyTilesResources->DenoiserTileListBufferSize(),
+                0u
+            );
+        }
 
-        std::array<VkBufferMemoryBarrier, 2> transferToCompute{};
-        transferToCompute[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        transferToCompute[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        transferToCompute[0].dstAccessMask =
-            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        transferToCompute[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        transferToCompute[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        transferToCompute[0].buffer = rayCounterBuffer;
-        transferToCompute[0].offset = 0;
-        transferToCompute[0].size =
-            ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize();
-        transferToCompute[1] = transferToCompute[0];
-        transferToCompute[1].buffer = indirectArgsBuffer;
-        transferToCompute[1].size =
-            ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize();
+        std::array<VkBufferMemoryBarrier, 4> transferToCompute{};
+        u32 transferToComputeCount = 0u;
+        auto addTransferToComputeBarrier =
+            [&](VkBuffer buffer, VkDeviceSize size) {
+                VkBufferMemoryBarrier& barrier =
+                    transferToCompute[transferToComputeCount++];
+                barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+                barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+                barrier.dstAccessMask =
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.buffer = buffer;
+                barrier.offset = 0;
+                barrier.size = size;
+            };
+        addTransferToComputeBarrier(
+            rayCounterBuffer,
+            ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize()
+        );
+        addTransferToComputeBarrier(
+            indirectArgsBuffer,
+            ffxSssrPrepareIndirectArgsResources->IndirectArgsBufferSize()
+        );
+        if (ffxSssrClassifyTilesReady) {
+            addTransferToComputeBarrier(
+                ffxSssrClassifyTilesResources->RayListBuffer(imageIndex),
+                ffxSssrClassifyTilesResources->RayListBufferSize()
+            );
+            addTransferToComputeBarrier(
+                ffxSssrClassifyTilesResources->DenoiserTileListBuffer(imageIndex),
+                ffxSssrClassifyTilesResources->DenoiserTileListBufferSize()
+            );
+        }
         vkCmdPipelineBarrier(
             commandBuffer,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -3219,14 +3267,99 @@ void VulkanCommandBuffer::Record(
             0,
             0,
             nullptr,
-            static_cast<u32>(transferToCompute.size()),
+            transferToComputeCount,
             transferToCompute.data(),
             0,
             nullptr
         );
 
-        const VkDescriptorSet frameDescriptorSet =
-            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        if (ffxSssrClassifyTilesReady) {
+            BarrierSsrComputeImage(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+            BarrierSsrComputeImage(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->ExtractedRoughnessImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+
+            const VkDescriptorSet classifyDescriptorSet =
+                ffxSssrClassifyTilesResources->Handle(imageIndex);
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrClassifyTilesPipeline->Handle()
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrClassifyTilesPipeline->Layout(),
+                0,
+                1,
+                &ffxConstantsDescriptorSet,
+                0,
+                nullptr
+            );
+            vkCmdBindDescriptorSets(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                ffxSssrClassifyTilesPipeline->Layout(),
+                1,
+                1,
+                &classifyDescriptorSet,
+                0,
+                nullptr
+            );
+            vkCmdDispatch(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->GroupCountX(),
+                ffxSssrClassifyTilesResources->GroupCountY(),
+                1u
+            );
+
+            VkBufferMemoryBarrier classifyToPrepare{};
+            classifyToPrepare.sType =
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            classifyToPrepare.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            classifyToPrepare.dstAccessMask =
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            classifyToPrepare.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            classifyToPrepare.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            classifyToPrepare.buffer = rayCounterBuffer;
+            classifyToPrepare.offset = 0;
+            classifyToPrepare.size =
+                ffxSssrPrepareIndirectArgsResources->RayCounterBufferSize();
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0,
+                nullptr,
+                1u,
+                &classifyToPrepare,
+                0,
+                nullptr
+            );
+
+            if (bindStats != nullptr) {
+                ++bindStats->ffxSssrClassifyTilesDispatches;
+                bindStats->ffxSssrClassifyTilesDescriptorBinds += 2u;
+                bindStats->ffxSssrClassifyTilesGroupCountX =
+                    ffxSssrClassifyTilesResources->GroupCountX();
+                bindStats->ffxSssrClassifyTilesGroupCountY =
+                    ffxSssrClassifyTilesResources->GroupCountY();
+            }
+        }
+
         const VkDescriptorSet ffxDescriptorSet =
             ffxSssrPrepareIndirectArgsResources->Handle(imageIndex);
         vkCmdBindPipeline(
@@ -3240,7 +3373,7 @@ void VulkanCommandBuffer::Record(
             ffxSssrPrepareIndirectArgsPipeline->Layout(),
             0,
             1,
-            &frameDescriptorSet,
+            &ffxConstantsDescriptorSet,
             0,
             nullptr
         );

@@ -2,6 +2,31 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-19 - FidelityFX Storage Image Format Must Match SPIR-V Declaration
+
+Symptom:
+- The first official AMD FidelityFX SSSR `ClassifyTiles.hlsl` bridge ran far enough to publish CSV stats, but Vulkan validation rejected the `g_intersection_output` storage image binding.
+
+False leads:
+- Assuming HLSL `RWTexture2D<float4>` could be backed by `VK_FORMAT_R16G16B16A16_SFLOAT` because half-float would be smaller and visually sufficient for an intermediate carrier.
+
+Cause:
+- The compiled SPIR-V declares `g_intersection_output` as an `Rgba32f` storage image. Vulkan storage image validation requires the bound image view format to match that declared format class, so `R16G16B16A16_SFLOAT` is invalid here.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1 -Strict` with `SE_SSR_BACKEND=ffx-sssr`; the FFX lanes must create and dispatch `ClassifyTiles` without storage-image validation diagnostics.
+
+Fix:
+- Bind `g_intersection_output` as `VK_FORMAT_R32G32B32A32_SFLOAT`, update the memory estimate, and keep the pass behind the data-first FFX/internal backend control matrix.
+
+Prevention:
+- For every third-party shader pass, inspect SPIR-V reflection or Vulkan validation for storage image formats before selecting lower-precision SelfEngine resources.
+- Do not optimize intermediate precision until the vendor shader contract and typed descriptor requirements are proven.
+
+Validation:
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -Strict -OutputDirectory tmp\ffx_sssr_classify_tiles_v3` passed `71 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics -OutputDirectory tmp\ssr_refinement_after_ffx_classify_tiles` passed `861 pass / 0 fail`.
+
 ## 2026-07-19 - FidelityFX RWBuffer Maps To Vulkan Storage Texel Buffers
 
 Symptom:

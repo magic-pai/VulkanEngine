@@ -238,7 +238,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 2u;
+    ssr.fidelityFxSssrContractVersion = 3u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -252,6 +252,10 @@ void VulkanSsrFeature::WriteStats(
     ssr.fidelityFxSssrDenoiserDependencyReady = 0u;
     ssr.fidelityFxSssrSpdDependencyReady = 0u;
 #endif
+    ssr.fidelityFxSssrConstantsResourcesReady =
+        context.renderer.ffxSssrConstantsResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrConstantsDescriptorSetsReady =
+        context.renderer.ffxSssrConstantsDescriptorSetsReady ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady =
         context.renderer.ffxSssrPrepareIndirectArgsResourcesReady ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady =
@@ -260,6 +264,28 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrPrepareIndirectArgsPipelineReady ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsBufferBytes =
         context.renderer.ffxSssrPrepareIndirectArgsBufferBytes;
+    ssr.fidelityFxSssrClassifyTilesResourcesReady =
+        context.renderer.ffxSssrClassifyTilesResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrClassifyTilesDescriptorSetsReady =
+        context.renderer.ffxSssrClassifyTilesDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrClassifyTilesPipelineReady =
+        context.renderer.ffxSssrClassifyTilesPipelineReady ? 1u : 0u;
+    ssr.fidelityFxSssrClassifyTilesInputContractReady =
+        context.renderer.ffxSssrClassifyTilesInputContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrClassifyTilesWidth =
+        context.renderer.ffxSssrClassifyTilesWidth;
+    ssr.fidelityFxSssrClassifyTilesHeight =
+        context.renderer.ffxSssrClassifyTilesHeight;
+    ssr.fidelityFxSssrClassifyTilesGroupCountX =
+        context.renderer.ffxSssrClassifyTilesGroupCountX;
+    ssr.fidelityFxSssrClassifyTilesGroupCountY =
+        context.renderer.ffxSssrClassifyTilesGroupCountY;
+    ssr.fidelityFxSssrClassifyTilesRayListCapacity =
+        context.renderer.ffxSssrClassifyTilesRayListCapacity;
+    ssr.fidelityFxSssrClassifyTilesDenoiserTileListCapacity =
+        context.renderer.ffxSssrClassifyTilesDenoiserTileListCapacity;
+    ssr.fidelityFxSssrClassifyTilesMemoryBytes =
+        context.renderer.ffxSssrClassifyTilesMemoryBytes;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -267,9 +293,15 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrShaderBuildIntegrated > 0u &&
         ssr.fidelityFxSssrDenoiserDependencyReady > 0u &&
         ssr.fidelityFxSssrSpdDependencyReady > 0u &&
+        ssr.fidelityFxSssrConstantsResourcesReady > 0u &&
+        ssr.fidelityFxSssrConstantsDescriptorSetsReady > 0u &&
         ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady > 0u &&
         ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady > 0u &&
-        ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady > 0u
+        ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady > 0u &&
+        ssr.fidelityFxSssrClassifyTilesResourcesReady > 0u &&
+        ssr.fidelityFxSssrClassifyTilesDescriptorSetsReady > 0u &&
+        ssr.fidelityFxSssrClassifyTilesPipelineReady > 0u &&
+        ssr.fidelityFxSssrClassifyTilesInputContractReady > 0u
             ? 1u
             : 0u;
     ssr.fidelityFxSssrRuntimeActive = 0u;

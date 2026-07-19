@@ -377,15 +377,33 @@ struct RendererSsrStats {
     u32 fidelityFxSssrShaderCount = 0;
     u32 fidelityFxSssrDenoiserDependencyReady = 0;
     u32 fidelityFxSssrSpdDependencyReady = 0;
+    u32 fidelityFxSssrConstantsResourcesReady = 0;
+    u32 fidelityFxSssrConstantsDescriptorSetsReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsResourcesReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsPipelineReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsDispatches = 0;
     u32 fidelityFxSssrPrepareIndirectArgsDescriptorBinds = 0;
     u64 fidelityFxSssrPrepareIndirectArgsBufferBytes = 0;
+    u32 fidelityFxSssrClassifyTilesResourcesReady = 0;
+    u32 fidelityFxSssrClassifyTilesDescriptorSetsReady = 0;
+    u32 fidelityFxSssrClassifyTilesPipelineReady = 0;
+    u32 fidelityFxSssrClassifyTilesInputContractReady = 0;
+    u32 fidelityFxSssrClassifyTilesDispatches = 0;
+    u32 fidelityFxSssrClassifyTilesDescriptorBinds = 0;
+    u32 fidelityFxSssrClassifyTilesWidth = 0;
+    u32 fidelityFxSssrClassifyTilesHeight = 0;
+    u32 fidelityFxSssrClassifyTilesGroupCountX = 0;
+    u32 fidelityFxSssrClassifyTilesGroupCountY = 0;
+    u32 fidelityFxSssrClassifyTilesRayListCapacity = 0;
+    u32 fidelityFxSssrClassifyTilesDenoiserTileListCapacity = 0;
+    u64 fidelityFxSssrClassifyTilesMemoryBytes = 0;
+    u32 fidelityFxSssrRayCounterReadbackValid = 0;
+    u32 fidelityFxSssrClassifiedRayCount = 0;
+    u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
     u32 fidelityFxSssrRuntimeDispatchReady = 0;
     u32 fidelityFxSssrRuntimeActive = 0;
-    // 0 = none, 1 = not requested, 2 = prepare-args bridge unavailable, 3 = source/build unavailable.
+    // 0 = none, 1 = not requested, 2 = runtime bridge unavailable, 3 = source/build unavailable.
     u32 fidelityFxSssrFallbackReason = 0;
     f32 strength = 0.0f;
     f32 rayLength = 0.0f;
@@ -887,6 +905,10 @@ struct RendererBindStats {
     u32 ssrReconstructionTemporalDispatches = 0;
     u32 ssrReconstructionSpatialDispatches = 0;
     u32 ssrReconstructionHistoryCopies = 0;
+    u32 ffxSssrClassifyTilesDispatches = 0;
+    u32 ffxSssrClassifyTilesDescriptorBinds = 0;
+    u32 ffxSssrClassifyTilesGroupCountX = 0;
+    u32 ffxSssrClassifyTilesGroupCountY = 0;
     u32 ffxSssrPrepareIndirectArgsDispatches = 0;
     u32 ffxSssrPrepareIndirectArgsDescriptorBinds = 0;
     u32 reflectionProbeDebugDraws = 0;

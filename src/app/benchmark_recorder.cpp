@@ -603,12 +603,30 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrShaderCount << ','
         << ssr.fidelityFxSssrDenoiserDependencyReady << ','
         << ssr.fidelityFxSssrSpdDependencyReady << ','
+        << ssr.fidelityFxSssrConstantsResourcesReady << ','
+        << ssr.fidelityFxSssrConstantsDescriptorSetsReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsDispatches << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsBufferBytes << ','
+        << ssr.fidelityFxSssrClassifyTilesResourcesReady << ','
+        << ssr.fidelityFxSssrClassifyTilesDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrClassifyTilesPipelineReady << ','
+        << ssr.fidelityFxSssrClassifyTilesInputContractReady << ','
+        << ssr.fidelityFxSssrClassifyTilesDispatches << ','
+        << ssr.fidelityFxSssrClassifyTilesDescriptorBinds << ','
+        << ssr.fidelityFxSssrClassifyTilesWidth << ','
+        << ssr.fidelityFxSssrClassifyTilesHeight << ','
+        << ssr.fidelityFxSssrClassifyTilesGroupCountX << ','
+        << ssr.fidelityFxSssrClassifyTilesGroupCountY << ','
+        << ssr.fidelityFxSssrClassifyTilesRayListCapacity << ','
+        << ssr.fidelityFxSssrClassifyTilesDenoiserTileListCapacity << ','
+        << ssr.fidelityFxSssrClassifyTilesMemoryBytes << ','
+        << ssr.fidelityFxSssrRayCounterReadbackValid << ','
+        << ssr.fidelityFxSssrClassifiedRayCount << ','
+        << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
         << ssr.fidelityFxSssrRuntimeDispatchReady << ','
         << ssr.fidelityFxSssrRuntimeActive << ','
         << ssr.fidelityFxSssrFallbackReason << ','
@@ -1470,6 +1488,10 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ssrReconstructionTemporalDispatches << ','
         << binds.ssrReconstructionSpatialDispatches << ','
         << binds.ssrReconstructionHistoryCopies << ','
+        << binds.ffxSssrClassifyTilesDispatches << ','
+        << binds.ffxSssrClassifyTilesDescriptorBinds << ','
+        << binds.ffxSssrClassifyTilesGroupCountX << ','
+        << binds.ffxSssrClassifyTilesGroupCountY << ','
         << binds.ffxSssrPrepareIndirectArgsDispatches << ','
         << binds.ffxSssrPrepareIndirectArgsDescriptorBinds << ','
         << binds.reflectionProbeDebugDraws << ','
@@ -1908,12 +1930,30 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_shader_count,"
         << "ssr_ffx_sssr_denoiser_dependency_ready,"
         << "ssr_ffx_sssr_spd_dependency_ready,"
+        << "ssr_ffx_sssr_constants_resources_ready,"
+        << "ssr_ffx_sssr_constants_descriptor_sets_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_resources_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_dispatches,"
         << "ssr_ffx_sssr_prepare_indirect_args_descriptor_binds,"
         << "ssr_ffx_sssr_prepare_indirect_args_buffer_bytes,"
+        << "ssr_ffx_sssr_classify_tiles_resources_ready,"
+        << "ssr_ffx_sssr_classify_tiles_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_classify_tiles_pipeline_ready,"
+        << "ssr_ffx_sssr_classify_tiles_input_contract_ready,"
+        << "ssr_ffx_sssr_classify_tiles_dispatches,"
+        << "ssr_ffx_sssr_classify_tiles_descriptor_binds,"
+        << "ssr_ffx_sssr_classify_tiles_width,"
+        << "ssr_ffx_sssr_classify_tiles_height,"
+        << "ssr_ffx_sssr_classify_tiles_group_count_x,"
+        << "ssr_ffx_sssr_classify_tiles_group_count_y,"
+        << "ssr_ffx_sssr_classify_tiles_ray_list_capacity,"
+        << "ssr_ffx_sssr_classify_tiles_denoiser_tile_list_capacity,"
+        << "ssr_ffx_sssr_classify_tiles_memory_bytes,"
+        << "ssr_ffx_sssr_ray_counter_readback_valid,"
+        << "ssr_ffx_sssr_classified_ray_count,"
+        << "ssr_ffx_sssr_classified_denoiser_tile_count,"
         << "ssr_ffx_sssr_runtime_dispatch_ready,"
         << "ssr_ffx_sssr_runtime_active,"
         << "ssr_ffx_sssr_fallback_reason,"
@@ -2633,6 +2673,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_reconstruction_temporal_dispatches,"
         << "ssr_reconstruction_spatial_dispatches,"
         << "ssr_reconstruction_history_copies,"
+        << "ffx_sssr_classify_tiles_dispatches,"
+        << "ffx_sssr_classify_tiles_descriptor_binds,"
+        << "ffx_sssr_classify_tiles_groups_x,"
+        << "ffx_sssr_classify_tiles_groups_y,"
         << "ffx_sssr_prepare_indirect_args_dispatches,"
         << "ffx_sssr_prepare_indirect_args_descriptor_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"

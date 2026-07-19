@@ -30,6 +30,10 @@ class VulkanComputePipeline;
 class VulkanImage;
 class VulkanDepthBuffer;
 class VulkanDescriptorSetLayout;
+class VulkanFfxSssrClassifyTilesDescriptorSetLayout;
+class VulkanFfxSssrClassifyTilesResources;
+class VulkanFfxSssrConstantsDescriptorSetLayout;
+class VulkanFfxSssrConstantsResources;
 class VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanDescriptorSets;
@@ -385,6 +389,14 @@ struct FrameSsrGpuDiagnosticsStats {
     u32 contractVersion = 0;
 };
 
+struct FrameFfxSssrGpuReadbackStats {
+    bool valid = false;
+    u32 pendingRayCount = 0;
+    u32 preparedRayCount = 0;
+    u32 pendingDenoiserTileCount = 0;
+    u32 preparedDenoiserTileCount = 0;
+};
+
 struct FrameAutoExposureReadbackStats {
     bool valid = false;
     f32 exposure = 1.0f;
@@ -631,6 +643,11 @@ private:
         bool shadowSamplingEnabled,
         const FrameTemporalState* temporalState
     ) const;
+    void UpdateFfxSssrConstants(
+        std::size_t imageIndex,
+        const FrameMatrices* matrices,
+        const FrameTemporalState* temporalState
+    ) const;
     void UpdateOverlayUniformBuffer(
         std::size_t imageIndex,
         const FrameMatrices* matrices,
@@ -650,6 +667,9 @@ private:
         std::size_t imageIndex
     ) const;
     FrameSsrGpuDiagnosticsStats ReadPreviousSsrGpuDiagnostics(
+        std::size_t imageIndex
+    ) const;
+    FrameFfxSssrGpuReadbackStats ReadPreviousFfxSssrGpuReadback(
         std::size_t imageIndex
     ) const;
     FrameAutoExposureReadbackStats ReadPreviousAutoExposureStats(
@@ -836,8 +856,12 @@ private:
     std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
     std::unique_ptr<VulkanSsrReconstructionDescriptorSetLayout>
         m_SsrReconstructionDescriptorSetLayout;
+    std::unique_ptr<VulkanFfxSssrConstantsDescriptorSetLayout>
+        m_FfxSssrConstantsDescriptorSetLayout;
     std::unique_ptr<VulkanFfxSssrPrepareIndirectArgsDescriptorSetLayout>
         m_FfxSssrPrepareIndirectArgsDescriptorSetLayout;
+    std::unique_ptr<VulkanFfxSssrClassifyTilesDescriptorSetLayout>
+        m_FfxSssrClassifyTilesDescriptorSetLayout;
     std::unique_ptr<VulkanUniformBuffer> m_UniformBuffer;
     std::unique_ptr<VulkanUniformBuffer> m_OverlayUniformBuffer;
     std::unique_ptr<VulkanDescriptorSets> m_DescriptorSets;
@@ -849,8 +873,12 @@ private:
     std::unique_ptr<VulkanHiZDescriptorSets> m_HiZDescriptorSets;
     std::unique_ptr<VulkanSsrReconstructionDescriptorSets>
         m_SsrReconstructionDescriptorSets;
+    std::unique_ptr<VulkanFfxSssrConstantsResources>
+        m_FfxSssrConstantsResources;
     std::unique_ptr<VulkanFfxSssrPrepareIndirectArgsResources>
         m_FfxSssrPrepareIndirectArgsResources;
+    std::unique_ptr<VulkanFfxSssrClassifyTilesResources>
+        m_FfxSssrClassifyTilesResources;
     std::unique_ptr<VulkanHdrDescriptorSets> m_HdrDescriptorSets;
     std::unique_ptr<VulkanHdrDescriptorSets> m_TemporalUpscaleHdrDescriptorSets;
     std::unique_ptr<VulkanBloomDescriptorSets> m_BloomDescriptorSets;
@@ -924,7 +952,9 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_SsrTemporalComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_SsrSpatialComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_SsrDiagnosticsComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_FfxSssrClassifyTilesPipeline;
     std::unique_ptr<VulkanComputePipeline> m_FfxSssrPrepareIndirectArgsPipeline;
+    std::vector<bool> m_FfxSssrGpuReadbackReady;
     bool m_SsrReconstructionImagesInitialized = false;
     // IBL textures
     std::unique_ptr<VulkanImage> m_IblBrdfImage;

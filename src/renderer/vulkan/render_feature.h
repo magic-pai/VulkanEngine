@@ -39,10 +39,23 @@ struct VulkanRenderFeatureContext {
     bool ssrReconstructionDescriptorSetsReady = false;
     bool ssrReconstructionPipelinesAvailable = false;
     u32 ssrReconstructionImageCount = 0;
+    bool ffxSssrConstantsResourcesReady = false;
+    bool ffxSssrConstantsDescriptorSetsReady = false;
     bool ffxSssrPrepareIndirectArgsResourcesReady = false;
     bool ffxSssrPrepareIndirectArgsDescriptorSetsReady = false;
     bool ffxSssrPrepareIndirectArgsPipelineReady = false;
     u64 ffxSssrPrepareIndirectArgsBufferBytes = 0;
+    bool ffxSssrClassifyTilesResourcesReady = false;
+    bool ffxSssrClassifyTilesDescriptorSetsReady = false;
+    bool ffxSssrClassifyTilesPipelineReady = false;
+    bool ffxSssrClassifyTilesInputContractReady = false;
+    u32 ffxSssrClassifyTilesWidth = 0;
+    u32 ffxSssrClassifyTilesHeight = 0;
+    u32 ffxSssrClassifyTilesGroupCountX = 0;
+    u32 ffxSssrClassifyTilesGroupCountY = 0;
+    u32 ffxSssrClassifyTilesRayListCapacity = 0;
+    u32 ffxSssrClassifyTilesDenoiserTileListCapacity = 0;
+    u64 ffxSssrClassifyTilesMemoryBytes = 0;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

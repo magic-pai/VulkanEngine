@@ -106,6 +106,14 @@ function Invoke-StaticChecks {
     $vendorRoot = Join-Path $projectRoot "thirdParty\fidelityfx_sssr"
     $cmakePath = Join-Path $projectRoot "CMakeLists.txt"
     $cmakeSource = Get-Content -Raw -LiteralPath $cmakePath
+    $adapterSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\fidelityfx_sssr_adapter.cpp")
+    $rendererSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\renderer.cpp")
+    $classifyShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\ClassifyTiles.hlsl")
+    $commonShader = Get-Content -Raw -LiteralPath (
+        Join-Path $vendorRoot "shaders\Common.hlsl")
     $sssrHeader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "include\ffx-sssr\ffx_sssr.h")
     $dnsrCommon = Get-Content -Raw -LiteralPath (
@@ -183,6 +191,38 @@ function Invoke-StaticChecks {
             $cmakeSource -match "ffx_sssr_") `
         "dxc=$($cmakeSource -match 'DXC_EXECUTABLE'),list=$($cmakeSource -match 'FFX_SSSR_HLSL_SHADERS'),prefix=$($cmakeSource -match 'ffx_sssr_')" `
         "true/true/true"
+    $checks += New-Check `
+        "FFX SSSR Common constants cbuffer is vendor-shaped" `
+        ($commonShader -match "g_inv_view_proj" -and
+            $commonShader -match "g_buffer_dimensions" -and
+            $commonShader -match "g_samples_per_quad") `
+        "invViewProj=$($commonShader -match 'g_inv_view_proj'),dims=$($commonShader -match 'g_buffer_dimensions'),samples=$($commonShader -match 'g_samples_per_quad')" `
+        "true/true/true"
+    $checks += New-Check `
+        "FFX SSSR ClassifyTiles shader contract present" `
+        ($classifyShader -match "Texture2D<float4> g_roughness" -and
+            $classifyShader -match "RWBuffer<uint> g_ray_list" -and
+            $classifyShader -match "RWTexture2D<float> g_extracted_roughness" -and
+            $classifyShader -match "numthreads\(8, 8, 1\)") `
+        "roughness=$($classifyShader -match 'Texture2D<float4> g_roughness'),rayList=$($classifyShader -match 'RWBuffer<uint> g_ray_list'),roughOut=$($classifyShader -match 'RWTexture2D<float> g_extracted_roughness')" `
+        "true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX ClassifyTiles descriptors match typed-buffer contract" `
+        ($adapterSource -match "VulkanFfxSssrClassifyTilesDescriptorSetLayout" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_SAMPLER" -and
+            $adapterSource -match "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE" -and
+            $adapterSource -match "VK_FORMAT_R32_SFLOAT") `
+        "classifyLayout=$($adapterSource -match 'VulkanFfxSssrClassifyTilesDescriptorSetLayout'),typed=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER'),r32=$($adapterSource -match 'VK_FORMAT_R32_SFLOAT')" `
+        "true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX pipelines use AMD constants set zero" `
+        ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
+            $rendererSource -match "m_FfxSssrConstantsDescriptorSetLayout->Handle\(\)" -and
+            $rendererSource -match "ffx_sssr_ClassifyTiles.hlsl.spv") `
+        "constantsLayout=$($adapterSource -match 'VulkanFfxSssrConstantsDescriptorSetLayout'),pipelineLayout=$($rendererSource -match 'm_FfxSssrConstantsDescriptorSetLayout->Handle\(\)'),classifySpv=$($rendererSource -match 'ffx_sssr_ClassifyTiles.hlsl.spv')" `
+        "true/true/true"
 
     $passCount = @($checks | Where-Object { $_.status -eq "pass" }).Count
     $failCount = @($checks | Where-Object { $_.status -eq "fail" }).Count
@@ -258,6 +298,8 @@ function Invoke-RuntimeLane {
     $shaderCount = Get-UIntMetric $last "ssr_ffx_sssr_shader_count"
     $denoiserReady = Get-UIntMetric $last "ssr_ffx_sssr_denoiser_dependency_ready"
     $spdReady = Get-UIntMetric $last "ssr_ffx_sssr_spd_dependency_ready"
+    $constantsResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_constants_resources_ready"
+    $constantsDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_constants_descriptor_sets_ready"
     $prepareResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_resources_ready"
     $prepareDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready"
     $preparePipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready"
@@ -266,6 +308,26 @@ function Invoke-RuntimeLane {
     $prepareBindDispatches = Get-UIntMetric $last "ffx_sssr_prepare_indirect_args_dispatches"
     $prepareBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_prepare_indirect_args_descriptor_binds"
     $prepareBufferBytes = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_buffer_bytes"
+    $classifyResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_resources_ready"
+    $classifyDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_descriptor_sets_ready"
+    $classifyPipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_pipeline_ready"
+    $classifyInputContractReady = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_input_contract_ready"
+    $classifyDispatches = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_dispatches"
+    $classifyDescriptorBinds = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_descriptor_binds"
+    $classifyWidth = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_width"
+    $classifyHeight = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_height"
+    $classifyGroupCountX = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_group_count_x"
+    $classifyGroupCountY = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_group_count_y"
+    $classifyRayListCapacity = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_ray_list_capacity"
+    $classifyDenoiserTileListCapacity = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_denoiser_tile_list_capacity"
+    $classifyMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_classify_tiles_memory_bytes"
+    $classifyReadbackValid = Get-UIntMetric $last "ssr_ffx_sssr_ray_counter_readback_valid"
+    $classifyRayCount = Get-UIntMetric $last "ssr_ffx_sssr_classified_ray_count"
+    $classifyDenoiserTileCount = Get-UIntMetric $last "ssr_ffx_sssr_classified_denoiser_tile_count"
+    $classifyBindDispatches = Get-UIntMetric $last "ffx_sssr_classify_tiles_dispatches"
+    $classifyBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_classify_tiles_descriptor_binds"
+    $classifyBindGroupCountX = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_x"
+    $classifyBindGroupCountY = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_y"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
@@ -285,6 +347,63 @@ function Invoke-RuntimeLane {
             $prepareBindDispatches -eq 0 -and
             $prepareBindDescriptorBinds -eq 0
     }
+    $classifyDispatchStateMatches = $false
+    $classifyExpectedLabel = "0/0 mirrored"
+    if ($ExpectPrepareDispatch) {
+        $classifyDispatchStateMatches =
+            $classifyDispatches -gt 0 -and
+            $classifyDescriptorBinds -gt 0 -and
+            $classifyBindDispatches -eq $classifyDispatches -and
+            $classifyBindDescriptorBinds -eq $classifyDescriptorBinds -and
+            $classifyBindGroupCountX -eq $classifyGroupCountX -and
+            $classifyBindGroupCountY -eq $classifyGroupCountY
+        $classifyExpectedLabel = ">0/>0 mirrored with matching groups"
+    } else {
+        $classifyDispatchStateMatches =
+            $classifyDispatches -eq 0 -and
+            $classifyDescriptorBinds -eq 0 -and
+            $classifyBindDispatches -eq 0 -and
+            $classifyBindDescriptorBinds -eq 0
+    }
+    $expectedRayCapacity = $classifyWidth * $classifyHeight
+    $expectedTileCapacity =
+        [uint32]([Math]::Ceiling($classifyWidth / 8.0) *
+            [Math]::Ceiling($classifyHeight / 8.0))
+    $expectedClassifyGroupsX = [uint32][Math]::Ceiling($classifyWidth / 8.0)
+    $expectedClassifyGroupsY = [uint32][Math]::Ceiling($classifyHeight / 8.0)
+    $classifyGroupStateMatches = $false
+    $classifyGroupExpectedLabel = "resource extent valid, dispatch groups suppressed"
+    if ($ExpectPrepareDispatch) {
+        $classifyGroupStateMatches =
+            $classifyGroupCountX -eq $expectedClassifyGroupsX -and
+            $classifyGroupCountY -eq $expectedClassifyGroupsY
+        $classifyGroupExpectedLabel = "ceil groups"
+    } else {
+        $classifyGroupStateMatches =
+            $classifyGroupCountX -eq 0 -and
+            $classifyGroupCountY -eq 0
+    }
+    $classifyCapacityMatches =
+        $classifyWidth -gt 0 -and
+        $classifyHeight -gt 0 -and
+        $classifyGroupStateMatches -and
+        $classifyRayListCapacity -ge $expectedRayCapacity -and
+        $classifyDenoiserTileListCapacity -ge $expectedTileCapacity -and
+        $classifyMemoryBytes -gt $prepareBufferBytes
+    $classifyReadbackMatches = $true
+    $classifyReadbackExpected = "not required for disabled lane"
+    if ($ExpectPrepareDispatch) {
+        $classifyReadbackMatches =
+            $classifyReadbackValid -eq 1 -and
+            $classifyRayCount -le $classifyRayListCapacity -and
+            $classifyDenoiserTileCount -le $classifyDenoiserTileListCapacity
+        $classifyReadbackExpected = "valid and counts within capacity"
+    } else {
+        $classifyReadbackMatches =
+            $classifyReadbackValid -eq 0 -and
+            $classifyRayCount -eq 0 -and
+            $classifyDenoiserTileCount -eq 0
+    }
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -294,14 +413,19 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 2 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "2/1"),
+            ($contractVersion -eq 3 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "3/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
         (New-Check "$Name FFX dependencies ready" `
             ($denoiserReady -eq 1 -and $spdReady -eq 1) `
             "dnsr=$denoiserReady,spd=$spdReady" "1/1"),
+        (New-Check "$Name FFX constants ready" `
+            ($constantsResourcesReady -eq 1 -and
+                $constantsDescriptorSetsReady -eq 1) `
+            "resources=$constantsResourcesReady,sets=$constantsDescriptorSetsReady" `
+            "1/1"),
         (New-Check "$Name prepare-args resources ready" `
             ($prepareResourcesReady -eq 1 -and
                 $prepareDescriptorSetsReady -eq 1 -and
@@ -313,6 +437,25 @@ function Invoke-RuntimeLane {
             $prepareDispatchStateMatches `
             "stats=$prepareDispatches/$prepareDescriptorBinds,binds=$prepareBindDispatches/$prepareBindDescriptorBinds" `
             $prepareExpectedLabel),
+        (New-Check "$Name classify-tiles resources ready" `
+            ($classifyResourcesReady -eq 1 -and
+                $classifyDescriptorSetsReady -eq 1 -and
+                $classifyPipelineReady -eq 1 -and
+                $classifyInputContractReady -eq 1) `
+            "resources=$classifyResourcesReady,sets=$classifyDescriptorSetsReady,pipeline=$classifyPipelineReady,input=$classifyInputContractReady" `
+            "1/1/1/1"),
+        (New-Check "$Name classify-tiles capacity contract" `
+            $classifyCapacityMatches `
+            "extent=${classifyWidth}x${classifyHeight},groups=${classifyGroupCountX}x${classifyGroupCountY},capacity=$classifyRayListCapacity/$classifyDenoiserTileListCapacity,bytes=$classifyMemoryBytes" `
+            "extent>0,$classifyGroupExpectedLabel,capacity>=pixels/tiles,bytes>prepare"),
+        (New-Check "$Name classify-tiles dispatch/bind state" `
+            $classifyDispatchStateMatches `
+            "stats=$classifyDispatches/$classifyDescriptorBinds,binds=$classifyBindDispatches/$classifyBindDescriptorBinds,groups=${classifyBindGroupCountX}x${classifyBindGroupCountY}" `
+            $classifyExpectedLabel),
+        (New-Check "$Name classify-tiles counter readback" `
+            $classifyReadbackMatches `
+            "valid=$classifyReadbackValid,rays=$classifyRayCount/$classifyRayListCapacity,tiles=$classifyDenoiserTileCount/$classifyDenoiserTileListCapacity" `
+            $classifyReadbackExpected),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -340,6 +483,8 @@ function Invoke-RuntimeLane {
             shaderCount = $shaderCount
             denoiserDependencyReady = $denoiserReady
             spdDependencyReady = $spdReady
+            constantsResourcesReady = $constantsResourcesReady
+            constantsDescriptorSetsReady = $constantsDescriptorSetsReady
             prepareIndirectArgsResourcesReady = $prepareResourcesReady
             prepareIndirectArgsDescriptorSetsReady = $prepareDescriptorSetsReady
             prepareIndirectArgsPipelineReady = $preparePipelineReady
@@ -348,6 +493,26 @@ function Invoke-RuntimeLane {
             prepareIndirectArgsBindDispatches = $prepareBindDispatches
             prepareIndirectArgsBindDescriptorBinds = $prepareBindDescriptorBinds
             prepareIndirectArgsBufferBytes = $prepareBufferBytes
+            classifyTilesResourcesReady = $classifyResourcesReady
+            classifyTilesDescriptorSetsReady = $classifyDescriptorSetsReady
+            classifyTilesPipelineReady = $classifyPipelineReady
+            classifyTilesInputContractReady = $classifyInputContractReady
+            classifyTilesDispatches = $classifyDispatches
+            classifyTilesDescriptorBinds = $classifyDescriptorBinds
+            classifyTilesWidth = $classifyWidth
+            classifyTilesHeight = $classifyHeight
+            classifyTilesGroupCountX = $classifyGroupCountX
+            classifyTilesGroupCountY = $classifyGroupCountY
+            classifyTilesRayListCapacity = $classifyRayListCapacity
+            classifyTilesDenoiserTileListCapacity = $classifyDenoiserTileListCapacity
+            classifyTilesMemoryBytes = $classifyMemoryBytes
+            classifyTilesReadbackValid = $classifyReadbackValid
+            classifyTilesRayCount = $classifyRayCount
+            classifyTilesDenoiserTileCount = $classifyDenoiserTileCount
+            classifyTilesBindDispatches = $classifyBindDispatches
+            classifyTilesBindDescriptorBinds = $classifyBindDescriptorBinds
+            classifyTilesBindGroupCountX = $classifyBindGroupCountX
+            classifyTilesBindGroupCountY = $classifyBindGroupCountY
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
             fallbackReason = $fallbackReason

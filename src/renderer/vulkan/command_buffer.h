@@ -26,6 +26,8 @@ class VulkanHdrDescriptorSets;
 class VulkanHdrRenderPass;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
+class VulkanFfxSssrClassifyTilesResources;
+class VulkanFfxSssrConstantsResources;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanImGuiLayer;
 class VulkanInstanceBuffer;
@@ -313,6 +315,11 @@ public:
         const VulkanComputePipeline* ssrSpatialPipeline = nullptr,
         const VulkanComputePipeline* ssrDiagnosticsPipeline = nullptr,
         const VulkanSsrReconstructionDescriptorSets* ssrDescriptorSets = nullptr,
+        const VulkanFfxSssrConstantsResources* ffxSssrConstantsResources =
+            nullptr,
+        const VulkanComputePipeline* ffxSssrClassifyTilesPipeline = nullptr,
+        const VulkanFfxSssrClassifyTilesResources*
+            ffxSssrClassifyTilesResources = nullptr,
         const VulkanComputePipeline* ffxSssrPrepareIndirectArgsPipeline = nullptr,
         const VulkanFfxSssrPrepareIndirectArgsResources*
             ffxSssrPrepareIndirectArgsResources = nullptr,
