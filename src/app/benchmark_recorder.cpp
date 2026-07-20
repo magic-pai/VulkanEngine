@@ -726,6 +726,14 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
+        << ssr.fidelityFxSssrHitAttributionRequested << ','
+        << ssr.fidelityFxSssrHitAttributionActive << ','
+        << ssr.fidelityFxSssrHitAttributionReadbackValid << ','
+        << ssr.fidelityFxSssrHighConfidenceHitSamples << ','
+        << ssr.fidelityFxSssrPartialHitSamples << ','
+        << ssr.fidelityFxSssrEnvironmentFallbackSamples << ','
+        << ssr.fidelityFxSssrConfidenceSum16 << ','
+        << ssr.fidelityFxSssrHitAttributionContractVersion << ','
         << ssr.fidelityFxSssrRuntimeDispatchReady << ','
         << ssr.fidelityFxSssrRuntimeActive << ','
         << ssr.fidelityFxSssrFallbackReason << ','
@@ -2168,6 +2176,14 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
+        << "ssr_ffx_sssr_hit_attribution_requested,"
+        << "ssr_ffx_sssr_hit_attribution_active,"
+        << "ssr_ffx_sssr_hit_attribution_readback_valid,"
+        << "ssr_ffx_sssr_high_confidence_hit_samples,"
+        << "ssr_ffx_sssr_partial_hit_samples,"
+        << "ssr_ffx_sssr_environment_fallback_samples,"
+        << "ssr_ffx_sssr_confidence_sum16,"
+        << "ssr_ffx_sssr_hit_attribution_contract_version,"
         << "ssr_ffx_sssr_runtime_dispatch_ready,"
         << "ssr_ffx_sssr_runtime_active,"
         << "ssr_ffx_sssr_fallback_reason,"

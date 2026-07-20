@@ -368,6 +368,19 @@ function Invoke-StaticChecks {
         "layout=$($adapterSource -match 'VulkanFfxSssrIntersectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrIntersectResources'),rayListTyped=$($adapterSource -match 'VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER'),intersectSpv=$($rendererSource -match 'ffx_sssr_Intersect.hlsl.spv')" `
         "true/true/true/true"
     $checks += New-Check `
+        "SelfEngine FFX hit attribution is Debug-only and counter-backed" `
+        ($intersectShader -match "SelfEngine_FfxSssrHitAttributionEnabled" -and
+            $intersectShader -match "g_ray_counter\[4\]" -and
+            $intersectShader -match "g_ray_counter\[5\]" -and
+            $intersectShader -match "g_ray_counter\[6\]" -and
+            $intersectShader -match "g_ray_counter\[7\]" -and
+            $rendererSource -match "FfxSssrHitAttributionEnabledFromEnvironment" -and
+            $rendererSource -match "defined\(NDEBUG\)" -and
+            $adapterHeader -match "kRayCounterBufferSize = sizeof\(u32\) \* 8u" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_hit_attribution_contract_version") `
+        "shader=$($intersectShader -match 'SelfEngine_FfxSssrHitAttributionEnabled'),counters=$($intersectShader -match 'g_ray_counter\[4\]' -and $intersectShader -match 'g_ray_counter\[7\]'),releaseGuard=$($rendererSource -match 'defined\(NDEBUG\)'),buffer8=$($adapterHeader -match 'kRayCounterBufferSize = sizeof\(u32\) \* 8u'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_hit_attribution_contract_version')" `
+        "true/true/true/true/true"
+    $checks += New-Check `
         "SelfEngine FFX Reproject descriptors match official shader contract" `
         ($adapterSource -match "VulkanFfxSssrReprojectDescriptorSetLayout" -and
             $adapterSource -match "VulkanFfxSssrReprojectResources" -and
@@ -669,7 +682,8 @@ function Invoke-RuntimeLane {
         [uint32]$ExpectedDeferredReceiverReprojectionEnabled = 1,
         [uint32]$ExpectedVisibleOutputClearEnabled = 1,
         [uint32]$ExpectedVisibleOutputClears = 1,
-        [uint32]$ExpectedCompositeConfidenceMode = 0
+        [uint32]$ExpectedCompositeConfidenceMode = 0,
+        [bool]$ExpectHitAttribution = $false
     )
 
     $laneDirectory = Join-Path $OutputDirectory $Name
@@ -778,6 +792,14 @@ function Invoke-RuntimeLane {
     $classifyReadbackValid = Get-UIntMetric $last "ssr_ffx_sssr_ray_counter_readback_valid"
     $classifyRayCount = Get-UIntMetric $last "ssr_ffx_sssr_classified_ray_count"
     $classifyDenoiserTileCount = Get-UIntMetric $last "ssr_ffx_sssr_classified_denoiser_tile_count"
+    $hitAttributionRequested = Get-UIntMetric $last "ssr_ffx_sssr_hit_attribution_requested"
+    $hitAttributionActive = Get-UIntMetric $last "ssr_ffx_sssr_hit_attribution_active"
+    $hitAttributionReadbackValid = Get-UIntMetric $last "ssr_ffx_sssr_hit_attribution_readback_valid"
+    $highConfidenceHitSamples = Get-UIntMetric $last "ssr_ffx_sssr_high_confidence_hit_samples"
+    $partialHitSamples = Get-UIntMetric $last "ssr_ffx_sssr_partial_hit_samples"
+    $environmentFallbackSamples = Get-UIntMetric $last "ssr_ffx_sssr_environment_fallback_samples"
+    $confidenceSum16 = Get-UIntMetric $last "ssr_ffx_sssr_confidence_sum16"
+    $hitAttributionContractVersion = Get-UIntMetric $last "ssr_ffx_sssr_hit_attribution_contract_version"
     $classifyBindDispatches = Get-UIntMetric $last "ffx_sssr_classify_tiles_dispatches"
     $classifyBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_classify_tiles_descriptor_binds"
     $classifyBindGroupCountX = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_x"
@@ -1231,6 +1253,30 @@ function Invoke-RuntimeLane {
             "$ExpectedEnvironmentMipCount/iblMips>resolved"
     }
 
+    $hitAttributionSampleSum =
+        [uint64]$highConfidenceHitSamples +
+        [uint64]$partialHitSamples +
+        [uint64]$environmentFallbackSamples
+    $hitAttributionMatches =
+        if ($ExpectHitAttribution) {
+            $hitAttributionRequested -eq 1 -and
+                $hitAttributionActive -eq 1 -and
+                $hitAttributionReadbackValid -eq 1 -and
+                $hitAttributionContractVersion -eq 1 -and
+                $hitAttributionSampleSum -eq [uint64]$classifyRayCount -and
+                [uint64]$confidenceSum16 -le
+                    ($hitAttributionSampleSum * 65535)
+        } else {
+            $hitAttributionRequested -eq 0 -and
+                $hitAttributionActive -eq 0
+        }
+    $hitAttributionExpectedLabel =
+        if ($ExpectHitAttribution) {
+            "enabled=1,readback=1,contract=1,sum=classified"
+        } else {
+            "requested=0,active=0"
+        }
+
     $checks = @(
         (New-Check "$Name requested provider" `
             ($requestedProvider -eq $ExpectedRequestedProvider) `
@@ -1332,6 +1378,10 @@ function Invoke-RuntimeLane {
             $classifyReadbackMatches `
             "valid=$classifyReadbackValid,rays=$classifyRayCount/$classifyRayListCapacity,tiles=$classifyDenoiserTileCount/$classifyDenoiserTileListCapacity" `
             $classifyReadbackExpected),
+        (New-Check "$Name hit attribution contract" `
+            $hitAttributionMatches `
+            "requested=$hitAttributionRequested,active=$hitAttributionActive,readback=$hitAttributionReadbackValid,contract=$hitAttributionContractVersion,high=$highConfidenceHitSamples,partial=$partialHitSamples,env=$environmentFallbackSamples,sum=$hitAttributionSampleSum,classified=$classifyRayCount,confidenceSum16=$confidenceSum16" `
+            $hitAttributionExpectedLabel),
         (New-Check "$Name blue-noise resource contract" `
             $blueNoiseResourceContractMatches `
             "resources=$blueNoiseResourcesReady,sets=$blueNoiseDescriptorSetsReady,pipeline=$blueNoisePipelineReady,extent=${blueNoiseWidth}x${blueNoiseHeight},groups=${blueNoiseGroupCountX}x${blueNoiseGroupCountY},tables=$blueNoiseSobolEntryCount/$blueNoiseRankingTileEntryCount/$blueNoiseScramblingTileEntryCount,bytes=$blueNoiseMemoryBytes" `
@@ -1461,6 +1511,14 @@ function Invoke-RuntimeLane {
             classifyTilesReadbackValid = $classifyReadbackValid
             classifyTilesRayCount = $classifyRayCount
             classifyTilesDenoiserTileCount = $classifyDenoiserTileCount
+            hitAttributionRequested = $hitAttributionRequested
+            hitAttributionActive = $hitAttributionActive
+            hitAttributionReadbackValid = $hitAttributionReadbackValid
+            highConfidenceHitSamples = $highConfidenceHitSamples
+            partialHitSamples = $partialHitSamples
+            environmentFallbackSamples = $environmentFallbackSamples
+            confidenceSum16 = $confidenceSum16
+            hitAttributionContractVersion = $hitAttributionContractVersion
             classifyTilesBindDispatches = $classifyBindDispatches
             classifyTilesBindDescriptorBinds = $classifyBindDescriptorBinds
             classifyTilesBindGroupCountX = $classifyBindGroupCountX
@@ -2139,6 +2197,41 @@ $reports += Invoke-RuntimeLane `
     -ExpectPrepareDispatch $true `
     -ExpectedFallbackReason 0 `
     -ExpectDeferredComposite $true
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-hit-attribution" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_HIT_ATTRIBUTION = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectHitAttribution $true
+
+$reports += Invoke-RuntimeLane `
+    -Name "forward3d-fbx-ffx-hit-attribution" `
+    -Executable $forwardExecutable `
+    -Environment ($common.Clone() + @{
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_HIT_ATTRIBUTION = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectHitAttribution $true
 
 $reports += Invoke-RuntimeLane `
     -Name "lighting-showcase-internal-backend-control" `

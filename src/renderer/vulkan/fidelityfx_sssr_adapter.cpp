@@ -386,7 +386,7 @@ VkBufferView VulkanFfxSssrPrepareIndirectArgsResources::RayCounterBufferView(
     return m_RayCounterBufferViews[imageIndex];
 }
 
-std::array<u32, 4>
+std::array<u32, 8>
 VulkanFfxSssrPrepareIndirectArgsResources::RayCounterValues(
     std::size_t imageIndex
 ) const {
@@ -394,7 +394,7 @@ VulkanFfxSssrPrepareIndirectArgsResources::RayCounterValues(
         imageIndex < m_RayCounterBuffers.size(),
         "FidelityFX SSSR ray-counter readback image index is out of range"
     );
-    std::array<u32, 4> values{};
+    std::array<u32, 8> values{};
     m_RayCounterBuffers[imageIndex]->Download(
         std::as_writable_bytes(std::span<u32>(values))
     );
@@ -478,7 +478,7 @@ void VulkanFfxSssrPrepareIndirectArgsResources::CreateResources(
     m_IndirectArgsBuffers.reserve(count);
     m_RayCounterBufferViews.reserve(count);
     m_IndirectArgsBufferViews.reserve(count);
-    const std::array<u32, 4> zeroRayCounter{};
+    const std::array<u32, 8> zeroRayCounter{};
     const std::array<u32, 6> zeroIndirectArgs{};
     for (std::size_t index = 0; index < count; ++index) {
         auto rayCounter = std::make_unique<VulkanBuffer>(

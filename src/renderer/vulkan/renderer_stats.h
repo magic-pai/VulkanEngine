@@ -507,6 +507,16 @@ struct RendererSsrStats {
     u32 fidelityFxSssrRayCounterReadbackValid = 0;
     u32 fidelityFxSssrClassifiedRayCount = 0;
     u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
+    // Debug-only traced-sample attribution. These are not final pixel counts
+    // because FFX may replicate one base ray across a quad.
+    u32 fidelityFxSssrHitAttributionRequested = 0;
+    u32 fidelityFxSssrHitAttributionActive = 0;
+    u32 fidelityFxSssrHitAttributionReadbackValid = 0;
+    u32 fidelityFxSssrHighConfidenceHitSamples = 0;
+    u32 fidelityFxSssrPartialHitSamples = 0;
+    u32 fidelityFxSssrEnvironmentFallbackSamples = 0;
+    u32 fidelityFxSssrConfidenceSum16 = 0;
+    u32 fidelityFxSssrHitAttributionContractVersion = 0;
     u32 fidelityFxSssrRuntimeDispatchReady = 0;
     u32 fidelityFxSssrRuntimeActive = 0;
     // 0 = none, 1 = not requested, 2 = runtime bridge unavailable, 3 = source/build unavailable.

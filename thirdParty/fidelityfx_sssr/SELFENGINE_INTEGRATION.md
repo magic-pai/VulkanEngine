@@ -115,6 +115,12 @@ Production visual contract (SelfEngine FFX contract v12):
   by classification cannot preserve stale radiance from a previous frame.
 
 Debug reverse controls:
+- `SE_SSR_FFX_HIT_ATTRIBUTION=1` enables Debug-only traced-sample attribution
+  in the extended ray-counter buffer. The CSV reports high-confidence hit,
+  partial-hit, environment-fallback, and quantized confidence-sum counters.
+  These are ray samples, not final pixels, because the FFX quad path may copy
+  one base ray into neighboring lanes. The expected invariant is:
+  `high + partial + environment == classified rays`.
 - `SE_SSR_FFX_SAMPLES_PER_QUAD=1`
 - `SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF=1`
 - `SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF=1`
@@ -145,3 +151,8 @@ Validation note:
   `30 pass / 0 fail`. The user accepted the real LightingShowcase re-entry test:
   a partly off-screen glossy sphere now returns with reflections present in the
   same frame instead of briefly exposing its base material.
+- The Debug hit-attribution gate passed `1090 pass / 0 fail` across
+  LightingShowcase and Forward3D FBX. LightingShowcase recorded `4066` high,
+  `1761` partial, and `150795` environment-fallback samples out of `156622`;
+  Forward3D recorded `73`, `36`, and `2635` out of `2744`. The general SSR
+  regression remained `691 pass / 0 fail`.

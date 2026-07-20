@@ -2530,6 +2530,14 @@ u32 FfxSssrCompositeConfidenceModeFromEnvironment() {
     ) ? 1u : 0u;
 }
 
+bool FfxSssrHitAttributionEnabledFromEnvironment() {
+#if defined(NDEBUG)
+    return false;
+#else
+    return EnvironmentFlagEnabled("SE_SSR_FFX_HIT_ATTRIBUTION");
+#endif
+}
+
 void ApplyProjectionJitter(glm::mat4& projection, const glm::vec2& jitterUv) {
     projection[2][0] += jitterUv.x * 2.0f;
     projection[2][1] += jitterUv.y * 2.0f;
@@ -6185,6 +6193,8 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_SSR_FFX_CLASSIFY_SURFACE_SEED");
     const bool ffxSssrIntersectCoverageMarkerEnabled =
         EnvironmentFlagEnabled("SE_SSR_FFX_INTERSECT_COVERAGE_MARKER");
+    const bool ffxSssrHitAttributionEnabled =
+        FfxSssrHitAttributionEnabledFromEnvironment();
     const u32 ffxSssrIblEnvironmentMipCount =
         m_IblPrefilteredImage != nullptr
             ? m_IblPrefilteredImage->MipLevels()
@@ -6585,6 +6595,7 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrResolveTemporalBypassEnabled,
         ffxSssrClassifySurfaceSeedEnabled,
         ffxSssrIntersectCoverageMarkerEnabled,
+        ffxSssrHitAttributionEnabled,
         ffxSssrEnvironmentMipCount,
         ffxSssrCompositeConfidenceMode
     );
@@ -8798,6 +8809,25 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrGpuReadback.preparedRayCount;
     frameStats.ssr.fidelityFxSssrClassifiedDenoiserTileCount =
         ffxSssrGpuReadback.preparedDenoiserTileCount;
+    frameStats.ssr.fidelityFxSssrHitAttributionRequested =
+        ffxSssrHitAttributionEnabled ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrHitAttributionActive =
+        ffxSssrHitAttributionEnabled &&
+                frameStats.binds.ffxSssrIntersectDispatches > 0u
+            ? 1u
+            : 0u;
+    frameStats.ssr.fidelityFxSssrHitAttributionReadbackValid =
+        ffxSssrHitAttributionEnabled && ffxSssrGpuReadback.valid ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrHighConfidenceHitSamples =
+        ffxSssrGpuReadback.highConfidenceHitSamples;
+    frameStats.ssr.fidelityFxSssrPartialHitSamples =
+        ffxSssrGpuReadback.partialHitSamples;
+    frameStats.ssr.fidelityFxSssrEnvironmentFallbackSamples =
+        ffxSssrGpuReadback.environmentFallbackSamples;
+    frameStats.ssr.fidelityFxSssrConfidenceSum16 =
+        ffxSssrGpuReadback.confidenceSum16;
+    frameStats.ssr.fidelityFxSssrHitAttributionContractVersion =
+        ffxSssrHitAttributionEnabled ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches =
         frameStats.binds.ffxSssrPrepareIndirectArgsDispatches;
     frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDescriptorBinds =
@@ -14100,6 +14130,7 @@ void VulkanRenderer::UpdateFfxSssrConstants(
     bool resolveTemporalBypassEnabled,
     bool classifySurfaceSeedEnabled,
     bool intersectCoverageMarkerEnabled,
+    bool hitAttributionEnabled,
     u32 environmentMipCount,
     u32 compositeConfidenceMode
 ) const {
@@ -14172,6 +14203,7 @@ void VulkanRenderer::UpdateFfxSssrConstants(
         std::min<u32>(compositeConfidenceMode, 1u);
     constants.environmentFallbackControl =
         std::min<u32>(environmentMipCount, 0xffffu) |
+        (hitAttributionEnabled ? 0x01000000u : 0u) |
         (intersectCoverageMarkerEnabled ? 0x02000000u : 0u) |
         (classifySurfaceSeedEnabled ? 0x04000000u : 0u) |
         (resolveTemporalBypassEnabled ? 0x08000000u : 0u) |
@@ -14530,13 +14562,17 @@ FrameFfxSssrGpuReadbackStats VulkanRenderer::ReadPreviousFfxSssrGpuReadback(
         return stats;
     }
 
-    const std::array<u32, 4> values =
+    const std::array<u32, 8> values =
         m_FfxSssrPrepareIndirectArgsResources->RayCounterValues(imageIndex);
     stats.valid = true;
     stats.pendingRayCount = values[0];
     stats.preparedRayCount = values[1];
     stats.pendingDenoiserTileCount = values[2];
     stats.preparedDenoiserTileCount = values[3];
+    stats.highConfidenceHitSamples = values[4];
+    stats.partialHitSamples = values[5];
+    stats.environmentFallbackSamples = values[6];
+    stats.confidenceSum16 = values[7];
     return stats;
 }
 

@@ -33,7 +33,7 @@ THE SOFTWARE.
 [[vk::binding(7, 1)]] SamplerState g_environment_map_sampler                                : register(s0);
 
 [[vk::binding(8, 1)]] RWTexture2D<float4> g_intersection_output                             : register(u0);
-[[vk::binding(9, 1)]] RWBuffer<uint> g_ray_counter                                          : register(u1);
+[[vk::binding(9, 1)]] globallycoherent RWBuffer<uint> g_ray_counter                       : register(u1);
 
 #define M_PI                               3.14159265358979f
 
@@ -141,6 +141,30 @@ bool PerfectReflectionDirectionsEnabled() {
 
 bool SelfEngine_FfxSssrIntersectCoverageMarkerEnabled() {
     return (g_environment_fallback_control & 0x02000000u) != 0u;
+}
+
+bool SelfEngine_FfxSssrHitAttributionEnabled() {
+    return (g_environment_fallback_control & 0x01000000u) != 0u;
+}
+
+void SelfEngine_FfxSssrRecordHitAttribution(float confidence) {
+    if (!SelfEngine_FfxSssrHitAttributionEnabled()) {
+        return;
+    }
+
+    // These counters describe traced samples, not final pixels. A base ray
+    // may be copied to neighboring quad lanes by the official FFX path.
+    if (confidence >= 0.75f) {
+        InterlockedAdd(g_ray_counter[4], 1u);
+    } else if (confidence > 0.0f) {
+        InterlockedAdd(g_ray_counter[5], 1u);
+    } else {
+        InterlockedAdd(g_ray_counter[6], 1u);
+    }
+    InterlockedAdd(
+        g_ray_counter[7],
+        (uint)(saturate(confidence) * 65535.0f + 0.5f)
+    );
 }
 
 float EnvironmentMipCount() {
@@ -266,6 +290,8 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
 
     float confidence = valid_hit ? FFX_SSSR_ValidateHit(hit, uv, world_space_ray, screen_size, g_depth_buffer_thickness) : 0;
     float world_ray_length = max(0, length(world_space_ray));
+
+    SelfEngine_FfxSssrRecordHitAttribution(confidence);
 
     float3 reflection_radiance = 0;
     if (confidence > 0) {

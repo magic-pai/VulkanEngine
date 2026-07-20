@@ -2,6 +2,35 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-21 - SSR Must Preserve Hit Provenance Before IBL Fallback
+
+Symptom:
+- LightingShowcase metal spheres mostly showed broad environment/IBL shapes. Narrow emissive strips inside wall fixtures and nearby geometry were weak or absent.
+
+False leads:
+- Increasing sphere metallic or lowering roughness.
+- Changing the cubemap or treating the round direct-light highlights as reflected fixture geometry.
+
+Cause:
+- FFX SSSR only has screen-space access to geometry visible in the current HDR frame. Misses are blended with the environment map in Intersect, and the current Intersect fallback is bound to the global prefiltered IBL view.
+- The production ResolveTemporal alpha represented glossy validity, not true screen-hit provenance, so the final consumer could not distinguish screen radiance from environment fallback.
+
+Control test:
+- Enable `SE_SSR_FFX_HIT_ATTRIBUTION=1` in Debug and require high-confidence hits + partial hits + environment-fallback samples to equal the prepared ray count.
+
+Fix:
+- Added Debug-only traced-sample attribution counters to the existing FFX ray-counter buffer. The counters record high-confidence hit samples, partial hit samples, environment-fallback samples, and quantized confidence sum without changing reflection color or filtering.
+
+Prevention:
+- Do not tune a reflective showcase until the producer reports hit provenance separately from environment fallback. Treat the attribution values as traced samples because FFX may copy one base ray across quad lanes.
+- The next production reflection step must carry a separate hit-confidence resource and use the selected local probe/IBL only as explicit fallback.
+
+Validation:
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1090 / 0` across LightingShowcase and Forward3D, including attribution lanes and zero Vulkan/FrameGraph diagnostics.
+- LightingShowcase: `4066` high-confidence, `1761` partial, `150795` environment fallback out of `156622` traced samples.
+- Forward3D FBX: `73` high-confidence, `36` partial, `2635` environment fallback out of `2744` traced samples.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `691 / 0`.
+
 ## 2026-07-21 - Post-Lighting SSSR Output Must Be Composited In The Same Frame
 
 Symptom:

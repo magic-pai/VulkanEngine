@@ -405,6 +405,10 @@ struct FrameFfxSssrGpuReadbackStats {
     u32 preparedRayCount = 0;
     u32 pendingDenoiserTileCount = 0;
     u32 preparedDenoiserTileCount = 0;
+    u32 highConfidenceHitSamples = 0;
+    u32 partialHitSamples = 0;
+    u32 environmentFallbackSamples = 0;
+    u32 confidenceSum16 = 0;
 };
 
 struct FrameAutoExposureReadbackStats {
@@ -668,6 +672,7 @@ private:
         bool resolveTemporalBypassEnabled,
         bool classifySurfaceSeedEnabled,
         bool intersectCoverageMarkerEnabled,
+        bool hitAttributionEnabled,
         u32 environmentMipCount,
         u32 compositeConfidenceMode
     ) const;

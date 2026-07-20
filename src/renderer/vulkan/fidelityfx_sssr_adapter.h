@@ -158,7 +158,7 @@ public:
     VkBuffer RayCounterBuffer(std::size_t imageIndex) const;
     VkBuffer IndirectArgsBuffer(std::size_t imageIndex) const;
     VkBufferView RayCounterBufferView(std::size_t imageIndex) const;
-    std::array<u32, 4> RayCounterValues(std::size_t imageIndex) const;
+    std::array<u32, 8> RayCounterValues(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkDeviceSize RayCounterBufferSize() const;
     VkDeviceSize IndirectArgsBufferSize() const;
@@ -173,7 +173,9 @@ public:
     );
     void Release();
 
-    static constexpr VkDeviceSize kRayCounterBufferSize = sizeof(u32) * 4u;
+    // [0..3] are the official FFX counters. [4..7] are Debug-only
+    // hit-attribution counters written by Intersect when enabled.
+    static constexpr VkDeviceSize kRayCounterBufferSize = sizeof(u32) * 8u;
     static constexpr VkDeviceSize kIndirectArgsBufferSize = sizeof(u32) * 6u;
 
 private:
