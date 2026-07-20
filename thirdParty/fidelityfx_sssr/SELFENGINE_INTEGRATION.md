@@ -66,7 +66,8 @@ Current integration state:
 - `Reproject.hlsl` consumes the intersection output, extracted roughness,
   current scene depth, GBuffer normal, motion vectors, generated blue noise,
   denoiser tile list, and bootstrap history images. It writes reprojected
-  radiance, average radiance, variance, and sample-count images. The dispatch
+  radiance, average radiance, variance, sample-count, and independent hit-
+  confidence images. The dispatch
   is indirect at byte offset `12`, matching the second three-uint dispatch
   record written by `PrepareIndirectArgs.hlsl`.
 - `Reproject.hlsl` consumes SelfEngine motion vectors as UV-space
@@ -100,8 +101,14 @@ Current integration state:
   destination-alpha additive blend and is restored to one by the apply pass.
   `SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF=1` retains the previous-frame Deferred
   consumer as an explicit diagnostic fallback.
+- The SelfEngine Apply pass does not infer hit provenance from FFX radiance
+  alpha. It consumes the reprojected `HitConfidence` image separately,
+  subtracts the selected local `SceneReflectionProbeCubemap` baseline from
+  validated screen-space radiance, and leaves probe/IBL fallback responsible
+  for misses. Apply's local-probe priority and box-projection contract matches
+  Deferred lighting.
 
-Production visual contract (SelfEngine FFX contract v12):
+Production visual contract (SelfEngine FFX contract v13):
 - The default ray density is `4 rays/quad`. Sparse `1` and `2` ray modes remain
   explicit diagnostics because quad replication produced distance-dependent
   rings on glossy receivers in the current integration.
@@ -113,6 +120,8 @@ Production visual contract (SelfEngine FFX contract v12):
   retained as a comparison mode, not the production default.
 - The current visible FFX output is cleared before dispatch so pixels omitted
   by classification cannot preserve stale radiance from a previous frame.
+- Hit-confidence history is consumed only after the previous FFX writeback is
+  valid; allocation alone is not treated as valid temporal history.
 
 Debug reverse controls:
 - `SE_SSR_FFX_HIT_ATTRIBUTION=1` enables Debug-only traced-sample attribution
@@ -156,3 +165,12 @@ Validation note:
   `1761` partial, and `150795` environment-fallback samples out of `156622`;
   Forward3D recorded `73`, `36`, and `2635` out of `2744`. The general SSR
   regression remained `691 pass / 0 fail`.
+- Contract v13 separates hit provenance from vendor radiance alpha, adds
+  receiver-validated hit-confidence reprojection, and makes the Apply pass
+  consume the selected local probe fallback through the same FrameGraph
+  identity as Deferred lighting. The strict integration matrix passes
+  `1115 pass / 0 fail` and the SSR/Hi-Z regression passes `691 pass / 0 fail`
+  across LightingShowcase and the animated Forward3D FBX lane. Device Guard
+  blocks the newly linked Debug Forward3D binary with exit `4551`, so the
+  cross-scene runtime lane uses the same-source Release Forward3D binary;
+  Debug-only hit attribution is correctly disabled for that lane.

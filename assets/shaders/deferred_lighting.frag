@@ -560,6 +560,18 @@ bool ReflectionProbeIndependentIblEnergyEnabled() {
     return floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5;
 }
 
+bool ReflectionProbeDominantMirrorEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(
+        floor(mode / 4.0),
+        2.0
+    ) > 0.5;
+}
+
+float ReflectionProbeDominantMirrorFactor(float roughness) {
+    return 1.0 - smoothstep(0.30, 0.60, clamp(roughness, 0.0, 1.0));
+}
+
 float LocalReflectionProbeShapeCoordinateAt(
     int probeIndex,
     vec3 worldPosition
@@ -789,6 +801,20 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
         return result;
     }
 
+    int dominantProbeIndex = -1;
+    float dominantRawWeight = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        if (probeIndex < probeCount && weights[probeIndex] > dominantRawWeight) {
+            dominantRawWeight = weights[probeIndex];
+            dominantProbeIndex = probeIndex;
+        }
+    }
+    float dominantMirrorFactor = productionBlend &&
+        ReflectionProbeDominantMirrorEnabled() &&
+        dominantProbeIndex >= 0
+        ? ReflectionProbeDominantMirrorFactor(roughness)
+        : 0.0;
+
     vec3 localBlend = vec3(0.0);
     float roughnessClamped = clamp(roughness, 0.0, 1.0);
     float glossBoost = IblSpecularStability(roughnessClamped);
@@ -838,7 +864,15 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
             ) *
             localIntensity *
             glossBoost;
-        localBlend += localRadiance * (rawWeight / totalWeight);
+        float effectiveWeight = mix(
+            rawWeight,
+            probeIndex == dominantProbeIndex ? totalWeight : 0.0,
+            dominantMirrorFactor
+        );
+        if (effectiveWeight <= 0.0001) {
+            continue;
+        }
+        localBlend += localRadiance * (effectiveWeight / totalWeight);
     }
 
     result.localRadiance = localBlend;
@@ -2173,6 +2207,10 @@ bool SsrFidelityFxRadianceHistorySourceEnabled() {
 
 bool SsrFidelityFxSameFrameCompositeEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 262144.0), 2.0) > 0.5;
+}
+
+bool SsrFidelityFxHitProvenanceEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 524288.0), 2.0) > 0.5;
 }
 
 float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
@@ -4182,6 +4220,7 @@ void AccumulateRectAreaLight(
     ));
     vec3 rectBitangent = normalize(cross(rectNormal, rectTangent));
     vec2 halfSize = max(localLight.parameters.zw * 0.5, vec2(0.001));
+    float analyticSpecular = clamp(localLight.parameters.x, 0.0, 1.0);
     float radius = max(positionRadius.w, length(halfSize));
     vec2 sampleSigns[4] = vec2[](
         vec2(-0.57735, -0.57735),
@@ -4289,6 +4328,7 @@ void AccumulateRectAreaLight(
                     nDotL *
                     shadowVisibility *
                     rectMask *
+                    analyticSpecular *
                     max(specularStrength, 0.0) *
                     roughnessEnergy *
                     (fresnel + coatFresnel);
@@ -4903,7 +4943,8 @@ void main() {
         ssrReflection
     );
     float ffxSameFrameBlendWeight =
-        ffxSameFrameComposite && roughness < 0.6
+        ffxSameFrameComposite && roughness < 0.6 &&
+            !SsrFidelityFxHitProvenanceEnabled()
             ? SsrProbeFallbackBlendWeight(
                 clamp(frame.ssrControls.x, 0.0, 1.0),
                 roughness

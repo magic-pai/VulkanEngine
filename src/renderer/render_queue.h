@@ -91,6 +91,7 @@ struct RenderCommand {
     RenderBounds worldBounds{};
     RenderMaterialPushConstants materialPushConstants{};
     bool castShadow = false;
+    bool reflectionCaptureVisible = true;
     u32 lodLevel = 0;
     f32 lodScreenFraction = 1.0f;
     i32 drawOrder = 0;

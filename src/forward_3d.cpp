@@ -2248,6 +2248,7 @@ void BuildLightingShowcaseScene(
         showcasePlainSpheres ? "ShowcaseWarmStoneMaterial" : "ShowcaseReflectionTestSilverMaterial"
     );
     place(metalSphere, { -2.15f, 0.18f, 0.15f }, { 1.18f, 1.18f, 1.18f });
+    metalSphere.SetReflectionCaptureVisible(false);
     if (showcaseSphereShadowCastersOff) {
         metalSphere.SetCastShadow(false);
     }
@@ -2384,7 +2385,8 @@ void BuildLightingShowcaseScene(
                 height,
                 radius,
                 color,
-                intensity
+                intensity,
+                0.0f
             );
             if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
                 AddLightIndexLabel(
@@ -2651,7 +2653,8 @@ void BuildLightingShowcaseScene(
                 2.05f,
                 6.8f,
                 lightColor,
-                index == 1 ? 8.8f : 7.4f
+                index == 1 ? 8.8f : 7.4f,
+                0.0f
             );
             if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
                 AddLightIndexLabel(
@@ -2672,7 +2675,8 @@ void BuildLightingShowcaseScene(
                 2.05f,
                 2.45f,
                 lightColor,
-                index == 1 ? 2.8f : 2.35f
+                index == 1 ? 2.8f : 2.35f,
+                0.0f
             );
             if (showcaseLightIndexLabelsVisible && lightIndexOverlayScene != nullptr) {
                 AddLightIndexLabel(

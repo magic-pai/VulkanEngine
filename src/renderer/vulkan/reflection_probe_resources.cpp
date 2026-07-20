@@ -37,7 +37,6 @@ constexpr u32 kMinEquirectangularCubemapFaceSizeLimit = 64u;
 constexpr u32 kMaxEquirectangularCubemapFaceSizeLimit = 1024u;
 constexpr const char* kEquirectangularCubemapFaceSizeEnv =
     "SE_REFLECTION_PROBE_EQUIRECT_FACE_SIZE";
-constexpr u32 kCapturedSceneCubemapFaceSize = 256u;
 constexpr u32 kCapturedSceneMaxLightSamples = 16u;
 constexpr std::size_t kMaxCapturedSceneProbeResourceCount = 4u;
 constexpr VkFormat kGpuCapturedSceneFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -1587,38 +1586,39 @@ std::array<float, 3> CapturedSceneRadiance(
 
 AuthoredCubemapPixelData BuildCapturedSceneCubemapPixels(
     const CapturedReflectionProbeSceneSample& sceneSample,
-    std::span<const CapturedReflectionProbeLightSample> lights
+    std::span<const CapturedReflectionProbeLightSample> lights,
+    u32 faceSize
 ) {
     AuthoredCubemapPixelData pixelData{};
     pixelData.format = VK_FORMAT_R8G8B8A8_SRGB;
     pixelData.hdr = false;
     pixelData.bytesPerTexel = 4u;
     pixelData.pixels.resize(
-        static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) *
-        static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) *
+        static_cast<std::size_t>(faceSize) *
+        static_cast<std::size_t>(faceSize) *
         6u *
         pixelData.bytesPerTexel
     );
 
     for (std::size_t face = 0; face < 6u; ++face) {
-        for (u32 y = 0; y < kCapturedSceneCubemapFaceSize; ++y) {
-            for (u32 x = 0; x < kCapturedSceneCubemapFaceSize; ++x) {
+        for (u32 y = 0; y < faceSize; ++y) {
+            for (u32 x = 0; x < faceSize; ++x) {
                 const float faceU =
                     (2.0f * (static_cast<float>(x) + 0.5f) /
-                     static_cast<float>(kCapturedSceneCubemapFaceSize)) -
+                     static_cast<float>(faceSize)) -
                     1.0f;
                 const float faceV =
                     (2.0f * (static_cast<float>(y) + 0.5f) /
-                     static_cast<float>(kCapturedSceneCubemapFaceSize)) -
+                     static_cast<float>(faceSize)) -
                     1.0f;
                 const std::array<float, 3> direction =
                     CubemapDirection(face, faceU, faceV);
                 const std::array<float, 3> radiance =
                     CapturedSceneRadiance(sceneSample, lights, direction);
                 const std::size_t offset =
-                    (((face * static_cast<std::size_t>(kCapturedSceneCubemapFaceSize) +
+                    (((face * static_cast<std::size_t>(faceSize) +
                        static_cast<std::size_t>(y)) *
-                      static_cast<std::size_t>(kCapturedSceneCubemapFaceSize)) +
+                      static_cast<std::size_t>(faceSize)) +
                      static_cast<std::size_t>(x)) *
                     pixelData.bytesPerTexel;
                 pixelData.pixels[offset + 0u] =
@@ -2390,6 +2390,12 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     if (resource == nullptr) {
         return;
     }
+    m_CapturedSceneCubemapFaceSize = std::clamp(
+        filteringSettings.faceSize,
+        128u,
+        1024u
+    );
+    m_CapturedSceneCubemapFaceSizeInitialized = true;
     m_LastCapturedSceneProbeSceneIndex = probeSceneIndex;
     ++resource->refreshCheckCount;
     const bool resourceReady =
@@ -2527,11 +2533,15 @@ void VulkanReflectionProbeResources::EnsureCapturedSceneCubemap(
     }
 
     const AuthoredCubemapPixelData pixelData =
-        BuildCapturedSceneCubemapPixels(sceneSample, lights);
+        BuildCapturedSceneCubemapPixels(
+            sceneSample,
+            lights,
+            m_CapturedSceneCubemapFaceSize
+        );
     AuthoredCubemapMipChain mipChain =
         BuildPrefilteredCubemapMipChain(
             pixelData,
-            kCapturedSceneCubemapFaceSize,
+            m_CapturedSceneCubemapFaceSize,
             filteringSettings
         );
     resource->activeImage = UploadAuthoredCubemapMipChain(
@@ -2584,7 +2594,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = static_cast<f32>(
-            MipCountForExtent(kCapturedSceneCubemapFaceSize) - 1u
+            MipCountForExtent(m_CapturedSceneCubemapFaceSize) - 1u
         );
         if (vkCreateSampler(
                 device.Handle(),
@@ -2619,7 +2629,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
 
         const u32 descriptorSetCapacity =
             static_cast<u32>(kMaxCapturedSceneProbeResourceCount) *
-            (MipCountForExtent(kCapturedSceneCubemapFaceSize) - 1u);
+            (MipCountForExtent(m_CapturedSceneCubemapFaceSize) - 1u);
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0] = {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -2886,7 +2896,8 @@ void VulkanReflectionProbeResources::ReleaseGpuCapturedSceneDiffuseIrradianceRes
 bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    i32 probeSceneIndex
+    i32 probeSceneIndex,
+    CapturedReflectionProbeFilteringSettings filteringSettings
 ) {
     CapturedSceneProbeResource* resource =
         FindOrCreateCapturedSceneProbeResource(probeSceneIndex);
@@ -2895,6 +2906,19 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
     }
     if (m_GpuCapturedSceneDevice != VK_NULL_HANDLE &&
         m_GpuCapturedSceneDevice != device.Handle()) {
+        return false;
+    }
+    const u32 requestedFaceSize = std::clamp(
+        filteringSettings.faceSize,
+        128u,
+        1024u
+    );
+    if (!m_CapturedSceneCubemapFaceSizeInitialized) {
+        m_CapturedSceneCubemapFaceSize = requestedFaceSize;
+        m_CapturedSceneCubemapFaceSizeInitialized = true;
+    } else if (m_CapturedSceneCubemapFaceSize != requestedFaceSize) {
+        // Capture resolution is process-scoped because the render pass and
+        // descriptor pools are shared by every captured probe.
         return false;
     }
     if (resource->targetImage != nullptr &&
@@ -2909,8 +2933,8 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
 
     try {
         const VkExtent2D extent{
-            kCapturedSceneCubemapFaceSize,
-            kCapturedSceneCubemapFaceSize
+            m_CapturedSceneCubemapFaceSize,
+            m_CapturedSceneCubemapFaceSize
         };
         const u32 mipCount = MipCountForExtent(extent.width);
         const VkFormat depthFormat = VulkanDepthBuffer::FindDepthFormat(physicalDevice);
@@ -3602,7 +3626,10 @@ VkRenderPass VulkanReflectionProbeResources::GpuCapturedSceneRenderPass() const 
 
 VkExtent2D VulkanReflectionProbeResources::GpuCapturedSceneExtent() const {
     return m_GpuCapturedSceneRenderPass != VK_NULL_HANDLE
-        ? VkExtent2D{ kCapturedSceneCubemapFaceSize, kCapturedSceneCubemapFaceSize }
+        ? VkExtent2D{
+            m_CapturedSceneCubemapFaceSize,
+            m_CapturedSceneCubemapFaceSize
+        }
         : VkExtent2D{};
 }
 
@@ -3679,8 +3706,8 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     baseCopy.srcSubresource.layerCount = 6u;
     baseCopy.dstSubresource = baseCopy.srcSubresource;
     baseCopy.extent = {
-        kCapturedSceneCubemapFaceSize,
-        kCapturedSceneCubemapFaceSize,
+        m_CapturedSceneCubemapFaceSize,
+        m_CapturedSceneCubemapFaceSize,
         1u
     };
     vkCmdCopyImage(
@@ -3726,10 +3753,10 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     );
     for (u32 mip = 1u; mip < mipCount; ++mip) {
         const i32 sourceExtent = static_cast<i32>(
-            std::max(1u, kCapturedSceneCubemapFaceSize >> (mip - 1u))
+            std::max(1u, m_CapturedSceneCubemapFaceSize >> (mip - 1u))
         );
         const i32 destinationExtent = static_cast<i32>(
-            std::max(1u, kCapturedSceneCubemapFaceSize >> mip)
+            std::max(1u, m_CapturedSceneCubemapFaceSize >> mip)
         );
         VkImageBlit blit{};
         blit.srcOffsets[1] = { sourceExtent, sourceExtent, 1 };
@@ -3793,8 +3820,8 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
             mipCopy.srcSubresource.layerCount = 6u;
             mipCopy.dstSubresource = mipCopy.srcSubresource;
             mipCopy.extent = {
-                std::max(1u, kCapturedSceneCubemapFaceSize >> mip),
-                std::max(1u, kCapturedSceneCubemapFaceSize >> mip),
+                std::max(1u, m_CapturedSceneCubemapFaceSize >> mip),
+                std::max(1u, m_CapturedSceneCubemapFaceSize >> mip),
                 1u
             };
             vkCmdCopyImage(
@@ -3870,7 +3897,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
             f32 roughness = 0.0f;
             u32 mipExtent = 1u;
             u32 sampleCount = 1u;
-            u32 sourceFaceSize = kCapturedSceneCubemapFaceSize;
+            u32 sourceFaceSize = 1u;
             u32 sourceMipCount = 1u;
             u32 pdfLodEnabled = 1u;
             u32 reserved0 = 0u;
@@ -3878,8 +3905,9 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         } constants;
         constants.roughness = static_cast<f32>(mip) /
             static_cast<f32>(std::max(1u, mipCount - 1u));
-        constants.mipExtent = std::max(1u, kCapturedSceneCubemapFaceSize >> mip);
+        constants.mipExtent = std::max(1u, m_CapturedSceneCubemapFaceSize >> mip);
         constants.sampleCount = sampleCount;
+        constants.sourceFaceSize = m_CapturedSceneCubemapFaceSize;
         constants.sourceMipCount = mipCount;
         vkCmdBindDescriptorSets(
             commandBuffer,
@@ -3978,13 +4006,14 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneDiffuseIrradiance(
     struct DiffuseIrradiancePushConstants {
         u32 faceSize = kGpuCapturedSceneDiffuseIrradianceFaceSize;
         u32 sampleCount = kGpuCapturedSceneDiffuseIrradianceSampleCount;
-        u32 sourceFaceSize = kCapturedSceneCubemapFaceSize;
+        u32 sourceFaceSize = 1u;
         u32 sourceMipCount = 1u;
         u32 pdfLodEnabled = 1u;
         u32 reserved0 = 0u;
         u32 reserved1 = 0u;
         u32 reserved2 = 0u;
     } constants;
+    constants.sourceFaceSize = m_CapturedSceneCubemapFaceSize;
     constants.sourceMipCount = resource->sourceRadianceImage->MipLevels();
     vkCmdBindDescriptorSets(
         commandBuffer,
@@ -4202,6 +4231,7 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     u32 drawCount,
     u32 visibleCount,
     u32 culledCount,
+    u32 selfCaptureExcludedCount,
     bool captureComplete,
     u64 schedulerFrame
 ) {
@@ -4219,6 +4249,7 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.captureDrawCount += drawCount;
     resource->audit.captureVisibleCount += visibleCount;
     resource->audit.captureCulledCount += culledCount;
+    resource->audit.selfCaptureExcludedCount = selfCaptureExcludedCount;
     resource->audit.facesRendered = resource->facesRendered;
     resource->audit.facesPending = 6u - resource->facesRendered;
     resource->audit.captureFaceOrientationValid =
@@ -4271,11 +4302,11 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.sourceMipGenerationCount = 1u;
     resource->audit.sourceMipCount = completedSourceMipCount;
     resource->audit.sourceMipMemoryBytes = CapturedSceneCubemapMipMemoryBytes(
-        kCapturedSceneCubemapFaceSize,
+        m_CapturedSceneCubemapFaceSize,
         completedSourceMipCount
     );
     resource->audit.sourceMipChainReady = completedSourceMipCount ==
-        MipCountForExtent(kCapturedSceneCubemapFaceSize);
+        MipCountForExtent(m_CapturedSceneCubemapFaceSize);
     resource->audit.ggxPrefilterSourceImageSeparated = sourceImageSeparated;
     resource->audit.ggxPrefilterPdfLodEnabled =
         CapturedReflectionProbeGgxPrefilterEnabled(
@@ -4394,6 +4425,8 @@ void VulkanReflectionProbeResources::Release() {
         m_GpuCapturedSceneRenderPass = VK_NULL_HANDLE;
     }
     m_GpuCapturedSceneDevice = VK_NULL_HANDLE;
+    m_CapturedSceneCubemapFaceSize = 512u;
+    m_CapturedSceneCubemapFaceSizeInitialized = false;
     m_BuiltInCubemapImage.reset();
     m_BuiltInCubemapView = VK_NULL_HANDLE;
     m_LastCapturedSceneProbeSceneIndex = -1;

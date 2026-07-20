@@ -34,6 +34,7 @@ THE SOFTWARE.
 
 [[vk::binding(8, 1)]] RWTexture2D<float4> g_intersection_output                             : register(u0);
 [[vk::binding(9, 1)]] globallycoherent RWBuffer<uint> g_ray_counter                       : register(u1);
+[[vk::binding(10, 1)]] RWTexture2D<float> g_hit_confidence_output                           : register(u2);
 
 #define M_PI                               3.14159265358979f
 
@@ -208,19 +209,24 @@ void StoreIntersectionSample(
     bool copy_horizontal,
     bool copy_vertical,
     bool copy_diagonal,
-    float4 sample
+    float4 sample,
+    float confidence
 ) {
     g_intersection_output[coords] = sample;
+    g_hit_confidence_output[coords] = confidence;
 
     uint2 copy_target = uint2(coords) ^ 0b1u;
     if (copy_horizontal) {
         g_intersection_output[uint2(copy_target.x, coords.y)] = sample;
+        g_hit_confidence_output[uint2(copy_target.x, coords.y)] = confidence;
     }
     if (copy_vertical) {
         g_intersection_output[uint2(coords.x, copy_target.y)] = sample;
+        g_hit_confidence_output[uint2(coords.x, copy_target.y)] = confidence;
     }
     if (copy_diagonal) {
         g_intersection_output[copy_target] = sample;
+        g_hit_confidence_output[copy_target] = confidence;
     }
 }
 
@@ -243,7 +249,8 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
             copy_horizontal,
             copy_vertical,
             copy_diagonal,
-            float4(1.0, 0.0, 1.0, 1.0)
+            float4(1.0, 0.0, 1.0, 1.0),
+            1.0
         );
         return;
     }
@@ -318,6 +325,7 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
         copy_horizontal,
         copy_vertical,
         copy_diagonal,
-        new_sample
+        new_sample,
+        confidence
     );
 }

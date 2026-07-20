@@ -2807,8 +2807,41 @@ CapturedReflectionProbeFilteringSettingsFromEnvironment() {
         settings.quality = CapturedReflectionProbeFilterQuality::High;
     } else if (value == "ultra" || value == "4") {
         settings.quality = CapturedReflectionProbeFilterQuality::Ultra;
-    } else if (value == "medium" || value == "2" || value.empty()) {
+    } else if (value == "medium" || value == "2") {
         settings.quality = CapturedReflectionProbeFilterQuality::Medium;
+    }
+
+    switch (settings.quality) {
+    case CapturedReflectionProbeFilterQuality::Off:
+        settings.faceSize = 128u;
+        break;
+    case CapturedReflectionProbeFilterQuality::Low:
+    case CapturedReflectionProbeFilterQuality::Medium:
+        settings.faceSize = 256u;
+        break;
+    case CapturedReflectionProbeFilterQuality::High:
+    case CapturedReflectionProbeFilterQuality::Ultra:
+        settings.faceSize = 512u;
+        break;
+    }
+
+    const std::string faceSizeValue = LowerAscii(
+        ReadEnvironmentString("SE_REFLECTION_CAPTURE_FACE_SIZE")
+    );
+    if (!faceSizeValue.empty()) {
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(
+            faceSizeValue.c_str(),
+            &end,
+            10
+        );
+        if (end != faceSizeValue.c_str() && *end == '\0') {
+            const u32 requested = static_cast<u32>(parsed);
+            if (requested == 128u || requested == 256u ||
+                requested == 512u || requested == 1024u) {
+                settings.faceSize = requested;
+            }
+        }
     }
     return settings;
 }
@@ -3161,7 +3194,8 @@ RendererLocalLight RectLocalLight(
     f32 height,
     f32 radius,
     glm::vec3 color,
-    f32 intensity
+    f32 intensity,
+    f32 specular
 ) {
     if (glm::dot(direction, direction) <= 0.0001f) {
         direction = { 0.0f, -1.0f, 0.0f };
@@ -3179,6 +3213,7 @@ RendererLocalLight RectLocalLight(
     light.width = std::max(width, 0.0f);
     light.height = std::max(height, 0.0f);
     light.sourceRadius = 0.0f;
+    light.specular = std::clamp(specular, 0.0f, 1.0f);
     return light;
 }
 
@@ -3659,6 +3694,9 @@ CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
     u64 signature = 0x2fdb9a9f90ca7f23ull;
     const f32 captureDistance = ReflectionProbeCaptureDistance(probe);
     for (const RenderCommand& command : commands) {
+        if (!command.reflectionCaptureVisible) {
+            continue;
+        }
         if (!SphereIntersectsAabb(
                 probe.center,
                 captureDistance,
@@ -4047,6 +4085,10 @@ void WriteReflectionReceiverAuditStats(
     stats.receiverAuditTotalWeight = 0.0f;
     stats.receiverAuditLocalCoverage = 0.0f;
     stats.receiverAuditDominantNormalizedWeight = 0.0f;
+    stats.receiverAuditDominantMirrorEnabled = 0u;
+    stats.receiverAuditDominantMirrorFactor = 0.0f;
+    stats.receiverAuditEffectivePositiveWeightMask = 0u;
+    stats.receiverAuditEffectiveDominantNormalizedWeight = 0.0f;
     stats.receiverAuditLocalCubemapWeight = 0.0f;
     stats.receiverAuditWeights.fill(0.0f);
     stats.receiverAuditNormalizedWeights.fill(0.0f);
@@ -4076,8 +4118,12 @@ void WriteReflectionReceiverAuditStats(
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_BLEND");
     const bool independentIblEnergy =
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE");
+    const bool dominantMirrorEnabled =
+        productionBlend &&
+        !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF");
     stats.receiverAuditProductionBlend = productionBlend ? 1u : 0u;
     stats.receiverAuditIndependentIblEnergy = independentIblEnergy ? 1u : 0u;
+    stats.receiverAuditDominantMirrorEnabled = dominantMirrorEnabled ? 1u : 0u;
     stats.receiverAuditPositionX = request.position.x;
     stats.receiverAuditPositionY = request.position.y;
     stats.receiverAuditPositionZ = request.position.z;
@@ -4144,6 +4190,9 @@ void WriteReflectionReceiverAuditStats(
     if (stats.receiverAuditTotalWeight <= 0.0001f) {
         return;
     }
+    stats.receiverAuditDominantMirrorFactor = dominantMirrorEnabled
+        ? 1.0f - SmoothStep(0.30f, 0.60f, request.roughness)
+        : 0.0f;
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         const f32 normalized = stats.receiverAuditWeights[index] /
             stats.receiverAuditTotalWeight;
@@ -4152,6 +4201,21 @@ void WriteReflectionReceiverAuditStats(
             stats.receiverAuditDominantNormalizedWeight = normalized;
             stats.receiverAuditDominantSlot = static_cast<i32>(index);
         }
+    }
+    for (u32 index = 0; index < selectedProbeCount; ++index) {
+        const f32 normalized = stats.receiverAuditNormalizedWeights[index];
+        const f32 effective = normalized *
+                (1.0f - stats.receiverAuditDominantMirrorFactor) +
+            (index == static_cast<u32>(stats.receiverAuditDominantSlot)
+                ? stats.receiverAuditDominantMirrorFactor
+                : 0.0f);
+        if (effective > 0.0001f) {
+            stats.receiverAuditEffectivePositiveWeightMask |= 1u << index;
+        }
+        stats.receiverAuditEffectiveDominantNormalizedWeight = std::max(
+            stats.receiverAuditEffectiveDominantNormalizedWeight,
+            effective
+        );
     }
 }
 
@@ -4368,6 +4432,12 @@ void WriteFrameReflectionProbeStats(
     stats.influenceMode = frameProbes.influenceMode;
     stats.parallaxCorrectionEnabled =
         frameProbes.parallaxCorrectionEnabled ? 1u : 0u;
+    stats.forceMip0Sampling =
+        EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_MIP0") ? 1u : 0u;
+    stats.dominantMirrorSelectionEnabled =
+        !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF")
+            ? 1u
+            : 0u;
     WriteReflectionReceiverAuditStats(frameProbes, stats);
 }
 
@@ -4409,6 +4479,10 @@ void PopulateReflectionProbeUniforms(
         reflectionProbes.selectedProbeCount,
         static_cast<u32>(kMaxFrameReflectionProbes)
     );
+    const bool forceReflectionProbeMip0 =
+        EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_MIP0");
+    const bool dominantMirrorSelectionEnabled =
+        !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF");
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         const RendererReflectionProbe& probe =
             reflectionProbes.selectedProbes[index];
@@ -4442,7 +4516,9 @@ void PopulateReflectionProbeUniforms(
         );
         const u32 mipCount = reflectionProbes.selectedCaptureMipCounts[index];
         uniformData.reflectionProbeMipControls[index] = glm::vec4(
-            mipCount > 0u ? static_cast<f32>(mipCount - 1u) : 0.0f,
+            forceReflectionProbeMip0
+                ? 0.0f
+                : mipCount > 0u ? static_cast<f32>(mipCount - 1u) : 0.0f,
             static_cast<f32>(mipCount),
             probeCubemapApplied ? 1.0f : 0.0f,
             probe.captureSource ==
@@ -4472,7 +4548,8 @@ void PopulateReflectionProbeUniforms(
         (EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_BLEND") ? 0.0f : 1.0f) +
             (EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE")
                 ? 0.0f
-                : 2.0f)
+                : 2.0f) +
+            (dominantMirrorSelectionEnabled ? 4.0f : 0.0f)
     );
 }
 
@@ -4864,7 +4941,10 @@ void AddSceneRectLights(
             rectLight.height,
             rectLight.radius,
             glm::max(rectLight.color, glm::vec3(0.0f)),
-            rectLight.intensity
+            rectLight.intensity,
+            EnvironmentFlagEnabled("SE_RECT_LIGHT_ANALYTIC_SPECULAR_OFF")
+                ? 0.0f
+                : rectLight.specular
         );
         ++lights.localCount;
         ++lights.rectCount;
@@ -6065,6 +6145,8 @@ void VulkanRenderer::DrawFrame() {
         );
     const bool ffxSssrSameFrameCompositeReverseControlActive =
         EnvironmentFlagEnabled("SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF");
+    const bool ffxSssrHitConfidenceReverseControlActive =
+        EnvironmentFlagEnabled("SE_SSR_FFX_HIT_CONFIDENCE_OFF");
     const bool ffxSssrSameFrameCompositeRequested =
         ffxSssrDeferredCompositeRequested &&
         !ffxSssrSameFrameCompositeReverseControlActive &&
@@ -6092,6 +6174,10 @@ void VulkanRenderer::DrawFrame() {
             imageIndex,
             imageIndex,
             ffxSssrSameFrameCompositeView,
+            VK_IMAGE_LAYOUT_GENERAL,
+            ffxSssrSameFrameCompositeResourcesReady
+                ? m_FfxSssrReprojectResources->HitConfidenceView(imageIndex)
+                : VK_NULL_HANDLE,
             VK_IMAGE_LAYOUT_GENERAL
         );
     const bool ffxSssrSameFrameCompositeActive =
@@ -6580,7 +6666,8 @@ void VulkanRenderer::DrawFrame() {
         shadowSamplingEnabled,
         &temporalState,
         ffxSssrDeferredCompositeActive,
-        ffxSssrSameFrameCompositeActive
+        ffxSssrSameFrameCompositeActive,
+        ffxSssrSameFrameCompositeActive && !ffxSssrHitConfidenceReverseControlActive
     );
     UpdateFfxSssrConstants(
         imageIndex,
@@ -6861,6 +6948,28 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrDeferredCompositeConfidenceSource =
         frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrHitConfidenceContractVersion =
+        m_FfxSssrReprojectResources != nullptr ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrHitConfidenceResourcesReady =
+        m_FfxSssrClassifyTilesResources != nullptr &&
+                m_FfxSssrReprojectResources != nullptr &&
+                m_FfxSssrClassifyTilesResources->Count() ==
+                    m_FfxSssrReprojectResources->Count()
+            ? 1u
+            : 0u;
+    frameStats.ssr.fidelityFxSssrHitConfidenceHistoryReady =
+        m_FfxSssrRadianceHistoryValid &&
+                m_FfxSssrReprojectResources != nullptr &&
+                m_FfxSssrReprojectResources->Count() > 1u
+            ? 1u
+            : 0u;
+    frameStats.ssr.fidelityFxSssrHitConfidenceApplyBound =
+        ffxSssrSameFrameCompositeDescriptorUpdated ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrProbeFallbackConsumer =
+        ffxSssrSameFrameCompositeActive &&
+                !ffxSssrHitConfidenceReverseControlActive
+            ? 1u
+            : 0u;
     frameStats.ssr.fidelityFxSssrSameFrameCompositeRequested =
         ffxSssrSameFrameCompositeRequested ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrSameFrameCompositeResourcesReady =
@@ -7076,6 +7185,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.captureVisibleCount;
     frameStats.reflectionProbe.capturedSceneCaptureCulledCount =
         capturedSceneAudit.captureCulledCount;
+    frameStats.reflectionProbe.capturedSceneSelfCaptureExcludedCount =
+        capturedSceneAudit.selfCaptureExcludedCount;
     frameStats.reflectionProbe.capturedSceneCaptureFaceOrientationMask =
         capturedSceneAudit.captureFaceOrientationMask;
     frameStats.reflectionProbe.capturedSceneMipGenerationCount =
@@ -8114,6 +8225,19 @@ void VulkanRenderer::DrawFrame() {
     frameStats.binds.frameDirectionalLightCount = frameLightSet.directionalCount;
     frameStats.binds.frameLocalLightCount = frameLightSet.localCount;
     frameStats.binds.frameRectLightCount = frameLightSet.rectCount;
+    frameStats.binds.frameRectLightAnalyticSpecularEnabledCount = 0u;
+    frameStats.binds.frameRectLightAnalyticSpecularDisabledCount = 0u;
+    for (u32 index = 0u; index < frameLightSet.localCount; ++index) {
+        const RendererLocalLight& light = frameLightSet.localLights[index];
+        if (light.kind != RendererLightKind::Rect) {
+            continue;
+        }
+        if (light.specular > 0.0001f) {
+            ++frameStats.binds.frameRectLightAnalyticSpecularEnabledCount;
+        } else {
+            ++frameStats.binds.frameRectLightAnalyticSpecularDisabledCount;
+        }
+    }
     frameStats.binds.frameLightTileSize = lightTileStats.tileSize;
     frameStats.binds.frameLightTileCountX = lightTileStats.tileCountX;
     frameStats.binds.frameLightTileCountY = lightTileStats.tileCountY;
@@ -13927,7 +14051,8 @@ void VulkanRenderer::UpdateUniformBuffer(
     bool shadowSamplingEnabled,
     const FrameTemporalState* temporalState,
     bool ssrFidelityFxDeferredCompositeActive,
-    bool ssrFidelityFxSameFrameCompositeActive
+    bool ssrFidelityFxSameFrameCompositeActive,
+    bool ssrFidelityFxHitConfidenceActive
 ) const {
     UniformBufferObject uniformData{};
     if (matrices != nullptr) {
@@ -14003,7 +14128,8 @@ void VulkanRenderer::UpdateUniformBuffer(
         (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f) +
         (m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled ? 65536.0f : 0.0f) +
         (ssrFidelityFxDeferredCompositeActive ? 131072.0f : 0.0f) +
-        (ssrFidelityFxSameFrameCompositeActive ? 262144.0f : 0.0f);
+        (ssrFidelityFxSameFrameCompositeActive ? 262144.0f : 0.0f) +
+        (ssrFidelityFxHitConfidenceActive ? 524288.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
@@ -14198,7 +14324,12 @@ void VulkanRenderer::UpdateFfxSssrConstants(
     constants.motionVectorContractReady = 1u;
     constants.hitReprojectionEnabled =
         FfxSssrHitReprojectionEnabledFromEnvironment() ? 1u : 0u;
-    constants.reprojectionContractReady = 1u;
+    constants.reprojectionContractReady =
+        temporalState != nullptr &&
+        temporalState->historyValid &&
+        m_FfxSssrRadianceHistoryValid
+        ? 1u
+        : 0u;
     constants.compositeConfidenceMode =
         std::min<u32>(compositeConfidenceMode, 1u);
     constants.environmentFallbackControl =
@@ -14456,7 +14587,9 @@ void VulkanRenderer::UpdateLightBuffer(
         }
         record.directionType = glm::vec4(direction, localLightType);
         record.parameters = glm::vec4(
-            std::clamp(light.innerConeCos, -1.0f, 1.0f),
+            light.kind == RendererLightKind::Rect
+                ? std::clamp(light.specular, 0.0f, 1.0f)
+                : std::clamp(light.innerConeCos, -1.0f, 1.0f),
             std::clamp(light.outerConeCos, -1.0f, 1.0f),
             std::max(light.width, 0.0f),
             std::max(light.height, 0.0f)
@@ -16432,10 +16565,67 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             options
         );
     }
-    const std::span<const RenderCommand> captureCommands =
-        m_ReflectionCaptureRenderQueue.Commands();
-    const std::span<const RenderCommand> captureShadowCommands =
-        ShadowRenderCommands();
+    std::vector<RenderCommand> reflectionCaptureCommands;
+    reflectionCaptureCommands.reserve(m_ReflectionCaptureRenderQueue.Count());
+    u32 selfCaptureExcludedCount = 0u;
+    for (const RenderCommand& command : m_ReflectionCaptureRenderQueue.Commands()) {
+        if (!command.reflectionCaptureVisible) {
+            ++selfCaptureExcludedCount;
+            continue;
+        }
+        reflectionCaptureCommands.push_back(command);
+    }
+    const std::span<const RenderCommand> captureCommands(
+        reflectionCaptureCommands.data(),
+        reflectionCaptureCommands.size()
+    );
+#if !defined(NDEBUG)
+    if (face == 0u &&
+        EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_CONTENT_AUDIT")) {
+        std::cout << "[reflection-capture-content] probe="
+            << probe.sceneIndex
+            << " commands=" << captureCommands.size()
+            << std::endl;
+        for (std::size_t index = 0; index < captureCommands.size(); ++index) {
+            const RenderCommand& command = captureCommands[index];
+            const MaterialProperties* properties = command.material != nullptr
+                ? &command.material->Properties()
+                : nullptr;
+            const f32 emissiveLuma = properties != nullptr
+                ? std::max(
+                    std::max(properties->emissiveFactor[0], properties->emissiveFactor[1]),
+                    properties->emissiveFactor[2]
+                )
+                : 0.0f;
+            std::cout << "[reflection-capture-content] index=" << index
+                << " name=" << command.debugRenderableName
+                << " alpha=" << (properties != nullptr
+                    ? static_cast<u32>(properties->alphaMode)
+                    : 0u)
+                << " class=" << (properties != nullptr
+                    ? static_cast<u32>(properties->renderClass)
+                    : 0u)
+                << " doubleSided=" << (properties != nullptr && properties->doubleSided ? 1 : 0)
+                << " base=" << (properties != nullptr ? properties->baseColorFactor[0] : 0.0f)
+                << "," << (properties != nullptr ? properties->baseColorFactor[1] : 0.0f)
+                << "," << (properties != nullptr ? properties->baseColorFactor[2] : 0.0f)
+                << " emissiveLuma=" << emissiveLuma
+                << std::endl;
+        }
+    }
+#endif
+    std::vector<RenderCommand> reflectionCaptureShadowCommands;
+    const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
+    reflectionCaptureShadowCommands.reserve(shadowCommands.size());
+    for (const RenderCommand& command : shadowCommands) {
+        if (command.reflectionCaptureVisible) {
+            reflectionCaptureShadowCommands.push_back(command);
+        }
+    }
+    const std::span<const RenderCommand> captureShadowCommands(
+        reflectionCaptureShadowCommands.data(),
+        reflectionCaptureShadowCommands.size()
+    );
     const bool snapshotEnabled =
         !EnvironmentFlagEnabled("SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF");
     const bool persistentShadowCacheEnabled = snapshotEnabled &&
@@ -16932,6 +17122,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         drawStats.drawCount,
         cullingStats.visible,
         cullingStats.culled,
+        selfCaptureExcludedCount,
         captureComplete,
         m_ReflectionCaptureSchedulerFrame
     );
@@ -17085,8 +17276,12 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
             !m_ReflectionProbeResources.EnsureGpuCapturedSceneResources(
                 m_Device,
                 m_PhysicalDevice,
-                probe.sceneIndex
+                probe.sceneIndex,
+                capturedFilteringSettings
             )) {
+            AuthoredReflectionProbeFilteringSettings analyticFilteringSettings =
+                filteringSettings;
+            analyticFilteringSettings.faceSize = capturedFilteringSettings.faceSize;
             m_ReflectionProbeResources.EnsureCapturedSceneCubemap(
                 m_Device,
                 m_PhysicalDevice,
@@ -17095,7 +17290,7 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
                 sceneSample,
                 capturedLightSamples,
                 refreshRequest,
-                filteringSettings
+                analyticFilteringSettings
             );
             continue;
         }

@@ -2732,3 +2732,83 @@ Validation:
 - `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` Debug builds passed.
 - `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ffx_sssr_intersect_bridge_default_exes` passed `89 / 0`.
 - `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\\ssr_regression_after_ffx_intersect` passed `691 / 0`.
+
+## 2026-07-21 - FFX SSR hit confidence must be independent from radiance alpha
+
+Symptom:
+- The same-frame FFX Apply pass needed to distinguish a real screen-space hit from the vendor radiance/environment fallback while selecting a local reflection probe for misses.
+
+False leads:
+- Treating `RadianceHistory.a` as hit confidence, or tuning the local probe blend until the visible result looked stable in LightingShowcase.
+
+Cause:
+- FFX radiance alpha carries a vendor temporal/composite signal, not a SelfEngine hit-provenance contract. The new confidence image/history also exposed two integration gaps: the Apply shader's zero-direction guard could replace valid components with `-0.0001`, and its FrameGraph input name did not match the existing physical `SceneReflectionProbeCubemap` resource.
+
+Fix:
+- Add a dedicated `R32_SFLOAT` hit-confidence producer, reproject it with motion/depth/normal/roughness rejection, and bind it to Apply independently from radiance alpha.
+- Disable hit-history reads until the previous FFX history has actually been written.
+- Match Apply's local-probe priority/coverage weights to Deferred, use the scene-independent `SceneReflectionProbeCubemap` FrameGraph identity, and keep the internal-backend lane as an explicit no-consumer control.
+
+Prevention:
+- Never overload vendor radiance alpha with an engine-owned provenance meaning.
+- Every newly sampled resource must have the same identity in shader bindings, FrameGraph reads, physical allocation, and CSV producer/consumer evidence.
+- A history resource being allocated is not the same as history being valid; gate first-frame reads with the actual writeback state.
+
+Validation:
+- `Test-FidelityFxSssrIntegration.ps1 -StaticOnly -SkipBuild -Strict` passed `59 / 0`.
+- Debug and Release shader/renderer builds passed.
+- The strict FFX integration matrix passed `1115 / 0` with zero FrameGraph/Vulkan diagnostics.
+- The SSR/Hi-Z regression passed `691 / 0` across LightingShowcase and the animated Forward3D FBX lane.
+
+## 2026-07-21 - Glossy Overlapping Probes Need Dominant Selection
+
+Symptom:
+- Forcing captured Probe MIP0 made the fixture bars and housing crisp, but a metal receiver showed duplicated room/fixture silhouettes.
+
+False leads:
+- Increasing capture resolution, disabling global IBL, or treating the artifact as a missing captured object.
+
+Cause:
+- Two spatially overlapping local Probes were both valid and were mixed at `0.257578 / 0.742422`. Their different capture positions and Box Projection directions produced parallax-inconsistent mirror images. The FFX Apply fallback used the same multi-Probe blend contract and therefore had to agree with Deferred.
+
+Control test:
+- Default `SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF` unset: roughness `0.24` resolves effective mask `0x2`, dominant weight `1.0`.
+- `SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF=1`: the same receiver returns effective mask `0x3` and dominant weight `0.742422`.
+
+Fix:
+- Use coverage/volume-priority dominant Probe selection for glossy materials, with a roughness-dependent transition from dominant-only at roughness `<=0.30` to regular multi-Probe blending by `0.60`.
+- Apply the same rule in Deferred environment resolution and FFX SSSR Apply fallback; keep the control Debug-only and scene-independent.
+
+Prevention:
+- Do not solve glossy Probe ghosting by disabling IBL or lowering capture quality. Audit normalized Probe weights and Box Projection identity first, then use roughness-aware dominant selection for overlapping mirror views.
+
+Validation:
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict` passed `769 / 0` with default and dominant-selection-off lanes.
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `1109 / 0` with zero warnings/failures.
+
+## 2026-07-21 - Reflection Probe Captures Must Exclude the Receiving Surface
+
+Symptom:
+- A polished metal sphere showed a distinct sphere-shaped image even though no second sphere existed in the corresponding direction. The image disappeared when the sphere was excluded from reflection capture.
+
+Cause:
+- The local captured-scene Probe overlapped the receiver's bounds. The receiver was therefore rendered into its own cubemap and later sampled that cubemap as environment reflection. This is a capture-ownership error, not a missing scene object or an SSR ray hit.
+
+Control test:
+- Keep the receiver in the main camera and normal shadow queues, but set its scene-owned `ReflectionCaptureVisible` flag to `false`.
+- Compare the real `SelfEngineLightingShowcase` with Probe Mip0 forced and FFX SSSR enabled. The suspected self-image must disappear while wall, fixture, and other-geometry reflections remain.
+
+Fix:
+- Add a generic `Renderable3D` reflection-capture visibility contract with a default of `true`.
+- Filter the flag from captured-scene color draws, capture-side shadow draws, capture geometry signatures, and invalidation accounting. Do not branch on scene names, object names, or Probe indices in the renderer.
+- Opt the showcase's metal receiver out through scene-owned data only.
+
+Prevention:
+- Every reflection-capture receiver must have an explicit capture-visibility policy when a Probe can overlap its bounds. Do not diagnose a self-image by disabling SSR, lowering Probe quality, or hiding the object from the main camera.
+- Capture filtering must be applied consistently to color, shadow, geometry-signature, and debug-stat paths; otherwise stale self-content can survive after the visible draw is removed.
+
+Validation:
+- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `1132 / 0 / 0` across capture reuse, invalidation, filter, Mip0, multi-Probe, Box Projection, rect-light, and capture-shadow lanes.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0` with zero FrameGraph/Vulkan diagnostics.
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0` across the official FFX SSSR bridge and controls.
+- Real `SelfEngineLightingShowcase` visual acceptance confirmed that the suspected self-reflection disappeared.

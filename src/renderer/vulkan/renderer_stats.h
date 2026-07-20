@@ -517,6 +517,11 @@ struct RendererSsrStats {
     u32 fidelityFxSssrEnvironmentFallbackSamples = 0;
     u32 fidelityFxSssrConfidenceSum16 = 0;
     u32 fidelityFxSssrHitAttributionContractVersion = 0;
+    u32 fidelityFxSssrHitConfidenceContractVersion = 0;
+    u32 fidelityFxSssrHitConfidenceResourcesReady = 0;
+    u32 fidelityFxSssrHitConfidenceHistoryReady = 0;
+    u32 fidelityFxSssrHitConfidenceApplyBound = 0;
+    u32 fidelityFxSssrProbeFallbackConsumer = 0;
     u32 fidelityFxSssrRuntimeDispatchReady = 0;
     u32 fidelityFxSssrRuntimeActive = 0;
     // 0 = none, 1 = not requested, 2 = runtime bridge unavailable, 3 = source/build unavailable.
@@ -678,6 +683,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneCaptureDrawCount = 0;
     u32 capturedSceneCaptureVisibleCount = 0;
     u32 capturedSceneCaptureCulledCount = 0;
+    u32 capturedSceneSelfCaptureExcludedCount = 0;
     u32 capturedSceneCaptureFaceOrientationMask = 0;
     u32 capturedSceneMipGenerationCount = 0;
     u32 capturedSceneSourceMipGenerationCount = 0;
@@ -888,6 +894,10 @@ struct RendererReflectionProbeStats {
     f32 receiverAuditTotalWeight = 0.0f;
     f32 receiverAuditLocalCoverage = 0.0f;
     f32 receiverAuditDominantNormalizedWeight = 0.0f;
+    u32 receiverAuditDominantMirrorEnabled = 0;
+    f32 receiverAuditDominantMirrorFactor = 0.0f;
+    u32 receiverAuditEffectivePositiveWeightMask = 0;
+    f32 receiverAuditEffectiveDominantNormalizedWeight = 0.0f;
     f32 receiverAuditLocalCubemapWeight = 0.0f;
     std::array<f32, kMaxFrameReflectionProbes> receiverAuditWeights{};
     std::array<f32, kMaxFrameReflectionProbes> receiverAuditNormalizedWeights{};
@@ -922,6 +932,8 @@ struct RendererReflectionProbeStats {
     u32 boxProjectionEnabled = 0;
     u32 influenceMode = 0;
     u32 parallaxCorrectionEnabled = 0;
+    u32 forceMip0Sampling = 0;
+    u32 dominantMirrorSelectionEnabled = 0;
 };
 
 struct RendererHeightFogStats {
@@ -1137,6 +1149,8 @@ struct RendererBindStats {
     u32 frameDirectionalLightCount = 0;
     u32 frameLocalLightCount = 0;
     u32 frameRectLightCount = 0;
+    u32 frameRectLightAnalyticSpecularEnabledCount = 0;
+    u32 frameRectLightAnalyticSpecularDisabledCount = 0;
     u32 frameLightTileSize = 0;
     u32 frameLightTileCountX = 0;
     u32 frameLightTileCountY = 0;

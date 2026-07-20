@@ -327,6 +327,8 @@ public:
     VkImageView IntersectionOutputView(std::size_t imageIndex) const;
     VkImage ExtractedRoughnessImage(std::size_t imageIndex) const;
     VkImageView ExtractedRoughnessView(std::size_t imageIndex) const;
+    VkImage HitConfidenceImage(std::size_t imageIndex) const;
+    VkImageView HitConfidenceView(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkExtent2D Extent() const;
     u32 GroupCountX() const;
@@ -377,6 +379,7 @@ private:
     std::vector<VkBufferView> m_DenoiserTileListBufferViews;
     std::vector<std::unique_ptr<VulkanImage>> m_IntersectionOutputImages;
     std::vector<std::unique_ptr<VulkanImage>> m_ExtractedRoughnessImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_HitConfidenceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceHistoryImages;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
@@ -514,6 +517,10 @@ public:
     VkImageView VarianceHistoryView(std::size_t imageIndex) const;
     VkImage SampleCountHistoryImage(std::size_t imageIndex) const;
     VkImageView SampleCountHistoryView(std::size_t imageIndex) const;
+    VkImage HitConfidenceImage(std::size_t imageIndex) const;
+    VkImageView HitConfidenceView(std::size_t imageIndex) const;
+    VkImage HitConfidenceHistoryImage(std::size_t imageIndex) const;
+    VkImageView HitConfidenceHistoryView(std::size_t imageIndex) const;
     std::size_t Count() const;
     VkExtent2D Extent() const;
     VkExtent2D AverageExtent() const;
@@ -552,10 +559,12 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_AverageRadianceHistoryImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceHistoryImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SampleCountHistoryImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_HitConfidenceHistoryImages;
     std::vector<std::unique_ptr<VulkanImage>> m_ReprojectedRadianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_AverageRadianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_VarianceImages;
     std::vector<std::unique_ptr<VulkanImage>> m_SampleCountImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_HitConfidenceImages;
     std::vector<VkDescriptorSet> m_DescriptorSets;
 };
 

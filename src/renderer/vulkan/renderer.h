@@ -223,6 +223,7 @@ struct RendererLocalLight {
     f32 width = 0.0f;
     f32 height = 0.0f;
     f32 sourceRadius = 0.05f;
+    f32 specular = 1.0f;
 };
 
 inline constexpr std::size_t kRendererMaxFrameLocalLights = 64;
@@ -657,7 +658,8 @@ private:
         bool shadowSamplingEnabled,
         const FrameTemporalState* temporalState,
         bool ssrFidelityFxDeferredCompositeActive = false,
-        bool ssrFidelityFxSameFrameCompositeActive = false
+        bool ssrFidelityFxSameFrameCompositeActive = false,
+        bool ssrFidelityFxHitConfidenceActive = false
     ) const;
     void UpdateFfxSssrConstants(
         std::size_t imageIndex,

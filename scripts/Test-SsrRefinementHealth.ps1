@@ -420,6 +420,10 @@ function Invoke-SsrLane {
     $receiverAuditTotalWeight = [double]$last.reflection_probe_receiver_audit_total_weight
     $receiverAuditLocalCoverage = [double]$last.reflection_probe_receiver_audit_local_coverage
     $receiverAuditDominantWeight = [double]$last.reflection_probe_receiver_audit_dominant_normalized_weight
+    $receiverAuditDominantMirrorEnabled = Get-UIntMetric $last "reflection_probe_receiver_audit_dominant_mirror_enabled"
+    $receiverAuditDominantMirrorFactor = [double]$last.reflection_probe_receiver_audit_dominant_mirror_factor
+    $receiverAuditEffectivePositiveWeightMask = Get-UIntMetric $last "reflection_probe_receiver_audit_effective_positive_weight_mask"
+    $receiverAuditEffectiveDominantWeight = [double]$last.reflection_probe_receiver_audit_effective_dominant_normalized_weight
     $receiverAuditCubemapWeight = [double]$last.reflection_probe_receiver_audit_local_cubemap_weight
     $receiverAuditRoughness = [double]$last.reflection_probe_receiver_audit_roughness
     $receiverAuditLods = @(
@@ -428,7 +432,11 @@ function Invoke-SsrLane {
         [double]$last.reflection_probe_receiver_audit_lod_2,
         [double]$last.reflection_probe_receiver_audit_lod_3
     )
+    $frameRectLightCount = Get-UIntMetric $last "frame_rect_light_count"
+    $frameRectAnalyticSpecularEnabled = Get-UIntMetric $last "frame_rect_light_analytic_specular_enabled_count"
+    $frameRectAnalyticSpecularDisabled = Get-UIntMetric $last "frame_rect_light_analytic_specular_disabled_count"
     $capturedSceneNeutralTintMask = Get-UIntMetric $last "reflection_probe_captured_scene_neutral_tint_mask"
+    $capturedSceneSelfCaptureExcludedCount = Get-UIntMetric $last "reflection_probe_captured_scene_self_capture_excluded_count"
     $frameGraphIssues = Get-UIntMetric $last "framegraph_validation_issues"
     $gpuTotalAverage = [double](
         $rows | Measure-Object gpu_total_recorded_ms -Average
@@ -670,13 +678,44 @@ function Invoke-SsrLane {
             "SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE"
         ) -and $Environment["SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE"] -eq "1"
         $expectedIndependentEnergy = if ($legacyEnergyExpected) { 0 } else { 1 }
-        $checks += New-Check "receiver reflection audit active" ($receiverAuditRequested -eq 1) $receiverAuditRequested "1"
+    $checks += New-Check "receiver reflection audit active" ($receiverAuditRequested -eq 1) $receiverAuditRequested "1"
+    $checks += New-Check "rect-light analytic specular accounting is bounded" `
+        ($frameRectAnalyticSpecularEnabled + $frameRectAnalyticSpecularDisabled -eq $frameRectLightCount) `
+        "rects=$frameRectLightCount,enabled=$frameRectAnalyticSpecularEnabled,disabled=$frameRectAnalyticSpecularDisabled" `
+        "enabled+disabled=rects"
+    $checks += New-Check "reflection capture self-exclusion accounting is nonnegative" `
+        ($capturedSceneSelfCaptureExcludedCount -ge 0) `
+        $capturedSceneSelfCaptureExcludedCount ">=0"
         $checks += New-Check "receiver reflection blend mode" ($receiverAuditProductionBlend -eq $expectedProductionBlend) $receiverAuditProductionBlend $expectedProductionBlend
         $checks += New-Check "receiver reflection IBL energy mode" ($receiverAuditIndependentIblEnergy -eq $expectedIndependentEnergy) $receiverAuditIndependentIblEnergy $expectedIndependentEnergy
         $checks += New-Check "receiver has weighted local probes" ($receiverAuditPositiveWeightMask -ne 0 -and $receiverAuditTotalWeight -gt 0.0) "mask=$receiverAuditPositiveWeightMask,total=$receiverAuditTotalWeight" "nonzero"
         $checks += New-Check "receiver local probes have cubemap resources" (($receiverAuditReadyCubemapMask -band $receiverAuditPositiveWeightMask) -eq $receiverAuditPositiveWeightMask) "weighted=$receiverAuditPositiveWeightMask,ready=$receiverAuditReadyCubemapMask" "all weighted probes ready"
         $checks += New-Check "receiver box projection resolves" (($receiverAuditBoxProjectionHitMask -band $receiverAuditPositiveWeightMask) -eq $receiverAuditPositiveWeightMask) "weighted=$receiverAuditPositiveWeightMask,hits=$receiverAuditBoxProjectionHitMask" "all weighted probes hit"
         $checks += New-Check "receiver dominant probe resolves" ($receiverAuditDominantSlot -ge 0 -and $receiverAuditDominantWeight -gt 0.5) "slot=$receiverAuditDominantSlot,weight=$receiverAuditDominantWeight" "valid slot and >0.5"
+        $dominantMirrorExpected = if (
+            $receiverAuditProductionBlend -eq 1 -and
+            $Environment.ContainsKey("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF") -and
+            "$($Environment['SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF'])" -eq "1"
+        ) { 0 } elseif ($receiverAuditProductionBlend -eq 1) { 1 } else { 0 }
+        $checks += New-Check "receiver dominant-mirror selection mode" `
+            ($receiverAuditDominantMirrorEnabled -eq $dominantMirrorExpected) `
+            $receiverAuditDominantMirrorEnabled $dominantMirrorExpected
+        if ($dominantMirrorExpected -eq 1) {
+            $expectedEffectiveMask = 1 -shl $receiverAuditDominantSlot
+            $checks += New-Check "low-roughness receiver selects one dominant probe" `
+                ($receiverAuditDominantMirrorFactor -ge 0.99 -and
+                    $receiverAuditEffectivePositiveWeightMask -eq $expectedEffectiveMask -and
+                    $receiverAuditEffectiveDominantWeight -ge 0.99) `
+                "factor=$receiverAuditDominantMirrorFactor,mask=$receiverAuditEffectivePositiveWeightMask,dominant=$receiverAuditEffectiveDominantWeight" `
+                "factor>=0.99,mask=$expectedEffectiveMask,dominant>=0.99"
+        } else {
+            $checks += New-Check "dominant-mirror control preserves multi-probe weights" `
+                ($receiverAuditDominantMirrorFactor -eq 0.0 -and
+                    $receiverAuditEffectivePositiveWeightMask -eq $receiverAuditPositiveWeightMask -and
+                    [math]::Abs($receiverAuditEffectiveDominantWeight - $receiverAuditDominantWeight) -lt 0.0001) `
+                "factor=$receiverAuditDominantMirrorFactor,mask=$receiverAuditEffectivePositiveWeightMask,dominant=$receiverAuditEffectiveDominantWeight" `
+                "factor=0,mask=$receiverAuditPositiveWeightMask,dominant=$receiverAuditDominantWeight"
+        }
         $checks += New-Check "receiver cubemap roughness filter active" ($receiverAuditCubemapWeight -gt 0.99 -and $receiverAuditRoughness -gt 0.0 -and ($receiverAuditLods | Measure-Object -Maximum).Maximum -gt 0.0) "cubemap=$receiverAuditCubemapWeight,roughness=$receiverAuditRoughness,lods=$($receiverAuditLods -join '/')" "cubemap >0.99, roughness/lod >0"
         if ($legacyBlendExpected) {
             $checks += New-Check "legacy receiver control remains diluted" ($receiverAuditLocalCoverage -gt 0.0 -and $receiverAuditLocalCoverage -lt 0.9) $receiverAuditLocalCoverage "0 < coverage < 0.9"
@@ -924,6 +963,10 @@ function Invoke-SsrLane {
             receiverAuditTotalWeight = $receiverAuditTotalWeight
             receiverAuditLocalCoverage = $receiverAuditLocalCoverage
             receiverAuditDominantWeight = $receiverAuditDominantWeight
+            receiverAuditDominantMirrorEnabled = $receiverAuditDominantMirrorEnabled
+            receiverAuditDominantMirrorFactor = $receiverAuditDominantMirrorFactor
+            receiverAuditEffectivePositiveWeightMask = $receiverAuditEffectivePositiveWeightMask
+            receiverAuditEffectiveDominantWeight = $receiverAuditEffectiveDominantWeight
             receiverAuditCubemapWeight = $receiverAuditCubemapWeight
             receiverAuditLods = $receiverAuditLods
             capturedSceneNeutralTintMask = $capturedSceneNeutralTintMask
@@ -977,6 +1020,9 @@ if ($VerifyHoleDiagnostics) {
 $normalShowcase = $common.Clone()
 $normalShowcase.Remove("SE_SHADOW_QUALITY")
 $explicitReenable = $common.Clone()
+
+$dominantMirrorDisabled = $common.Clone()
+$dominantMirrorDisabled["SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF"] = "1"
 
 $lanes = @(
     [pscustomobject]@{
@@ -1072,6 +1118,19 @@ $lanes = @(
             SE_SSR_HIZ = "1"
             SE_SSR_REFINEMENT = "1"
             SE_REFLECTION_PROBE_LEGACY_BLEND = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-dominant-mirror-disabled"
+        executable = $showcaseExecutable
+        scene = "LightingShowcase dominant mirror Probe control"
+        mode = "hiz"
+        environment = $dominantMirrorDisabled + @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SSR = "1"
+            SE_SSR_HIZ = "1"
+            SE_SSR_REFINEMENT = "1"
         }
     },
     [pscustomobject]@{

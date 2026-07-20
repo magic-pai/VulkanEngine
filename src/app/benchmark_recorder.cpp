@@ -734,6 +734,11 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrEnvironmentFallbackSamples << ','
         << ssr.fidelityFxSssrConfidenceSum16 << ','
         << ssr.fidelityFxSssrHitAttributionContractVersion << ','
+        << ssr.fidelityFxSssrHitConfidenceContractVersion << ','
+        << ssr.fidelityFxSssrHitConfidenceResourcesReady << ','
+        << ssr.fidelityFxSssrHitConfidenceHistoryReady << ','
+        << ssr.fidelityFxSssrHitConfidenceApplyBound << ','
+        << ssr.fidelityFxSssrProbeFallbackConsumer << ','
         << ssr.fidelityFxSssrRuntimeDispatchReady << ','
         << ssr.fidelityFxSssrRuntimeActive << ','
         << ssr.fidelityFxSssrFallbackReason << ','
@@ -871,6 +876,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneCaptureDrawCount << ','
         << reflectionProbe.capturedSceneCaptureVisibleCount << ','
         << reflectionProbe.capturedSceneCaptureCulledCount << ','
+        << reflectionProbe.capturedSceneSelfCaptureExcludedCount << ','
         << reflectionProbe.capturedSceneCaptureFaceOrientationMask << ','
         << reflectionProbe.capturedSceneMipGenerationCount << ','
         << reflectionProbe.capturedSceneSourceMipGenerationCount << ','
@@ -1113,6 +1119,10 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.receiverAuditTotalWeight << ','
         << reflectionProbe.receiverAuditLocalCoverage << ','
         << reflectionProbe.receiverAuditDominantNormalizedWeight << ','
+        << reflectionProbe.receiverAuditDominantMirrorEnabled << ','
+        << reflectionProbe.receiverAuditDominantMirrorFactor << ','
+        << reflectionProbe.receiverAuditEffectivePositiveWeightMask << ','
+        << reflectionProbe.receiverAuditEffectiveDominantNormalizedWeight << ','
         << reflectionProbe.receiverAuditLocalCubemapWeight << ','
         << reflectionProbe.receiverAuditWeights[0] << ','
         << reflectionProbe.receiverAuditWeights[1] << ','
@@ -1152,6 +1162,8 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.boxProjectionEnabled << ','
         << reflectionProbe.influenceMode << ','
         << reflectionProbe.parallaxCorrectionEnabled << ','
+        << reflectionProbe.forceMip0Sampling << ','
+        << reflectionProbe.dominantMirrorSelectionEnabled << ','
         << heightFog.enabled << ','
         << heightFog.density << ','
         << heightFog.heightFalloff << ','
@@ -1710,6 +1722,8 @@ void BenchmarkRecorder::RecordFrame(
         << binds.frameDirectionalLightCount << ','
         << binds.frameLocalLightCount << ','
         << binds.frameRectLightCount << ','
+        << binds.frameRectLightAnalyticSpecularEnabledCount << ','
+        << binds.frameRectLightAnalyticSpecularDisabledCount << ','
         << binds.frameLightTileSize << ','
         << binds.frameLightTileCountX << ','
         << binds.frameLightTileCountY << ','
@@ -2184,6 +2198,11 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_environment_fallback_samples,"
         << "ssr_ffx_sssr_confidence_sum16,"
         << "ssr_ffx_sssr_hit_attribution_contract_version,"
+        << "ssr_ffx_sssr_hit_confidence_contract_version,"
+        << "ssr_ffx_sssr_hit_confidence_resources_ready,"
+        << "ssr_ffx_sssr_hit_confidence_history_ready,"
+        << "ssr_ffx_sssr_hit_confidence_apply_bound,"
+        << "ssr_ffx_sssr_probe_fallback_consumer,"
         << "ssr_ffx_sssr_runtime_dispatch_ready,"
         << "ssr_ffx_sssr_runtime_active,"
         << "ssr_ffx_sssr_fallback_reason,"
@@ -2283,6 +2302,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_capture_draw_count,"
         << "reflection_probe_captured_scene_capture_visible_count,"
         << "reflection_probe_captured_scene_capture_culled_count,"
+        << "reflection_probe_captured_scene_self_capture_excluded_count,"
         << "reflection_probe_captured_scene_capture_face_orientation_mask,"
         << "reflection_probe_captured_scene_mip_generation_count,"
         << "reflection_probe_captured_scene_source_mip_generation_count,"
@@ -2525,6 +2545,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_receiver_audit_total_weight,"
         << "reflection_probe_receiver_audit_local_coverage,"
         << "reflection_probe_receiver_audit_dominant_normalized_weight,"
+        << "reflection_probe_receiver_audit_dominant_mirror_enabled,"
+        << "reflection_probe_receiver_audit_dominant_mirror_factor,"
+        << "reflection_probe_receiver_audit_effective_positive_weight_mask,"
+        << "reflection_probe_receiver_audit_effective_dominant_normalized_weight,"
         << "reflection_probe_receiver_audit_local_cubemap_weight,"
         << "reflection_probe_receiver_audit_weight_0,"
         << "reflection_probe_receiver_audit_weight_1,"
@@ -2559,6 +2583,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_box_projection_enabled,"
         << "reflection_probe_influence_mode,"
         << "reflection_probe_parallax_correction_enabled,"
+        << "reflection_probe_force_mip0_sampling,"
+        << "reflection_probe_dominant_mirror_selection_enabled,"
         << "height_fog_enabled,height_fog_density,height_fog_height_falloff,"
         << "height_fog_start_distance,height_fog_max_opacity,"
         << "bloom_enabled,bloom_intensity,bloom_threshold,bloom_radius_pixels,"
@@ -2989,6 +3015,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "frame_light_constant_updates,frame_light_buffer_updates,"
         << "frame_light_total_count,frame_directional_light_count,frame_local_light_count,"
         << "frame_rect_light_count,"
+        << "frame_rect_light_analytic_specular_enabled_count,"
+        << "frame_rect_light_analytic_specular_disabled_count,"
         << "frame_light_tile_size,frame_light_tile_count_x,frame_light_tile_count_y,"
         << "frame_light_tile_count,frame_light_tile_assignments,"
         << "frame_light_tile_assignment_capacity,"

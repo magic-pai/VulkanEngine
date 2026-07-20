@@ -710,7 +710,9 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     std::size_t descriptorIndex,
     std::size_t historyImageIndex,
     VkImageView resolvedReflectionOverride,
-    VkImageLayout resolvedReflectionLayout
+    VkImageLayout resolvedReflectionLayout,
+    VkImageView hitConfidenceOverride,
+    VkImageLayout hitConfidenceLayout
 ) {
     if (descriptorIndex >= m_DescriptorSets.size() ||
         historyImageIndex >= renderTargets.Count()) {
@@ -734,11 +736,18 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     metadataInfo.imageView = renderTargets.SsrHistoryMetadataView(historyImageIndex);
     metadataInfo.sampler = sampler.Handle();
 
+    VkDescriptorImageInfo hitConfidenceInfo{};
+    hitConfidenceInfo.imageLayout = hitConfidenceLayout;
+    hitConfidenceInfo.imageView = hitConfidenceOverride != VK_NULL_HANDLE
+        ? hitConfidenceOverride
+        : metadataInfo.imageView;
+    hitConfidenceInfo.sampler = sampler.Handle();
+
     std::array<VkWriteDescriptorSet, 3> descriptorWrites{};
     const std::array<VkDescriptorImageInfo*, 3> imageInfos = {
         &historyColorInfo,
         &resolvedInfo,
-        &metadataInfo
+        hitConfidenceOverride != VK_NULL_HANDLE ? &hitConfidenceInfo : &metadataInfo
     };
     const std::array<u32, 3> bindings = { 16u, 17u, 18u };
     for (std::size_t index = 0; index < descriptorWrites.size(); ++index) {

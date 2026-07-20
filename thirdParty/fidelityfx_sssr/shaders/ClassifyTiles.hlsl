@@ -37,6 +37,7 @@ THE SOFTWARE.
 [[vk::binding(9, 1)]] RWTexture2D<float> g_extracted_roughness              : register(u3);
 
 [[vk::binding(10, 1)]] RWBuffer<uint> g_denoiser_tile_list                  : register(u4);
+[[vk::binding(11, 1)]] RWTexture2D<float> g_hit_confidence_output             : register(u5);
 
 void IncrementRayCounter(uint value, out uint original_value) {
     InterlockedAdd(g_ray_counter[0], value, original_value);
@@ -154,6 +155,7 @@ void ClassifyTiles(uint2 dispatch_thread_id, uint2 group_thread_id, float roughn
         intersection_output.xyz = SampleEnvironmentMap(dispatch_thread_id, roughness);
     }
     g_intersection_output[dispatch_thread_id] = intersection_output;
+    g_hit_confidence_output[dispatch_thread_id] = 0.0;
 
     GroupMemoryBarrierWithGroupSync(); // Wait until g_TileCount
 

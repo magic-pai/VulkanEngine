@@ -389,9 +389,10 @@ function Invoke-StaticChecks {
             $adapterSource -match "VK_FORMAT_R32G32B32A32_SFLOAT" -and
             $adapterSource -match "DenoiserTileListBufferView" -and
             $rendererSource -match "ffx_sssr_Reproject.hlsl.spv" -and
-            $commandBufferSource -match "sizeof\(u32\) \* 3u") `
-        "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),rgba32=$($adapterSource -match 'VK_FORMAT_R32G32B32A32_SFLOAT'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u')" `
-        "true/true/true/true/true"
+            $commandBufferSource -match "sizeof\(u32\) \* 3u" -and
+            $commandBufferSource -match "return 3u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrReprojectDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrReprojectResources'),rgba32=$($adapterSource -match 'VK_FORMAT_R32G32B32A32_SFLOAT'),typedTiles=$($adapterSource -match 'DenoiserTileListBufferView'),reprojectSpv=$($rendererSource -match 'ffx_sssr_Reproject.hlsl.spv'),offset=$($commandBufferSource -match 'sizeof\(u32\) \* 3u'),currentCopies=$($commandBufferSource -match 'return 3u')" `
+        "true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX Prefilter descriptors match official shader contract" `
         ($adapterSource -match "VulkanFfxSssrPrefilterDescriptorSetLayout" -and
@@ -424,9 +425,10 @@ function Invoke-StaticChecks {
             $commandBufferSource -match "CopyFfxSssrCurrentDenoiserStateToHistory" -and
             $commandBufferSource -match "CopyFfxSssrHistoryToOtherImages" -and
             $commandBufferSource -match "ffxSssrResolveTemporalDispatches" -and
-            $commandBufferSource -match "sizeof\(u32\) \* 3u") `
-        "layout=$($adapterSource -match 'VulkanFfxSssrResolveTemporalDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrResolveTemporalResources'),prefilterInput=$($adapterSource -match 'prefilterResources\.RadianceView'),historyOut=$($adapterSource -match 'reprojectResources\.RadianceHistoryView'),resolveSpv=$($rendererSource -match 'ffx_sssr_ResolveTemporal.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrResolveTemporalDispatches'),copies=$($commandBufferSource -match 'CopyFfxSssrHistoryToOtherImages')" `
-        "true/true/true/true/true/true/true"
+            $commandBufferSource -match "sizeof\(u32\) \* 3u" -and
+            $commandBufferSource -match "copyCount \+= 5u") `
+        "layout=$($adapterSource -match 'VulkanFfxSssrResolveTemporalDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrResolveTemporalResources'),prefilterInput=$($adapterSource -match 'prefilterResources\.RadianceView'),historyOut=$($adapterSource -match 'reprojectResources\.RadianceHistoryView'),resolveSpv=$($rendererSource -match 'ffx_sssr_ResolveTemporal.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrResolveTemporalDispatches'),copies=$($commandBufferSource -match 'CopyFfxSssrHistoryToOtherImages'),historyImages=$($commandBufferSource -match 'copyCount \+= 5u')" `
+        "true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX Reproject consumes packed previous receiver metadata" `
         ($adapterSource -match "renderTargets\.SsrHistoryMetadataView\(imageIndex\)" -and
@@ -607,8 +609,25 @@ function Invoke-StaticChecks {
             $benchmarkRecorderSource -match "ssr_ffx_sssr_composite_confidence_mode") `
         "on=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE'),off=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF'),constant=$($commonShader -match 'g_composite_confidence_mode'),glossy=$($resolveTemporalShader -match 'glossy_validity'),branch=$($resolveTemporalShader -match 'g_composite_confidence_mode == 0u'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_composite_confidence_mode')" `
         "true/true/true/true/true/true"
-    $contractVersionTwelve =
-        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*12u'
+    $checks += New-Check `
+        "SelfEngine FFX hit provenance is separate from ray length and uses probe fallback" `
+        ($classifyShader -match "g_hit_confidence_output" -and
+            $intersectShader -match "g_hit_confidence_output" -and
+            $reprojectShader -match "g_hit_confidence_history" -and
+            $reprojectShader -match "SelfEngine_FfxSssrHitConfidence" -and
+            $adapterSource -match "HitConfidenceHistoryView" -and
+            $commandBufferSource -match "HitConfidenceImage" -and
+            $deferredLightingShader -match "SsrFidelityFxHitProvenanceEnabled" -and
+            $ffxApplyShader -match "SelectedLocalProbeRadiance" -and
+            $ffxApplyShader -match "bestPriority" -and
+            $ffxApplyShader -match "safeDirection\.x =" -and
+            $ffxApplyShader -match "ffxSssrHitConfidence" -and
+            $rendererSource -match "m_FfxSssrRadianceHistoryValid" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_hit_confidence_contract_version") `
+        "classify=$($classifyShader -match 'g_hit_confidence_output'),intersect=$($intersectShader -match 'g_hit_confidence_output'),history=$($reprojectShader -match 'g_hit_confidence_history'),temporal=$($reprojectShader -match 'SelfEngine_FfxSssrHitConfidence'),adapter=$($adapterSource -match 'HitConfidenceHistoryView'),barrier=$($commandBufferSource -match 'HitConfidenceImage'),deferred=$($deferredLightingShader -match 'SsrFidelityFxHitProvenanceEnabled'),probe=$($ffxApplyShader -match 'SelectedLocalProbeRadiance'),priority=$($ffxApplyShader -match 'bestPriority'),boxGuard=$($ffxApplyShader -match 'safeDirection\.x ='),apply=$($ffxApplyShader -match 'ffxSssrHitConfidence'),historyGuard=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_hit_confidence_contract_version')" `
+        "true/true/true/true/true/true/true/true/true/true/true/true/true"
+    $contractVersionThirteen =
+        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*13u'
     $adapterDefaultsLocked =
         $adapterHeader -match 'samplesPerQuad\s*=\s*4u' -and
         $adapterHeader -match 'compositeConfidenceMode\s*=\s*0u'
@@ -623,15 +642,15 @@ function Invoke-StaticChecks {
     $visibleOutputClearDefault = $rendererSource -match
         '(?s)ffxSssrVisibleOutputClearRequested\s*=\s*EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT"\)\s*\|\|\s*!EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF"\);'
     $checks += New-Check `
-        "SelfEngine FFX production visual defaults are locked by contract v12" `
-        ($contractVersionTwelve -and
+        "SelfEngine FFX production visual defaults are locked by contract v13" `
+        ($contractVersionThirteen -and
             $adapterDefaultsLocked -and
             $fourRaysDefault -and
             $stableEnvironmentDefault -and
             $perfectDirectionsDefault -and
             $vendorConfidenceDefault -and
             $visibleOutputClearDefault) `
-        "contract12=$contractVersionTwelve,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
+        "contract13=$contractVersionThirteen,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
         "true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
@@ -696,6 +715,9 @@ function Invoke-RuntimeLane {
     Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
 
     $Environment["SE_BENCHMARK_CSV"] = $csvPath
+    $resolvedExecutablePath = Resolve-FullPath $Executable
+    $releaseExecutable = $resolvedExecutablePath -match "\\(Release|RelWithDebInfo)\\"
+    $effectiveExpectHitAttribution = $ExpectHitAttribution -and -not $releaseExecutable
     $previous = Set-ProcessEnvironment -Values $Environment
     try {
         $exitCode = 0
@@ -800,6 +822,11 @@ function Invoke-RuntimeLane {
     $environmentFallbackSamples = Get-UIntMetric $last "ssr_ffx_sssr_environment_fallback_samples"
     $confidenceSum16 = Get-UIntMetric $last "ssr_ffx_sssr_confidence_sum16"
     $hitAttributionContractVersion = Get-UIntMetric $last "ssr_ffx_sssr_hit_attribution_contract_version"
+    $hitConfidenceContractVersion = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_contract_version"
+    $hitConfidenceResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_resources_ready"
+    $hitConfidenceHistoryReady = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_history_ready"
+    $hitConfidenceApplyBound = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_apply_bound"
+    $probeFallbackConsumer = Get-UIntMetric $last "ssr_ffx_sssr_probe_fallback_consumer"
     $classifyBindDispatches = Get-UIntMetric $last "ffx_sssr_classify_tiles_dispatches"
     $classifyBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_classify_tiles_descriptor_binds"
     $classifyBindGroupCountX = Get-UIntMetric $last "ffx_sssr_classify_tiles_groups_x"
@@ -1258,7 +1285,7 @@ function Invoke-RuntimeLane {
         [uint64]$partialHitSamples +
         [uint64]$environmentFallbackSamples
     $hitAttributionMatches =
-        if ($ExpectHitAttribution) {
+        if ($effectiveExpectHitAttribution) {
             $hitAttributionRequested -eq 1 -and
                 $hitAttributionActive -eq 1 -and
                 $hitAttributionReadbackValid -eq 1 -and
@@ -1271,11 +1298,32 @@ function Invoke-RuntimeLane {
                 $hitAttributionActive -eq 0
         }
     $hitAttributionExpectedLabel =
-        if ($ExpectHitAttribution) {
+        if ($effectiveExpectHitAttribution) {
             "enabled=1,readback=1,contract=1,sum=classified"
+        } elseif ($ExpectHitAttribution) {
+            "release=1,requested=0,active=0"
         } else {
             "requested=0,active=0"
         }
+    if ($ExpectedActiveProvider -eq 1) {
+        $hitConfidenceContractMatches =
+            $hitConfidenceContractVersion -eq 1 -and
+            $hitConfidenceResourcesReady -eq 1 -and
+            $hitConfidenceHistoryReady -eq 1 -and
+            $hitConfidenceApplyBound -eq $sameFrameCompositeDescriptorBound -and
+            $probeFallbackConsumer -eq $sameFrameCompositeActive
+        $hitConfidenceExpectedLabel =
+            "active=1,resources/history=1,apply/probeFallback==sameFrame"
+    } else {
+        $hitConfidenceContractMatches =
+            $hitConfidenceContractVersion -eq 1 -and
+            $hitConfidenceResourcesReady -eq 1 -and
+            $hitConfidenceHistoryReady -eq 0 -and
+            $hitConfidenceApplyBound -eq 0 -and
+            $probeFallbackConsumer -eq 0
+        $hitConfidenceExpectedLabel =
+            "active=0,resources=1,history/apply/probeFallback=0"
+    }
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -1285,8 +1333,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 12 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "12/1"),
+            ($contractVersion -eq 13 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "13/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -1382,6 +1430,10 @@ function Invoke-RuntimeLane {
             $hitAttributionMatches `
             "requested=$hitAttributionRequested,active=$hitAttributionActive,readback=$hitAttributionReadbackValid,contract=$hitAttributionContractVersion,high=$highConfidenceHitSamples,partial=$partialHitSamples,env=$environmentFallbackSamples,sum=$hitAttributionSampleSum,classified=$classifyRayCount,confidenceSum16=$confidenceSum16" `
             $hitAttributionExpectedLabel),
+        (New-Check "$Name hit-confidence/probe fallback contract" `
+            $hitConfidenceContractMatches `
+            "version=$hitConfidenceContractVersion,resources=$hitConfidenceResourcesReady,history=$hitConfidenceHistoryReady,apply=$hitConfidenceApplyBound,probeFallback=$probeFallbackConsumer,sameFrame=$sameFrameCompositeDescriptorBound/$sameFrameCompositeActive" `
+            $hitConfidenceExpectedLabel),
         (New-Check "$Name blue-noise resource contract" `
             $blueNoiseResourceContractMatches `
             "resources=$blueNoiseResourcesReady,sets=$blueNoiseDescriptorSetsReady,pipeline=$blueNoisePipelineReady,extent=${blueNoiseWidth}x${blueNoiseHeight},groups=${blueNoiseGroupCountX}x${blueNoiseGroupCountY},tables=$blueNoiseSobolEntryCount/$blueNoiseRankingTileEntryCount/$blueNoiseScramblingTileEntryCount,bytes=$blueNoiseMemoryBytes" `

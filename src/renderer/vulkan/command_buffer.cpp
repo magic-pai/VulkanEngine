@@ -1444,7 +1444,13 @@ u32 CopyFfxSssrCurrentDenoiserStateToHistory(
         reprojectResources.SampleCountHistoryImage(imageIndex),
         reprojectResources.Extent()
     );
-    return 2u;
+    CopyFfxSssrImage(
+        commandBuffer,
+        reprojectResources.HitConfidenceImage(imageIndex),
+        reprojectResources.HitConfidenceHistoryImage(imageIndex),
+        reprojectResources.Extent()
+    );
+    return 3u;
 }
 
 void ClearFfxSssrVisibleOutput(
@@ -1538,7 +1544,13 @@ u32 CopyFfxSssrHistoryToOtherImages(
             reprojectResources.SampleCountHistoryImage(destinationIndex),
             reprojectResources.Extent()
         );
-        copyCount += 4u;
+        CopyFfxSssrImage(
+            commandBuffer,
+            reprojectResources.HitConfidenceHistoryImage(sourceIndex),
+            reprojectResources.HitConfidenceHistoryImage(destinationIndex),
+            reprojectResources.Extent()
+        );
+        copyCount += 5u;
     }
     return copyCount;
 }
@@ -3533,6 +3545,14 @@ void VulkanCommandBuffer::Record(
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
             );
+            BarrierSsrComputeImage(
+                commandBuffer,
+                ffxSssrClassifyTilesResources->HitConfidenceImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
 
             const VkDescriptorSet classifyDescriptorSet =
                 ffxSssrClassifyTilesResources->Handle(imageIndex);
@@ -4224,10 +4244,14 @@ void VulkanCommandBuffer::Record(
         intersectionForWrite.image =
             ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex);
 
-        std::array<VkImageMemoryBarrier, 3> imageBarriers{
+        VkImageMemoryBarrier hitConfidenceForWrite = intersectionForWrite;
+        hitConfidenceForWrite.image =
+            ffxSssrClassifyTilesResources->HitConfidenceImage(imageIndex);
+        std::array<VkImageMemoryBarrier, 4> imageBarriers{
             blueNoiseToIntersect,
             roughnessToIntersect,
-            intersectionForWrite
+            intersectionForWrite,
+            hitConfidenceForWrite
         };
         VkBufferMemoryBarrier rayListToIntersect{};
         rayListToIntersect.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -4294,7 +4318,7 @@ void VulkanCommandBuffer::Record(
         }
 
         if (ffxSssrReprojectReady) {
-            std::array<VkImageMemoryBarrier, 5> reprojectImageBarriers{};
+            std::array<VkImageMemoryBarrier, 7> reprojectImageBarriers{};
             auto setReprojectImageBarrier = [&](
                 std::size_t barrierIndex,
                 VkImage image,
@@ -4347,6 +4371,18 @@ void VulkanCommandBuffer::Record(
             setReprojectImageBarrier(
                 4u,
                 ffxSssrReprojectResources->SampleCountImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT
+            );
+            setReprojectImageBarrier(
+                5u,
+                ffxSssrClassifyTilesResources->HitConfidenceImage(imageIndex),
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT
+            );
+            setReprojectImageBarrier(
+                6u,
+                ffxSssrReprojectResources->HitConfidenceImage(imageIndex),
                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                 VK_ACCESS_SHADER_WRITE_BIT
             );
@@ -4769,6 +4805,22 @@ void VulkanCommandBuffer::Record(
             nullptr,
             1u,
             &radianceForApply
+        );
+        VkImageMemoryBarrier hitConfidenceForApply = radianceForApply;
+        hitConfidenceForApply.image =
+            ffxSssrReprojectResources->HitConfidenceImage(imageIndex);
+        hitConfidenceForApply.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1u,
+            &hitConfidenceForApply
         );
 
         VkRenderPassBeginInfo applyPassInfo{};

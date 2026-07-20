@@ -160,7 +160,9 @@ public:
         std::size_t descriptorIndex,
         std::size_t historyImageIndex,
         VkImageView resolvedReflectionOverride = VK_NULL_HANDLE,
-        VkImageLayout resolvedReflectionLayout = VK_IMAGE_LAYOUT_GENERAL
+        VkImageLayout resolvedReflectionLayout = VK_IMAGE_LAYOUT_GENERAL,
+        VkImageView hitConfidenceOverride = VK_NULL_HANDLE,
+        VkImageLayout hitConfidenceLayout = VK_IMAGE_LAYOUT_GENERAL
     );
 
     void Recreate(

@@ -345,6 +345,7 @@ function New-ReflectionCaptureReport {
         "reflection_probe_capture_resource_ready",
         "reflection_probe_capture_descriptor_bound",
         "reflection_probe_captured_scene_capture_backend",
+        "reflection_probe_force_mip0_sampling",
         "reflection_probe_captured_scene_face_count",
         "reflection_probe_captured_scene_faces_rendered",
         "reflection_probe_captured_scene_faces_pending",
@@ -352,7 +353,10 @@ function New-ReflectionCaptureReport {
         "reflection_probe_captured_scene_capture_draw_count",
         "reflection_probe_captured_scene_capture_visible_count",
         "reflection_probe_captured_scene_capture_culled_count",
+        "reflection_probe_captured_scene_self_capture_excluded_count",
         "reflection_probe_captured_scene_capture_face_orientation_mask",
+        "reflection_probe_cubemap_face_size",
+        "reflection_probe_cubemap_mip_count",
         "reflection_probe_captured_scene_mip_generation_count",
         "reflection_probe_captured_scene_source_mip_generation_count",
         "reflection_probe_captured_scene_source_mip_count",
@@ -545,6 +549,21 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "contract" -Name "framegraph validation" `
         -Passed ($metrics["framegraph_validation_issues"].max -eq 0) `
         -Actual $metrics["framegraph_validation_issues"].max -Expected 0
+    Add-BooleanCheck -Checks $checks -Area "capture" -Name "self-capture exclusion accounting is nonnegative" `
+        -Passed ($metrics["reflection_probe_captured_scene_self_capture_excluded_count"].min -ge 0) `
+        -Actual $metrics["reflection_probe_captured_scene_self_capture_excluded_count"].min -Expected ">= 0"
+    if ($Mode -eq "filter-high" -or $Mode -eq "filter-medium") {
+        Add-BooleanCheck -Checks $checks -Area "capture" -Name "showcase reflective receiver is excluded from probe capture" `
+            -Passed ($metrics["reflection_probe_captured_scene_self_capture_excluded_count"].max -gt 0) `
+            -Actual $metrics["reflection_probe_captured_scene_self_capture_excluded_count"].max -Expected "> 0"
+    }
+    $expectedForceMip0 = if (
+        $Environment.ContainsKey("SE_REFLECTION_PROBE_FORCE_MIP0") -and
+        "$($Environment['SE_REFLECTION_PROBE_FORCE_MIP0'])" -eq "1"
+    ) { 1 } else { 0 }
+    Add-BooleanCheck -Checks $checks -Area "sampling" -Name "probe MIP0 control is explicit" `
+        -Passed ($metrics["reflection_probe_force_mip0_sampling"].max -eq $expectedForceMip0) `
+        -Actual $metrics["reflection_probe_force_mip0_sampling"].max -Expected $expectedForceMip0
     $selectiveExpected = if ($Mode -eq "selective-fallback") { 0 } else { 1 }
     Add-BooleanCheck -Checks $checks -Area "selective-refresh" -Name "selective invalidation mode is explicit" `
         -Passed ($metrics["reflection_probe_captured_scene_selective_invalidation_enabled"].max -eq $selectiveExpected) `
@@ -583,15 +602,39 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "backend" -Name "six faces reach a completed mip chain" `
         -Passed ($metrics["reflection_probe_captured_scene_mip_chain_ready"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_mip_chain_ready"].max -Expected 1
-    $expectedSourceMipMemoryBytes = 4194288
+    $expectedCaptureFaceSize = switch ($Mode) {
+        "filter-off" { 128 }
+        "filter-medium" { 256 }
+        default { 512 }
+    }
+    $expectedSourceMipCount = switch ($expectedCaptureFaceSize) {
+        128 { 8 }
+        256 { 9 }
+        512 { 10 }
+        1024 { 11 }
+        default { 0 }
+    }
+    $expectedSourceMipMemoryBytes = switch ($expectedCaptureFaceSize) {
+        128 { 1048560 }
+        256 { 4194288 }
+        512 { 16777200 }
+        1024 { 67108848 }
+        default { 0 }
+    }
+    Add-BooleanCheck -Checks $checks -Area "budget" -Name "captured cubemap face size resolves" `
+        -Passed ($metrics["reflection_probe_cubemap_face_size"].max -eq $expectedCaptureFaceSize) `
+        -Actual $metrics["reflection_probe_cubemap_face_size"].max -Expected $expectedCaptureFaceSize
+    Add-BooleanCheck -Checks $checks -Area "budget" -Name "captured cubemap mip count resolves" `
+        -Passed ($metrics["reflection_probe_cubemap_mip_count"].max -eq $expectedSourceMipCount) `
+        -Actual $metrics["reflection_probe_cubemap_mip_count"].max -Expected $expectedSourceMipCount
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance builds a complete source mip chain" `
         -Passed (
             $metrics["reflection_probe_captured_scene_source_mip_generation_count"].max -eq 1 -and
-            $metrics["reflection_probe_captured_scene_source_mip_count"].max -eq 9 -and
+            $metrics["reflection_probe_captured_scene_source_mip_count"].max -eq $expectedSourceMipCount -and
             $metrics["reflection_probe_captured_scene_source_mip_chain_ready"].max -eq 1
         ) `
         -Actual "builds/mips/ready=$($metrics['reflection_probe_captured_scene_source_mip_generation_count'].max)/$($metrics['reflection_probe_captured_scene_source_mip_count'].max)/$($metrics['reflection_probe_captured_scene_source_mip_chain_ready'].max)" `
-        -Expected "1/9/1"
+        -Expected "1/$expectedSourceMipCount/1"
     Add-BooleanCheck -Checks $checks -Area "budget" -Name "captured radiance source mip memory is bounded" `
         -Passed ($metrics["reflection_probe_captured_scene_source_mip_memory_bytes"].max -eq $expectedSourceMipMemoryBytes) `
         -Actual $metrics["reflection_probe_captured_scene_source_mip_memory_bytes"].max `
@@ -599,24 +642,20 @@ function New-ReflectionCaptureReport {
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "GGX output never aliases its source image" `
         -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_source_image_separated"].max -eq 1) `
         -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_source_image_separated"].max -Expected 1
-    $expectedCapturedFilterQuality = if ($Mode -eq "filter-off") {
-        0
-    } elseif ($Mode -eq "filter-high") {
-        3
-    } else {
-        2
+    $expectedCapturedFilterQuality = switch ($Mode) {
+        "filter-off" { 0 }
+        "filter-medium" { 2 }
+        default { 3 }
     }
-    $expectedCapturedFilterSamples = if ($Mode -eq "filter-off") {
-        1
-    } elseif ($Mode -eq "filter-high") {
-        128
-    } else {
-        64
+    $expectedCapturedFilterSamples = switch ($Mode) {
+        "filter-off" { 1 }
+        "filter-medium" { 64 }
+        default { 128 }
     }
     $expectedCapturedFilterReady = if ($Mode -eq "filter-off") { 0 } else { 1 }
     $expectedCapturedFilterFallback = if ($Mode -eq "filter-off") { 1 } else { 0 }
     $expectedPdfLodEnabled = if ($Mode -eq "filter-off") { 0 } else { 1 }
-    $expectedGgxDispatches = if ($Mode -eq "filter-off") { 0 } else { 8 }
+    $expectedGgxDispatches = if ($Mode -eq "filter-off") { 0 } else { $expectedSourceMipCount - 1 }
     Add-BooleanCheck -Checks $checks -Area "filtering" -Name "captured radiance filter quality resolves" `
         -Passed ($metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -eq $expectedCapturedFilterQuality) `
         -Actual $metrics["reflection_probe_captured_scene_ggx_prefilter_quality"].max -Expected $expectedCapturedFilterQuality
@@ -1296,6 +1335,10 @@ $managedKeys = @(
     "SE_REFLECTION_CAPTURE_SHADOW_SNAPSHOT_OFF",
     "SE_REFLECTION_CAPTURE_PERSISTENT_SHADOW_CACHE_OFF",
     "SE_REFLECTION_CAPTURE_FILTER_QUALITY",
+    "SE_REFLECTION_CAPTURE_FACE_SIZE",
+    "SE_REFLECTION_PROBE_FORCE_MIP0",
+    "SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF",
+    "SE_RECT_LIGHT_ANALYTIC_SPECULAR_OFF",
     "SE_REFLECTION_CAPTURE_REFRESH_MIN_FRAMES",
     "SE_REFLECTION_CAPTURE_SELECTIVE_REFRESH_OFF",
     "SE_REFLECTION_CAPTURE_LOCALITY_CONTROL",
@@ -1392,6 +1435,16 @@ $laneSpecs = @(
         }
     },
     [pscustomobject]@{
+        name = "capture-filter-medium-control"
+        mode = "filter-medium"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_CAPTURE_FILTER_QUALITY = "medium"
+        }
+    },
+    [pscustomobject]@{
         name = "capture-filter-fallback"
         mode = "filter-off"
         environment = @{
@@ -1399,6 +1452,16 @@ $laneSpecs = @(
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
             SE_SCENE_UPDATE_FREEZE = "1"
             SE_REFLECTION_CAPTURE_FILTER_QUALITY = "off"
+        }
+    },
+    [pscustomobject]@{
+        name = "probe-force-mip0-control"
+        mode = "filter-high"
+        environment = @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SCENE_UPDATE_FREEZE = "1"
+            SE_REFLECTION_PROBE_FORCE_MIP0 = "1"
         }
     },
     [pscustomobject]@{
@@ -1584,7 +1647,11 @@ foreach ($lane in $laneSpecs) {
     $runError = $null
     try {
         Invoke-WithEnvironment -ManagedKeys $managedKeys -Environment $environment -Script {
-            & $resolvedExecutable | Out-Host
+            # Some development hosts allow signed local binaries through cmd.exe
+            # while blocking PowerShell's direct invocation operator.
+            $executableDirectory = Split-Path -Parent $resolvedExecutable
+            $commandLine = "cd /d `"$executableDirectory`" && `"$resolvedExecutable`""
+            & cmd.exe /d /c $commandLine | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 throw "SelfEngineForward3D exited with code $LASTEXITCODE"
             }

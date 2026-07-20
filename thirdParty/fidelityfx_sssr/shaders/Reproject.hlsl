@@ -51,6 +51,9 @@ THE SOFTWARE.
 [[vk::binding(17, 1)]] RWTexture2D<float> g_out_sample_count		            : register(u3);
 
 [[vk::binding(18, 1)]] Buffer<uint> g_denoiser_tile_list                        : register(t13);
+[[vk::binding(19, 1)]] Texture2D<float> g_hit_confidence                         : register(t14);
+[[vk::binding(20, 1)]] Texture2D<float> g_hit_confidence_history                 : register(t15);
+[[vk::binding(21, 1)]] RWTexture2D<float> g_out_hit_confidence                    : register(u4);
 
 float FFX_DNSR_Reflections_GetRandom(int2 pixel_coordinate) { return g_blue_noise_texture.Load(int3(pixel_coordinate.xy % 128, 0)).x; }
 float FFX_DNSR_Reflections_LoadDepth(int2 pixel_coordinate) { return g_depth_buffer.Load(int3(pixel_coordinate, 0)); }
@@ -91,6 +94,50 @@ float2 FFX_DNSR_Reflections_LoadMotionVector(int2 pixel_coordinate) { return g_m
 min16float3 FFX_DNSR_Reflections_SamplePreviousAverageRadiance(float2 uv) { return (min16float3)g_average_radiance_history.SampleLevel(g_linear_sampler, uv, 0.0f).xyz; }
 min16float FFX_DNSR_Reflections_SampleVarianceHistory(float2 uv) { return (min16float)g_variance_history.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float FFX_DNSR_Reflections_LoadRayLength(int2 pixel_coordinate) { return (min16float)g_in_radiance.Load(int3(pixel_coordinate, 0)).w; }
+float SelfEngine_FfxSssrHitConfidence(int2 pixel_coordinate) {
+    if (any(pixel_coordinate < 0) || any(uint2(pixel_coordinate) >= g_buffer_dimensions)) {
+        return 0.0;
+    }
+    float current = saturate(g_hit_confidence.Load(int3(pixel_coordinate, 0)));
+    if (g_reprojection_contract_ready == 0u || g_hit_reprojection_enabled == 0u) {
+        return current;
+    }
+
+    float2 currentUv = (float2(pixel_coordinate) + 0.5) * g_inv_buffer_dimensions;
+    float2 previousUv = currentUv - FFX_DNSR_Reflections_LoadMotionVector(pixel_coordinate);
+    if (any(previousUv <= 0.0) || any(previousUv >= 1.0)) {
+        return current;
+    }
+
+    float history = saturate(
+        g_hit_confidence_history.SampleLevel(g_linear_sampler, previousUv, 0.0)
+    );
+    if (history <= 0.0001) {
+        return current;
+    }
+
+    float currentDepth = FFX_DNSR_Reflections_GetLinearDepth(
+        currentUv,
+        g_depth_buffer.Load(int3(pixel_coordinate, 0))
+    );
+    float previousDepth = FFX_DNSR_Reflections_SampleDepthHistory(previousUv);
+    float depthError = abs(currentDepth - previousDepth) /
+        max(max(currentDepth, previousDepth), 0.001);
+    float depthValidity = 1.0 - smoothstep(0.01, 0.06, depthError);
+    float3 currentNormal = FFX_DNSR_Reflections_LoadWorldSpaceNormal(pixel_coordinate);
+    float3 previousNormal = FFX_DNSR_Reflections_SampleWorldSpaceNormalHistory(previousUv);
+    float normalValidity = smoothstep(0.82, 0.98, dot(currentNormal, previousNormal));
+    float currentRoughness = (float)FFX_DNSR_Reflections_LoadRoughness(pixel_coordinate);
+    float previousRoughness = (float)FFX_DNSR_Reflections_SampleRoughnessHistory(previousUv);
+    float roughnessValidity = 1.0 - smoothstep(
+        0.04,
+        0.16,
+        abs(currentRoughness - previousRoughness)
+    );
+    float historyValidity = depthValidity * normalValidity * roughnessValidity;
+    float historyWeight = clamp(g_temporal_stability_factor, 0.0, 0.98);
+    return saturate(max(current, history * historyValidity * historyWeight));
+}
 void FFX_DNSR_Reflections_StoreRadianceReprojected(int2 pixel_coordinate, min16float3 value) { g_out_reprojected_radiance[pixel_coordinate] = value.xyzz; }
 void FFX_DNSR_Reflections_StoreAverageRadiance(int2 pixel_coordinate, min16float3 value) { g_out_average_radiance[pixel_coordinate] = value.xyzz; }
 void FFX_DNSR_Reflections_StoreVariance(int2 pixel_coordinate, min16float value) { g_out_variance[pixel_coordinate] = value; }
@@ -108,4 +155,8 @@ void main(int2 group_thread_id      : SV_GroupThreadID,
     uint2 remapped_dispatch_thread_id = dispatch_group_id * 8 + remapped_group_thread_id;
 
     FFX_DNSR_Reflections_Reproject(remapped_dispatch_thread_id, remapped_group_thread_id, g_buffer_dimensions, g_temporal_stability_factor, 32);
+    if (all(remapped_dispatch_thread_id < g_buffer_dimensions)) {
+        g_out_hit_confidence[remapped_dispatch_thread_id] =
+            SelfEngine_FfxSssrHitConfidence(remapped_dispatch_thread_id);
+    }
 }

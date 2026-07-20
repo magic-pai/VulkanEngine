@@ -122,6 +122,15 @@ void AppendFfxSssrFrameGraphResources(RenderFrameGraphPlan& plan) {
     AppendRenderFrameGraphResource(
         plan,
         kPhysical,
+        kPerFrame,
+        "FFX HitConfidence",
+        "R32_SFLOAT",
+        "storage image, sampled",
+        "internal resolution"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
         kHistory,
         "FFX RadianceHistory",
         "R32G32B32A32_SFLOAT",
@@ -153,6 +162,15 @@ void AppendFfxSssrFrameGraphResources(RenderFrameGraphPlan& plan) {
         "FFX SampleCountHistory",
         "R32_SFLOAT",
         "sampled placeholder sample-count history",
+        "internal resolution history"
+    );
+    AppendRenderFrameGraphResource(
+        plan,
+        kPhysical,
+        kHistory,
+        "FFX HitConfidenceHistory",
+        "R32_SFLOAT",
+        "sampled history",
         "internal resolution history"
     );
     AppendRenderFrameGraphResource(
@@ -239,7 +257,7 @@ void VulkanSsrFeature::AppendFrameGraph(
             RenderFramePassQueue::Compute,
             "FidelityFXSSSRClassifyTiles",
             "FrameConstants, GBufferNormalRoughness, SceneDepth, PrefilteredEnvironmentMap, FFX VarianceHistory",
-            "FFX RayCounter, FFX RayList, FFX DenoiserTiles, FFX ExtractedRoughness, FFX IntersectOutput",
+            "FFX RayCounter, FFX RayList, FFX DenoiserTiles, FFX ExtractedRoughness, FFX IntersectOutput, FFX HitConfidence",
             "AMD FidelityFX SSSR ClassifyTiles bridge classifies rays and denoiser tiles from scene depth, roughness, normal, and variance inputs."
         );
         AppendRenderFrameGraphPass(
@@ -275,7 +293,7 @@ void VulkanSsrFeature::AppendFrameGraph(
             RenderFramePassQueue::Compute,
             "FidelityFXSSSRIntersect",
             "FrameConstants, HDRSceneColor, SSRDepthPyramid, GBufferNormalRoughness, FFX ExtractedRoughness, PrefilteredEnvironmentMap, FFX BlueNoise, FFX RayList, FFX IntersectArgs",
-            "FFX IntersectOutput, FFX RayCounter",
+            "FFX IntersectOutput, FFX HitConfidence, FFX RayCounter",
             "AMD FidelityFX SSSR Intersect bridge consumes the official ray list and writes the intersection payload; it is still an auditable intermediate."
         );
         AppendRenderFrameGraphPass(
@@ -286,8 +304,8 @@ void VulkanSsrFeature::AppendFrameGraph(
                 : RenderFramePassStatus::Roadmap,
             RenderFramePassQueue::Compute,
             "FidelityFXSSSRReproject",
-            "FrameConstants, SceneDepth, FFX ExtractedRoughness, GBufferNormalRoughness, FFX IntersectOutput, Velocity, FFX BlueNoise, FFX DenoiserTiles, FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory, FFX IntersectArgs",
-            "FFX ReprojectedRadiance, FFX AverageRadiance, FFX Variance, FFX SampleCount",
+            "FrameConstants, SceneDepth, FFX ExtractedRoughness, GBufferNormalRoughness, FFX IntersectOutput, FFX HitConfidence, Velocity, FFX BlueNoise, FFX DenoiserTiles, FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory, FFX HitConfidenceHistory, FFX IntersectArgs",
+            "FFX ReprojectedRadiance, FFX AverageRadiance, FFX Variance, FFX SampleCount, FFX HitConfidence",
             "AMD FidelityFX SSSR Reproject bridge consumes denoiser tiles through the second indirect dispatch record and prepares DNSR variance and history inputs."
         );
         AppendRenderFrameGraphPass(
@@ -311,7 +329,7 @@ void VulkanSsrFeature::AppendFrameGraph(
             RenderFramePassQueue::Compute,
             "FidelityFXSSSRResolveTemporal",
             "FrameConstants, FFX ExtractedRoughness, FFX AverageRadiance, FFX PrefilteredRadiance, FFX ReprojectedRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount, FFX DenoiserTiles, FFX IntersectArgs",
-            "FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory",
+            "FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory, FFX HitConfidenceHistory",
             "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into history images consumed by the next Reproject pass and the current frame reflection apply pass."
         );
         AppendRenderFrameGraphPass(
@@ -322,9 +340,9 @@ void VulkanSsrFeature::AppendFrameGraph(
                 : RenderFramePassStatus::Roadmap,
             RenderFramePassQueue::Graphics,
             "FidelityFXSSSRApplyReflections",
-            "HDRSceneColor, FFX RadianceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT",
+            "HDRSceneColor, FFX RadianceHistory, FFX HitConfidence, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap, SceneReflectionProbeCubemap",
             "HDRSceneColor",
-            "AMD-style same-frame post composition applies current ResolveTemporal radiance before temporal upscaling; destination alpha preserves the attenuated IBL replacement baseline."
+            "Same-frame composition blends validated screen-space radiance against the selected local Probe/IBL baseline before temporal upscaling."
         );
         AppendRenderFrameGraphPass(
             context.plan,
@@ -549,7 +567,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 12u;
+    ssr.fidelityFxSssrContractVersion = 13u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;

@@ -294,6 +294,7 @@ RenderCommand CommandForRenderable(
     command.drawOrder = renderable.DrawOrder();
     command.worldBounds = worldBounds;
     command.castShadow = renderable.CastShadow();
+    command.reflectionCaptureVisible = renderable.ReflectionCaptureVisible();
     command.bonePaletteResourceId = std::string(renderable.BonePaletteResourceId());
 #if !defined(NDEBUG)
     command.debugRenderableIdentity = renderable.RenderIdentity();

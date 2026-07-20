@@ -113,6 +113,17 @@ void Renderable3D::SetCastShadow(bool castShadow) {
     m_CastShadow = castShadow;
 }
 
+bool Renderable3D::ReflectionCaptureVisible() const {
+    return m_ReflectionCaptureVisible;
+}
+
+void Renderable3D::SetReflectionCaptureVisible(bool visible) {
+    if (m_ReflectionCaptureVisible != visible) {
+        MarkRenderStateChanged();
+    }
+    m_ReflectionCaptureVisible = visible;
+}
+
 void Renderable3D::SetRenderChangeCallback(ChangeCallback callback) {
     m_OnRenderChange = std::move(callback);
 }

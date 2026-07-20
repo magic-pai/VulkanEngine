@@ -1711,6 +1711,7 @@ void AccumulateRectAreaLight(
     ));
     vec3 rectBitangent = normalize(cross(rectNormal, rectTangent));
     vec2 halfSize = max(localLight.parameters.zw * 0.5, vec2(0.001));
+    float analyticSpecular = clamp(localLight.parameters.x, 0.0, 1.0);
     float radius = max(positionRadius.w, length(halfSize));
     vec2 sampleSigns[4] = vec2[](
         vec2(-0.57735, -0.57735),
@@ -1818,6 +1819,7 @@ void AccumulateRectAreaLight(
                     nDotL *
                     shadowVisibility *
                     rectMask *
+                    analyticSpecular *
                     max(specularStrength, 0.0) *
                     roughnessEnergy *
                     (fresnel + coatFresnel);

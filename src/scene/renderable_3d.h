@@ -41,6 +41,8 @@ public:
     void SetPickable(bool pickable);
     bool CastShadow() const;
     void SetCastShadow(bool castShadow);
+    bool ReflectionCaptureVisible() const;
+    void SetReflectionCaptureVisible(bool visible);
     void SetRenderChangeCallback(ChangeCallback callback);
 
 private:
@@ -54,6 +56,7 @@ private:
     u64 m_RenderStateVersion = 1;
     bool m_Pickable = true;
     bool m_CastShadow = true;
+    bool m_ReflectionCaptureVisible = true;
     ChangeCallback m_OnRenderChange;
 };
 

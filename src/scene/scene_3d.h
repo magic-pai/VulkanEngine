@@ -54,6 +54,7 @@ struct RectLight3D {
     f32 radius = 1.0f;
     glm::vec3 color{ 1.0f };
     f32 intensity = 1.0f;
+    f32 specular = 1.0f;
     bool enabled = true;
 };
 
@@ -125,7 +126,8 @@ public:
         f32 height,
         f32 radius,
         glm::vec3 color,
-        f32 intensity
+        f32 intensity,
+        f32 specular = 1.0f
     );
     ReflectionProbe3D& CreateReflectionProbe(
         std::string name,

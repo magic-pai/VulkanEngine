@@ -70,13 +70,17 @@ constexpr bool CapturedReflectionProbeGgxPrefilterEnabled(
 
 struct CapturedReflectionProbeFilteringSettings {
     CapturedReflectionProbeFilterQuality quality =
-        CapturedReflectionProbeFilterQuality::Medium;
+        CapturedReflectionProbeFilterQuality::High;
+    // The capture face size is part of the producer contract. Thin fixture
+    // geometry is otherwise removed by the roughness-selected mip chain.
+    u32 faceSize = 512u;
 };
 
 struct AuthoredReflectionProbeFilteringSettings {
     AuthoredReflectionProbeFilterQuality quality =
         AuthoredReflectionProbeFilterQuality::Medium;
     bool seamAwareFiltering = true;
+    u32 faceSize = 512u;
 };
 
 struct CapturedReflectionProbeLightSample {
@@ -223,6 +227,7 @@ struct CapturedSceneCaptureAudit {
     u32 captureDrawCount = 0;
     u32 captureVisibleCount = 0;
     u32 captureCulledCount = 0;
+    u32 selfCaptureExcludedCount = 0;
     u32 captureFaceOrientationMask = 0;
     u32 mipGenerationCount = 0;
     u32 sourceMipGenerationCount = 0;
@@ -335,7 +340,8 @@ public:
     bool EnsureGpuCapturedSceneResources(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        i32 probeSceneIndex
+        i32 probeSceneIndex,
+        CapturedReflectionProbeFilteringSettings filteringSettings = {}
     );
     bool RequestGpuCapturedSceneRefresh(
         const CapturedSceneRefreshRequest& refreshRequest,
@@ -420,6 +426,7 @@ public:
         u32 drawCount,
         u32 visibleCount,
         u32 culledCount,
+        u32 selfCaptureExcludedCount,
         bool captureComplete,
         u64 schedulerFrame
     );
@@ -641,6 +648,8 @@ private:
     u32 m_AuthoredCubemapReloadCount = 0;
     u32 m_AuthoredCubemapRefreshCheckCount = 0;
     u32 m_DescriptorSetsBound = 0;
+    u32 m_CapturedSceneCubemapFaceSize = 512u;
+    bool m_CapturedSceneCubemapFaceSizeInitialized = false;
 };
 
 }

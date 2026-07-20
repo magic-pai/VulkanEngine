@@ -156,7 +156,8 @@ RectLight3D& Scene3D::CreateRectLight(
     f32 height,
     f32 radius,
     glm::vec3 color,
-    f32 intensity
+    f32 intensity,
+    f32 specular
 ) {
     if (glm::dot(direction, direction) <= 0.0001f) {
         direction = { 0.0f, -1.0f, 0.0f };
@@ -173,6 +174,7 @@ RectLight3D& Scene3D::CreateRectLight(
         std::max(radius, 0.0f),
         glm::max(color, glm::vec3(0.0f)),
         std::max(intensity, 0.0f),
+        std::clamp(specular, 0.0f, 1.0f),
         true
     });
     MarkLightsChanged();
