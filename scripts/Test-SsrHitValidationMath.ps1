@@ -12,6 +12,7 @@ $frameGraphPath = Join-Path $repoRoot "src\renderer\vulkan\frame_graph.cpp"
 $shader = Get-Content -Raw -LiteralPath $shaderPath
 $traceShader = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "assets\shaders\ssr_trace.comp")
 $temporalShader = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "assets\shaders\ssr_temporal.comp")
+$spatialShader = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "assets\shaders\ssr_spatial.comp")
 $renderer = Get-Content -Raw -LiteralPath $rendererPath
 $settings = Get-Content -Raw -LiteralPath $settingsPath
 $descriptorLayout = Get-Content -Raw -LiteralPath $descriptorLayoutPath
@@ -130,13 +131,16 @@ Add-Check "SSR hit tests use nearest depth texels" `
 Add-Check "SSR traversal is deterministic without hit history" `
     ($shader -match "const float jitter = 0\.5") `
     ($shader -match "const float jitter = 0.5") "true"
-Add-Check "SSR packed control decodes the 1024-bit flag" `
+Add-Check "SSR packed controls decode positional bits without high-bit leakage" `
     ($shader -match "floor\(abs\(frame\.ssrControls\.w\) / 1024\.0\)" -and
         $shader -match "mod\(encodedControl, 2\.0\)" -and
         $traceShader -match "mod\(floor\(abs\(frame\.ssrControls\.w\)\), 64\.0\)" -and
-        $temporalShader -match "floor\(abs\(frame\.ssrControls\.w\) / 128\.0\)") `
-    "deferred=$($shader -match '1024\.0'),trace=$($traceShader -match '64\.0'),temporal=$($temporalShader -match '128\.0')" `
-    "true/true/true"
+        $temporalShader -match "floor\(abs\(frame\.ssrControls\.w\) / 2048\.0\)" -and
+        $temporalShader -match "floor\(abs\(frame\.ssrControls\.w\) / 65536\.0\)" -and
+        $spatialShader -match "floor\(abs\(frame\.ssrControls\.w\) / 8192\.0\)" -and
+        $shader -match "floor\(abs\(frame\.ssrControls\.w\) / 262144\.0\)") `
+    "deferred1024=$($shader -match '1024\.0'),traceLow6=$($traceShader -match '64\.0'),temporal2048=$($temporalShader -match '2048\.0'),temporal65536=$($temporalShader -match '65536\.0'),spatial8192=$($spatialShader -match '8192\.0'),sameFrame262144=$($shader -match '262144\.0')" `
+    "true/true/true/true/true/true"
 
 $passCount = @($checks | Where-Object status -eq "pass").Count
 $failCount = @($checks | Where-Object status -eq "fail").Count

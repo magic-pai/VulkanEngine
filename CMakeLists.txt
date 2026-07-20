@@ -84,6 +84,7 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/dlss_mask_3d.frag
     ${SHADER_SOURCE_DIR}/deferred_lighting.vert
     ${SHADER_SOURCE_DIR}/deferred_lighting.frag
+    ${SHADER_SOURCE_DIR}/ffx_sssr_apply.frag
     ${SHADER_SOURCE_DIR}/hdr_composite.vert
     ${SHADER_SOURCE_DIR}/hdr_composite.frag
     ${SHADER_SOURCE_DIR}/taa_resolve.frag

@@ -2651,6 +2651,9 @@ void VulkanCommandBuffer::Record(
     const VulkanComputePipeline* ffxSssrResolveTemporalPipeline,
     const VulkanFfxSssrResolveTemporalResources*
         ffxSssrResolveTemporalResources,
+    const VulkanGraphicsPipeline* ffxSssrApplyPipeline,
+    const VulkanGBufferDescriptorSets* ffxSssrApplyGBufferDescriptorSets,
+    bool ffxSssrSameFrameCompositeEnabled,
     bool ffxSssrPrepareIndirectArgsEnabled,
     bool ffxSssrVisibleOutputClearEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
@@ -3427,6 +3430,7 @@ void VulkanCommandBuffer::Record(
         ffxSssrResolveTemporalPipeline != nullptr &&
         ffxSssrResolveTemporalResources != nullptr &&
         ffxSssrResolveTemporalResources->Count() > imageIndex;
+    bool ffxSssrResolveTemporalDispatched = false;
     if (ffxSssrPrepareIndirectArgsReady) {
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
@@ -4705,6 +4709,7 @@ void VulkanCommandBuffer::Record(
                             ->IndirectArgsBuffer(imageIndex),
                         kFfxSssrDenoiserIndirectArgsOffset
                     );
+                    ffxSssrResolveTemporalDispatched = true;
                     historyCopies += CopyFfxSssrHistoryToOtherImages(
                         commandBuffer,
                         *ffxSssrReprojectResources,
@@ -4722,9 +4727,107 @@ void VulkanCommandBuffer::Record(
         }
     }
 
-    // SSR radiance is resolved after Deferred has written the current HDR
-    // scene color. The resolved image is consumed by Deferred on the next
-    // frame, avoiding a pre-lighting sample of stale scene color history.
+    const bool ffxSssrSameFrameApplyReady =
+        ffxSssrSameFrameCompositeEnabled &&
+        ffxSssrResolveTemporalDispatched &&
+        ffxSssrApplyPipeline != nullptr &&
+        ffxSssrApplyGBufferDescriptorSets != nullptr &&
+        ffxSssrApplyGBufferDescriptorSets->Count() > imageIndex &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        deferredLightingFrameDescriptorSets->Count() > imageIndex &&
+        ffxSssrReprojectResources != nullptr &&
+        ffxSssrReprojectResources->Count() > imageIndex &&
+        hdrRenderPass != nullptr &&
+        hdrFramebuffer != nullptr;
+    if (ffxSssrSameFrameApplyReady) {
+        VkImageMemoryBarrier radianceForApply{};
+        radianceForApply.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        radianceForApply.srcAccessMask =
+            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+        radianceForApply.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        radianceForApply.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        radianceForApply.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        radianceForApply.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        radianceForApply.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        radianceForApply.image =
+            ffxSssrReprojectResources->RadianceHistoryImage(imageIndex);
+        radianceForApply.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_COLOR_BIT;
+        radianceForApply.subresourceRange.baseMipLevel = 0u;
+        radianceForApply.subresourceRange.levelCount = 1u;
+        radianceForApply.subresourceRange.baseArrayLayer = 0u;
+        radianceForApply.subresourceRange.layerCount = 1u;
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            1u,
+            &radianceForApply
+        );
+
+        VkRenderPassBeginInfo applyPassInfo{};
+        applyPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        applyPassInfo.renderPass = hdrRenderPass->LoadHandle();
+        applyPassInfo.framebuffer = hdrFramebuffer->Handle(imageIndex);
+        applyPassInfo.renderArea.offset = { 0, 0 };
+        applyPassInfo.renderArea.extent = hdrFramebuffer->Extent();
+        vkCmdBeginRenderPass(
+            commandBuffer,
+            &applyPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+        SetViewportAndScissor(
+            commandBuffer,
+            { 0, 0 },
+            hdrFramebuffer->Extent()
+        );
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Handle()
+        );
+        const VkDescriptorSet frameDescriptorSet =
+            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Layout(),
+            0,
+            1,
+            &frameDescriptorSet,
+            0,
+            nullptr
+        );
+        const VkDescriptorSet applyGBufferDescriptorSet =
+            ffxSssrApplyGBufferDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Layout(),
+            1,
+            1,
+            &applyGBufferDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        vkCmdEndRenderPass(commandBuffer);
+
+        if (bindStats != nullptr) {
+            ++bindStats->ffxSssrApplyDraws;
+            ++bindStats->ffxSssrApplyFrameBinds;
+            ++bindStats->ffxSssrApplyGBufferBinds;
+        }
+    }
+
+    // The default FFX path applies ResolveTemporal output in this frame.
+    // The reverse control retains the old next-frame Deferred history path.
     const bool ssrPostReconstructionReady =
         ssrReconstructionEnabled &&
         deferredLightingFrameDescriptorSets != nullptr &&

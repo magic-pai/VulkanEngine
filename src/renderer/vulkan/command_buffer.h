@@ -343,6 +343,10 @@ public:
         const VulkanComputePipeline* ffxSssrResolveTemporalPipeline = nullptr,
         const VulkanFfxSssrResolveTemporalResources*
             ffxSssrResolveTemporalResources = nullptr,
+        const VulkanGraphicsPipeline* ffxSssrApplyPipeline = nullptr,
+        const VulkanGBufferDescriptorSets*
+            ffxSssrApplyGBufferDescriptorSets = nullptr,
+        bool ffxSssrSameFrameCompositeEnabled = false,
         bool ffxSssrPrepareIndirectArgsEnabled = false,
         bool ffxSssrVisibleOutputClearEnabled = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,

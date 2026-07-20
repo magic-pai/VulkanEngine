@@ -114,7 +114,20 @@ VulkanHdrRenderPass::VulkanHdrRenderPass(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
 ) : m_Device(device.Handle()) {
-    CreateRenderPass(device, renderTargets);
+    CreateRenderPass(
+        device,
+        renderTargets,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        m_RenderPass
+    );
+    CreateRenderPass(
+        device,
+        renderTargets,
+        VK_ATTACHMENT_LOAD_OP_LOAD,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        m_LoadRenderPass
+    );
 }
 
 VulkanHdrRenderPass::~VulkanHdrRenderPass() {
@@ -125,27 +138,47 @@ VkRenderPass VulkanHdrRenderPass::Handle() const {
     return m_RenderPass;
 }
 
+VkRenderPass VulkanHdrRenderPass::LoadHandle() const {
+    return m_LoadRenderPass;
+}
+
 void VulkanHdrRenderPass::Recreate(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
 ) {
     Release();
     m_Device = device.Handle();
-    CreateRenderPass(device, renderTargets);
+    CreateRenderPass(
+        device,
+        renderTargets,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        m_RenderPass
+    );
+    CreateRenderPass(
+        device,
+        renderTargets,
+        VK_ATTACHMENT_LOAD_OP_LOAD,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        m_LoadRenderPass
+    );
 }
 
 void VulkanHdrRenderPass::CreateRenderPass(
     const VulkanDevice& device,
-    const VulkanSceneRenderTargets& renderTargets
+    const VulkanSceneRenderTargets& renderTargets,
+    VkAttachmentLoadOp colorLoadOp,
+    VkImageLayout colorInitialLayout,
+    VkRenderPass& renderPass
 ) {
     std::array<VkAttachmentDescription, 2> attachments{};
     attachments[0].format = renderTargets.HdrSceneColorFormat();
     attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[0].loadOp = colorLoadOp;
     attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].initialLayout = colorInitialLayout;
     attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     attachments[1].format = renderTargets.SceneDepthFormat();
@@ -174,16 +207,22 @@ void VulkanHdrRenderPass::CreateRenderPass(
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
+    // Both variants must remain render-pass compatible with the shared HDR
+    // framebuffer, including identical subpass dependencies.
     dependency.srcStageMask =
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     dependency.srcAccessMask =
+        VK_ACCESS_SHADER_READ_BIT |
         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dependency.dstStageMask =
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dependency.dstAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
         VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
 
@@ -196,7 +235,7 @@ void VulkanHdrRenderPass::CreateRenderPass(
     createInfo.dependencyCount = 1;
     createInfo.pDependencies = &dependency;
 
-    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
+    if (vkCreateRenderPass(device.Handle(), &createInfo, nullptr, &renderPass) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create Vulkan HDR render pass");
     }
 }
@@ -205,6 +244,10 @@ void VulkanHdrRenderPass::Release() {
     if (m_RenderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
         m_RenderPass = VK_NULL_HANDLE;
+    }
+    if (m_LoadRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_LoadRenderPass, nullptr);
+        m_LoadRenderPass = VK_NULL_HANDLE;
     }
 }
 

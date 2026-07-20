@@ -5583,6 +5583,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_HdrCompositePipeline.reset();
     m_WeightedTranslucencyResolvePipeline.reset();
     m_DeferredLightingPipeline.reset();
+    m_FfxSssrApplyPipeline.reset();
     m_LightTileCullComputePipeline.reset();
     m_LightClusterCullComputePipeline.reset();
     m_AutoExposureComputePipeline.reset();
@@ -5663,6 +5664,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_FfxSssrConstantsResources.reset();
     m_SsrReconstructionDescriptorSets.reset();
     m_HiZDescriptorSets.reset();
+    m_FfxSssrApplyGBufferDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
     m_SsrDepthPyramidSampler.reset();
     m_SceneTargetSampler.reset();
@@ -6013,6 +6015,8 @@ void VulkanRenderer::DrawFrame() {
         ssrSceneColorHistorySourceValid
             ? *m_PreviousTemporalHistoryImageIndex
             : imageIndex;
+    const int deferredPbrDebugView =
+        DeferredPbrDebugViewIndex(m_RenderDebugSettings.forwardView);
     const bool ssrColorResolveCandidate =
         has3DMainPass &&
         m_DeferredLightingPipeline != nullptr &&
@@ -6051,8 +6055,43 @@ void VulkanRenderer::DrawFrame() {
             m_FfxSssrResolveTemporalResources->Extent(),
             m_SceneRenderTargets->Extent()
         );
+    const bool ffxSssrSameFrameCompositeReverseControlActive =
+        EnvironmentFlagEnabled("SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF");
+    const bool ffxSssrSameFrameCompositeRequested =
+        ffxSssrDeferredCompositeRequested &&
+        !ffxSssrSameFrameCompositeReverseControlActive &&
+        deferredPbrDebugView == 0;
+    const bool ffxSssrSameFrameCompositeResourcesReady =
+        ffxSssrDeferredCompositeResourcesReady &&
+        m_FfxSssrApplyPipeline != nullptr &&
+        m_FfxSssrApplyGBufferDescriptorSets != nullptr &&
+        m_HdrRenderPass != nullptr &&
+        m_HdrFramebuffer != nullptr &&
+        imageIndex < m_FfxSssrReprojectResources->Count() &&
+        imageIndex < m_FfxSssrApplyGBufferDescriptorSets->Count();
+    const VkImageView ffxSssrSameFrameCompositeView =
+        ffxSssrSameFrameCompositeResourcesReady
+            ? m_FfxSssrReprojectResources->RadianceHistoryView(imageIndex)
+            : VK_NULL_HANDLE;
+    const bool ffxSssrSameFrameCompositeDescriptorUpdated =
+        ffxSssrSameFrameCompositeRequested &&
+        ffxSssrSameFrameCompositeResourcesReady &&
+        m_SceneTargetSampler != nullptr &&
+        m_FfxSssrApplyGBufferDescriptorSets->UpdateSsrSceneColorHistory(
+            m_Device,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            imageIndex,
+            imageIndex,
+            ffxSssrSameFrameCompositeView,
+            VK_IMAGE_LAYOUT_GENERAL
+        );
+    const bool ffxSssrSameFrameCompositeActive =
+        ffxSssrSameFrameCompositeRequested &&
+        ffxSssrSameFrameCompositeDescriptorUpdated;
     const bool ffxSssrDeferredCompositeActive =
         ffxSssrDeferredCompositeRequested &&
+        !ffxSssrSameFrameCompositeActive &&
         m_FfxSssrRadianceHistoryValid &&
         ssrSceneColorHistorySourceValid &&
         ffxSssrDeferredCompositeResourcesReady;
@@ -6530,7 +6569,8 @@ void VulkanRenderer::DrawFrame() {
         frameReflectionProbes,
         shadowSamplingEnabled,
         &temporalState,
-        ffxSssrDeferredCompositeActive
+        ffxSssrDeferredCompositeActive,
+        ffxSssrSameFrameCompositeActive
     );
     UpdateFfxSssrConstants(
         imageIndex,
@@ -6581,8 +6621,6 @@ void VulkanRenderer::DrawFrame() {
     m_SyncObjects->MarkImageInFlight(imageIndex, currentFrameFence);
     vkResetFences(m_Device.Handle(), 1, &currentFrameFence);
 
-    const int deferredPbrDebugView =
-        DeferredPbrDebugViewIndex(m_RenderDebugSettings.forwardView);
     const int weightedTranslucencyDebugView =
         WeightedTranslucencyDebugViewIndex(m_RenderDebugSettings.forwardView);
     const int gBufferDebugView = GBufferDebugViewIndex(m_RenderDebugSettings.forwardView);
@@ -6812,6 +6850,19 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrDeferredCompositeConfidenceSource =
         frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeRequested =
+        ffxSssrSameFrameCompositeRequested ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeResourcesReady =
+        ffxSssrSameFrameCompositeResourcesReady ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeDescriptorBound =
+        ffxSssrSameFrameCompositeDescriptorUpdated ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeActive =
+        ffxSssrSameFrameCompositeActive ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeSourceImageIndex =
+        ffxSssrSameFrameCompositeActive ? static_cast<u32>(imageIndex) : 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeSourceFrameAge = 0u;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeReverseControlActive =
+        ffxSssrSameFrameCompositeReverseControlActive ? 1u : 0u;
     frameStats.ssr.holeDiagnosticsRequested =
         ssrHoleDiagnosticsRequested ? 1u : 0u;
     frameStats.ssr.holeDiagnosticsReadbackValid =
@@ -8708,6 +8759,13 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
             ? m_FfxSssrResolveTemporalResources.get()
             : nullptr,
+        ffxSssrSameFrameCompositeActive
+            ? m_FfxSssrApplyPipeline.get()
+            : nullptr,
+        ffxSssrSameFrameCompositeActive
+            ? m_FfxSssrApplyGBufferDescriptorSets.get()
+            : nullptr,
+        ffxSssrSameFrameCompositeActive,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0,
         ffxSssrVisibleOutputClearEnabled,
         has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
@@ -8772,6 +8830,21 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.ffxSssrResolveTemporalHistoryCopies;
     frameStats.ssr.fidelityFxSssrVisibleOutputClears =
         frameStats.binds.ffxSssrVisibleOutputClears;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeApplyDraws =
+        frameStats.binds.ffxSssrApplyDraws;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeFrameBinds =
+        frameStats.binds.ffxSssrApplyFrameBinds;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeGBufferBinds =
+        frameStats.binds.ffxSssrApplyGBufferBinds;
+    frameStats.ssr.fidelityFxSssrSameFrameCompositeActive =
+        frameStats.ssr.fidelityFxSssrSameFrameCompositeRequested > 0u &&
+            frameStats.ssr.fidelityFxSssrSameFrameCompositeDescriptorBound > 0u &&
+            frameStats.ssr.fidelityFxSssrResolveTemporalDispatches > 0u &&
+            frameStats.ssr.fidelityFxSssrSameFrameCompositeApplyDraws == 1u &&
+            frameStats.ssr.fidelityFxSssrSameFrameCompositeFrameBinds == 1u &&
+            frameStats.ssr.fidelityFxSssrSameFrameCompositeGBufferBinds == 1u
+            ? 1u
+            : 0u;
     frameStats.ssr.fidelityFxSssrRuntimeActive =
         frameStats.ssr.fidelityFxSssrClassifyTilesDispatches > 0u &&
             frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u &&
@@ -8841,15 +8914,17 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.reconstructionCurrentHdrMipChainReady =
         frameStats.ssr.reconstructionCurrentHdrMipLevels > 1u ? 1u : 0u;
     frameStats.ssr.radianceSource =
-        frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u
-            ? 4u
+        frameStats.ssr.fidelityFxSssrSameFrameCompositeActive > 0u
+            ? 5u
+            : (frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u
+                ? 4u
             : (frameStats.ssr.reconstructionCurrentHdrSourceEnabled > 0 &&
                 frameStats.ssr.sceneColorHistoryActive > 0 &&
                 frameStats.ssr.reconstructionCurrentHdrMipChainReady > 0
                     ? 3u
                     : (frameStats.ssr.sceneColorHistoryActive > 0
                         ? 2u
-                        : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u)));
+                        : (frameStats.ssr.colorResolveEnabled > 0 ? 1u : 0u))));
     frameStats.ssr.fallbackBlendRequested =
         m_ShadowSettings.ssrProbeFallbackBlendEnabled ? 1u : 0u;
     frameStats.ssr.fallbackBlendActive =
@@ -9856,6 +9931,17 @@ void VulkanRenderer::CreateSwapchainResources() {
         m_LocalShadowAtlas.get(),
         m_SsrDepthPyramid.get()
     );
+    m_FfxSssrApplyGBufferDescriptorSets =
+        std::make_unique<VulkanGBufferDescriptorSets>(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            m_ShadowMap.get(),
+            m_DirectionalShadowCascadeAtlas.get(),
+            m_LocalShadowAtlas.get(),
+            m_SsrDepthPyramid.get()
+        );
     m_HiZDescriptorSets = std::make_unique<VulkanHiZDescriptorSets>(
         m_Device,
         *m_HiZDescriptorSetLayout,
@@ -10325,6 +10411,19 @@ void VulkanRenderer::CreateSwapchainResources() {
             deferredLightingFragmentShaderPath
         )
     );
+    const std::string ffxSssrApplyFragmentShaderPath =
+        std::string(SE_SHADER_DIR) + "/ffx_sssr_apply.frag.spv";
+    m_FfxSssrApplyPipeline = std::make_unique<VulkanGraphicsPipeline>(
+        m_Device,
+        *m_DescriptorSetLayout,
+        *m_MaterialDescriptorSetLayout,
+        m_HdrRenderPass->LoadHandle(),
+        *m_Swapchain,
+        PipelineSpec::FidelityFxSssrApply(
+            deferredLightingVertexShaderPath,
+            ffxSssrApplyFragmentShaderPath
+        )
+    );
     if (m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced) {
         const std::string lightTileCullShaderPath =
@@ -10623,6 +10722,9 @@ void VulkanRenderer::RecreateSwapchain() {
     }
     if (m_DeferredLightingPipeline != nullptr) {
         m_DeferredLightingPipeline->Release();
+    }
+    if (m_FfxSssrApplyPipeline != nullptr) {
+        m_FfxSssrApplyPipeline->Release();
     }
     if (m_LightTileCullComputePipeline != nullptr) {
         m_LightTileCullComputePipeline->Release();
@@ -11315,6 +11417,20 @@ void VulkanRenderer::RecreateSwapchain() {
             m_SsrDepthPyramid.get()
         );
     }
+    if (m_FfxSssrApplyGBufferDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_FfxSssrApplyGBufferDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            m_ShadowMap.get(),
+            m_DirectionalShadowCascadeAtlas.get(),
+            m_LocalShadowAtlas.get(),
+            m_SsrDepthPyramid.get()
+        );
+    }
     if (m_HdrDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&
         m_BloomPyramid != nullptr &&
@@ -11751,6 +11867,23 @@ void VulkanRenderer::RecreateSwapchain() {
             PipelineSpec::DeferredLighting(
                 deferredLightingVertexShaderPath,
                 deferredLightingFragmentShaderPath
+            )
+        );
+    }
+    if (m_FfxSssrApplyPipeline != nullptr && m_HdrRenderPass != nullptr) {
+        const std::string deferredLightingVertexShaderPath =
+            std::string(SE_SHADER_DIR) + "/deferred_lighting.vert.spv";
+        const std::string ffxSssrApplyFragmentShaderPath =
+            std::string(SE_SHADER_DIR) + "/ffx_sssr_apply.frag.spv";
+        m_FfxSssrApplyPipeline->Recreate(
+            m_Device,
+            *m_DescriptorSetLayout,
+            *m_MaterialDescriptorSetLayout,
+            m_HdrRenderPass->LoadHandle(),
+            *m_Swapchain,
+            PipelineSpec::FidelityFxSssrApply(
+                deferredLightingVertexShaderPath,
+                ffxSssrApplyFragmentShaderPath
             )
         );
     }
@@ -12788,6 +12921,21 @@ void VulkanRenderer::ApplyShadowMapSettings() {
         );
     }
 
+    if (m_FfxSssrApplyGBufferDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_FfxSssrApplyGBufferDescriptorSets->Recreate(
+            m_Device,
+            *m_MaterialDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            m_ShadowMap.get(),
+            m_DirectionalShadowCascadeAtlas.get(),
+            m_LocalShadowAtlas.get(),
+            m_SsrDepthPyramid.get()
+        );
+    }
+
     const std::string shadowShaderPath = std::string(SE_SHADER_DIR) + "/shadow_depth.vert.spv";
     const PipelineSpec shadowSpec =
         PipelineSpec::ShadowDepth(shadowShaderPath, m_ShadowMap->Extent());
@@ -13748,7 +13896,8 @@ void VulkanRenderer::UpdateUniformBuffer(
     const FrameReflectionProbeSet& reflectionProbes,
     bool shadowSamplingEnabled,
     const FrameTemporalState* temporalState,
-    bool ssrFidelityFxDeferredCompositeActive
+    bool ssrFidelityFxDeferredCompositeActive,
+    bool ssrFidelityFxSameFrameCompositeActive
 ) const {
     UniformBufferObject uniformData{};
     if (matrices != nullptr) {
@@ -13823,7 +13972,8 @@ void VulkanRenderer::UpdateUniformBuffer(
         (m_ShadowSettings.ssrProbeFallbackBlendEnabled ? 16384.0f : 0.0f) +
         (m_ShadowSettings.ssrTemporalHistoryLockEnabled ? 32768.0f : 0.0f) +
         (m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled ? 65536.0f : 0.0f) +
-        (ssrFidelityFxDeferredCompositeActive ? 131072.0f : 0.0f);
+        (ssrFidelityFxDeferredCompositeActive ? 131072.0f : 0.0f) +
+        (ssrFidelityFxSameFrameCompositeActive ? 262144.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),

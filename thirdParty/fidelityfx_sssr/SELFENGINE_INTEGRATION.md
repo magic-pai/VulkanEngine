@@ -92,15 +92,16 @@ Current integration state:
   lane that proves the FFX dispatches are suppressed when not requested. The
   gate also requires the FFX FrameGraph resources, pass split, history writeback,
   and Vulkan validation logs to be clean.
-- Runtime image contribution now has a controlled Deferred composite bridge:
-  when `SE_SSR_BACKEND=ffx-sssr`, a previous temporal frame exists, and the FFX
-  history has completed at least once, GBuffer binding 17 samples the previous
-  FFX `RadianceHistory` instead of the internal `SSRResolved` image. The shader
-  uses an explicit SSR control bit to treat this as radiance history, bypassing
-  the internal alpha-confidence/metadata contract and blending conservatively
-  over the stable probe/IBL fallback.
+- Runtime image contribution now follows the AMD sample's same-frame ordering.
+  Deferred writes lit HDR plus an attenuated IBL baseline, ResolveTemporal
+  writes the current image's `RadianceHistory`, and a fullscreen
+  `FidelityFXSSSRApplyReflections` pass composites that current result into HDR
+  before TAA/DLSS. HDR alpha carries the baseline attenuation into a
+  destination-alpha additive blend and is restored to one by the apply pass.
+  `SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF=1` retains the previous-frame Deferred
+  consumer as an explicit diagnostic fallback.
 
-Production visual contract (SelfEngine FFX contract v11):
+Production visual contract (SelfEngine FFX contract v12):
 - The default ray density is `4 rays/quad`. Sparse `1` and `2` ray modes remain
   explicit diagnostics because quad replication produced distance-dependent
   rings on glossy receivers in the current integration.
@@ -119,6 +120,7 @@ Debug reverse controls:
 - `SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF=1`
 - `SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE=1`
 - `SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF=1`
+- `SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF=1`
 
 Validation note:
 - The accepted GPU behavior was run with the exact v10 combination that became
@@ -135,3 +137,11 @@ Validation note:
   device compatibility task resolves that policy boundary. Use
   `scripts\Test-FidelityFxSssrIntegration.ps1 -StaticOnly -SkipBuild -Strict`
   for the source/default contract gate in the meantime.
+- Contract v12 adds same-frame Apply ordering and Debug/CSV evidence for source
+  identity, frame age, draw count, descriptor binds, and the delayed reverse
+  control. After signing the rebuilt Forward3D development binary, the strict
+  cross-scene integration matrix passed `981 pass / 0 fail`; the general SSR
+  regression passed `691 pass / 0 fail`, and the packed-control math gate passed
+  `30 pass / 0 fail`. The user accepted the real LightingShowcase re-entry test:
+  a partly off-screen glossy sphere now returns with reflections present in the
+  same frame instead of briefly exposing its base material.

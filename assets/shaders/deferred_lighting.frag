@@ -2171,6 +2171,10 @@ bool SsrFidelityFxRadianceHistorySourceEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 131072.0), 2.0) > 0.5;
 }
 
+bool SsrFidelityFxSameFrameCompositeEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 262144.0), 2.0) > 0.5;
+}
+
 float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
     float resolvedConfidence = clamp(confidence, 0.0, 1.0);
     if (!SsrProbeFallbackBlendEnabled()) {
@@ -4803,7 +4807,12 @@ void main() {
     ssrTrace.depthConfidence = 0.0;
     ssrTrace.validationConfidence = 0.0;
     vec3 ssrReflection = environmentReflection;
-    if (SsrReconstructionEnabled()) {
+    bool ffxSameFrameComposite =
+        SsrFidelityFxSameFrameCompositeEnabled() && deferredDebugView == 0;
+    if (ffxSameFrameComposite) {
+        // The current FFX result is applied after ResolveTemporal in this frame.
+        // Keep only the probe/IBL baseline here so Intersect can sample lit HDR.
+    } else if (SsrReconstructionEnabled()) {
         bool ffxRadianceHistorySource =
             SsrFidelityFxRadianceHistorySourceEnabled();
         vec2 ssrHistoryUv = fragUv;
@@ -4893,6 +4902,14 @@ void main() {
             : 0.36 * ambientStrength,
         ssrReflection
     );
+    float ffxSameFrameBlendWeight =
+        ffxSameFrameComposite && roughness < 0.6
+            ? SsrProbeFallbackBlendWeight(
+                clamp(frame.ssrControls.x, 0.0, 1.0),
+                roughness
+            )
+            : 0.0;
+    iblAmbient.specular *= 1.0 - ffxSameFrameBlendWeight;
     vec3 ambientDiffuse = iblAmbient.diffuse;
     vec3 ambientSpecular = iblAmbient.specular;
     vec3 ambient = ambientDiffuse + ambientSpecular;
@@ -4905,6 +4922,8 @@ void main() {
     ambient *= ssaoVisibility;
     ambientDiffuse *= ssaoVisibility;
     ambientSpecular *= ssaoVisibility;
+    float ffxSameFrameSpecularVisibility =
+        ambientVisibility * ssaoVisibility;
     vec3 ambientProbe =
         SampleProbeGridIrradiance(worldPosition, normal) *
         baseColor *
@@ -4923,6 +4942,7 @@ void main() {
             0.32;
         direct *= mix(1.0, 0.78, transmission);
         ambient = mix(ambient, ambient * 0.88 + transmittedEnv, transmission);
+        ffxSameFrameSpecularVisibility *= mix(1.0, 0.88, transmission);
     }
 
     if (deferredDebugView == 22) {
@@ -5236,10 +5256,18 @@ void main() {
         return;
     }
 
-    vec3 finalColor = ApplyHeightFog(
+    float heightFogFactor = HeightFogFactor(worldPosition, cameraPosition);
+    vec3 finalColor = mix(
         ambient + direct + emissiveColor,
-        worldPosition,
-        cameraPosition
+        HeightFogColor(),
+        heightFogFactor
     );
-    outColor = vec4(finalColor, 1.0);
+    float outputAlpha = ffxSameFrameComposite
+        ? clamp(
+            ffxSameFrameSpecularVisibility * (1.0 - heightFogFactor),
+            0.0,
+            1.0
+        )
+        : 1.0;
+    outColor = vec4(finalColor, outputAlpha);
 }

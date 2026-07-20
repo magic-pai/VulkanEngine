@@ -22,6 +22,7 @@ public:
     SE_DISABLE_MOVE(VulkanHdrRenderPass);
 
     VkRenderPass Handle() const;
+    VkRenderPass LoadHandle() const;
 
     void Recreate(
         const VulkanDevice& device,
@@ -32,12 +33,16 @@ public:
 private:
     void CreateRenderPass(
         const VulkanDevice& device,
-        const VulkanSceneRenderTargets& renderTargets
+        const VulkanSceneRenderTargets& renderTargets,
+        VkAttachmentLoadOp colorLoadOp,
+        VkImageLayout colorInitialLayout,
+        VkRenderPass& renderPass
     );
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_LoadRenderPass = VK_NULL_HANDLE;
 };
 
 class VulkanWeightedTranslucencyRenderPass {

@@ -369,7 +369,8 @@ struct RendererSsrStats {
     u32 sceneColorHistorySourceImageIndex = 0;
     u32 sceneColorHistoryFrameAge = 0;
     // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history,
-    // 3 = active current-HDR source, 4 = AMD FidelityFX SSSR ResolveTemporal history.
+    // 3 = active current-HDR source, 4 = previous FFX ResolveTemporal history,
+    // 5 = current-frame FFX ResolveTemporal post composition.
     u32 radianceSource = 0;
     // 0 = SelfEngine internal SSR, 1 = AMD FidelityFX SSSR.
     u32 backendRequestedProvider = 0;
@@ -493,6 +494,16 @@ struct RendererSsrStats {
     u32 fidelityFxSssrDeferredCompositeQualityGate = 0;
     // 0 = none/internal, 1 = ResolveTemporal alpha from sample-count/variance.
     u32 fidelityFxSssrDeferredCompositeConfidenceSource = 0;
+    u32 fidelityFxSssrSameFrameCompositeRequested = 0;
+    u32 fidelityFxSssrSameFrameCompositeResourcesReady = 0;
+    u32 fidelityFxSssrSameFrameCompositeDescriptorBound = 0;
+    u32 fidelityFxSssrSameFrameCompositeActive = 0;
+    u32 fidelityFxSssrSameFrameCompositeSourceImageIndex = 0;
+    u32 fidelityFxSssrSameFrameCompositeSourceFrameAge = 0;
+    u32 fidelityFxSssrSameFrameCompositeApplyDraws = 0;
+    u32 fidelityFxSssrSameFrameCompositeFrameBinds = 0;
+    u32 fidelityFxSssrSameFrameCompositeGBufferBinds = 0;
+    u32 fidelityFxSssrSameFrameCompositeReverseControlActive = 0;
     u32 fidelityFxSssrRayCounterReadbackValid = 0;
     u32 fidelityFxSssrClassifiedRayCount = 0;
     u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
@@ -1020,6 +1031,9 @@ struct RendererBindStats {
     u32 ffxSssrResolveTemporalDescriptorBinds = 0;
     u32 ffxSssrResolveTemporalHistoryCopies = 0;
     u32 ffxSssrVisibleOutputClears = 0;
+    u32 ffxSssrApplyDraws = 0;
+    u32 ffxSssrApplyFrameBinds = 0;
+    u32 ffxSssrApplyGBufferBinds = 0;
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;

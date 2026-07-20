@@ -713,6 +713,16 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrDeferredCompositeSource << ','
         << ssr.fidelityFxSssrDeferredCompositeQualityGate << ','
         << ssr.fidelityFxSssrDeferredCompositeConfidenceSource << ','
+        << ssr.fidelityFxSssrSameFrameCompositeRequested << ','
+        << ssr.fidelityFxSssrSameFrameCompositeResourcesReady << ','
+        << ssr.fidelityFxSssrSameFrameCompositeDescriptorBound << ','
+        << ssr.fidelityFxSssrSameFrameCompositeActive << ','
+        << ssr.fidelityFxSssrSameFrameCompositeSourceImageIndex << ','
+        << ssr.fidelityFxSssrSameFrameCompositeSourceFrameAge << ','
+        << ssr.fidelityFxSssrSameFrameCompositeApplyDraws << ','
+        << ssr.fidelityFxSssrSameFrameCompositeFrameBinds << ','
+        << ssr.fidelityFxSssrSameFrameCompositeGBufferBinds << ','
+        << ssr.fidelityFxSssrSameFrameCompositeReverseControlActive << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1596,6 +1606,9 @@ void BenchmarkRecorder::RecordFrame(
         << binds.ffxSssrResolveTemporalDispatches << ','
         << binds.ffxSssrResolveTemporalDescriptorBinds << ','
         << binds.ffxSssrResolveTemporalHistoryCopies << ','
+        << binds.ffxSssrApplyDraws << ','
+        << binds.ffxSssrApplyFrameBinds << ','
+        << binds.ffxSssrApplyGBufferBinds << ','
         << binds.reflectionProbeDebugDraws << ','
         << binds.reflectionProbeDebugFrameBinds << ','
         << binds.reflectionProbeDebugGBufferBinds << ','
@@ -2142,6 +2155,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_deferred_composite_source,"
         << "ssr_ffx_sssr_deferred_composite_quality_gate,"
         << "ssr_ffx_sssr_deferred_composite_confidence_source,"
+        << "ssr_ffx_sssr_same_frame_composite_requested,"
+        << "ssr_ffx_sssr_same_frame_composite_resources_ready,"
+        << "ssr_ffx_sssr_same_frame_composite_descriptor_bound,"
+        << "ssr_ffx_sssr_same_frame_composite_active,"
+        << "ssr_ffx_sssr_same_frame_composite_source_image_index,"
+        << "ssr_ffx_sssr_same_frame_composite_source_frame_age,"
+        << "ssr_ffx_sssr_same_frame_composite_apply_draws,"
+        << "ssr_ffx_sssr_same_frame_composite_frame_binds,"
+        << "ssr_ffx_sssr_same_frame_composite_gbuffer_binds,"
+        << "ssr_ffx_sssr_same_frame_composite_reverse_control_active,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2883,6 +2906,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "ffx_sssr_resolve_temporal_dispatches,"
         << "ffx_sssr_resolve_temporal_descriptor_binds,"
         << "ffx_sssr_resolve_temporal_history_copies,"
+        << "ffx_sssr_apply_draws,"
+        << "ffx_sssr_apply_frame_binds,"
+        << "ffx_sssr_apply_gbuffer_binds,"
         << "reflection_probe_debug_draws,reflection_probe_debug_frame_binds,"
         << "reflection_probe_debug_gbuffer_binds,"
         << "height_fog_debug_draws,height_fog_debug_frame_binds,"

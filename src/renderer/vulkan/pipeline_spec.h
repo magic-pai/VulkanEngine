@@ -16,6 +16,7 @@ enum class ColorBlendMode {
     Disabled,
     Alpha,
     Additive,
+    DestinationAlphaAdditive,
     ZeroSource
 };
 
@@ -70,6 +71,10 @@ struct PipelineSpec {
         std::string fragmentShaderPath
     );
     static PipelineSpec DeferredLighting(
+        std::string vertexShaderPath,
+        std::string fragmentShaderPath
+    );
+    static PipelineSpec FidelityFxSssrApply(
         std::string vertexShaderPath,
         std::string fragmentShaderPath
     );

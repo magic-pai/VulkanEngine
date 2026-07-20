@@ -652,7 +652,8 @@ private:
         const FrameReflectionProbeSet& reflectionProbes,
         bool shadowSamplingEnabled,
         const FrameTemporalState* temporalState,
-        bool ssrFidelityFxDeferredCompositeActive = false
+        bool ssrFidelityFxDeferredCompositeActive = false,
+        bool ssrFidelityFxSameFrameCompositeActive = false
     ) const;
     void UpdateFfxSssrConstants(
         std::size_t imageIndex,
@@ -903,6 +904,8 @@ private:
     std::unique_ptr<VulkanMaterialDescriptorSets>
         m_ReflectionCaptureMaterialDescriptorSets;
     std::unique_ptr<VulkanGBufferDescriptorSets> m_GBufferDescriptorSets;
+    std::unique_ptr<VulkanGBufferDescriptorSets>
+        m_FfxSssrApplyGBufferDescriptorSets;
     std::unique_ptr<VulkanHiZDescriptorSets> m_HiZDescriptorSets;
     std::unique_ptr<VulkanSsrReconstructionDescriptorSets>
         m_SsrReconstructionDescriptorSets;
@@ -982,6 +985,7 @@ private:
     std::unique_ptr<VulkanGraphicsPipeline> m_GBufferGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedGBufferGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DeferredLightingPipeline;
+    std::unique_ptr<VulkanGraphicsPipeline> m_FfxSssrApplyPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_HdrCompositePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_TaaResolvePipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_BloomDownsamplePipeline;

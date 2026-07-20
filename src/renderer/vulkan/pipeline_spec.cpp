@@ -163,6 +163,19 @@ PipelineSpec PipelineSpec::DeferredLighting(
     return spec;
 }
 
+PipelineSpec PipelineSpec::FidelityFxSssrApply(
+    std::string vertexShaderPath,
+    std::string fragmentShaderPath
+) {
+    PipelineSpec spec = DeferredLighting(
+        std::move(vertexShaderPath),
+        std::move(fragmentShaderPath)
+    );
+    spec.alphaBlendEnabled = true;
+    spec.colorBlendModes[0] = ColorBlendMode::DestinationAlphaAdditive;
+    return spec;
+}
+
 PipelineSpec PipelineSpec::HdrComposite(
     std::string vertexShaderPath,
     std::string fragmentShaderPath

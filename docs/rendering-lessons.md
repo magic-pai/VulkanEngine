@@ -2,6 +2,35 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-21 - Post-Lighting SSSR Output Must Be Composited In The Same Frame
+
+Symptom:
+- When a glossy sphere moved partly off-screen and rapidly returned, it showed its base material/IBL state first and gained the screen-space reflection several frames later.
+
+False leads:
+- Tuning material roughness, SSR confidence, history rejection, or probe strength.
+- Weakening receiver depth/normal/disocclusion validation to keep stale history alive near the screen edge.
+
+Cause:
+- SelfEngine resolved FidelityFX SSSR after Deferred lighting but only consumed `RadianceHistory` in Deferred on the next frame. A newly visible receiver therefore had no same-frame screen-space result, and conservative history rejection could extend the visible delay.
+
+Control test:
+- The default FFX lane must record `ResolveTemporal dispatch=1`, `Apply draw=1`, `sourceImageIndex=currentImageIndex`, `sourceFrameAge=0`, and `radianceSource=5`. `SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF=1` must suppress Apply and restore the delayed `radianceSource=4` path.
+
+Fix:
+- Added an AMD-style fullscreen ApplyReflections pass after ResolveTemporal and before TAA/DLSS.
+- Deferred preserves a weighted IBL baseline in HDR alpha; destination-alpha additive blending replaces that baseline with current-frame FFX radiance and restores alpha to one.
+- Added an HDR load render pass, explicit compute/transfer-to-fragment synchronization, FrameGraph modeling, CSV counters, source identity/frame age, and a reverse control.
+
+Prevention:
+- Treat a post-lighting reflection producer consumed by next-frame lighting as temporal history, not current output. Audit final producer-to-visible-consumer ordering whenever entry-frame or re-entry latency appears.
+- Do not weaken disocclusion validation to hide a scheduling defect. Prefer same-frame composition with an explicit off-screen IBL/probe fallback.
+
+Validation:
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `981 / 0` across LightingShowcase, Forward3D FBX, internal-backend, and delayed-path controls with zero FrameGraph/Vulkan issues.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `691 / 0`; `Test-SsrHitValidationMath.ps1` passed `30 / 0`.
+- The user confirmed in the real LightingShowcase window that rapidly returning a partly off-screen glossy sphere no longer exposes its base material before reflections appear.
+
 ## 2026-07-21 - FFX SSSR Glossy Stability Is A Multi-Part Sampling Contract
 
 Symptom:

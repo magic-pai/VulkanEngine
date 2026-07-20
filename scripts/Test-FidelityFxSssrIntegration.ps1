@@ -132,8 +132,18 @@ function Invoke-StaticChecks {
         Join-Path $projectRoot "src\renderer\vulkan\command_buffer.cpp")
     $descriptorSetsSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\descriptor_sets.cpp")
+    $renderTargetsSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\render_targets.cpp")
+    $renderTargetsHeader = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\render_targets.h")
+    $pipelineSpecSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\pipeline_spec.cpp")
+    $graphicsPipelineSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\graphics_pipeline.cpp")
     $deferredLightingShader = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "assets\shaders\deferred_lighting.frag")
+    $ffxApplyShader = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "assets\shaders\ffx_sssr_apply.frag")
     $benchmarkRecorderSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\app\benchmark_recorder.cpp")
     $ssrFeatureSource = Get-Content -Raw -LiteralPath (
@@ -461,6 +471,30 @@ function Invoke-StaticChecks {
             $benchmarkRecorderSource -match "ssr_ffx_sssr_deferred_composite_quality_gate") `
         "descriptorOverride=$($descriptorSetsSource -match 'resolvedReflectionOverride'),radianceHistory=$($rendererSource -match 'RadianceHistoryView'),active=$($rendererSource -match 'fidelityFxSssrDeferredCompositeActive'),historyValid=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),shaderBit=$($deferredLightingShader -match 'SsrFidelityFxRadianceHistorySourceEnabled'),activeCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_deferred_composite_active'),qualityCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_deferred_composite_quality_gate')" `
         "true/true/true/true/true/true/true"
+    $sameFrameCommandOrder = $commandBufferSource -match
+        '(?s)ffxSssrResolveTemporalDispatched\s*=\s*true;.*?ffxSssrSameFrameApplyReady.*?vkCmdBeginRenderPass.*?ffxSssrApplyPipeline->Handle\(\).*?vkCmdDraw\(commandBuffer, 3, 1, 0, 0\).*?RecordTemporalUpscalerEvaluate'
+    $checks += New-Check `
+        "SelfEngine FFX applies current ResolveTemporal output before temporal upscaling" `
+        ($cmakeSource -match "ffx_sssr_apply\.frag" -and
+            $rendererSource -match "SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF" -and
+            $rendererSource -match "RadianceHistoryView\(imageIndex\)" -and
+            $rendererSource -match "ssrFidelityFxSameFrameCompositeActive" -and
+            $deferredLightingShader -match "262144\.0" -and
+            $deferredLightingShader -match "ffxSameFrameComposite" -and
+            $ffxApplyShader -match "binding = 17" -and
+            $ffxApplyShader -match "FFX_SSSR_ROUGHNESS_THRESHOLD = 0\.6" -and
+            $pipelineSpecSource -match "FidelityFxSssrApply" -and
+            $pipelineSpecSource -match "DestinationAlphaAdditive" -and
+            $graphicsPipelineSource -match "VK_BLEND_FACTOR_DST_ALPHA" -and
+            $renderTargetsHeader -match "VulkanHdrRenderPass[\s\S]*?LoadHandle\(\) const" -and
+            $renderTargetsSource -match "VK_ATTACHMENT_LOAD_OP_LOAD" -and
+            $commandBufferSource -match "VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT" -and
+            $sameFrameCommandOrder -and
+            $ssrFeatureSource -match "FidelityFXSSSRApplyReflections" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_same_frame_composite_source_frame_age" -and
+            $benchmarkRecorderSource -match "ffx_sssr_apply_draws") `
+        "shader=$($cmakeSource -match 'ffx_sssr_apply\.frag'),reverse=$($rendererSource -match 'SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF'),currentView=$($rendererSource -match 'RadianceHistoryView\(imageIndex\)'),bit=$($deferredLightingShader -match '262144\.0'),apply=$($pipelineSpecSource -match 'FidelityFxSssrApply'),dstAlpha=$($graphicsPipelineSource -match 'VK_BLEND_FACTOR_DST_ALPHA'),load=$($renderTargetsSource -match 'VK_ATTACHMENT_LOAD_OP_LOAD'),order=$sameFrameCommandOrder,frameGraph=$($ssrFeatureSource -match 'FidelityFXSSSRApplyReflections'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_same_frame_composite_source_frame_age')" `
+        "true/true/true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX temporal stability is an audited runtime control" `
         ($rendererSource -match "SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR" -and
@@ -560,8 +594,8 @@ function Invoke-StaticChecks {
             $benchmarkRecorderSource -match "ssr_ffx_sssr_composite_confidence_mode") `
         "on=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE'),off=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF'),constant=$($commonShader -match 'g_composite_confidence_mode'),glossy=$($resolveTemporalShader -match 'glossy_validity'),branch=$($resolveTemporalShader -match 'g_composite_confidence_mode == 0u'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_composite_confidence_mode')" `
         "true/true/true/true/true/true"
-    $contractVersionEleven =
-        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*11u'
+    $contractVersionTwelve =
+        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*12u'
     $adapterDefaultsLocked =
         $adapterHeader -match 'samplesPerQuad\s*=\s*4u' -and
         $adapterHeader -match 'compositeConfidenceMode\s*=\s*0u'
@@ -576,15 +610,15 @@ function Invoke-StaticChecks {
     $visibleOutputClearDefault = $rendererSource -match
         '(?s)ffxSssrVisibleOutputClearRequested\s*=\s*EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT"\)\s*\|\|\s*!EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF"\);'
     $checks += New-Check `
-        "SelfEngine FFX production visual defaults are locked by contract v11" `
-        ($contractVersionEleven -and
+        "SelfEngine FFX production visual defaults are locked by contract v12" `
+        ($contractVersionTwelve -and
             $adapterDefaultsLocked -and
             $fourRaysDefault -and
             $stableEnvironmentDefault -and
             $perfectDirectionsDefault -and
             $vendorConfidenceDefault -and
             $visibleOutputClearDefault) `
-        "contract11=$contractVersionEleven,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
+        "contract12=$contractVersionTwelve,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
         "true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
@@ -617,6 +651,7 @@ function Invoke-RuntimeLane {
         [bool]$ExpectPrepareDispatch,
         [uint32]$ExpectedFallbackReason,
         [bool]$ExpectDeferredComposite = $false,
+        [bool]$ExpectSameFrameComposite = $true,
         [uint32]$ExpectedMotionVectorMode = 1,
         [double]$ExpectedMotionVectorScaleX = 1.0,
         [double]$ExpectedMotionVectorScaleY = 1.0,
@@ -837,6 +872,20 @@ function Invoke-RuntimeLane {
     $deferredCompositeSource = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_source"
     $deferredCompositeQualityGate = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_quality_gate"
     $deferredCompositeConfidenceSource = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_confidence_source"
+    $sameFrameCompositeRequested = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_requested"
+    $sameFrameCompositeResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_resources_ready"
+    $sameFrameCompositeDescriptorBound = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_descriptor_bound"
+    $sameFrameCompositeActive = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_active"
+    $sameFrameCompositeSourceImageIndex = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_source_image_index"
+    $sameFrameCompositeSourceFrameAge = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_source_frame_age"
+    $sameFrameCompositeApplyDraws = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_apply_draws"
+    $sameFrameCompositeFrameBinds = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_frame_binds"
+    $sameFrameCompositeGBufferBinds = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_gbuffer_binds"
+    $sameFrameCompositeReverseControlActive = Get-UIntMetric $last "ssr_ffx_sssr_same_frame_composite_reverse_control_active"
+    $sameFrameBindApplyDraws = Get-UIntMetric $last "ffx_sssr_apply_draws"
+    $sameFrameBindFrameBinds = Get-UIntMetric $last "ffx_sssr_apply_frame_binds"
+    $sameFrameBindGBufferBinds = Get-UIntMetric $last "ffx_sssr_apply_gbuffer_binds"
+    $currentImageIndex = Get-UIntMetric $last "ssr_scene_color_history_current_image_index"
     $radianceSource = Get-UIntMetric $last "ssr_radiance_source"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
@@ -1091,8 +1140,37 @@ function Invoke-RuntimeLane {
         $resolveTemporalIndirectArgsOffsetBytes -eq 12 -and
         $sampleCountWritebackReady -eq 1
     $deferredCompositeMatches = $false
-    $deferredCompositeExpectedLabel = "0/0/0/0/source0/radiance!=4"
-    if ($ExpectDeferredComposite) {
+    $sameFrameCompositeMatches = $false
+    $deferredCompositeExpectedLabel = "requested0/active0/source0"
+    $sameFrameCompositeExpectedLabel = "requested0/active0/draws0/radiance!=5"
+    if ($ExpectDeferredComposite -and $ExpectSameFrameComposite) {
+        $deferredCompositeMatches =
+            $deferredCompositeRequested -eq 1 -and
+            $deferredCompositeActive -eq 0 -and
+            $deferredCompositeDescriptorBound -eq 0 -and
+            $deferredCompositeSource -eq 0 -and
+            $deferredCompositeQualityGate -eq 0 -and
+            $deferredCompositeConfidenceSource -eq 0
+        $deferredCompositeExpectedLabel =
+            "requested1/active0/descriptor0/source0/quality0/confidence0"
+        $sameFrameCompositeMatches =
+            $sameFrameCompositeRequested -eq 1 -and
+            $sameFrameCompositeResourcesReady -eq 1 -and
+            $sameFrameCompositeDescriptorBound -eq 1 -and
+            $sameFrameCompositeActive -eq 1 -and
+            $sameFrameCompositeSourceImageIndex -eq $currentImageIndex -and
+            $sameFrameCompositeSourceFrameAge -eq 0 -and
+            $sameFrameCompositeApplyDraws -eq 1 -and
+            $sameFrameCompositeFrameBinds -eq 1 -and
+            $sameFrameCompositeGBufferBinds -eq 1 -and
+            $sameFrameBindApplyDraws -eq 1 -and
+            $sameFrameBindFrameBinds -eq 1 -and
+            $sameFrameBindGBufferBinds -eq 1 -and
+            $sameFrameCompositeReverseControlActive -eq 0 -and
+            $radianceSource -eq 5
+        $sameFrameCompositeExpectedLabel =
+            "requested/resources/descriptor/active=1,source=current,age=0,draw/binds=1,reverse=0,radiance5"
+    } elseif ($ExpectDeferredComposite) {
         $deferredCompositeMatches =
             $deferredCompositeRequested -eq 1 -and
             $deferredCompositeActive -eq 1 -and
@@ -1104,7 +1182,21 @@ function Invoke-RuntimeLane {
             $radianceSource -eq 4 -and
             $deferredCompositeSourceImageIndex -lt 16
         $deferredCompositeExpectedLabel =
-            "1/1/1/1/source1/quality1/confidence1/radiance4,sourceIndex<16"
+            "requested/active/descriptor/history=1,source1,quality1,confidence1,radiance4"
+        $sameFrameCompositeMatches =
+            $sameFrameCompositeRequested -eq 0 -and
+            $sameFrameCompositeResourcesReady -eq 1 -and
+            $sameFrameCompositeDescriptorBound -eq 0 -and
+            $sameFrameCompositeActive -eq 0 -and
+            $sameFrameCompositeApplyDraws -eq 0 -and
+            $sameFrameCompositeFrameBinds -eq 0 -and
+            $sameFrameCompositeGBufferBinds -eq 0 -and
+            $sameFrameBindApplyDraws -eq 0 -and
+            $sameFrameBindFrameBinds -eq 0 -and
+            $sameFrameBindGBufferBinds -eq 0 -and
+            $sameFrameCompositeReverseControlActive -eq 1
+        $sameFrameCompositeExpectedLabel =
+            "reverse=1,requested/descriptor/active/draw/binds=0"
     } else {
         $deferredCompositeMatches =
             $deferredCompositeRequested -eq 0 -and
@@ -1113,7 +1205,18 @@ function Invoke-RuntimeLane {
             $deferredCompositeSource -eq 0 -and
             $deferredCompositeQualityGate -eq 0 -and
             $deferredCompositeConfidenceSource -eq 0 -and
-            $radianceSource -ne 4
+            $radianceSource -ne 4 -and
+            $radianceSource -ne 5
+        $sameFrameCompositeMatches =
+            $sameFrameCompositeRequested -eq 0 -and
+            $sameFrameCompositeDescriptorBound -eq 0 -and
+            $sameFrameCompositeActive -eq 0 -and
+            $sameFrameCompositeApplyDraws -eq 0 -and
+            $sameFrameCompositeFrameBinds -eq 0 -and
+            $sameFrameCompositeGBufferBinds -eq 0 -and
+            $sameFrameBindApplyDraws -eq 0 -and
+            $sameFrameBindFrameBinds -eq 0 -and
+            $sameFrameBindGBufferBinds -eq 0
     }
 
     $environmentMipContractMatches =
@@ -1136,8 +1239,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 11 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "11/1"),
+            ($contractVersion -eq 12 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "12/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -1281,6 +1384,10 @@ function Invoke-RuntimeLane {
             $deferredCompositeMatches `
             "requested=$deferredCompositeRequested,active=$deferredCompositeActive,descriptor=$deferredCompositeDescriptorBound,history=$deferredCompositeHistoryValid,source=$deferredCompositeSource,quality=$deferredCompositeQualityGate,confidence=$deferredCompositeConfidenceSource,sourceIndex=$deferredCompositeSourceImageIndex,radiance=$radianceSource" `
             $deferredCompositeExpectedLabel),
+        (New-Check "$Name same-frame FFX composition contract" `
+            $sameFrameCompositeMatches `
+            "requested=$sameFrameCompositeRequested,resources=$sameFrameCompositeResourcesReady,descriptor=$sameFrameCompositeDescriptorBound,active=$sameFrameCompositeActive,source/current=$sameFrameCompositeSourceImageIndex/$currentImageIndex,age=$sameFrameCompositeSourceFrameAge,statsDraw/binds=$sameFrameCompositeApplyDraws/$sameFrameCompositeFrameBinds/$sameFrameCompositeGBufferBinds,bindDraw/binds=$sameFrameBindApplyDraws/$sameFrameBindFrameBinds/$sameFrameBindGBufferBinds,reverse=$sameFrameCompositeReverseControlActive,radiance=$radianceSource" `
+            $sameFrameCompositeExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -1448,6 +1555,17 @@ function Invoke-RuntimeLane {
             deferredCompositeSource = $deferredCompositeSource
             deferredCompositeQualityGate = $deferredCompositeQualityGate
             deferredCompositeConfidenceSource = $deferredCompositeConfidenceSource
+            sameFrameCompositeRequested = $sameFrameCompositeRequested
+            sameFrameCompositeResourcesReady = $sameFrameCompositeResourcesReady
+            sameFrameCompositeDescriptorBound = $sameFrameCompositeDescriptorBound
+            sameFrameCompositeActive = $sameFrameCompositeActive
+            sameFrameCompositeSourceImageIndex = $sameFrameCompositeSourceImageIndex
+            sameFrameCompositeCurrentImageIndex = $currentImageIndex
+            sameFrameCompositeSourceFrameAge = $sameFrameCompositeSourceFrameAge
+            sameFrameCompositeApplyDraws = $sameFrameCompositeApplyDraws
+            sameFrameCompositeFrameBinds = $sameFrameCompositeFrameBinds
+            sameFrameCompositeGBufferBinds = $sameFrameCompositeGBufferBinds
+            sameFrameCompositeReverseControlActive = $sameFrameCompositeReverseControlActive
             radianceSource = $radianceSource
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
@@ -1527,6 +1645,24 @@ $reports += Invoke-RuntimeLane `
     -ExpectPrepareDispatch $true `
     -ExpectedFallbackReason 0 `
     -ExpectDeferredComposite $true
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-same-frame-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectSameFrameComposite $false
 
 $reports += Invoke-RuntimeLane `
     -Name "lighting-showcase-ffx-legacy-motion-vector-control" `

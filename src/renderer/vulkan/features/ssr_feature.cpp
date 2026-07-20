@@ -312,7 +312,19 @@ void VulkanSsrFeature::AppendFrameGraph(
             "FidelityFXSSSRResolveTemporal",
             "FrameConstants, FFX ExtractedRoughness, FFX AverageRadiance, FFX PrefilteredRadiance, FFX ReprojectedRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount, FFX DenoiserTiles, FFX IntersectArgs",
             "FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory",
-            "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into the history images consumed by the next Reproject pass and by the delayed Deferred reflection composite."
+            "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into history images consumed by the next Reproject pass and the current frame reflection apply pass."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrSameFrameCompositeActive > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "FidelityFXSSSRApplyReflections",
+            "HDRSceneColor, FFX RadianceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT",
+            "HDRSceneColor",
+            "AMD-style same-frame post composition applies current ResolveTemporal radiance before temporal upscaling; destination alpha preserves the attenuated IBL replacement baseline."
         );
         AppendRenderFrameGraphPass(
             context.plan,
@@ -324,7 +336,7 @@ void VulkanSsrFeature::AppendFrameGraph(
             "FidelityFXSSSRDeferredComposite",
             "FFX RadianceHistory, Velocity, SSRHistoryMetadata, GBufferNormalRoughness, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "HDRSceneColor",
-            "Deferred lighting samples the previous completed FidelityFX SSSR ResolveTemporal radiance history with receiver reprojection plus previous receiver depth/normal/roughness validation, then blends it conservatively over the probe/IBL fallback."
+            "Debug reverse-control fallback: Deferred lighting samples the previous completed FidelityFX SSSR ResolveTemporal history with receiver validation when same-frame composition is disabled."
         );
     }
     if (context.stats.ssr.colorResolveEnabled > 0) {
@@ -537,7 +549,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 11u;
+    ssr.fidelityFxSssrContractVersion = 12u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
