@@ -3,6 +3,7 @@ param(
     [string]$ForwardExecutablePath = "build\Debug\SelfEngineForward3D.exe",
     [string]$ShowcaseExecutablePath = "build\Debug\SelfEngineLightingShowcase.exe",
     [switch]$SkipBuild,
+    [switch]$StaticOnly,
     [switch]$Strict,
     [string]$OutputDirectory = ""
 )
@@ -50,6 +51,19 @@ function Get-UIntMetric {
         throw "Missing CSV metric: $Name"
     }
     return [uint32]$property.Value
+}
+
+function Get-FloatMetric {
+    param([pscustomobject]$Row, [string]$Name)
+
+    $property = $Row.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        throw "Missing CSV metric: $Name"
+    }
+    return [double]::Parse(
+        [string]$property.Value,
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
 }
 
 function Set-ProcessEnvironment {
@@ -112,8 +126,18 @@ function Invoke-StaticChecks {
         Join-Path $projectRoot "src\renderer\vulkan\fidelityfx_sssr_adapter.h")
     $rendererSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\renderer.cpp")
+    $renderFeatureSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\render_feature.h")
     $commandBufferSource = Get-Content -Raw -LiteralPath (
         Join-Path $projectRoot "src\renderer\vulkan\command_buffer.cpp")
+    $descriptorSetsSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\descriptor_sets.cpp")
+    $deferredLightingShader = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "assets\shaders\deferred_lighting.frag")
+    $benchmarkRecorderSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\app\benchmark_recorder.cpp")
+    $ssrFeatureSource = Get-Content -Raw -LiteralPath (
+        Join-Path $projectRoot "src\renderer\vulkan\features\ssr_feature.cpp")
     $classifyShader = Get-Content -Raw -LiteralPath (
         Join-Path $vendorRoot "shaders\ClassifyTiles.hlsl")
     $blueNoiseShader = Get-Content -Raw -LiteralPath (
@@ -259,10 +283,16 @@ function Invoke-StaticChecks {
             $reprojectShader -match "RWTexture2D<float> g_out_variance" -and
             $reprojectShader -match "RWTexture2D<float> g_out_sample_count" -and
             $reprojectShader -match "Buffer<uint> g_denoiser_tile_list" -and
+            $commonShader -match "uint g_motion_vector_mode" -and
+            $commonShader -match "uint g_motion_vector_contract_ready" -and
+            $commonShader -match "uint g_hit_reprojection_enabled" -and
+            $commonShader -match "uint g_reprojection_contract_ready" -and
+            $reprojectShader -match "SelfEngine_FfxSssrMotionVectorScale" -and
+            $reprojectShader -match "FFX_DNSR_Reflections_HitPositionReprojectionEnabled" -and
             $reprojectShader -match "g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz" -and
             $reprojectShader -match "g_out_average_radiance\[pixel_coordinate\] = value\.xyzz" -and
             $reprojectShader -match "numthreads\(8, 8, 1\)") `
-        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float4> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float4> g_out_average_radiance'),rgbaStores=$($reprojectShader -match 'g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz')/$($reprojectShader -match 'g_out_average_radiance\[pixel_coordinate\] = value\.xyzz'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float4> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float4> g_out_average_radiance'),mv=$($commonShader -match 'uint g_motion_vector_mode')/$($reprojectShader -match 'SelfEngine_FfxSssrMotionVectorScale'),hit=$($commonShader -match 'uint g_hit_reprojection_enabled')/$($reprojectShader -match 'FFX_DNSR_Reflections_HitPositionReprojectionEnabled'),rgbaStores=$($reprojectShader -match 'g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz')/$($reprojectShader -match 'g_out_average_radiance\[pixel_coordinate\] = value\.xyzz'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
         "true/true/true/true/true"
     $checks += New-Check `
         "FFX SSSR Prefilter shader contract present" `
@@ -375,6 +405,188 @@ function Invoke-StaticChecks {
         "layout=$($adapterSource -match 'VulkanFfxSssrResolveTemporalDescriptorSetLayout'),resources=$($adapterSource -match 'VulkanFfxSssrResolveTemporalResources'),prefilterInput=$($adapterSource -match 'prefilterResources\.RadianceView'),historyOut=$($adapterSource -match 'reprojectResources\.RadianceHistoryView'),resolveSpv=$($rendererSource -match 'ffx_sssr_ResolveTemporal.hlsl.spv'),dispatch=$($commandBufferSource -match 'ffxSssrResolveTemporalDispatches'),copies=$($commandBufferSource -match 'CopyFfxSssrHistoryToOtherImages')" `
         "true/true/true/true/true/true/true"
     $checks += New-Check `
+        "SelfEngine FFX Reproject consumes packed previous receiver metadata" `
+        ($adapterSource -match "renderTargets\.SsrHistoryMetadataView\(imageIndex\)" -and
+            $adapterSource -notmatch "sampledImages\[3\] = sampledImages\[0\]" -and
+            $reprojectShader -match "g_receiver_history_metadata" -and
+            $reprojectShader -match "SelfEngine_DecodeHistoryNormal" -and
+            $commonShader -match "depth > 1\.0f" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_reproject_motion_vector_mode" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_reproject_hit_reprojection_enabled" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_reproject_reprojection_contract_ready" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_reproject_history_metadata_source") `
+        "metadataView=$($adapterSource -match 'renderTargets\.SsrHistoryMetadataView\(imageIndex\)'),currentAliasGone=$($adapterSource -notmatch 'sampledImages\[3\] = sampledImages\[0\]'),shaderMetadata=$($reprojectShader -match 'g_receiver_history_metadata'),normalDecode=$($reprojectShader -match 'SelfEngine_DecodeHistoryNormal'),linearDepth=$($commonShader -match 'depth > 1\.0f'),mvCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_reproject_motion_vector_mode'),hitCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_reproject_hit_reprojection_enabled'),readyCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_reproject_reprojection_contract_ready'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_reproject_history_metadata_source')" `
+        "true/true/true/true/true/true/true/true/true"
+    $ffxPrefilterSampleCountStores =
+        $prefilterShader -match "g_out_sample_count\[pixel_coordinate\]"
+    $ffxResolveSampleConfidence =
+        $resolveTemporalShader -match "sample_confidence"
+    $ffxResolveVarianceConfidence =
+        $resolveTemporalShader -match "variance_confidence"
+    $ffxResolveSampleCountStores =
+        $resolveTemporalShader -match "g_out_sample_count\[pixel_coordinate\]"
+    $ffxDeferredAlphaConfidence =
+        $deferredLightingShader -match "ffxCompositeConfidence = clamp\(resolvedSsr\.a"
+    $ffxDeferredReceiverValidation =
+        $deferredLightingShader -match "SsrDeferredReceiverHistoryConfidence\(" -and
+        $deferredLightingShader -match "SsrDeferredReceiverValidatedHistory\(" -and
+        $deferredLightingShader -match "texelFetch\(\s*ssrHistoryMetadata" -and
+        $deferredLightingShader -match "texelFetch\(\s*ssrResolvedReflection" -and
+        $deferredLightingShader -notmatch "ffxRadianceHistorySource\s*\?\s*\(historyUvValid\s*\?\s*1\.0\s*:\s*0\.0\)"
+    $ffxFrameGraphMetadataInput =
+        $ssrFeatureSource -match "FFX RadianceHistory, Velocity, SSRHistoryMetadata"
+    $ffxCompositeConfidenceCsv =
+        $benchmarkRecorderSource -match "ssr_ffx_sssr_deferred_composite_confidence_source"
+    $checks += New-Check `
+        "SelfEngine FFX composite uses sample-count variance confidence and receiver validation" `
+        ($ffxPrefilterSampleCountStores -and
+            $ffxResolveSampleConfidence -and
+            $ffxResolveVarianceConfidence -and
+            $ffxResolveSampleCountStores -and
+            $ffxDeferredAlphaConfidence -and
+            $ffxDeferredReceiverValidation -and
+            $ffxFrameGraphMetadataInput -and
+            $ffxCompositeConfidenceCsv) `
+        "prefilterSample=$ffxPrefilterSampleCountStores,sampleConfidence=$ffxResolveSampleConfidence,varianceConfidence=$ffxResolveVarianceConfidence,resolveSample=$ffxResolveSampleCountStores,deferredAlpha=$ffxDeferredAlphaConfidence,receiverValidation=$ffxDeferredReceiverValidation,frameGraphMetadata=$ffxFrameGraphMetadataInput,csv=$ffxCompositeConfidenceCsv" `
+        "true/true/true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Deferred composite consumes ResolveTemporal history" `
+        ($descriptorSetsSource -match "resolvedReflectionOverride" -and
+            $rendererSource -match "RadianceHistoryView" -and
+            $rendererSource -match "fidelityFxSssrDeferredCompositeActive" -and
+            $rendererSource -match "m_FfxSssrRadianceHistoryValid" -and
+            $deferredLightingShader -match "SsrFidelityFxRadianceHistorySourceEnabled" -and
+            $deferredLightingShader -match "131072\.0" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_deferred_composite_active" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_deferred_composite_quality_gate") `
+        "descriptorOverride=$($descriptorSetsSource -match 'resolvedReflectionOverride'),radianceHistory=$($rendererSource -match 'RadianceHistoryView'),active=$($rendererSource -match 'fidelityFxSssrDeferredCompositeActive'),historyValid=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),shaderBit=$($deferredLightingShader -match 'SsrFidelityFxRadianceHistorySourceEnabled'),activeCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_deferred_composite_active'),qualityCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_deferred_composite_quality_gate')" `
+        "true/true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX temporal stability is an audited runtime control" `
+        ($rendererSource -match "SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR" -and
+            $rendererSource -match "FfxSssrTemporalStabilityFactorFromEnvironment" -and
+            $rendererSource -match "constants\.temporalStabilityFactor" -and
+            $renderFeatureSource -match "ffxSssrTemporalStabilityFactor" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_temporal_stability_factor" -and
+            $commonShader -match "g_temporal_stability_factor") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR'),source=$($rendererSource -match 'FfxSssrTemporalStabilityFactorFromEnvironment'),constant=$($rendererSource -match 'constants\.temporalStabilityFactor'),context=$($renderFeatureSource -match 'ffxSssrTemporalStabilityFactor'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_temporal_stability_factor'),shader=$($commonShader -match 'g_temporal_stability_factor')" `
+        "true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX samples-per-quad quality control is auditable" `
+        ($rendererSource -match "SE_SSR_FFX_SAMPLES_PER_QUAD" -and
+            $rendererSource -match "FfxSssrSamplesPerQuadFromEnvironment" -and
+            $rendererSource -match "constants\.samplesPerQuad" -and
+            $renderFeatureSource -match "ffxSssrSamplesPerQuad" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_samples_per_quad" -and
+            $commonShader -match "g_samples_per_quad") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_SAMPLES_PER_QUAD'),source=$($rendererSource -match 'FfxSssrSamplesPerQuadFromEnvironment'),constant=$($rendererSource -match 'constants\.samplesPerQuad'),context=$($renderFeatureSource -match 'ffxSssrSamplesPerQuad'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_samples_per_quad'),shader=$($commonShader -match 'g_samples_per_quad')" `
+        "true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX environment fallback is stable, roughness-prefiltered, and LOD0-isolatable" `
+        ($rendererSource -match "SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK" -and
+            $rendererSource -match "SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF" -and
+            $rendererSource -match "SE_SSR_FFX_ENVIRONMENT_LOD0" -and
+            $rendererSource -match "SE_SSR_FFX_CONSTANT_ENVIRONMENT" -and
+            $rendererSource -match "SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS" -and
+            $rendererSource -match "SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF" -and
+            $rendererSource -match "m_IblPrefilteredImage->MipLevels\(\)" -and
+            $rendererSource -match "ffxSssrEnvironmentLod0Enabled && ffxSssrIblEnvironmentMipCount > 0u" -and
+            $adapterHeader -match "environmentFallbackControl" -and
+            $commonShader -match "g_environment_fallback_control" -and
+            $intersectShader -match "StableEnvironmentFallbackEnabled" -and
+            $intersectShader -match "ConstantEnvironmentFallbackEnabled" -and
+            $intersectShader -match "PerfectReflectionDirectionsEnabled" -and
+            $intersectShader -match "reflect\(view_space_ray_direction, view_space_surface_normal\)" -and
+            $intersectShader -match "float3\(0\.6, 0\.6, 0\.6\)" -and
+            $intersectShader -match "EnvironmentMipCount" -and
+            $intersectShader -match "view_space_environment_direction" -and
+            $intersectShader -match "saturate\(roughness\) \* max_mip" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_stable_environment_fallback_enabled" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_constant_environment_fallback_enabled" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_perfect_reflection_directions_enabled" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_environment_mip_count") `
+        "stable=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK'),stableOff=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF'),lod0=$($rendererSource -match 'SE_SSR_FFX_ENVIRONMENT_LOD0'),constantEnv=$($rendererSource -match 'SE_SSR_FFX_CONSTANT_ENVIRONMENT'),perfectDirections=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS'),perfectOff=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF'),mips=$($rendererSource -match 'm_IblPrefilteredImage->MipLevels\(\)'),resolve=$($rendererSource -match 'ffxSssrEnvironmentLod0Enabled && ffxSssrIblEnvironmentMipCount > 0u'),constant=$($adapterHeader -match 'environmentFallbackControl'),cbuffer=$($commonShader -match 'g_environment_fallback_control'),stableMode=$($intersectShader -match 'StableEnvironmentFallbackEnabled'),constantMode=$($intersectShader -match 'ConstantEnvironmentFallbackEnabled'),perfectMode=$($intersectShader -match 'PerfectReflectionDirectionsEnabled'),perfectReflect=$($intersectShader -match 'reflect\(view_space_ray_direction, view_space_surface_normal\)'),constantColor=$($intersectShader -match 'float3\(0\.6, 0\.6, 0\.6\)'),mipFn=$($intersectShader -match 'EnvironmentMipCount'),stableDir=$($intersectShader -match 'view_space_environment_direction'),roughnessLod=$($intersectShader -match 'saturate\(roughness\) \* max_mip'),stableCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_stable_environment_fallback_enabled'),constantCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_constant_environment_fallback_enabled'),perfectCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_perfect_reflection_directions_enabled'),mipCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_environment_mip_count')" `
+        "true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX visible output clear is a default-on audited control" `
+        ($rendererSource -match "SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT" -and
+            $rendererSource -match "SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF" -and
+            $rendererSource -match "ssrFidelityFxBackendRequested" -and
+            $commandBufferSource -match "ClearFfxSssrVisibleOutput" -and
+            $commandBufferSource -match "vkCmdClearColorImage" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_visible_output_clear_enabled" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_visible_output_clears") `
+        "on=$($rendererSource -match 'SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT'),off=$($rendererSource -match 'SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF'),backend=$($rendererSource -match 'ssrFidelityFxBackendRequested'),clear=$($commandBufferSource -match 'ClearFfxSssrVisibleOutput'),gpu=$($commandBufferSource -match 'vkCmdClearColorImage'),enabledCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_visible_output_clear_enabled'),countCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_visible_output_clears')" `
+        "true/true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX spatial prefilter has an audited bypass" `
+        ($rendererSource -match "SE_SSR_FFX_PREFILTER_BYPASS" -and
+            $prefilterShader -match "SelfEngine_FfxSssrPrefilterBypassEnabled" -and
+            $prefilterShader -match "g_out_radiance\[remapped_dispatch_thread_id\] = input_radiance" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_prefilter_bypass_enabled") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_PREFILTER_BYPASS'),branch=$($prefilterShader -match 'SelfEngine_FfxSssrPrefilterBypassEnabled'),copy=$($prefilterShader -match 'g_out_radiance\[remapped_dispatch_thread_id\] = input_radiance'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_prefilter_bypass_enabled')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX temporal resolve has an audited bypass" `
+        ($rendererSource -match "SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS" -and
+            $resolveTemporalShader -match "SelfEngine_FfxSssrResolveTemporalBypassEnabled" -and
+            $resolveTemporalShader -match "g_out_radiance\[remapped_dispatch_thread_id\] = float4" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_resolve_temporal_bypass_enabled") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS'),branch=$($resolveTemporalShader -match 'SelfEngine_FfxSssrResolveTemporalBypassEnabled'),copy=$($resolveTemporalShader -match 'g_out_radiance\[remapped_dispatch_thread_id\] = float4'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_resolve_temporal_bypass_enabled')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Classify surface coverage seed is audited" `
+        ($rendererSource -match "SE_SSR_FFX_CLASSIFY_SURFACE_SEED" -and
+            $classifyShader -match "SelfEngine_FfxSssrClassifySurfaceSeedEnabled" -and
+            $classifyShader -match "float4\(0\.6, 0\.6, 0\.6, 1\.0\)" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_classify_surface_seed_enabled") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_CLASSIFY_SURFACE_SEED'),branch=$($classifyShader -match 'SelfEngine_FfxSssrClassifySurfaceSeedEnabled'),seed=$($classifyShader -match 'float4\(0\.6, 0\.6, 0\.6, 1\.0\)'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_classify_surface_seed_enabled')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX Intersect ray coverage marker is audited" `
+        ($rendererSource -match "SE_SSR_FFX_INTERSECT_COVERAGE_MARKER" -and
+            $intersectShader -match "SelfEngine_FfxSssrIntersectCoverageMarkerEnabled" -and
+            $intersectShader -match "float4\(1\.0, 0\.0, 1\.0, 1\.0\)" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_intersect_coverage_marker_enabled") `
+        "env=$($rendererSource -match 'SE_SSR_FFX_INTERSECT_COVERAGE_MARKER'),branch=$($intersectShader -match 'SelfEngine_FfxSssrIntersectCoverageMarkerEnabled'),marker=$($intersectShader -match 'float4\(1\.0, 0\.0, 1\.0, 1\.0\)'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_intersect_coverage_marker_enabled')" `
+        "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX vendor confidence default and experimental mode are auditable" `
+        ($rendererSource -match "SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE" -and
+            $rendererSource -match "SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF" -and
+            $commonShader -match "g_composite_confidence_mode" -and
+            $resolveTemporalShader -match "glossy_validity" -and
+            $resolveTemporalShader -match "g_composite_confidence_mode == 0u" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_composite_confidence_mode") `
+        "on=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE'),off=$($rendererSource -match 'SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF'),constant=$($commonShader -match 'g_composite_confidence_mode'),glossy=$($resolveTemporalShader -match 'glossy_validity'),branch=$($resolveTemporalShader -match 'g_composite_confidence_mode == 0u'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_composite_confidence_mode')" `
+        "true/true/true/true/true/true"
+    $contractVersionEleven =
+        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*11u'
+    $adapterDefaultsLocked =
+        $adapterHeader -match 'samplesPerQuad\s*=\s*4u' -and
+        $adapterHeader -match 'compositeConfidenceMode\s*=\s*0u'
+    $fourRaysDefault = $rendererSource -match
+        '(?s)u32\s+FfxSssrSamplesPerQuadFromEnvironment\(\).*?return\s+4u;\s*\}'
+    $stableEnvironmentDefault = $rendererSource -match
+        '(?s)bool\s+FfxSssrStableEnvironmentFallbackEnabledFromEnvironment\(\).*?return\s+!EnvironmentFlagEnabled\(\s*"SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF"\s*\);'
+    $perfectDirectionsDefault = $rendererSource -match
+        '(?s)bool\s+FfxSssrPerfectReflectionDirectionsEnabledFromEnvironment\(\).*?return\s+!EnvironmentFlagEnabled\(\s*"SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF"\s*\);'
+    $vendorConfidenceDefault = $rendererSource -match
+        '(?s)u32\s+FfxSssrCompositeConfidenceModeFromEnvironment\(\).*?"SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE"\s*\)\s*\?\s*1u\s*:\s*0u;'
+    $visibleOutputClearDefault = $rendererSource -match
+        '(?s)ffxSssrVisibleOutputClearRequested\s*=\s*EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT"\)\s*\|\|\s*!EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF"\);'
+    $checks += New-Check `
+        "SelfEngine FFX production visual defaults are locked by contract v11" `
+        ($contractVersionEleven -and
+            $adapterDefaultsLocked -and
+            $fourRaysDefault -and
+            $stableEnvironmentDefault -and
+            $perfectDirectionsDefault -and
+            $vendorConfidenceDefault -and
+            $visibleOutputClearDefault) `
+        "contract11=$contractVersionEleven,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
+        "true/true/true/true/true/true/true"
+    $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
             $rendererSource -match "m_FfxSssrConstantsDescriptorSetLayout->Handle\(\)" -and
@@ -403,7 +615,26 @@ function Invoke-RuntimeLane {
         [uint32]$ExpectedDispatchReady,
         [uint32]$ExpectedRuntimeActive,
         [bool]$ExpectPrepareDispatch,
-        [uint32]$ExpectedFallbackReason
+        [uint32]$ExpectedFallbackReason,
+        [bool]$ExpectDeferredComposite = $false,
+        [uint32]$ExpectedMotionVectorMode = 1,
+        [double]$ExpectedMotionVectorScaleX = 1.0,
+        [double]$ExpectedMotionVectorScaleY = 1.0,
+        [uint32]$ExpectedHitReprojectionEnabled = 1,
+        [double]$ExpectedTemporalStabilityFactor = 0.95,
+        [uint32]$ExpectedSamplesPerQuad = 4,
+        [uint32]$ExpectedStableEnvironmentFallbackEnabled = 1,
+        [uint32]$ExpectedConstantEnvironmentFallbackEnabled = 0,
+        [uint32]$ExpectedPerfectReflectionDirectionsEnabled = 1,
+        [uint32]$ExpectedPrefilterBypassEnabled = 0,
+        [uint32]$ExpectedResolveTemporalBypassEnabled = 0,
+        [uint32]$ExpectedClassifySurfaceSeedEnabled = 0,
+        [uint32]$ExpectedIntersectCoverageMarkerEnabled = 0,
+        [uint32]$ExpectedEnvironmentMipCount = 0,
+        [uint32]$ExpectedDeferredReceiverReprojectionEnabled = 1,
+        [uint32]$ExpectedVisibleOutputClearEnabled = 1,
+        [uint32]$ExpectedVisibleOutputClears = 1,
+        [uint32]$ExpectedCompositeConfidenceMode = 0
     )
 
     $laneDirectory = Join-Path $OutputDirectory $Name
@@ -418,9 +649,31 @@ function Invoke-RuntimeLane {
     $Environment["SE_BENCHMARK_CSV"] = $csvPath
     $previous = Set-ProcessEnvironment -Values $Environment
     try {
-        & cmd.exe /d /c "`"$Executable`" > `"$stdoutPath`" 2> `"$stderrPath`""
-        if ($LASTEXITCODE -ne 0) {
-            throw "$Name exited with code $LASTEXITCODE"
+        $exitCode = 0
+        $startProcessBlocked = $false
+        try {
+            $process = Start-Process `
+                -FilePath $Executable `
+                -PassThru `
+                -Wait `
+                -WindowStyle Hidden `
+                -RedirectStandardOutput $stdoutPath `
+                -RedirectStandardError $stderrPath
+            $exitCode = $process.ExitCode
+            if ($exitCode -eq 4551) {
+                $startProcessBlocked = $true
+            }
+        } catch [System.InvalidOperationException] {
+            $startProcessBlocked = $true
+        }
+        if ($startProcessBlocked) {
+            Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+            & cmd.exe /d /c "`"$Executable`" > `"$stdoutPath`" 2> `"$stderrPath`""
+            $exitCode = $LASTEXITCODE
+        }
+        if ($exitCode -ne 0) {
+            throw "$Name exited with code $exitCode"
         }
     } finally {
         Restore-ProcessEnvironment -Values $previous
@@ -452,6 +705,20 @@ function Invoke-RuntimeLane {
     $spdReady = Get-UIntMetric $last "ssr_ffx_sssr_spd_dependency_ready"
     $constantsResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_constants_resources_ready"
     $constantsDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_constants_descriptor_sets_ready"
+    $temporalStabilityFactor = Get-FloatMetric $last "ssr_ffx_sssr_temporal_stability_factor"
+    $samplesPerQuad = Get-UIntMetric $last "ssr_ffx_sssr_samples_per_quad"
+    $stableEnvironmentFallbackEnabled = Get-UIntMetric $last "ssr_ffx_sssr_stable_environment_fallback_enabled"
+    $constantEnvironmentFallbackEnabled = Get-UIntMetric $last "ssr_ffx_sssr_constant_environment_fallback_enabled"
+    $perfectReflectionDirectionsEnabled = Get-UIntMetric $last "ssr_ffx_sssr_perfect_reflection_directions_enabled"
+    $prefilterBypassEnabled = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_bypass_enabled"
+    $resolveTemporalBypassEnabled = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_bypass_enabled"
+    $classifySurfaceSeedEnabled = Get-UIntMetric $last "ssr_ffx_sssr_classify_surface_seed_enabled"
+    $intersectCoverageMarkerEnabled = Get-UIntMetric $last "ssr_ffx_sssr_intersect_coverage_marker_enabled"
+    $environmentMipCount = Get-UIntMetric $last "ssr_ffx_sssr_environment_mip_count"
+    $iblPrefilteredMipCount = Get-UIntMetric $last "ibl_prefiltered_mip_count"
+    $deferredReceiverReprojectionEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_receiver_reprojection_enabled"
+    $deferredValidatedBilinearEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_validated_bilinear_enabled"
+    $deferredHistoryTapCount = Get-UIntMetric $last "ssr_reconstruction_deferred_history_tap_count"
     $prepareResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_resources_ready"
     $prepareDescriptorSetsReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready"
     $preparePipelineReady = Get-UIntMetric $last "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready"
@@ -520,8 +787,15 @@ function Invoke-RuntimeLane {
     $reprojectAverageHeight = Get-UIntMetric $last "ssr_ffx_sssr_reproject_average_height"
     $reprojectHistoryReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_history_ready"
     $reprojectHistorySource = Get-UIntMetric $last "ssr_ffx_sssr_reproject_history_source"
+    $reprojectHistoryMetadataSource = Get-UIntMetric $last "ssr_ffx_sssr_reproject_history_metadata_source"
     $reprojectMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_reproject_memory_bytes"
     $reprojectIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_reproject_indirect_args_offset_bytes"
+    $reprojectMotionVectorMode = Get-UIntMetric $last "ssr_ffx_sssr_reproject_motion_vector_mode"
+    $reprojectMotionVectorScaleX = Get-FloatMetric $last "ssr_ffx_sssr_reproject_motion_vector_scale_x"
+    $reprojectMotionVectorScaleY = Get-FloatMetric $last "ssr_ffx_sssr_reproject_motion_vector_scale_y"
+    $reprojectMotionVectorContractReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_motion_vector_contract_ready"
+    $reprojectHitReprojectionEnabled = Get-UIntMetric $last "ssr_ffx_sssr_reproject_hit_reprojection_enabled"
+    $reprojectReprojectionContractReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_reprojection_contract_ready"
     $reprojectBindDispatches = Get-UIntMetric $last "ffx_sssr_reproject_dispatches"
     $reprojectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_reproject_descriptor_binds"
     $prefilterResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_prefilter_resources_ready"
@@ -548,9 +822,22 @@ function Invoke-RuntimeLane {
     $resolveTemporalMemoryBytes = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_memory_bytes"
     $resolveTemporalIndirectArgsOffsetBytes = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_indirect_args_offset_bytes"
     $resolveTemporalHistoryCopies = Get-UIntMetric $last "ssr_ffx_sssr_resolve_temporal_history_copies"
+    $visibleOutputClearEnabled = Get-UIntMetric $last "ssr_ffx_sssr_visible_output_clear_enabled"
+    $visibleOutputClears = Get-UIntMetric $last "ssr_ffx_sssr_visible_output_clears"
+    $compositeConfidenceMode = Get-UIntMetric $last "ssr_ffx_sssr_composite_confidence_mode"
+    $sampleCountWritebackReady = Get-UIntMetric $last "ssr_ffx_sssr_sample_count_writeback_ready"
     $resolveTemporalBindDispatches = Get-UIntMetric $last "ffx_sssr_resolve_temporal_dispatches"
     $resolveTemporalBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_resolve_temporal_descriptor_binds"
     $resolveTemporalBindHistoryCopies = Get-UIntMetric $last "ffx_sssr_resolve_temporal_history_copies"
+    $deferredCompositeRequested = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_requested"
+    $deferredCompositeActive = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_active"
+    $deferredCompositeDescriptorBound = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_descriptor_bound"
+    $deferredCompositeHistoryValid = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_history_valid"
+    $deferredCompositeSourceImageIndex = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_source_image_index"
+    $deferredCompositeSource = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_source"
+    $deferredCompositeQualityGate = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_quality_gate"
+    $deferredCompositeConfidenceSource = Get-UIntMetric $last "ssr_ffx_sssr_deferred_composite_confidence_source"
+    $radianceSource = Get-UIntMetric $last "ssr_radiance_source"
     $dispatchReady = Get-UIntMetric $last "ssr_ffx_sssr_runtime_dispatch_ready"
     $runtimeActive = Get-UIntMetric $last "ssr_ffx_sssr_runtime_active"
     $fallbackReason = Get-UIntMetric $last "ssr_ffx_sssr_fallback_reason"
@@ -765,8 +1052,17 @@ function Invoke-RuntimeLane {
         $reprojectAverageHeight -eq $expectedClassifyGroupsY -and
         $reprojectHistoryReady -eq 1 -and
         $reprojectHistorySource -eq 1 -and
+        $reprojectHistoryMetadataSource -eq 1 -and
         $reprojectMemoryBytes -gt $classifyMemoryBytes -and
         $reprojectIndirectArgsOffsetBytes -eq 12
+    $reprojectMotionVectorContractMatches =
+        $reprojectMotionVectorContractReady -eq 1 -and
+        $reprojectMotionVectorMode -eq $ExpectedMotionVectorMode -and
+        [Math]::Abs($reprojectMotionVectorScaleX - $ExpectedMotionVectorScaleX) -lt 0.0001 -and
+        [Math]::Abs($reprojectMotionVectorScaleY - $ExpectedMotionVectorScaleY) -lt 0.0001
+    $reprojectHitReprojectionContractMatches =
+        $reprojectReprojectionContractReady -eq 1 -and
+        $reprojectHitReprojectionEnabled -eq $ExpectedHitReprojectionEnabled
     $prefilterResourceContractMatches =
         $prefilterResourcesReady -eq 1 -and
         $prefilterDescriptorSetsReady -eq 1 -and
@@ -792,7 +1088,45 @@ function Invoke-RuntimeLane {
         $resolveTemporalWidth -eq $prefilterWidth -and
         $resolveTemporalHeight -eq $prefilterHeight -and
         $resolveTemporalMemoryBytes -eq 0 -and
-        $resolveTemporalIndirectArgsOffsetBytes -eq 12
+        $resolveTemporalIndirectArgsOffsetBytes -eq 12 -and
+        $sampleCountWritebackReady -eq 1
+    $deferredCompositeMatches = $false
+    $deferredCompositeExpectedLabel = "0/0/0/0/source0/radiance!=4"
+    if ($ExpectDeferredComposite) {
+        $deferredCompositeMatches =
+            $deferredCompositeRequested -eq 1 -and
+            $deferredCompositeActive -eq 1 -and
+            $deferredCompositeDescriptorBound -eq 1 -and
+            $deferredCompositeHistoryValid -eq 1 -and
+            $deferredCompositeSource -eq 1 -and
+            $deferredCompositeQualityGate -eq 1 -and
+            $deferredCompositeConfidenceSource -eq 1 -and
+            $radianceSource -eq 4 -and
+            $deferredCompositeSourceImageIndex -lt 16
+        $deferredCompositeExpectedLabel =
+            "1/1/1/1/source1/quality1/confidence1/radiance4,sourceIndex<16"
+    } else {
+        $deferredCompositeMatches =
+            $deferredCompositeRequested -eq 0 -and
+            $deferredCompositeActive -eq 0 -and
+            $deferredCompositeDescriptorBound -eq 0 -and
+            $deferredCompositeSource -eq 0 -and
+            $deferredCompositeQualityGate -eq 0 -and
+            $deferredCompositeConfidenceSource -eq 0 -and
+            $radianceSource -ne 4
+    }
+
+    $environmentMipContractMatches =
+        $environmentMipCount -gt 1 -and
+        $environmentMipCount -eq $iblPrefilteredMipCount
+    $environmentMipExpectedLabel = ">1/equal"
+    if ($ExpectedEnvironmentMipCount -gt 0) {
+        $environmentMipContractMatches =
+            $environmentMipCount -eq $ExpectedEnvironmentMipCount -and
+            $iblPrefilteredMipCount -gt $environmentMipCount
+        $environmentMipExpectedLabel =
+            "$ExpectedEnvironmentMipCount/iblMips>resolved"
+    }
 
     $checks = @(
         (New-Check "$Name requested provider" `
@@ -802,8 +1136,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 7 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "7/1"),
+            ($contractVersion -eq 11 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "11/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -815,6 +1149,56 @@ function Invoke-RuntimeLane {
                 $constantsDescriptorSetsReady -eq 1) `
             "resources=$constantsResourcesReady,sets=$constantsDescriptorSetsReady" `
             "1/1"),
+        (New-Check "$Name temporal stability factor contract" `
+            ([Math]::Abs($temporalStabilityFactor - $ExpectedTemporalStabilityFactor) -lt 0.0001) `
+            "$temporalStabilityFactor" "$ExpectedTemporalStabilityFactor"),
+        (New-Check "$Name samples-per-quad contract" `
+            ($samplesPerQuad -eq $ExpectedSamplesPerQuad) `
+            "$samplesPerQuad" "$ExpectedSamplesPerQuad"),
+        (New-Check "$Name stable environment fallback contract" `
+            ($stableEnvironmentFallbackEnabled -eq $ExpectedStableEnvironmentFallbackEnabled -and
+                $environmentMipContractMatches) `
+            "enabled=$stableEnvironmentFallbackEnabled,mips=$environmentMipCount,iblMips=$iblPrefilteredMipCount" `
+            "$ExpectedStableEnvironmentFallbackEnabled/$environmentMipExpectedLabel"),
+        (New-Check "$Name constant environment fallback control" `
+            ($constantEnvironmentFallbackEnabled -eq $ExpectedConstantEnvironmentFallbackEnabled) `
+            "$constantEnvironmentFallbackEnabled" `
+            "$ExpectedConstantEnvironmentFallbackEnabled"),
+        (New-Check "$Name perfect reflection directions control" `
+            ($perfectReflectionDirectionsEnabled -eq $ExpectedPerfectReflectionDirectionsEnabled) `
+            "$perfectReflectionDirectionsEnabled" `
+            "$ExpectedPerfectReflectionDirectionsEnabled"),
+        (New-Check "$Name spatial prefilter bypass control" `
+            ($prefilterBypassEnabled -eq $ExpectedPrefilterBypassEnabled) `
+            "$prefilterBypassEnabled" `
+            "$ExpectedPrefilterBypassEnabled"),
+        (New-Check "$Name temporal resolve bypass control" `
+            ($resolveTemporalBypassEnabled -eq $ExpectedResolveTemporalBypassEnabled) `
+            "$resolveTemporalBypassEnabled" `
+            "$ExpectedResolveTemporalBypassEnabled"),
+        (New-Check "$Name Classify surface coverage seed control" `
+            ($classifySurfaceSeedEnabled -eq $ExpectedClassifySurfaceSeedEnabled) `
+            "$classifySurfaceSeedEnabled" `
+            "$ExpectedClassifySurfaceSeedEnabled"),
+        (New-Check "$Name Intersect ray coverage marker control" `
+            ($intersectCoverageMarkerEnabled -eq $ExpectedIntersectCoverageMarkerEnabled) `
+            "$intersectCoverageMarkerEnabled" `
+            "$ExpectedIntersectCoverageMarkerEnabled"),
+        (New-Check "$Name Deferred receiver reprojection control" `
+            ($deferredReceiverReprojectionEnabled -eq $ExpectedDeferredReceiverReprojectionEnabled -and
+                $deferredValidatedBilinearEnabled -eq $ExpectedDeferredReceiverReprojectionEnabled -and
+                $deferredHistoryTapCount -eq (4 * $ExpectedDeferredReceiverReprojectionEnabled)) `
+            "reproject=$deferredReceiverReprojectionEnabled,validatedBilinear=$deferredValidatedBilinearEnabled,taps=$deferredHistoryTapCount" `
+            "$ExpectedDeferredReceiverReprojectionEnabled/$ExpectedDeferredReceiverReprojectionEnabled/$(4 * $ExpectedDeferredReceiverReprojectionEnabled)"),
+        (New-Check "$Name visible output clear control" `
+            ($visibleOutputClearEnabled -eq $ExpectedVisibleOutputClearEnabled -and
+                $visibleOutputClears -eq $ExpectedVisibleOutputClears) `
+            "enabled=$visibleOutputClearEnabled,clears=$visibleOutputClears" `
+            "$ExpectedVisibleOutputClearEnabled/$ExpectedVisibleOutputClears"),
+        (New-Check "$Name composite confidence mode" `
+            ($compositeConfidenceMode -eq $ExpectedCompositeConfidenceMode) `
+            "$compositeConfidenceMode" `
+            "$ExpectedCompositeConfidenceMode"),
         (New-Check "$Name prepare-args resources ready" `
             ($prepareResourcesReady -eq 1 -and
                 $prepareDescriptorSetsReady -eq 1 -and
@@ -863,8 +1247,16 @@ function Invoke-RuntimeLane {
             $intersectExpectedLabel),
         (New-Check "$Name reproject resource contract" `
             $reprojectResourceContractMatches `
-            "resources=$reprojectResourcesReady,sets=$reprojectDescriptorSetsReady,pipeline=$reprojectPipelineReady,input=$reprojectInputContractReady,extent=${reprojectWidth}x${reprojectHeight},average=${reprojectAverageWidth}x${reprojectAverageHeight},history=$reprojectHistoryReady/source$reprojectHistorySource,bytes=$reprojectMemoryBytes,offset=$reprojectIndirectArgsOffsetBytes" `
-            "1/1/1/1,extent==classify/intersect,average==ceil8,history=1/source1,bytes>classify,offset=12"),
+            "resources=$reprojectResourcesReady,sets=$reprojectDescriptorSetsReady,pipeline=$reprojectPipelineReady,input=$reprojectInputContractReady,extent=${reprojectWidth}x${reprojectHeight},average=${reprojectAverageWidth}x${reprojectAverageHeight},history=$reprojectHistoryReady/source$reprojectHistorySource/metadata$reprojectHistoryMetadataSource,bytes=$reprojectMemoryBytes,offset=$reprojectIndirectArgsOffsetBytes" `
+            "1/1/1/1,extent==classify/intersect,average==ceil8,history=1/source1/metadata1,bytes>classify,offset=12"),
+        (New-Check "$Name reproject motion-vector contract" `
+            $reprojectMotionVectorContractMatches `
+            "ready=$reprojectMotionVectorContractReady,mode=$reprojectMotionVectorMode,scale=$reprojectMotionVectorScaleX/$reprojectMotionVectorScaleY" `
+            "ready=1,mode=$ExpectedMotionVectorMode,scale=$ExpectedMotionVectorScaleX/$ExpectedMotionVectorScaleY"),
+        (New-Check "$Name reproject hit-position contract" `
+            $reprojectHitReprojectionContractMatches `
+            "ready=$reprojectReprojectionContractReady,hit=$reprojectHitReprojectionEnabled" `
+            "ready=1,hit=$ExpectedHitReprojectionEnabled"),
         (New-Check "$Name reproject dispatch/bind state" `
             $reprojectDispatchStateMatches `
             "stats=$reprojectDispatches/$reprojectDescriptorBinds,binds=$reprojectBindDispatches/$reprojectBindDescriptorBinds" `
@@ -879,12 +1271,16 @@ function Invoke-RuntimeLane {
             $prefilterExpectedLabel),
         (New-Check "$Name resolve-temporal resource/history contract" `
             $resolveTemporalResourceContractMatches `
-            "resources=$resolveTemporalResourcesReady,sets=$resolveTemporalDescriptorSetsReady,pipeline=$resolveTemporalPipelineReady,input=$resolveTemporalInputContractReady,history=$resolveTemporalHistoryWritebackReady,extent=${resolveTemporalWidth}x${resolveTemporalHeight},bytes=$resolveTemporalMemoryBytes,offset=$resolveTemporalIndirectArgsOffsetBytes" `
-            "1/1/1/1/1,extent==classify/reproject/prefilter,bytes=0,offset=12"),
+            "resources=$resolveTemporalResourcesReady,sets=$resolveTemporalDescriptorSetsReady,pipeline=$resolveTemporalPipelineReady,input=$resolveTemporalInputContractReady,history=$resolveTemporalHistoryWritebackReady,sampleCount=$sampleCountWritebackReady,extent=${resolveTemporalWidth}x${resolveTemporalHeight},bytes=$resolveTemporalMemoryBytes,offset=$resolveTemporalIndirectArgsOffsetBytes" `
+            "1/1/1/1/1,sampleCount=1,extent==classify/reproject/prefilter,bytes=0,offset=12"),
         (New-Check "$Name resolve-temporal dispatch/bind/history-copy state" `
             $resolveTemporalDispatchStateMatches `
             "stats=$resolveTemporalDispatches/$resolveTemporalDescriptorBinds/$resolveTemporalHistoryCopies,binds=$resolveTemporalBindDispatches/$resolveTemporalBindDescriptorBinds/$resolveTemporalBindHistoryCopies" `
             $resolveTemporalExpectedLabel),
+        (New-Check "$Name deferred composite consumes FFX history" `
+            $deferredCompositeMatches `
+            "requested=$deferredCompositeRequested,active=$deferredCompositeActive,descriptor=$deferredCompositeDescriptorBound,history=$deferredCompositeHistoryValid,source=$deferredCompositeSource,quality=$deferredCompositeQualityGate,confidence=$deferredCompositeConfidenceSource,sourceIndex=$deferredCompositeSourceImageIndex,radiance=$radianceSource" `
+            $deferredCompositeExpectedLabel),
         (New-Check "$Name runtime dispatch state" `
             ($dispatchReady -eq $ExpectedDispatchReady -and
                 $runtimeActive -eq $ExpectedRuntimeActive) `
@@ -920,6 +1316,20 @@ function Invoke-RuntimeLane {
             spdDependencyReady = $spdReady
             constantsResourcesReady = $constantsResourcesReady
             constantsDescriptorSetsReady = $constantsDescriptorSetsReady
+            temporalStabilityFactor = $temporalStabilityFactor
+            samplesPerQuad = $samplesPerQuad
+            stableEnvironmentFallbackEnabled = $stableEnvironmentFallbackEnabled
+            constantEnvironmentFallbackEnabled = $constantEnvironmentFallbackEnabled
+            perfectReflectionDirectionsEnabled = $perfectReflectionDirectionsEnabled
+            prefilterBypassEnabled = $prefilterBypassEnabled
+            resolveTemporalBypassEnabled = $resolveTemporalBypassEnabled
+            classifySurfaceSeedEnabled = $classifySurfaceSeedEnabled
+            intersectCoverageMarkerEnabled = $intersectCoverageMarkerEnabled
+            environmentMipCount = $environmentMipCount
+            iblPrefilteredMipCount = $iblPrefilteredMipCount
+            deferredReceiverReprojectionEnabled = $deferredReceiverReprojectionEnabled
+            deferredValidatedBilinearEnabled = $deferredValidatedBilinearEnabled
+            deferredHistoryTapCount = $deferredHistoryTapCount
             prepareIndirectArgsResourcesReady = $prepareResourcesReady
             prepareIndirectArgsDescriptorSetsReady = $prepareDescriptorSetsReady
             prepareIndirectArgsPipelineReady = $preparePipelineReady
@@ -988,8 +1398,15 @@ function Invoke-RuntimeLane {
             reprojectAverageHeight = $reprojectAverageHeight
             reprojectHistoryReady = $reprojectHistoryReady
             reprojectHistorySource = $reprojectHistorySource
+            reprojectHistoryMetadataSource = $reprojectHistoryMetadataSource
             reprojectMemoryBytes = $reprojectMemoryBytes
             reprojectIndirectArgsOffsetBytes = $reprojectIndirectArgsOffsetBytes
+            reprojectMotionVectorMode = $reprojectMotionVectorMode
+            reprojectMotionVectorScaleX = $reprojectMotionVectorScaleX
+            reprojectMotionVectorScaleY = $reprojectMotionVectorScaleY
+            reprojectMotionVectorContractReady = $reprojectMotionVectorContractReady
+            reprojectHitReprojectionEnabled = $reprojectHitReprojectionEnabled
+            reprojectReprojectionContractReady = $reprojectReprojectionContractReady
             reprojectBindDispatches = $reprojectBindDispatches
             reprojectBindDescriptorBinds = $reprojectBindDescriptorBinds
             prefilterResourcesReady = $prefilterResourcesReady
@@ -1016,9 +1433,22 @@ function Invoke-RuntimeLane {
             resolveTemporalMemoryBytes = $resolveTemporalMemoryBytes
             resolveTemporalIndirectArgsOffsetBytes = $resolveTemporalIndirectArgsOffsetBytes
             resolveTemporalHistoryCopies = $resolveTemporalHistoryCopies
+            visibleOutputClearEnabled = $visibleOutputClearEnabled
+            visibleOutputClears = $visibleOutputClears
+            compositeConfidenceMode = $compositeConfidenceMode
+            sampleCountWritebackReady = $sampleCountWritebackReady
             resolveTemporalBindDispatches = $resolveTemporalBindDispatches
             resolveTemporalBindDescriptorBinds = $resolveTemporalBindDescriptorBinds
             resolveTemporalBindHistoryCopies = $resolveTemporalBindHistoryCopies
+            deferredCompositeRequested = $deferredCompositeRequested
+            deferredCompositeActive = $deferredCompositeActive
+            deferredCompositeDescriptorBound = $deferredCompositeDescriptorBound
+            deferredCompositeHistoryValid = $deferredCompositeHistoryValid
+            deferredCompositeSourceImageIndex = $deferredCompositeSourceImageIndex
+            deferredCompositeSource = $deferredCompositeSource
+            deferredCompositeQualityGate = $deferredCompositeQualityGate
+            deferredCompositeConfidenceSource = $deferredCompositeConfidenceSource
+            radianceSource = $radianceSource
             runtimeDispatchReady = $dispatchReady
             runtimeActive = $runtimeActive
             frameGraphValidationIssues = $frameGraphIssues
@@ -1029,21 +1459,47 @@ function Invoke-RuntimeLane {
     }
 }
 
-$forwardExecutable = Resolve-FullPath $ForwardExecutablePath
-$showcaseExecutable = Resolve-FullPath $ShowcaseExecutablePath
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
 if (!$SkipBuild) {
     Invoke-Build
 }
+
+$reports = @()
+$reports += Invoke-StaticChecks
+
+if ($StaticOnly) {
+    $passCount = ($reports | ForEach-Object { $_.passCount } |
+        Measure-Object -Sum).Sum
+    $failCount = ($reports | ForEach-Object { $_.failCount } |
+        Measure-Object -Sum).Sum
+    $summary = [pscustomobject]@{
+        generatedAt = (Get-Date).ToString("o")
+        outputDirectory = $OutputDirectory
+        staticOnly = $true
+        verdict = if ($failCount -eq 0) { "pass" } else { "fail" }
+        passCount = [int]$passCount
+        failCount = [int]$failCount
+        reports = $reports
+    }
+    $summary | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $OutputDirectory "summary.json") `
+            -Encoding utf8
+    $summary
+
+    if ($Strict -and $failCount -gt 0) {
+        exit 1
+    }
+    return
+}
+
+$forwardExecutable = Resolve-FullPath $ForwardExecutablePath
+$showcaseExecutable = Resolve-FullPath $ShowcaseExecutablePath
 foreach ($executable in @($forwardExecutable, $showcaseExecutable)) {
     if (!(Test-Path -LiteralPath $executable)) {
         throw "Missing executable: $executable"
     }
 }
-
-$reports = @()
-$reports += Invoke-StaticChecks
 
 $common = @{
     SE_WINDOW_HIDDEN = "1"
@@ -1069,7 +1525,469 @@ $reports += Invoke-RuntimeLane `
     -ExpectedDispatchReady 1 `
     -ExpectedRuntimeActive 1 `
     -ExpectPrepareDispatch $true `
-    -ExpectedFallbackReason 0
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-legacy-motion-vector-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_MOTION_VECTOR_MODE = "legacy-ndc"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedMotionVectorMode 2 `
+    -ExpectedMotionVectorScaleX 0.5 `
+    -ExpectedMotionVectorScaleY -0.5
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-hit-reprojection-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_HIT_REPROJECTION_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedHitReprojectionEnabled 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-temporal-stability-075-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR = "0.75"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedTemporalStabilityFactor 0.75
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-temporal-stability-000-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR = "0.0"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedTemporalStabilityFactor 0.0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-samples-per-quad-1-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-samples-4-official-confidence-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-stable-environment-fallback-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 0 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-environment-lod0-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-constant-environment-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-perfect-reflection-directions-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+        SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedPerfectReflectionDirectionsEnabled 0 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-prefilter-bypass-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+        SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS = "1"
+        SE_SSR_FFX_PREFILTER_BYPASS = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedPerfectReflectionDirectionsEnabled 1 `
+    -ExpectedPrefilterBypassEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-resolve-temporal-bypass-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+        SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS = "1"
+        SE_SSR_FFX_PREFILTER_BYPASS = "1"
+        SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedPerfectReflectionDirectionsEnabled 1 `
+    -ExpectedPrefilterBypassEnabled 1 `
+    -ExpectedResolveTemporalBypassEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-classify-surface-seed-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+        SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS = "1"
+        SE_SSR_FFX_PREFILTER_BYPASS = "1"
+        SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS = "1"
+        SE_SSR_FFX_CLASSIFY_SURFACE_SEED = "1"
+        SE_SSR_DEFERRED_REPROJECTION = "0"
+        SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR = "0.0"
+        SE_SSR_FFX_HIT_REPROJECTION_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedHitReprojectionEnabled 0 `
+    -ExpectedTemporalStabilityFactor 0.0 `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedPerfectReflectionDirectionsEnabled 1 `
+    -ExpectedPrefilterBypassEnabled 1 `
+    -ExpectedResolveTemporalBypassEnabled 1 `
+    -ExpectedClassifySurfaceSeedEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedDeferredReceiverReprojectionEnabled 0 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-intersect-coverage-marker-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT = "1"
+        SE_SSR_FFX_SAMPLES_PER_QUAD = "4"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE_OFF = "1"
+        SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK = "1"
+        SE_SSR_FFX_ENVIRONMENT_LOD0 = "1"
+        SE_SSR_FFX_CONSTANT_ENVIRONMENT = "1"
+        SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS = "1"
+        SE_SSR_FFX_PREFILTER_BYPASS = "1"
+        SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS = "1"
+        SE_SSR_FFX_CLASSIFY_SURFACE_SEED = "1"
+        SE_SSR_FFX_INTERSECT_COVERAGE_MARKER = "1"
+        SE_SSR_DEFERRED_REPROJECTION = "0"
+        SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR = "0.0"
+        SE_SSR_FFX_HIT_REPROJECTION_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedHitReprojectionEnabled 0 `
+    -ExpectedTemporalStabilityFactor 0.0 `
+    -ExpectedSamplesPerQuad 4 `
+    -ExpectedStableEnvironmentFallbackEnabled 1 `
+    -ExpectedConstantEnvironmentFallbackEnabled 1 `
+    -ExpectedPerfectReflectionDirectionsEnabled 1 `
+    -ExpectedPrefilterBypassEnabled 1 `
+    -ExpectedResolveTemporalBypassEnabled 1 `
+    -ExpectedClassifySurfaceSeedEnabled 1 `
+    -ExpectedIntersectCoverageMarkerEnabled 1 `
+    -ExpectedEnvironmentMipCount 1 `
+    -ExpectedDeferredReceiverReprojectionEnabled 0 `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-composite-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_COMPOSITE_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $false `
+    -ExpectedTemporalStabilityFactor 0.95
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-deferred-reprojection-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_DEFERRED_REPROJECTION = "0"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedDeferredReceiverReprojectionEnabled 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-visible-output-clear-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedVisibleOutputClearEnabled 0 `
+    -ExpectedVisibleOutputClears 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-sample-variance-confidence-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedVisibleOutputClearEnabled 1 `
+    -ExpectedVisibleOutputClears 1 `
+    -ExpectedCompositeConfidenceMode 1
 
 $reports += Invoke-RuntimeLane `
     -Name "forward3d-fbx-ffx-backend-contract" `
@@ -1083,7 +2001,8 @@ $reports += Invoke-RuntimeLane `
     -ExpectedDispatchReady 1 `
     -ExpectedRuntimeActive 1 `
     -ExpectPrepareDispatch $true `
-    -ExpectedFallbackReason 0
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true
 
 $reports += Invoke-RuntimeLane `
     -Name "lighting-showcase-internal-backend-control" `
@@ -1098,7 +2017,9 @@ $reports += Invoke-RuntimeLane `
     -ExpectedDispatchReady 0 `
     -ExpectedRuntimeActive 0 `
     -ExpectPrepareDispatch $false `
-    -ExpectedFallbackReason 1
+    -ExpectedFallbackReason 1 `
+    -ExpectedVisibleOutputClearEnabled 0 `
+    -ExpectedVisibleOutputClears 0
 
 $passCount = ($reports | ForEach-Object { $_.passCount } | Measure-Object -Sum).Sum
 $failCount = ($reports | ForEach-Object { $_.failCount } | Measure-Object -Sum).Sum

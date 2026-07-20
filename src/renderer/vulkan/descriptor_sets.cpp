@@ -708,7 +708,9 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanSampler& sampler,
     std::size_t descriptorIndex,
-    std::size_t historyImageIndex
+    std::size_t historyImageIndex,
+    VkImageView resolvedReflectionOverride,
+    VkImageLayout resolvedReflectionLayout
 ) {
     if (descriptorIndex >= m_DescriptorSets.size() ||
         historyImageIndex >= renderTargets.Count()) {
@@ -721,8 +723,10 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     historyColorInfo.sampler = sampler.Handle();
 
     VkDescriptorImageInfo resolvedInfo{};
-    resolvedInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    resolvedInfo.imageView = renderTargets.SsrResolvedView(historyImageIndex);
+    resolvedInfo.imageLayout = resolvedReflectionLayout;
+    resolvedInfo.imageView = resolvedReflectionOverride != VK_NULL_HANDLE
+        ? resolvedReflectionOverride
+        : renderTargets.SsrResolvedView(historyImageIndex);
     resolvedInfo.sampler = sampler.Handle();
 
     VkDescriptorImageInfo metadataInfo{};

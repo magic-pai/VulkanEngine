@@ -25,7 +25,10 @@ THE SOFTWARE.
 [[vk::binding( 0, 1)]] Texture2D<float> g_depth_buffer							: register(t0);
 [[vk::binding( 1, 1)]] Texture2D<float> g_roughness						        : register(t1);
 [[vk::binding( 2, 1)]] Texture2D<float3> g_normal							    : register(t2);
-[[vk::binding( 3, 1)]] Texture2D<float> g_depth_buffer_history					: register(t3);
+// SelfEngine packs previous receiver view-depth, octahedral world normal, and
+// roughness into one RGBA history image. FidelityFX DNSR still consumes the
+// same semantic inputs through its wrapper callbacks below.
+[[vk::binding( 3, 1)]] Texture2D<float4> g_receiver_history_metadata		        : register(t3);
 [[vk::binding( 4, 1)]] Texture2D<float> g_roughness_history				        : register(t4);
 [[vk::binding( 5, 1)]] Texture2D<float3> g_normal_history					    : register(t5);
 
@@ -51,19 +54,40 @@ THE SOFTWARE.
 
 float FFX_DNSR_Reflections_GetRandom(int2 pixel_coordinate) { return g_blue_noise_texture.Load(int3(pixel_coordinate.xy % 128, 0)).x; }
 float FFX_DNSR_Reflections_LoadDepth(int2 pixel_coordinate) { return g_depth_buffer.Load(int3(pixel_coordinate, 0)); }
-float FFX_DNSR_Reflections_LoadDepthHistory(int2 pixel_coordinate) { return g_depth_buffer_history.Load(int3(pixel_coordinate, 0)); }
-float FFX_DNSR_Reflections_SampleDepthHistory(float2 uv) { return g_depth_buffer_history.SampleLevel(g_linear_sampler, uv, 0.0f); }
+min16float3 SelfEngine_DecodeHistoryNormal(min16float2 encoded) {
+    min16float3 value = min16float3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
+    if (value.z < 0.0) {
+        min16float2 sign_value = min16float2(
+            value.x >= 0.0 ? 1.0 : -1.0,
+            value.y >= 0.0 ? 1.0 : -1.0
+        );
+        value.xy = (1.0 - abs(value.yx)) * sign_value;
+    }
+    return normalize(value);
+}
+
+float FFX_DNSR_Reflections_LoadDepthHistory(int2 pixel_coordinate) { return g_receiver_history_metadata.Load(int3(pixel_coordinate, 0)).x; }
+float FFX_DNSR_Reflections_SampleDepthHistory(float2 uv) { return g_receiver_history_metadata.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float3 FFX_DNSR_Reflections_LoadRadiance(int2 pixel_coordinate) { return (min16float3)g_in_radiance.Load(int3(pixel_coordinate, 0)).xyz; }
 min16float3 FFX_DNSR_Reflections_LoadRadianceHistory(int2 pixel_coordinate) { return (min16float3)g_radiance_history.Load(int3(pixel_coordinate, 0)).xyz; }
 min16float3 FFX_DNSR_Reflections_SampleRadianceHistory(float2 uv) { return (min16float3)g_radiance_history.SampleLevel(g_linear_sampler, uv, 0.0f).xyz; }
 min16float FFX_DNSR_Reflections_SampleNumSamplesHistory(float2 uv) { return (min16float)g_sample_count_history.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float3 FFX_DNSR_Reflections_LoadWorldSpaceNormal(int2 pixel_coordinate) { return normalize(2.0 * (min16float3)g_normal.Load(int3(pixel_coordinate, 0)) - 1.0); }
-min16float3 FFX_DNSR_Reflections_LoadWorldSpaceNormalHistory(int2 pixel_coordinate) { return normalize(2.0 * (min16float3)g_normal_history.Load(int3(pixel_coordinate, 0)) - 1.0); }
-min16float3 FFX_DNSR_Reflections_SampleWorldSpaceNormalHistory(float2 uv) { return normalize(2.0 * (min16float3)g_normal_history.SampleLevel(g_linear_sampler, uv, 0.0f) - 1.0); }
+min16float3 FFX_DNSR_Reflections_LoadWorldSpaceNormalHistory(int2 pixel_coordinate) { return SelfEngine_DecodeHistoryNormal((min16float2)g_receiver_history_metadata.Load(int3(pixel_coordinate, 0)).yz); }
+min16float3 FFX_DNSR_Reflections_SampleWorldSpaceNormalHistory(float2 uv) { return SelfEngine_DecodeHistoryNormal((min16float2)g_receiver_history_metadata.SampleLevel(g_linear_sampler, uv, 0.0f).yz); }
 min16float FFX_DNSR_Reflections_LoadRoughness(int2 pixel_coordinate) { return (min16float)g_roughness.Load(int3(pixel_coordinate, 0)); }
-min16float FFX_DNSR_Reflections_SampleRoughnessHistory(float2 uv) { return (min16float)g_roughness_history.SampleLevel(g_linear_sampler, uv, 0.0f); }
-min16float FFX_DNSR_Reflections_LoadRoughnessHistory(int2 pixel_coordinate) { return (min16float)g_roughness_history.Load(int3(pixel_coordinate, 0)); }
-float2 FFX_DNSR_Reflections_LoadMotionVector(int2 pixel_coordinate) { return g_motion_vector.Load(int3(pixel_coordinate, 0)) * float2(0.5, -0.5); }
+min16float FFX_DNSR_Reflections_SampleRoughnessHistory(float2 uv) { return (min16float)g_receiver_history_metadata.SampleLevel(g_linear_sampler, uv, 0.0f).w; }
+min16float FFX_DNSR_Reflections_LoadRoughnessHistory(int2 pixel_coordinate) { return (min16float)g_receiver_history_metadata.Load(int3(pixel_coordinate, 0)).w; }
+float2 SelfEngine_FfxSssrMotionVectorScale() {
+    if (g_motion_vector_contract_ready != 0u && g_motion_vector_mode == 2u) {
+        return float2(0.5, -0.5);
+    }
+    return float2(1.0, 1.0);
+}
+bool FFX_DNSR_Reflections_HitPositionReprojectionEnabled() {
+    return g_reprojection_contract_ready != 0u && g_hit_reprojection_enabled != 0u;
+}
+float2 FFX_DNSR_Reflections_LoadMotionVector(int2 pixel_coordinate) { return g_motion_vector.Load(int3(pixel_coordinate, 0)) * SelfEngine_FfxSssrMotionVectorScale(); }
 min16float3 FFX_DNSR_Reflections_SamplePreviousAverageRadiance(float2 uv) { return (min16float3)g_average_radiance_history.SampleLevel(g_linear_sampler, uv, 0.0f).xyz; }
 min16float FFX_DNSR_Reflections_SampleVarianceHistory(float2 uv) { return (min16float)g_variance_history.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float FFX_DNSR_Reflections_LoadRayLength(int2 pixel_coordinate) { return (min16float)g_in_radiance.Load(int3(pixel_coordinate, 0)).w; }

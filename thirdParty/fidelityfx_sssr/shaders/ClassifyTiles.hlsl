@@ -60,6 +60,11 @@ bool IsReflectiveSurface(int2 pixel_coordinate, float roughness)
     return g_depth_buffer[pixel_coordinate] < far_plane;
 }
 
+bool SelfEngine_FfxSssrClassifySurfaceSeedEnabled()
+{
+    return (g_environment_fallback_control & 0x04000000u) != 0u;
+}
+
 bool IsBaseRay(uint2 dispatch_thread_id, uint samples_per_quad) {
     switch (samples_per_quad) {
     case 1:
@@ -139,7 +144,10 @@ void ClassifyTiles(uint2 dispatch_thread_id, uint2 group_thread_id, float roughn
         StoreRay(ray_index, dispatch_thread_id, copy_horizontal, copy_vertical, copy_diagonal);
     }
 
-    float4 intersection_output = 0;
+    float4 intersection_output =
+        SelfEngine_FfxSssrClassifySurfaceSeedEnabled() && is_reflective_surface
+            ? float4(0.6, 0.6, 0.6, 1.0)
+            : float4(0.0, 0.0, 0.0, 0.0);
     if (is_reflective_surface && !is_glossy_reflection)
     {
         // Fall back to environment map without preparing a ray

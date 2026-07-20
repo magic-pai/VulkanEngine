@@ -347,6 +347,8 @@ function Invoke-SsrLane {
     $fallbackBlendAveragePermille = Get-UIntMetric $last "ssr_fallback_blend_average_permille"
     $reconstructionDeferredConsumerContractVersion = Get-UIntMetric $last "ssr_reconstruction_deferred_consumer_contract_version"
     $reconstructionDeferredReceiverReprojectionEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_receiver_reprojection_enabled"
+    $reconstructionDeferredValidatedBilinearEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_validated_bilinear_enabled"
+    $reconstructionDeferredHistoryTapCount = Get-UIntMetric $last "ssr_reconstruction_deferred_history_tap_count"
     $reconstructionDeferredDepthRejectEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_depth_reject_enabled"
     $reconstructionDeferredNormalRejectEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_normal_reject_enabled"
     $reconstructionDeferredRoughnessRejectEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_roughness_reject_enabled"
@@ -560,15 +562,17 @@ function Invoke-SsrLane {
         )
         $deferredReceiverActiveExpected = $reconstructionExpected -and $deferredReceiverExpected
         $checks += New-Check "SSR Deferred receiver reprojection contract" `
-            ($reconstructionDeferredConsumerContractVersion -eq 6 -and
+            ($reconstructionDeferredConsumerContractVersion -eq 7 -and
                 $reconstructionDeferredReceiverReprojectionEnabled -eq [int]$deferredReceiverActiveExpected -and
+                $reconstructionDeferredValidatedBilinearEnabled -eq [int]$deferredReceiverActiveExpected -and
+                $reconstructionDeferredHistoryTapCount -eq $(if ($deferredReceiverActiveExpected) { 4 } else { 0 }) -and
                 $reconstructionDeferredDepthRejectEnabled -eq [int]$deferredReceiverActiveExpected -and
                 $reconstructionDeferredNormalRejectEnabled -eq [int]$deferredReceiverActiveExpected -and
                 $reconstructionDeferredRoughnessRejectEnabled -eq [int]$deferredReceiverActiveExpected -and
                 $reconstructionDeferredMetadataDescriptorBound -eq 1 -and
                 $reconstructionResolvedMetadataAliased -eq 0) `
-            "version=$reconstructionDeferredConsumerContractVersion,reproject=$reconstructionDeferredReceiverReprojectionEnabled,depth/normal/roughness=$reconstructionDeferredDepthRejectEnabled/$reconstructionDeferredNormalRejectEnabled/$reconstructionDeferredRoughnessRejectEnabled,metadataBound=$reconstructionDeferredMetadataDescriptorBound,alias=$reconstructionResolvedMetadataAliased" `
-            "6/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/1/0"
+            "version=$reconstructionDeferredConsumerContractVersion,reproject=$reconstructionDeferredReceiverReprojectionEnabled,validatedBilinear=$reconstructionDeferredValidatedBilinearEnabled,taps=$reconstructionDeferredHistoryTapCount,depth/normal/roughness=$reconstructionDeferredDepthRejectEnabled/$reconstructionDeferredNormalRejectEnabled/$reconstructionDeferredRoughnessRejectEnabled,metadataBound=$reconstructionDeferredMetadataDescriptorBound,alias=$reconstructionResolvedMetadataAliased" `
+            "7/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/$(if ($deferredReceiverActiveExpected) { 4 } else { 0 })/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/$([int]$deferredReceiverActiveExpected)/1/0"
         $checks += New-Check "SSR reconstruction dispatches recorded" `
             ($reconstructionTraceDispatches -eq 1 -and $reconstructionTemporalDispatches -eq 1 -and $reconstructionSpatialDispatches -eq 1 -and $reconstructionHistoryCopies -eq ($pyramidImageCount - 1)) `
             "trace/temporal/spatial=$reconstructionTraceDispatches/$reconstructionTemporalDispatches/$reconstructionSpatialDispatches,copies=$reconstructionHistoryCopies" `
@@ -871,6 +875,8 @@ function Invoke-SsrLane {
             fallbackBlendAveragePermille = $fallbackBlendAveragePermille
             reconstructionDeferredConsumerContractVersion = $reconstructionDeferredConsumerContractVersion
             reconstructionDeferredReceiverReprojectionEnabled = $reconstructionDeferredReceiverReprojectionEnabled
+            reconstructionDeferredValidatedBilinearEnabled = $reconstructionDeferredValidatedBilinearEnabled
+            reconstructionDeferredHistoryTapCount = $reconstructionDeferredHistoryTapCount
             reconstructionDeferredDepthRejectEnabled = $reconstructionDeferredDepthRejectEnabled
             reconstructionDeferredNormalRejectEnabled = $reconstructionDeferredNormalRejectEnabled
             reconstructionDeferredRoughnessRejectEnabled = $reconstructionDeferredRoughnessRejectEnabled

@@ -2,6 +2,90 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-21 - FFX SSSR Glossy Stability Is A Multi-Part Sampling Contract
+
+Symptom:
+- LightingShowcase glossy spheres showed view-dependent crosses, concentric rings, dirty color blocks, and close-range television-like snow. Individual artifacts could disappear while another returned during camera translation or distance changes.
+
+False leads:
+- Treating the cubemap, wall color, SSR thickness, or one temporal reprojection branch as the sole cause.
+- Raising ray density alone, changing confidence alone, or clearing output alone and assuming a single control could close the issue.
+
+Cause:
+- The visible instability came from several contracts interacting: sparse `1 ray/quad` replication, stochastic GGX directions that did not converge under the current DNSR bridge, LOD0 environment fallback on random directions, a custom sample-count/variance alpha that exposed spherical confidence contours, and stale pixels where the current frame did not write visible output.
+
+Control test:
+- Hold the FFX backend and all other rendering settings fixed, then enable `4 rays/quad`, stable roughness-mip environment fallback, deterministic primary reflection directions, AMD glossy-validity confidence, and visible-output clearing together. Reverse controls must independently restore the old behavior for diagnosis.
+
+Fix:
+- Promoted the accepted combination to FFX contract v11 defaults: samples `4`, stable environment fallback on, perfect reflection directions on, composite confidence mode `0`, and visible-output clear on.
+- Preserved explicit Debug controls for sparse sampling, random directions, unstable fallback, sample/variance confidence, and uncleared output.
+
+Prevention:
+- Do not classify glossy SSSR stability as a one-parameter tuning problem. Validate ray coverage, direction stability, fallback LOD, confidence semantics, and full-frame output initialization as one producer-consumer contract.
+- Lock visually accepted production defaults with source-level assertions so a later refactor cannot silently restore diagnostic behavior.
+
+Validation:
+- The exact GPU combination passed the v10 runtime matrix with `916 pass / 0 fail`; the general SSR regression passed `691 pass / 0 fail`, and the octahedral normal/history codec gate passed `6 pass / 0 fail`.
+- The v11 source/default gate passed `56 pass / 0 fail` after rebuilding `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` in Debug.
+- The user confirmed that the final LightingShowcase window had no cross, ring, snow noise, exposed material base color, or camera-motion instability.
+- Contract v11 changes only the CPU defaults, reverse controls, and audit version; Windows Smart App Control blocked the new executable hash despite a valid local signature, so v11 is covered by the static gate rather than falsely claimed as a launched binary.
+
+## 2026-07-20 - FFX SSR History Needs Receiver Validation, Not UV Alone
+
+Symptom:
+- LightingShowcase glossy spheres showed distance-dependent rings and dirty waves that got worse during WASD camera translation, but calmed down when the camera stopped.
+
+False leads:
+- Treating the remaining artifact as a pure motion-vector scale problem.
+- Disabling hit-position reprojection alone and assuming the denoiser history was then fully safe.
+
+Cause:
+- The FFX visible composite was trusting radiance-history UV validity too much. It needed the same receiver-side depth/normal/roughness validation that the internal SSR path already used, otherwise moving camera samples could bleed unstable history across glossy boundaries.
+
+Control test:
+- `SE_SSR_FFX_HIT_REPROJECTION_OFF=1` isolated the hit-position branch, then the receiver validation gate proved the visible composite still needed previous receiver metadata checks.
+
+Fix:
+- Kept the FFX motion-vector and hit-reprojection controls, but made the visible deferred composite route its FFX history through `SsrDeferredReceiverHistoryConfidence(...)` instead of a UV-only bypass.
+- Added CSV and static-script coverage for the hit-reprojection control plus the receiver-validation contract.
+
+Prevention:
+- A third-party temporal producer is not production-ready just because its history image is valid. The visible consumer still needs receiver identity and rejection checks.
+
+Validation:
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_receiver_validation_gate` passed `191 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\ssr_regression_after_ffx_receiver_validation_gate` passed `691 pass / 0 fail`.
+
+## 2026-07-20 - FidelityFX SSSR History Composite Needs Its Own Consumer Contract
+
+Symptom:
+- The AMD SSSR ResolveTemporal output was valid as a history producer, but the final image still sampled the internal `SSRResolved` texture.
+
+False leads:
+- Treating ResolveTemporal dispatch success as proof of visible SSR contribution.
+- Reusing the internal resolved-alpha and metadata confidence contract for FFX radiance history.
+
+Cause:
+- The FFX pass chain produces `RadianceHistory` after Deferred lighting, so the visible consumer must sample the previous completed history on the next frame. That history stores radiance, not the internal `SSRResolved.a` confidence payload, and it does not match the internal `SSRHistoryMetadata` identity.
+
+Control test:
+- Run `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_deferred_composite_bridge` and require LightingShowcase plus Forward3D FFX lanes to report deferred composite requested/active/descriptor/history/source `1/1/1/1/1` and `radianceSource=4`; the internal-backend lane must keep those values at `0` and avoid `radianceSource=4`.
+
+Fix:
+- Let GBuffer binding 17 optionally bind the previous FFX `RadianceHistoryView`.
+- Added an SSR control bit for the Deferred shader to treat binding 17 as FFX radiance history, bypass internal metadata confidence, and blend conservatively over probe/IBL fallback.
+- Added CSV fields and a strict FFX integration gate for the Deferred composite bridge.
+
+Prevention:
+- Every temporal third-party producer needs an explicit visible consumer contract; do not infer it from successful intermediate dispatches.
+- Do not share confidence/metadata semantics between independently produced reflection histories unless resource identity and payload layout are proven.
+
+Validation:
+- Debug `SelfEngineShaders`, `SelfEngineForward3D`, and `SelfEngineLightingShowcase` builds passed.
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -OutputDirectory tmp\ffx_sssr_deferred_composite_bridge` passed `125 pass / 0 fail`.
+- `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\ssr_regression_after_ffx_deferred_composite` passed `691 pass / 0 fail`.
+
 ## 2026-07-20 - FidelityFX SSSR ResolveTemporal Must Be Validation-Clean History
 
 Symptom:

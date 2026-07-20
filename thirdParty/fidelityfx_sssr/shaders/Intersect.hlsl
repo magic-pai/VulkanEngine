@@ -127,8 +127,50 @@ float3 SampleReflectionVector(float3 view_direction, float3 normal, float roughn
     return mul(reflected_direction_tbn, inv_tbn_transform);
 }
 
-float3 SampleEnvironmentMap(float3 direction) {
-    return g_environment_map.SampleLevel(g_environment_map_sampler, direction, 0).xyz;
+bool StableEnvironmentFallbackEnabled() {
+    return (g_environment_fallback_control & 0x80000000u) != 0u;
+}
+
+bool ConstantEnvironmentFallbackEnabled() {
+    return (g_environment_fallback_control & 0x40000000u) != 0u;
+}
+
+bool PerfectReflectionDirectionsEnabled() {
+    return (g_environment_fallback_control & 0x20000000u) != 0u;
+}
+
+bool SelfEngine_FfxSssrIntersectCoverageMarkerEnabled() {
+    return (g_environment_fallback_control & 0x02000000u) != 0u;
+}
+
+float EnvironmentMipCount() {
+    return max(1.0, float(g_environment_fallback_control & 0xffffu));
+}
+
+float3 SampleEnvironmentMap(
+    float3 stochastic_direction,
+    float3 stable_direction,
+    float roughness
+) {
+    if (ConstantEnvironmentFallbackEnabled()) {
+        return float3(0.6, 0.6, 0.6);
+    }
+
+    if (!StableEnvironmentFallbackEnabled()) {
+        return g_environment_map.SampleLevel(
+            g_environment_map_sampler,
+            stochastic_direction,
+            0.0
+        ).xyz;
+    }
+
+    float max_mip = max(0.0, EnvironmentMipCount() - 1.0);
+    float mip = saturate(roughness) * max_mip;
+    return g_environment_map.SampleLevel(
+        g_environment_map_sampler,
+        normalize(stable_direction),
+        mip
+    ).xyz;
 }
 
 bool IsMirrorReflection(float roughness) {
@@ -136,6 +178,27 @@ bool IsMirrorReflection(float roughness) {
 }
 
 #include "ffx_sssr.h"
+
+void StoreIntersectionSample(
+    int2 coords,
+    bool copy_horizontal,
+    bool copy_vertical,
+    bool copy_diagonal,
+    float4 sample
+) {
+    g_intersection_output[coords] = sample;
+
+    uint2 copy_target = uint2(coords) ^ 0b1u;
+    if (copy_horizontal) {
+        g_intersection_output[uint2(copy_target.x, coords.y)] = sample;
+    }
+    if (copy_vertical) {
+        g_intersection_output[uint2(coords.x, copy_target.y)] = sample;
+    }
+    if (copy_diagonal) {
+        g_intersection_output[copy_target] = sample;
+    }
+}
 
 [numthreads(8, 8, 1)]
 void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
@@ -149,6 +212,17 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
     bool copy_vertical;
     bool copy_diagonal;
     UnpackRayCoords(packed_coords, coords, copy_horizontal, copy_vertical, copy_diagonal);
+
+    if (SelfEngine_FfxSssrIntersectCoverageMarkerEnabled()) {
+        StoreIntersectionSample(
+            coords,
+            copy_horizontal,
+            copy_vertical,
+            copy_diagonal,
+            float4(1.0, 0.0, 1.0, 1.0)
+        );
+        return;
+    }
 
     const uint2 screen_size = g_buffer_dimensions;
 
@@ -167,7 +241,19 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
     float3 view_space_ray_direction = normalize(view_space_ray);
 
     float3 view_space_surface_normal = mul(g_view, float4(world_space_normal, 0)).xyz;
-    float3 view_space_reflected_direction = SampleReflectionVector(view_space_ray_direction, view_space_surface_normal, roughness, coords);
+    float3 view_space_reflected_direction =
+        PerfectReflectionDirectionsEnabled()
+            ? reflect(view_space_ray_direction, view_space_surface_normal)
+            : SampleReflectionVector(
+                view_space_ray_direction,
+                view_space_surface_normal,
+                roughness,
+                coords
+            );
+    float3 view_space_environment_direction = reflect(
+        view_space_ray_direction,
+        view_space_surface_normal
+    );
     float3 screen_space_ray_direction = ProjectDirection(view_space_ray, view_space_reflected_direction, screen_uv_space_ray_origin, g_proj);
     
     //====SSSR====
@@ -189,23 +275,23 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
 
     // Sample environment map.
     float3 world_space_reflected_direction = mul(g_inv_view, float4(view_space_reflected_direction, 0)).xyz;
-    float3 environment_lookup = SampleEnvironmentMap(world_space_reflected_direction);
+    float3 world_space_environment_direction = mul(
+        g_inv_view,
+        float4(view_space_environment_direction, 0)
+    ).xyz;
+    float3 environment_lookup = SampleEnvironmentMap(
+        world_space_reflected_direction,
+        world_space_environment_direction,
+        roughness
+    );
     reflection_radiance = lerp(environment_lookup, reflection_radiance, confidence);
 
     float4 new_sample = float4(reflection_radiance, world_ray_length);
-    g_intersection_output[coords] = new_sample;
-
-    uint2 copy_target = coords ^ 0b1; // Flip last bit to find the mirrored coords along the x and y axis within a quad.
-    if (copy_horizontal) {
-        uint2 copy_coords = uint2(copy_target.x, coords.y);
-        g_intersection_output[copy_coords] = new_sample;
-    }
-    if (copy_vertical) {
-        uint2 copy_coords = uint2(coords.x, copy_target.y);
-        g_intersection_output[copy_coords] = new_sample;
-    }
-    if (copy_diagonal) {
-        uint2 copy_coords = copy_target;
-        g_intersection_output[copy_coords] = new_sample;
-    }
+    StoreIntersectionSample(
+        coords,
+        copy_horizontal,
+        copy_vertical,
+        copy_diagonal,
+        new_sample
+    );
 }

@@ -69,6 +69,11 @@ Current integration state:
   radiance, average radiance, variance, and sample-count images. The dispatch
   is indirect at byte offset `12`, matching the second three-uint dispatch
   record written by `PrepareIndirectArgs.hlsl`.
+- `Reproject.hlsl` consumes SelfEngine motion vectors as UV-space
+  `currentUv - previousUv`, matching the GBuffer/TAA/SSR temporal contract.
+  The constants buffer records motion-vector mode `1` and scale `1,1` by
+  default. The legacy AMD-sample-style NDC conversion `0.5,-0.5` remains only
+  as the Debug control `SE_SSR_FFX_MOTION_VECTOR_MODE=legacy-ndc`.
 - `Prefilter.hlsl` consumes current radiance from the Intersect output,
   average radiance plus variance/sample-count from Reproject, current depth,
   extracted roughness, GBuffer normal, and the denoiser tile list. It writes
@@ -87,7 +92,46 @@ Current integration state:
   lane that proves the FFX dispatches are suppressed when not requested. The
   gate also requires the FFX FrameGraph resources, pass split, history writeback,
   and Vulkan validation logs to be clean.
-- Runtime image contribution remains on the existing stable probe/IBL fallback
-  until the final FFX resolve/composite path is wired and validated. The current
-  ResolveTemporal output is intentionally an auditable history producer, not the
-  final visible reflection.
+- Runtime image contribution now has a controlled Deferred composite bridge:
+  when `SE_SSR_BACKEND=ffx-sssr`, a previous temporal frame exists, and the FFX
+  history has completed at least once, GBuffer binding 17 samples the previous
+  FFX `RadianceHistory` instead of the internal `SSRResolved` image. The shader
+  uses an explicit SSR control bit to treat this as radiance history, bypassing
+  the internal alpha-confidence/metadata contract and blending conservatively
+  over the stable probe/IBL fallback.
+
+Production visual contract (SelfEngine FFX contract v11):
+- The default ray density is `4 rays/quad`. Sparse `1` and `2` ray modes remain
+  explicit diagnostics because quad replication produced distance-dependent
+  rings on glossy receivers in the current integration.
+- Miss fallback uses a stable primary reflection direction and selects the
+  prefiltered environment mip from receiver roughness. The stochastic GGX
+  direction and LOD0 fallback remain reverse controls for isolation.
+- ResolveTemporal exports AMD-style glossy validity as composite confidence
+  (`mode 0`). SelfEngine's experimental sample-count/variance confidence is
+  retained as a comparison mode, not the production default.
+- The current visible FFX output is cleared before dispatch so pixels omitted
+  by classification cannot preserve stale radiance from a previous frame.
+
+Debug reverse controls:
+- `SE_SSR_FFX_SAMPLES_PER_QUAD=1`
+- `SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF=1`
+- `SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF=1`
+- `SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE=1`
+- `SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF=1`
+
+Validation note:
+- The accepted GPU behavior was run with the exact v10 combination that became
+  the v11 defaults. The v10 integration matrix passed `916 pass / 0 fail`, the
+  general SSR regression passed `691 pass / 0 fail`, and the user accepted the
+  real LightingShowcase result with no cross, concentric ring, snow noise, or
+  motion corruption.
+- The v11 static source/default contract passes `56 pass / 0 fail`; Debug
+  shader, Forward3D, and LightingShowcase builds also pass.
+- A newly linked v11 executable is currently denied by Windows Smart App
+  Control policy `4551` / policy ID
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}` even when its local Authenticode
+  signature reports `Valid`. Do not describe v11 as runtime-launched until the
+  device compatibility task resolves that policy boundary. Use
+  `scripts\Test-FidelityFxSssrIntegration.ps1 -StaticOnly -SkipBuild -Strict`
+  for the source/default contract gate in the meantime.

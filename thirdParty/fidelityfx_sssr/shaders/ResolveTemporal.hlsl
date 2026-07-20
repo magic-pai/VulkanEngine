@@ -46,11 +46,24 @@ min16float FFX_DNSR_Reflections_LoadRoughness(int2 pixel_coordinate) { return (m
 min16float FFX_DNSR_Reflections_LoadVariance(int2 pixel_coordinate) { return (min16float)g_in_variance.Load(int3(pixel_coordinate, 0)).x; }
 min16float FFX_DNSR_Reflections_LoadNumSamples(int2 pixel_coordinate) { return (min16float)g_in_sample_count.Load(int3(pixel_coordinate, 0)).x; }
 void FFX_DNSR_Reflections_StoreTemporalAccumulation(int2 pixel_coordinate, min16float3 radiance, min16float variance) {
-    g_out_radiance[pixel_coordinate] = radiance.xyzz;
+    float sample_count = clamp((float)FFX_DNSR_Reflections_LoadNumSamples(pixel_coordinate), 0.0f, 32.0f);
+    float sample_confidence = smoothstep(1.0f, 8.0f, sample_count);
+    float variance_confidence = 1.0f - smoothstep(0.03f, 0.35f, (float)variance);
+    float roughness = (float)FFX_DNSR_Reflections_LoadRoughness(pixel_coordinate);
+    float glossy_validity = roughness < g_roughness_threshold ? 1.0f : 0.0f;
+    float composite_confidence = g_composite_confidence_mode == 0u
+        ? glossy_validity
+        : saturate(sample_confidence * variance_confidence);
+    g_out_radiance[pixel_coordinate] = float4(radiance.xyz, composite_confidence);
     g_out_variance[pixel_coordinate] = variance.x;
+    g_out_sample_count[pixel_coordinate] = sample_count;
 }
 
 #include "ffx_denoiser_reflections_resolve_temporal.h"
+
+bool SelfEngine_FfxSssrResolveTemporalBypassEnabled() {
+    return (g_environment_fallback_control & 0x08000000u) != 0u;
+}
 
 [numthreads(8, 8, 1)]
 void main(int2 group_thread_id      : SV_GroupThreadID,
@@ -61,6 +74,24 @@ void main(int2 group_thread_id      : SV_GroupThreadID,
     int2  dispatch_group_id           = dispatch_thread_id / 8;
     uint2 remapped_group_thread_id    = FFX_DNSR_Reflections_RemapLane8x8(group_index);
     uint2 remapped_dispatch_thread_id = dispatch_group_id * 8 + remapped_group_thread_id;
+
+    if (SelfEngine_FfxSssrResolveTemporalBypassEnabled()) {
+        if (all(remapped_dispatch_thread_id < g_buffer_dimensions)) {
+            float3 input_radiance = g_in_radiance.Load(
+                int3(remapped_dispatch_thread_id, 0)
+            ).xyz;
+            g_out_radiance[remapped_dispatch_thread_id] = float4(
+                input_radiance,
+                1.0
+            );
+            g_out_variance[remapped_dispatch_thread_id] = g_in_variance.Load(
+                int3(remapped_dispatch_thread_id, 0)
+            );
+            g_out_sample_count[remapped_dispatch_thread_id] =
+                g_in_sample_count.Load(int3(remapped_dispatch_thread_id, 0));
+        }
+        return;
+    }
 
     FFX_DNSR_Reflections_ResolveTemporal(remapped_dispatch_thread_id, remapped_group_thread_id, g_buffer_dimensions, g_inv_buffer_dimensions, g_temporal_stability_factor);
 }

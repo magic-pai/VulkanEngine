@@ -344,6 +344,7 @@ public:
         const VulkanFfxSssrResolveTemporalResources*
             ffxSssrResolveTemporalResources = nullptr,
         bool ffxSssrPrepareIndirectArgsEnabled = false,
+        bool ffxSssrVisibleOutputClearEnabled = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,
         bool ssrReconstructionEnabled = false,
         bool ssrImagesInitialized = false,

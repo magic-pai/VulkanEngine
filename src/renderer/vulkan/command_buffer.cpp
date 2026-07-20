@@ -1447,6 +1447,55 @@ u32 CopyFfxSssrCurrentDenoiserStateToHistory(
     return 2u;
 }
 
+void ClearFfxSssrVisibleOutput(
+    VkCommandBuffer commandBuffer,
+    const VulkanFfxSssrReprojectResources& reprojectResources,
+    std::size_t imageIndex
+) {
+    if (imageIndex >= reprojectResources.Count()) {
+        return;
+    }
+
+    VkImageMemoryBarrier clearBarrier{};
+    clearBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    clearBarrier.srcAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    clearBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    clearBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    clearBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    clearBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    clearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    clearBarrier.image = reprojectResources.RadianceHistoryImage(imageIndex);
+    clearBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    clearBarrier.subresourceRange.baseMipLevel = 0u;
+    clearBarrier.subresourceRange.levelCount = 1u;
+    clearBarrier.subresourceRange.baseArrayLayer = 0u;
+    clearBarrier.subresourceRange.layerCount = 1u;
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1u,
+        &clearBarrier
+    );
+
+    const VkClearColorValue clearValue{};
+    vkCmdClearColorImage(
+        commandBuffer,
+        reprojectResources.RadianceHistoryImage(imageIndex),
+        VK_IMAGE_LAYOUT_GENERAL,
+        &clearValue,
+        1u,
+        &clearBarrier.subresourceRange
+    );
+}
+
 u32 CopyFfxSssrHistoryToOtherImages(
     VkCommandBuffer commandBuffer,
     const VulkanFfxSssrReprojectResources& reprojectResources,
@@ -2603,6 +2652,7 @@ void VulkanCommandBuffer::Record(
     const VulkanFfxSssrResolveTemporalResources*
         ffxSssrResolveTemporalResources,
     bool ffxSssrPrepareIndirectArgsEnabled,
+    bool ffxSssrVisibleOutputClearEnabled,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
     bool ssrImagesInitialized,
@@ -4488,6 +4538,16 @@ void VulkanCommandBuffer::Record(
                 }
 
                 if (ffxSssrResolveTemporalReady) {
+                    if (ffxSssrVisibleOutputClearEnabled) {
+                        ClearFfxSssrVisibleOutput(
+                            commandBuffer,
+                            *ffxSssrReprojectResources,
+                            imageIndex
+                        );
+                        if (bindStats != nullptr) {
+                            ++bindStats->ffxSssrVisibleOutputClears;
+                        }
+                    }
                     u32 historyCopies =
                         CopyFfxSssrCurrentDenoiserStateToHistory(
                             commandBuffer,

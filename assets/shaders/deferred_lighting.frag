@@ -1768,11 +1768,18 @@ vec3 ReconstructViewPosition(vec2 uv, float depth) {
     return viewPosition.xyz / viewPosition.w;
 }
 
+vec2 SsrOctSignNotZero(vec2 value) {
+    return vec2(
+        value.x >= 0.0 ? 1.0 : -1.0,
+        value.y >= 0.0 ? 1.0 : -1.0
+    );
+}
+
 vec2 SsrOctEncode(vec3 value) {
     value /= max(abs(value.x) + abs(value.y) + abs(value.z), 0.000001);
     vec2 encoded = value.xy;
     if (value.z < 0.0) {
-        encoded = (1.0 - abs(encoded.yx)) * sign(encoded.xy);
+        encoded = (1.0 - abs(encoded.yx)) * SsrOctSignNotZero(encoded.xy);
     }
     return encoded;
 }
@@ -1780,7 +1787,7 @@ vec2 SsrOctEncode(vec3 value) {
 vec3 SsrOctDecode(vec2 encoded) {
     vec3 value = vec3(encoded, 1.0 - abs(encoded.x) - abs(encoded.y));
     if (value.z < 0.0) {
-        value.xy = (1.0 - abs(value.yx)) * sign(value.xy);
+        value.xy = (1.0 - abs(value.yx)) * SsrOctSignNotZero(value.xy);
     }
     return normalize(value);
 }
@@ -1791,18 +1798,11 @@ bool SsrDeferredReceiverReprojectionEnabled() {
 }
 
 float SsrDeferredReceiverHistoryConfidence(
-    vec2 historyUv,
+    vec4 historyMetadata,
     vec3 receiverNormal,
     float receiverRoughness,
     float receiverPreviousViewDepth
 ) {
-    vec2 texelSize = 1.0 / vec2(textureSize(ssrHistoryMetadata, 0));
-    if (any(lessThan(historyUv, texelSize * 0.5)) ||
-        any(greaterThan(historyUv, vec2(1.0) - texelSize * 0.5))) {
-        return 0.0;
-    }
-
-    vec4 historyMetadata = texture(ssrHistoryMetadata, historyUv);
     if (historyMetadata.x <= 0.0001 || receiverPreviousViewDepth <= 0.0001) {
         return 0.0;
     }
@@ -1825,6 +1825,78 @@ float SsrDeferredReceiverHistoryConfidence(
         abs(historyMetadata.w - receiverRoughness)
     );
     return min(depthConfidence, min(normalConfidence, roughnessConfidence));
+}
+
+struct SsrDeferredReceiverHistorySample {
+    vec4 radiance;
+    float confidence;
+};
+
+SsrDeferredReceiverHistorySample SsrDeferredReceiverValidatedHistory(
+    vec2 historyUv,
+    vec3 receiverNormal,
+    float receiverRoughness,
+    float receiverPreviousViewDepth
+) {
+    SsrDeferredReceiverHistorySample result;
+    result.radiance = vec4(0.0);
+    result.confidence = 0.0;
+
+    ivec2 historyExtent = min(
+        textureSize(ssrResolvedReflection, 0),
+        textureSize(ssrHistoryMetadata, 0)
+    );
+    if (any(lessThanEqual(historyExtent, ivec2(0)))) {
+        return result;
+    }
+
+    vec2 texelSize = 1.0 / vec2(historyExtent);
+    if (any(lessThan(historyUv, texelSize * 0.5)) ||
+        any(greaterThan(historyUv, vec2(1.0) - texelSize * 0.5))) {
+        return result;
+    }
+
+    vec2 historyTexel = historyUv * vec2(historyExtent) - 0.5;
+    ivec2 baseTexel = ivec2(floor(historyTexel));
+    vec2 bilinearFraction = fract(historyTexel);
+    vec4 weightedRadiance = vec4(0.0);
+    float validWeightSum = 0.0;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            ivec2 sampleTexel = clamp(
+                baseTexel + ivec2(x, y),
+                ivec2(0),
+                historyExtent - ivec2(1)
+            );
+            float bilinearWeight =
+                (x == 0 ? 1.0 - bilinearFraction.x : bilinearFraction.x) *
+                (y == 0 ? 1.0 - bilinearFraction.y : bilinearFraction.y);
+            vec4 historyMetadata = texelFetch(
+                ssrHistoryMetadata,
+                sampleTexel,
+                0
+            );
+            float sampleConfidence = SsrDeferredReceiverHistoryConfidence(
+                historyMetadata,
+                receiverNormal,
+                receiverRoughness,
+                receiverPreviousViewDepth
+            );
+            float validWeight = bilinearWeight * sampleConfidence;
+            weightedRadiance += texelFetch(
+                ssrResolvedReflection,
+                sampleTexel,
+                0
+            ) * validWeight;
+            validWeightSum += validWeight;
+        }
+    }
+
+    if (validWeightSum > 0.000001) {
+        result.radiance = weightedRadiance / validWeightSum;
+        result.confidence = clamp(validWeightSum, 0.0, 1.0);
+    }
+    return result;
 }
 
 vec3 ViewRayWorldDirection(vec2 uv) {
@@ -2093,6 +2165,10 @@ bool SsrCurrentHdrSourceEnabled() {
 
 bool SsrProbeFallbackBlendEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 16384.0), 2.0) > 0.5;
+}
+
+bool SsrFidelityFxRadianceHistorySourceEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 131072.0), 2.0) > 0.5;
 }
 
 float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
@@ -4728,27 +4804,53 @@ void main() {
     ssrTrace.validationConfidence = 0.0;
     vec3 ssrReflection = environmentReflection;
     if (SsrReconstructionEnabled()) {
+        bool ffxRadianceHistorySource =
+            SsrFidelityFxRadianceHistorySourceEnabled();
         vec2 ssrHistoryUv = fragUv;
         float receiverHistoryConfidence = 1.0;
+        vec4 resolvedSsr = vec4(0.0);
         if (SsrDeferredReceiverReprojectionEnabled()) {
             vec2 velocity = texture(gBufferVelocity, fragUv).rg;
             ssrHistoryUv = fragUv - velocity;
             vec3 previousReceiverViewPosition =
                 (frame.previousView * vec4(worldPosition, 1.0)).xyz;
-            receiverHistoryConfidence =
-                frame.temporalControls.x > 0.5 &&
-                frame.temporalControls.y > 0.5
-                ? SsrDeferredReceiverHistoryConfidence(
-                    ssrHistoryUv,
-                    normal,
-                    roughness,
-                    abs(previousReceiverViewPosition.z)
-                )
-                : 0.0;
+            if (frame.temporalControls.x > 0.5 &&
+                frame.temporalControls.y > 0.5) {
+                SsrDeferredReceiverHistorySample historySample =
+                    SsrDeferredReceiverValidatedHistory(
+                        ssrHistoryUv,
+                        normal,
+                        roughness,
+                        abs(previousReceiverViewPosition.z)
+                    );
+                resolvedSsr = historySample.radiance;
+                receiverHistoryConfidence = historySample.confidence;
+            } else {
+                receiverHistoryConfidence = 0.0;
+            }
+        } else {
+            resolvedSsr = texture(ssrResolvedReflection, ssrHistoryUv);
         }
-        vec4 resolvedSsr = texture(ssrResolvedReflection, ssrHistoryUv);
-        float resolvedConfidence = clamp(resolvedSsr.a, 0.0, 1.0) *
-            receiverHistoryConfidence;
+        float resolvedConfidence = 0.0;
+        if (ffxRadianceHistorySource) {
+            float ffxCompositeConfidence = clamp(resolvedSsr.a, 0.0, 1.0);
+            float radianceLuma = dot(
+                max(resolvedSsr.rgb, vec3(0.0)),
+                vec3(0.2126, 0.7152, 0.0722)
+            );
+            float nonEmptyRadiance = smoothstep(0.0005, 0.02, radianceLuma);
+            resolvedConfidence =
+                receiverHistoryConfidence *
+                SsrProbeFallbackBlendWeight(
+                    ffxCompositeConfidence *
+                        nonEmptyRadiance *
+                        clamp(frame.ssrControls.x, 0.0, 1.0),
+                    roughness
+                );
+        } else {
+            resolvedConfidence = clamp(resolvedSsr.a, 0.0, 1.0) *
+                receiverHistoryConfidence;
+        }
         ssrReflection = mix(
             environmentReflection,
             max(resolvedSsr.rgb, vec3(0.0)),

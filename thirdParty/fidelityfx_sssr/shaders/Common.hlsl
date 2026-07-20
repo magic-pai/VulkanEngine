@@ -43,6 +43,12 @@ static const float g_depth_sigma = 0.02f;
     uint g_most_detailed_mip;
     uint g_samples_per_quad;
     uint g_temporal_variance_guided_tracing_enabled;
+    uint g_motion_vector_mode;
+    uint g_motion_vector_contract_ready;
+    uint g_hit_reprojection_enabled;
+    uint g_reprojection_contract_ready;
+    uint g_composite_confidence_mode;
+    uint g_environment_fallback_control;
 };
 
 //=== Common functions of the SssrSample ===
@@ -125,6 +131,12 @@ float3 FFX_DNSR_Reflections_WorldSpaceToScreenSpacePrevious(float3 world_space_p
 }
 
 float FFX_DNSR_Reflections_GetLinearDepth(float2 uv, float depth) {
+    if (depth <= 0.0f) {
+        return 0.0f;
+    }
+    if (depth > 1.0f) {
+        return depth;
+    }
     const float3 view_space_pos = InvProjectPosition(float3(uv, depth), g_inv_proj);
     return abs(view_space_pos.z);
 }

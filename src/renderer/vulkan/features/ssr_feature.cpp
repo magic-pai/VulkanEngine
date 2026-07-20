@@ -125,7 +125,7 @@ void AppendFfxSssrFrameGraphResources(RenderFrameGraphPlan& plan) {
         kHistory,
         "FFX RadianceHistory",
         "R32G32B32A32_SFLOAT",
-        "sampled placeholder history",
+        "sampled history and optional Deferred reflection composite input",
         "internal resolution history"
     );
     AppendRenderFrameGraphResource(
@@ -312,7 +312,19 @@ void VulkanSsrFeature::AppendFrameGraph(
             "FidelityFXSSSRResolveTemporal",
             "FrameConstants, FFX ExtractedRoughness, FFX AverageRadiance, FFX PrefilteredRadiance, FFX ReprojectedRadiance, FFX PrefilteredVariance, FFX PrefilteredSampleCount, FFX DenoiserTiles, FFX IntersectArgs",
             "FFX RadianceHistory, FFX AverageRadianceHistory, FFX VarianceHistory, FFX SampleCountHistory",
-            "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into the history images consumed by the next Reproject pass. Final visible composition remains disconnected until the full FFX chain is validated."
+            "AMD FidelityFX SSSR ResolveTemporal bridge clips and accumulates the prefiltered signal into the history images consumed by the next Reproject pass and by the delayed Deferred reflection composite."
+        );
+        AppendRenderFrameGraphPass(
+            context.plan,
+            RenderFramePassKind::Reflections,
+            context.stats.ssr.fidelityFxSssrDeferredCompositeActive > 0
+                ? RenderFramePassStatus::Active
+                : RenderFramePassStatus::Roadmap,
+            RenderFramePassQueue::Graphics,
+            "FidelityFXSSSRDeferredComposite",
+            "FFX RadianceHistory, Velocity, SSRHistoryMetadata, GBufferNormalRoughness, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
+            "HDRSceneColor",
+            "Deferred lighting samples the previous completed FidelityFX SSSR ResolveTemporal radiance history with receiver reprojection plus previous receiver depth/normal/roughness validation, then blends it conservatively over the probe/IBL fallback."
         );
     }
     if (context.stats.ssr.colorResolveEnabled > 0) {
@@ -525,7 +537,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 7u;
+    ssr.fidelityFxSssrContractVersion = 11u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -543,6 +555,26 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrConstantsResourcesReady ? 1u : 0u;
     ssr.fidelityFxSssrConstantsDescriptorSetsReady =
         context.renderer.ffxSssrConstantsDescriptorSetsReady ? 1u : 0u;
+    ssr.fidelityFxSssrTemporalStabilityFactor =
+        context.renderer.ffxSssrTemporalStabilityFactor;
+    ssr.fidelityFxSssrSamplesPerQuad =
+        context.renderer.ffxSssrSamplesPerQuad;
+    ssr.fidelityFxSssrStableEnvironmentFallbackEnabled =
+        context.renderer.ffxSssrStableEnvironmentFallbackEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrConstantEnvironmentFallbackEnabled =
+        context.renderer.ffxSssrConstantEnvironmentFallbackEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrPerfectReflectionDirectionsEnabled =
+        context.renderer.ffxSssrPerfectReflectionDirectionsEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrPrefilterBypassEnabled =
+        context.renderer.ffxSssrPrefilterBypassEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrResolveTemporalBypassEnabled =
+        context.renderer.ffxSssrResolveTemporalBypassEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrClassifySurfaceSeedEnabled =
+        context.renderer.ffxSssrClassifySurfaceSeedEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrIntersectCoverageMarkerEnabled =
+        context.renderer.ffxSssrIntersectCoverageMarkerEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrEnvironmentMipCount =
+        context.renderer.ffxSssrEnvironmentMipCount;
     ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady =
         context.renderer.ffxSssrPrepareIndirectArgsResourcesReady ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady =
@@ -629,10 +661,24 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrReprojectHistoryReady ? 1u : 0u;
     ssr.fidelityFxSssrReprojectHistorySource =
         context.renderer.ffxSssrReprojectHistorySource;
+    ssr.fidelityFxSssrReprojectHistoryMetadataSource =
+        context.renderer.ffxSssrReprojectHistoryMetadataSource;
     ssr.fidelityFxSssrReprojectMemoryBytes =
         context.renderer.ffxSssrReprojectMemoryBytes;
     ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes =
         context.renderer.ffxSssrReprojectIndirectArgsOffsetBytes;
+    ssr.fidelityFxSssrReprojectMotionVectorMode =
+        context.renderer.ffxSssrReprojectMotionVectorMode;
+    ssr.fidelityFxSssrReprojectMotionVectorScaleX =
+        context.renderer.ffxSssrReprojectMotionVectorScaleX;
+    ssr.fidelityFxSssrReprojectMotionVectorScaleY =
+        context.renderer.ffxSssrReprojectMotionVectorScaleY;
+    ssr.fidelityFxSssrReprojectMotionVectorContractReady =
+        context.renderer.ffxSssrReprojectMotionVectorContractReady ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectHitReprojectionEnabled =
+        context.renderer.ffxSssrReprojectHitReprojectionEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectReprojectionContractReady =
+        context.renderer.ffxSssrReprojectReprojectionContractReady ? 1u : 0u;
     ssr.fidelityFxSssrPrefilterResourcesReady =
         context.renderer.ffxSssrPrefilterResourcesReady ? 1u : 0u;
     ssr.fidelityFxSssrPrefilterDescriptorSetsReady =
@@ -667,6 +713,8 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrResolveTemporalMemoryBytes;
     ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes =
         context.renderer.ffxSssrResolveTemporalIndirectArgsOffsetBytes;
+    ssr.fidelityFxSssrSampleCountWritebackReady =
+        context.renderer.ffxSssrSampleCountWritebackReady ? 1u : 0u;
     ssr.fidelityFxSssrRuntimeDispatchReady =
         ssr.backendRequestedProvider > 0u &&
         ssr.colorResolveEnabled > 0u &&
@@ -700,7 +748,12 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrReprojectPipelineReady > 0u &&
         ssr.fidelityFxSssrReprojectInputContractReady > 0u &&
         ssr.fidelityFxSssrReprojectHistoryReady > 0u &&
+        ssr.fidelityFxSssrReprojectHistoryMetadataSource == 1u &&
         ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes == sizeof(u32) * 3u &&
+        ssr.fidelityFxSssrReprojectMotionVectorContractReady > 0u &&
+        (ssr.fidelityFxSssrReprojectMotionVectorMode == 1u ||
+            ssr.fidelityFxSssrReprojectMotionVectorMode == 2u) &&
+        ssr.fidelityFxSssrReprojectReprojectionContractReady > 0u &&
         ssr.fidelityFxSssrPrefilterResourcesReady > 0u &&
         ssr.fidelityFxSssrPrefilterDescriptorSetsReady > 0u &&
         ssr.fidelityFxSssrPrefilterPipelineReady > 0u &&
@@ -711,6 +764,7 @@ void VulkanSsrFeature::WriteStats(
         ssr.fidelityFxSssrResolveTemporalPipelineReady > 0u &&
         ssr.fidelityFxSssrResolveTemporalInputContractReady > 0u &&
         ssr.fidelityFxSssrResolveTemporalHistoryWritebackReady > 0u &&
+        ssr.fidelityFxSssrSampleCountWritebackReady > 0u &&
         ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes == sizeof(u32) * 3u
             ? 1u
             : 0u;

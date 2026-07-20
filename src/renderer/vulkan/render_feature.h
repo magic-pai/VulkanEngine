@@ -41,6 +41,16 @@ struct VulkanRenderFeatureContext {
     u32 ssrReconstructionImageCount = 0;
     bool ffxSssrConstantsResourcesReady = false;
     bool ffxSssrConstantsDescriptorSetsReady = false;
+    f32 ffxSssrTemporalStabilityFactor = 0.95f;
+    u32 ffxSssrSamplesPerQuad = 1u;
+    bool ffxSssrStableEnvironmentFallbackEnabled = false;
+    bool ffxSssrConstantEnvironmentFallbackEnabled = false;
+    bool ffxSssrPerfectReflectionDirectionsEnabled = false;
+    bool ffxSssrPrefilterBypassEnabled = false;
+    bool ffxSssrResolveTemporalBypassEnabled = false;
+    bool ffxSssrClassifySurfaceSeedEnabled = false;
+    bool ffxSssrIntersectCoverageMarkerEnabled = false;
+    u32 ffxSssrEnvironmentMipCount = 0u;
     bool ffxSssrPrepareIndirectArgsResourcesReady = false;
     bool ffxSssrPrepareIndirectArgsDescriptorSetsReady = false;
     bool ffxSssrPrepareIndirectArgsPipelineReady = false;
@@ -84,8 +94,15 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrReprojectAverageHeight = 0;
     bool ffxSssrReprojectHistoryReady = false;
     u32 ffxSssrReprojectHistorySource = 0;
+    u32 ffxSssrReprojectHistoryMetadataSource = 0;
     u64 ffxSssrReprojectMemoryBytes = 0;
     u32 ffxSssrReprojectIndirectArgsOffsetBytes = 0;
+    u32 ffxSssrReprojectMotionVectorMode = 1;
+    f32 ffxSssrReprojectMotionVectorScaleX = 1.0f;
+    f32 ffxSssrReprojectMotionVectorScaleY = 1.0f;
+    bool ffxSssrReprojectMotionVectorContractReady = true;
+    bool ffxSssrReprojectHitReprojectionEnabled = true;
+    bool ffxSssrReprojectReprojectionContractReady = true;
     bool ffxSssrPrefilterResourcesReady = false;
     bool ffxSssrPrefilterDescriptorSetsReady = false;
     bool ffxSssrPrefilterPipelineReady = false;
@@ -103,6 +120,7 @@ struct VulkanRenderFeatureContext {
     u32 ffxSssrResolveTemporalHeight = 0;
     u64 ffxSssrResolveTemporalMemoryBytes = 0;
     u32 ffxSssrResolveTemporalIndirectArgsOffsetBytes = 0;
+    bool ffxSssrSampleCountWritebackReady = false;
 };
 
 struct VulkanRenderFeatureFrameGraphContext {

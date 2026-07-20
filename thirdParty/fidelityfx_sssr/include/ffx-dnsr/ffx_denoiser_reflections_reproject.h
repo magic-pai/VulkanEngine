@@ -166,7 +166,10 @@ void FFX_DNSR_Reflections_PickReprojection(int2            dispatch_thread_id,  
     {
         const float2      motion_vector             = FFX_DNSR_Reflections_LoadMotionVector(dispatch_thread_id);
         const float2      surface_reprojection_uv   = FFX_DNSR_Reflections_GetSurfaceReprojection(dispatch_thread_id, uv, motion_vector);
-        const float2      hit_reprojection_uv       = FFX_DNSR_Reflections_GetHitPositionReprojection(dispatch_thread_id, uv, ray_length);
+        const bool        hit_reprojection_enabled  = FFX_DNSR_Reflections_HitPositionReprojectionEnabled();
+        const float2      hit_reprojection_uv       = hit_reprojection_enabled
+            ? FFX_DNSR_Reflections_GetHitPositionReprojection(dispatch_thread_id, uv, ray_length)
+            : surface_reprojection_uv;
         const min16float3 surface_normal            = FFX_DNSR_Reflections_SampleWorldSpaceNormalHistory(surface_reprojection_uv);
         const min16float3 hit_normal                = FFX_DNSR_Reflections_SampleWorldSpaceNormalHistory(hit_reprojection_uv);
         const min16float3 surface_history           = FFX_DNSR_Reflections_SampleRadianceHistory(surface_reprojection_uv);
@@ -177,7 +180,8 @@ void FFX_DNSR_Reflections_PickReprojection(int2            dispatch_thread_id,  
         const min16float  surface_roughness         = FFX_DNSR_Reflections_SampleRoughnessHistory(surface_reprojection_uv);
 
         // Choose reprojection uv based on similarity to the local neighborhood.
-        if (hit_normal_similarity > FFX_DNSR_REFLECTIONS_REPROJECTION_NORMAL_SIMILARITY_THRESHOLD  // Candidate for mirror reflection parallax
+        if (hit_reprojection_enabled &&
+            hit_normal_similarity > FFX_DNSR_REFLECTIONS_REPROJECTION_NORMAL_SIMILARITY_THRESHOLD  // Candidate for mirror reflection parallax
             && hit_normal_similarity + 1.0e-3 > surface_normal_similarity                          //
             && abs(hit_roughness - roughness) < abs(surface_roughness - roughness) + 1.0e-3        //
         ) {

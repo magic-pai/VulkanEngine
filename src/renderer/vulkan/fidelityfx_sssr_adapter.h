@@ -37,14 +37,25 @@ struct alignas(16) FfxSssrConstants {
     u32 maxTraversalIntersections = 32u;
     u32 minTraversalOccupancy = 4u;
     u32 mostDetailedMip = 0u;
-    u32 samplesPerQuad = 1u;
+    u32 samplesPerQuad = 4u;
     u32 temporalVarianceGuidedTracingEnabled = 0u;
-    u32 padding0 = 0u;
-    u32 padding1 = 0u;
+    // 1 = SelfEngine UV velocity, 2 = legacy NDC-like compatibility mode.
+    u32 motionVectorMode = 1u;
+    u32 motionVectorContractReady = 1u;
+    u32 hitReprojectionEnabled = 1u;
+    u32 reprojectionContractReady = 1u;
+    // 0 = AMD-style glossy validity, 1 = sample-count/variance confidence.
+    u32 compositeConfidenceMode = 0u;
+    // Bit 31 enables stable prefiltered IBL fallback, bit 30 selects the
+    // constant-color diagnostic, bit 29 bypasses GGX/TBN ray sampling, bit 28
+    // bypasses the spatial prefilter, bit 27 bypasses temporal resolve, bit 26
+    // seeds classified surface pixels for coverage diagnosis, bit 25 marks
+    // rays received by Intersect, and bits 0..15 store mip count.
+    u32 environmentFallbackControl = 0u;
 };
 
 static_assert(
-    sizeof(FfxSssrConstants) == 448u,
+    sizeof(FfxSssrConstants) == 464u,
     "FfxSssrConstants must match AMD Common.hlsl cbuffer packing"
 );
 

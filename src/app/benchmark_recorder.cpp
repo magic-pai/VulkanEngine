@@ -579,6 +579,8 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fallbackBlendAveragePermille << ','
         << ssr.reconstructionDeferredConsumerContractVersion << ','
         << ssr.reconstructionDeferredReceiverReprojectionEnabled << ','
+        << ssr.reconstructionDeferredValidatedBilinearEnabled << ','
+        << ssr.reconstructionDeferredHistoryTapCount << ','
         << ssr.reconstructionDeferredDepthRejectEnabled << ','
         << ssr.reconstructionDeferredNormalRejectEnabled << ','
         << ssr.reconstructionDeferredRoughnessRejectEnabled << ','
@@ -605,6 +607,16 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrSpdDependencyReady << ','
         << ssr.fidelityFxSssrConstantsResourcesReady << ','
         << ssr.fidelityFxSssrConstantsDescriptorSetsReady << ','
+        << ssr.fidelityFxSssrTemporalStabilityFactor << ','
+        << ssr.fidelityFxSssrSamplesPerQuad << ','
+        << ssr.fidelityFxSssrStableEnvironmentFallbackEnabled << ','
+        << ssr.fidelityFxSssrConstantEnvironmentFallbackEnabled << ','
+        << ssr.fidelityFxSssrPerfectReflectionDirectionsEnabled << ','
+        << ssr.fidelityFxSssrPrefilterBypassEnabled << ','
+        << ssr.fidelityFxSssrResolveTemporalBypassEnabled << ','
+        << ssr.fidelityFxSssrClassifySurfaceSeedEnabled << ','
+        << ssr.fidelityFxSssrIntersectCoverageMarkerEnabled << ','
+        << ssr.fidelityFxSssrEnvironmentMipCount << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady << ','
@@ -658,8 +670,15 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrReprojectAverageHeight << ','
         << ssr.fidelityFxSssrReprojectHistoryReady << ','
         << ssr.fidelityFxSssrReprojectHistorySource << ','
+        << ssr.fidelityFxSssrReprojectHistoryMetadataSource << ','
         << ssr.fidelityFxSssrReprojectMemoryBytes << ','
         << ssr.fidelityFxSssrReprojectIndirectArgsOffsetBytes << ','
+        << ssr.fidelityFxSssrReprojectMotionVectorMode << ','
+        << ssr.fidelityFxSssrReprojectMotionVectorScaleX << ','
+        << ssr.fidelityFxSssrReprojectMotionVectorScaleY << ','
+        << ssr.fidelityFxSssrReprojectMotionVectorContractReady << ','
+        << ssr.fidelityFxSssrReprojectHitReprojectionEnabled << ','
+        << ssr.fidelityFxSssrReprojectReprojectionContractReady << ','
         << ssr.fidelityFxSssrPrefilterResourcesReady << ','
         << ssr.fidelityFxSssrPrefilterDescriptorSetsReady << ','
         << ssr.fidelityFxSssrPrefilterPipelineReady << ','
@@ -682,6 +701,18 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrResolveTemporalMemoryBytes << ','
         << ssr.fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes << ','
         << ssr.fidelityFxSssrResolveTemporalHistoryCopies << ','
+        << ssr.fidelityFxSssrVisibleOutputClearEnabled << ','
+        << ssr.fidelityFxSssrVisibleOutputClears << ','
+        << ssr.fidelityFxSssrCompositeConfidenceMode << ','
+        << ssr.fidelityFxSssrSampleCountWritebackReady << ','
+        << ssr.fidelityFxSssrDeferredCompositeRequested << ','
+        << ssr.fidelityFxSssrDeferredCompositeActive << ','
+        << ssr.fidelityFxSssrDeferredCompositeDescriptorBound << ','
+        << ssr.fidelityFxSssrDeferredCompositeHistoryValid << ','
+        << ssr.fidelityFxSssrDeferredCompositeSourceImageIndex << ','
+        << ssr.fidelityFxSssrDeferredCompositeSource << ','
+        << ssr.fidelityFxSssrDeferredCompositeQualityGate << ','
+        << ssr.fidelityFxSssrDeferredCompositeConfidenceSource << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -1978,6 +2009,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_fallback_blend_average_permille,"
         << "ssr_reconstruction_deferred_consumer_contract_version,"
         << "ssr_reconstruction_deferred_receiver_reprojection_enabled,"
+        << "ssr_reconstruction_deferred_validated_bilinear_enabled,"
+        << "ssr_reconstruction_deferred_history_tap_count,"
         << "ssr_reconstruction_deferred_depth_reject_enabled,"
         << "ssr_reconstruction_deferred_normal_reject_enabled,"
         << "ssr_reconstruction_deferred_roughness_reject_enabled,"
@@ -2003,6 +2036,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_spd_dependency_ready,"
         << "ssr_ffx_sssr_constants_resources_ready,"
         << "ssr_ffx_sssr_constants_descriptor_sets_ready,"
+        << "ssr_ffx_sssr_temporal_stability_factor,"
+        << "ssr_ffx_sssr_samples_per_quad,"
+        << "ssr_ffx_sssr_stable_environment_fallback_enabled,"
+        << "ssr_ffx_sssr_constant_environment_fallback_enabled,"
+        << "ssr_ffx_sssr_perfect_reflection_directions_enabled,"
+        << "ssr_ffx_sssr_prefilter_bypass_enabled,"
+        << "ssr_ffx_sssr_resolve_temporal_bypass_enabled,"
+        << "ssr_ffx_sssr_classify_surface_seed_enabled,"
+        << "ssr_ffx_sssr_intersect_coverage_marker_enabled,"
+        << "ssr_ffx_sssr_environment_mip_count,"
         << "ssr_ffx_sssr_prepare_indirect_args_resources_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready,"
@@ -2056,8 +2099,15 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_reproject_average_height,"
         << "ssr_ffx_sssr_reproject_history_ready,"
         << "ssr_ffx_sssr_reproject_history_source,"
+        << "ssr_ffx_sssr_reproject_history_metadata_source,"
         << "ssr_ffx_sssr_reproject_memory_bytes,"
         << "ssr_ffx_sssr_reproject_indirect_args_offset_bytes,"
+        << "ssr_ffx_sssr_reproject_motion_vector_mode,"
+        << "ssr_ffx_sssr_reproject_motion_vector_scale_x,"
+        << "ssr_ffx_sssr_reproject_motion_vector_scale_y,"
+        << "ssr_ffx_sssr_reproject_motion_vector_contract_ready,"
+        << "ssr_ffx_sssr_reproject_hit_reprojection_enabled,"
+        << "ssr_ffx_sssr_reproject_reprojection_contract_ready,"
         << "ssr_ffx_sssr_prefilter_resources_ready,"
         << "ssr_ffx_sssr_prefilter_descriptor_sets_ready,"
         << "ssr_ffx_sssr_prefilter_pipeline_ready,"
@@ -2080,6 +2130,18 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_resolve_temporal_memory_bytes,"
         << "ssr_ffx_sssr_resolve_temporal_indirect_args_offset_bytes,"
         << "ssr_ffx_sssr_resolve_temporal_history_copies,"
+        << "ssr_ffx_sssr_visible_output_clear_enabled,"
+        << "ssr_ffx_sssr_visible_output_clears,"
+        << "ssr_ffx_sssr_composite_confidence_mode,"
+        << "ssr_ffx_sssr_sample_count_writeback_ready,"
+        << "ssr_ffx_sssr_deferred_composite_requested,"
+        << "ssr_ffx_sssr_deferred_composite_active,"
+        << "ssr_ffx_sssr_deferred_composite_descriptor_bound,"
+        << "ssr_ffx_sssr_deferred_composite_history_valid,"
+        << "ssr_ffx_sssr_deferred_composite_source_image_index,"
+        << "ssr_ffx_sssr_deferred_composite_source,"
+        << "ssr_ffx_sssr_deferred_composite_quality_gate,"
+        << "ssr_ffx_sssr_deferred_composite_confidence_source,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"

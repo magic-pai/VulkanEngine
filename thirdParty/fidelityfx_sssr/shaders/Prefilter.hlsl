@@ -68,9 +68,14 @@ void FFX_DNSR_Reflections_LoadNeighborhood(
 void FFX_DNSR_Reflections_StorePrefilteredReflections(int2 pixel_coordinate, min16float3 radiance, min16float variance) {
     g_out_radiance[pixel_coordinate] = radiance.xyzz;
     g_out_variance[pixel_coordinate] = variance.x;
+    g_out_sample_count[pixel_coordinate] = g_in_sample_count.Load(int3(pixel_coordinate, 0)).x;
 }
 
 #include "ffx_denoiser_reflections_prefilter.h"
+
+bool SelfEngine_FfxSssrPrefilterBypassEnabled() {
+    return (g_environment_fallback_control & 0x10000000u) != 0u;
+}
 
 [numthreads(8, 8, 1)]
 void main(int2 group_thread_id      : SV_GroupThreadID,
@@ -81,6 +86,21 @@ void main(int2 group_thread_id      : SV_GroupThreadID,
     int2  dispatch_group_id           = dispatch_thread_id / 8;
     uint2 remapped_group_thread_id    = FFX_DNSR_Reflections_RemapLane8x8(group_index);
     uint2 remapped_dispatch_thread_id = dispatch_group_id * 8 + remapped_group_thread_id;
+
+    if (SelfEngine_FfxSssrPrefilterBypassEnabled()) {
+        if (all(remapped_dispatch_thread_id < g_buffer_dimensions)) {
+            float4 input_radiance = g_in_radiance.Load(
+                int3(remapped_dispatch_thread_id, 0)
+            );
+            g_out_radiance[remapped_dispatch_thread_id] = input_radiance;
+            g_out_variance[remapped_dispatch_thread_id] = g_in_variance.Load(
+                int3(remapped_dispatch_thread_id, 0)
+            );
+            g_out_sample_count[remapped_dispatch_thread_id] =
+                g_in_sample_count.Load(int3(remapped_dispatch_thread_id, 0));
+        }
+        return;
+    }
 
     FFX_DNSR_Reflections_Prefilter(remapped_dispatch_thread_id, remapped_group_thread_id, g_buffer_dimensions);
 }

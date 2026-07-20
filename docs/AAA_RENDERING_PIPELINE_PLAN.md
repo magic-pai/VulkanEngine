@@ -3,11 +3,12 @@
 ## Latest Completed Slice
 
 AMD FidelityFX SSSR has advanced through the official DNSR ResolveTemporal
-bridge. The engine vendors the SSSR/DNSR/SPD shader subset, compiles eight FFX
-HLSL compute shaders to SPIR-V, creates a scene-independent
-`FidelityFxSssrAdapter`, and dispatches `ClassifyTiles.hlsl`,
-`PrepareIndirectArgs.hlsl`, `PrepareBlueNoiseTexture.hlsl`, `Intersect.hlsl`,
-`Reproject.hlsl`, `Prefilter.hlsl`, and `ResolveTemporal.hlsl` when
+bridge and into the first controlled visible Deferred composite. The engine
+vendors the SSSR/DNSR/SPD shader subset, compiles eight FFX HLSL compute
+shaders to SPIR-V, creates a scene-independent `FidelityFxSssrAdapter`, and
+dispatches `ClassifyTiles.hlsl`, `PrepareIndirectArgs.hlsl`,
+`PrepareBlueNoiseTexture.hlsl`, `Intersect.hlsl`, `Reproject.hlsl`,
+`Prefilter.hlsl`, and `ResolveTemporal.hlsl` when
 `SE_SSR_BACKEND=ffx-sssr`.
 
 The bridge allocates the vendor-shaped constants buffer plus per-swapchain ray
@@ -35,27 +36,30 @@ count. Reproject then consumes the denoiser tile list and the second indirect
 dispatch record at byte offset `12`; Prefilter and ResolveTemporal use the same
 denoiser indirect record. ResolveTemporal writes the current swapchain history
 slot and the bridge copies that FFX history state to the other slots so the next
-frame's Reproject has a coherent starting point. The final reflection image
-still uses the stable internal probe/IBL and completed-history fallback until
-the final FFX resolve/composite path is connected.
+frame's Reproject and Deferred reflection composite have a coherent starting
+point. The Deferred consumer now binds the previous completed FFX
+`RadianceHistory` as binding 17 when `SE_SSR_BACKEND=ffx-sssr`, a valid
+previous temporal frame exists, and the FFX history has completed at least once.
+The shader marks this with the `131072` SSR control bit so it treats the source
+as radiance history instead of internal `SSRResolved` alpha-confidence metadata,
+then blends it conservatively over the probe/IBL fallback.
 
 Validation: `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict
--OutputDirectory tmp\ffx_sssr_resolve_temporal_bridge` passed `121 pass / 0
-fail`, with LightingShowcase and Forward3D FBX FFX lanes reporting contract `7`,
-runtime ready/active `1/1`, ResolveTemporal readiness `1/1/1/1/1`,
-dispatch/bind/history-copy `1/2/10`, extent `1280x720`, memory `0`,
-indirect-args offset `12`, FrameGraph validation `0`, and Vulkan validation
-diagnostics `0`. The internal-backend control reports requested/active `0/0`,
-ResolveTemporal resources ready but dispatch/binds/history-copy `0/0/0`,
-runtime `0/0`, fallback `1`, FrameGraph validation `0`, and Vulkan validation
-diagnostics `0`. Existing SSR regression
+-OutputDirectory tmp\ffx_sssr_deferred_composite_bridge` passed `125 pass / 0
+fail`, with LightingShowcase and Forward3D FBX FFX lanes reporting backend
+requested/active `1/1`, runtime active `1`, deferred composite
+requested/active/descriptor/history/source `1/1/1/1/1`, `radianceSource=4`,
+FrameGraph validation `0`, and Vulkan validation diagnostics `0`. The
+internal-backend control reports requested/active `0/0`, deferred composite
+`0/0/0/0/0`, `radianceSource=2`, FrameGraph validation `0`, and Vulkan
+validation diagnostics `0`. Existing SSR regression
 `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict
--OutputDirectory tmp\ssr_regression_after_ffx_resolve_temporal` passed
+-OutputDirectory tmp\ssr_regression_after_ffx_deferred_composite` passed
 `691 pass / 0 fail`.
 
-The next SSR slice is to connect the validated FFX history output into a
-controlled final resolve/composite path, still behind the same data-first
-FFX/internal control matrix and with a probe/IBL fallback comparison.
+The next SSR slice is visual acceptance of the controlled FFX composite and then
+quality refinement of the visible SSSR contribution, keeping the stable
+probe/IBL fallback as the off-screen and low-confidence baseline.
 
 ## Goal
 
@@ -723,8 +727,9 @@ Completed execution slices in this phase:
 - SSR production hit validation, visual acceptance pending: refined Hi-Z crossings now resolve a continuous confidence from receiver `NdotV`, a 2-6 pixel view-dependent origin guard, hit-surface facing, signed front/behind thickness error, and a four-tap depth/normal planar footprint. Rejected confidence returns smoothly to the captured-probe IBL tier instead of exposing binary screen-space fragments. This follows the confidence/disocclusion discipline used by McGuire/Mara-style production SSR and AMD FidelityFX SSSR; disabling SSR, reducing global strength, and temporal accumulation over invalid hits were rejected because they hide rather than classify bad geometry. `SE_SSR_HIT_VALIDATION=0` preserves an explicit Debug comparison. `scripts\Test-SsrHitValidationMath.ps1` passes `14/0`, and `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -Strict -OutputDirectory tmp\ssr_hit_validation_health` passes `283/0` across LightingShowcase, animated Forward3D, fixed-step, history-off, SSR-off, and validation-off lanes with zero FrameGraph/Vulkan diagnostics. The four footprint reads run only for a successful hit candidate, add no persistent memory, and measured `17.48 ms` versus `17.55 ms` total LightingShowcase GPU time in the short validation-on/off smoke lanes, which is within run noise. Dedicated SSR temporal accumulation and spatial denoise remain the next layer after invalid-hit visual acceptance.
 - SSR temporal miss-history rejection and explicit current-HDR radiance source, data gate complete: the temporal pass now decays carried history on current trace misses using reprojected history validity and motion confidence, controlled by `SE_SSR_TEMPORAL_MISS_HISTORY_REJECT` and packed SSR bit `65536`. CSV/ImGui publish temporal contract version `11` plus the resolved miss-reject state, while the health gate adds current-HDR and dynamic Forward3D control lanes. `scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -VerifyHoleDiagnostics` passes `796 pass / 0 fail`, and the real Forward3D current-HDR window was visually accepted with `radianceSource=3`. Current-HDR hit radiance remains disabled by default and is still an experimental source; production SSR radiance quality and temporal denoise remain open.
 - SSR production fallback and static stability gate: the failed current-HDR roughness-trust experiment was removed after LightingShowcase showed persistent white wall/floor blocks and static-frame reflection flicker. `ssr_temporal.comp` now treats `SSRRaw` as hit UV/confidence only and samples neighbor hit radiance explicitly before YCoCg clamping, preventing raw trace payload channels from becoming reflection color. `scripts\Test-SsrRefinementHealth.ps1` now includes a static shader contract plus frozen-scene diagnostic ranges for raw, high-confidence, temporal, and resolved SSR coverage. The strict gate passed `861 pass / 0 fail` in `tmp\ssr_production_fallback_static_health`; key metrics were `samplesNeighborHitRadiance=1`, `usesRawTraceRgbAsRadiance=0`, production LightingShowcase `radianceSource=2/currentHdr=0`, and scene-color-history-disabled fallback `radianceSource=1/currentHdr=0`. The user accepted the real LightingShowcase production-default window as visually normal. Current-HDR radiance remains a Debug opt-in (`SE_SSR_CURRENT_HDR_SOURCE=1`) and is no longer treated as a production-quality SSR result; the next SSR work should add a proper foreground/background/stability classifier or a production denoised radiance source before reintroducing visible SSR contribution.
+- FidelityFX SSSR glossy-stability closure: the complete seven-pass AMD bridge now uses a contract-v11 production default assembled from controlled visual and data experiments: `4 rays/quad`, stable roughness-mip environment fallback, deterministic primary reflection directions, AMD glossy-validity confidence, receiver-validated four-tap history, and per-frame visible-output clearing. This combination addresses the interacting causes behind crosses, concentric rings, close-range snow, dirty color blocks, and camera-motion corruption; each former behavior remains available through an explicit Debug reverse control. The accepted v10 runtime matrix passed `916 pass / 0 fail`, the v11 static/default gate passed `56 pass / 0 fail`, the general SSR regression passed `691 pass / 0 fail`, the octahedral normal/history codec gate passed `6 pass / 0 fail`, all three affected Debug targets built, and the user accepted the real LightingShowcase result with all named artifacts absent. `Test-FidelityFxSssrIntegration.ps1 -StaticOnly` locks the v11 defaults without launching binaries. A v11 executable has not been runtime-certified because Windows Smart App Control policy `4551` rejects its new hash despite a valid local Authenticode signature; this remains a device-compatibility task, not a hidden renderer failure.
 
-Current execution slice: reflection-capture/probe blending has data coverage for capture orientation, per-probe resource identity, parallax/box projection, diffuse irradiance, receiver weights, and cross-volume receiver transitions. SSR now has Hi-Z tracing, hit validation, temporal miss rejection, explicit current-HDR debug controls, a static stability gate, and the first seven AMD FidelityFX SSSR runtime bridge passes: ClassifyTiles, PrepareIndirectArgs, PrepareBlueNoiseTexture, Intersect, Reproject, Prefilter, and ResolveTemporal. Production visual contribution remains deliberately bounded to stable probe/IBL/completed-history fallback until the final FFX resolve/composite path is connected and validated.
+Current execution slice: reflection-capture/probe blending has data coverage for capture orientation, per-probe resource identity, parallax/box projection, diffuse irradiance, receiver weights, and cross-volume receiver transitions. SSR now has Hi-Z tracing, hit validation, temporal miss rejection, explicit current-HDR debug controls, a static stability gate, and all seven AMD FidelityFX SSSR runtime bridge passes: ClassifyTiles, PrepareIndirectArgs, PrepareBlueNoiseTexture, Intersect, Reproject, Prefilter, and ResolveTemporal. The visible FFX composite is connected through previous-frame `RadianceHistory`, has cross-scene CSV evidence, and its glossy-stability production defaults have passed user visual acceptance. Remaining SSR work is performance profiling and broader dynamic/material stress coverage rather than another showcase-specific stability tuning loop.
 - Next renderer-first slices: start filling the still-missing mainstream 3A systems rather than returning to UE scene work. Near-term candidates are imported-model/skinned/object velocity baselines for DLSS, authored/material-specific reactive/transparency mask tuning for particles/water/refraction/emissive cases, larger moving-scene visual references, real reflection-capture/probe blending on top of the new IBL carriers, authored/per-volume color grading on top of the neutral LUT carrier, volumetric fog/aerial perspective beyond the first analytic fog tier, GTAO/SSR history and denoise, TAA/velocity correctness, dynamic-resolution/upscaler scaffolding with CAS/RCAS or TAAU-coupled sharpening, classic LOD/Hi-Z visibility, bloom quality polish, and renderer-owned visual-diff/reference captures. Keep finishing shadow quality in parallel through CSM stability captures, local-shadow invalidation/bias/filter evidence, contact-shadow stability, and WBOIT/forward-reference parity. Deferred/HDR should become the default only after imported-model/material parity, lighting/IBL, shadow/probe/SSR/AO coverage, translucency, temporal/post stability, visibility scaling, and diagnostics are all strong enough.
 
 Current renderer answer: do not make deferred/HDR the default yet. It is now visible through `Deferred HDR` and component views, and its inputs are inspectable through GBuffer/debug views, but legacy forward remains the default reference until imported-model parity, light data ownership, lighting quality, shadow/probe/SSR/AO coverage, translucency behavior, temporal/post stability, visibility scaling, and diagnostics are strong enough. The current plan is not complete until the mainstream 3A renderer feature set is implemented, benchmarked, and debuggable; UE project preview remains frozen until then.

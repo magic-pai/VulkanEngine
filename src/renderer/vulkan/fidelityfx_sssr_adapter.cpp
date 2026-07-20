@@ -2292,9 +2292,11 @@ void VulkanFfxSssrReprojectResources::CreateResources(
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         sampledImages[2].imageView =
             renderTargets.GBufferNormalRoughnessView(imageIndex);
-        sampledImages[3] = sampledImages[0];
-        sampledImages[4] = sampledImages[1];
-        sampledImages[5] = sampledImages[2];
+        sampledImages[3].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        sampledImages[3].imageView =
+            renderTargets.SsrHistoryMetadataView(imageIndex);
+        sampledImages[4] = sampledImages[3];
+        sampledImages[5] = sampledImages[3];
         sampledImages[6].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         sampledImages[6].imageView =
             classifyResources.IntersectionOutputView(imageIndex);

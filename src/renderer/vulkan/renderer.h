@@ -651,12 +651,24 @@ private:
         const FrameLightConstants& lights,
         const FrameReflectionProbeSet& reflectionProbes,
         bool shadowSamplingEnabled,
-        const FrameTemporalState* temporalState
+        const FrameTemporalState* temporalState,
+        bool ssrFidelityFxDeferredCompositeActive = false
     ) const;
     void UpdateFfxSssrConstants(
         std::size_t imageIndex,
         const FrameMatrices* matrices,
-        const FrameTemporalState* temporalState
+        const FrameTemporalState* temporalState,
+        f32 temporalStabilityFactor,
+        u32 samplesPerQuad,
+        bool stableEnvironmentFallbackEnabled,
+        bool constantEnvironmentFallbackEnabled,
+        bool perfectReflectionDirectionsEnabled,
+        bool prefilterBypassEnabled,
+        bool resolveTemporalBypassEnabled,
+        bool classifySurfaceSeedEnabled,
+        bool intersectCoverageMarkerEnabled,
+        u32 environmentMipCount,
+        u32 compositeConfidenceMode
     ) const;
     void UpdateOverlayUniformBuffer(
         std::size_t imageIndex,
@@ -853,6 +865,7 @@ private:
     bool m_TemporalHistoryValid = false;
     bool m_TemporalHistoryColorValid = false;
     std::optional<u32> m_PreviousTemporalHistoryImageIndex;
+    bool m_FfxSssrRadianceHistoryValid = false;
     bool m_DlssQualitySceneContentMotionSupported = true;
     RendererTemporalAntialiasingMode m_TemporalAntialiasingMode =
         RendererTemporalAntialiasingMode::Environment;

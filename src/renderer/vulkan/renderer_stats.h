@@ -351,6 +351,8 @@ struct RendererSsrStats {
     u32 fallbackBlendAveragePermille = 0;
     u32 reconstructionDeferredConsumerContractVersion = 0;
     u32 reconstructionDeferredReceiverReprojectionEnabled = 0;
+    u32 reconstructionDeferredValidatedBilinearEnabled = 0;
+    u32 reconstructionDeferredHistoryTapCount = 0;
     u32 reconstructionDeferredDepthRejectEnabled = 0;
     u32 reconstructionDeferredNormalRejectEnabled = 0;
     u32 reconstructionDeferredRoughnessRejectEnabled = 0;
@@ -366,7 +368,8 @@ struct RendererSsrStats {
     u32 sceneColorHistoryCurrentImageIndex = 0;
     u32 sceneColorHistorySourceImageIndex = 0;
     u32 sceneColorHistoryFrameAge = 0;
-    // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history, 3 = active current-HDR source.
+    // 0 = off, 1 = probe/IBL fallback, 2 = completed scene-color history,
+    // 3 = active current-HDR source, 4 = AMD FidelityFX SSSR ResolveTemporal history.
     u32 radianceSource = 0;
     // 0 = SelfEngine internal SSR, 1 = AMD FidelityFX SSSR.
     u32 backendRequestedProvider = 0;
@@ -379,6 +382,16 @@ struct RendererSsrStats {
     u32 fidelityFxSssrSpdDependencyReady = 0;
     u32 fidelityFxSssrConstantsResourcesReady = 0;
     u32 fidelityFxSssrConstantsDescriptorSetsReady = 0;
+    f32 fidelityFxSssrTemporalStabilityFactor = 0.95f;
+    u32 fidelityFxSssrSamplesPerQuad = 1u;
+    u32 fidelityFxSssrStableEnvironmentFallbackEnabled = 0u;
+    u32 fidelityFxSssrConstantEnvironmentFallbackEnabled = 0u;
+    u32 fidelityFxSssrPerfectReflectionDirectionsEnabled = 0u;
+    u32 fidelityFxSssrPrefilterBypassEnabled = 0u;
+    u32 fidelityFxSssrResolveTemporalBypassEnabled = 0u;
+    u32 fidelityFxSssrClassifySurfaceSeedEnabled = 0u;
+    u32 fidelityFxSssrIntersectCoverageMarkerEnabled = 0u;
+    u32 fidelityFxSssrEnvironmentMipCount = 0u;
     u32 fidelityFxSssrPrepareIndirectArgsResourcesReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady = 0;
     u32 fidelityFxSssrPrepareIndirectArgsPipelineReady = 0;
@@ -432,8 +445,17 @@ struct RendererSsrStats {
     u32 fidelityFxSssrReprojectAverageHeight = 0;
     u32 fidelityFxSssrReprojectHistoryReady = 0;
     u32 fidelityFxSssrReprojectHistorySource = 0;
+    // 0 = current GBuffer placeholder, 1 = packed previous receiver metadata.
+    u32 fidelityFxSssrReprojectHistoryMetadataSource = 0;
     u64 fidelityFxSssrReprojectMemoryBytes = 0;
     u32 fidelityFxSssrReprojectIndirectArgsOffsetBytes = 0;
+    // 1 = SelfEngine UV velocity, 2 = legacy NDC-like compatibility mode.
+    u32 fidelityFxSssrReprojectMotionVectorMode = 1;
+    f32 fidelityFxSssrReprojectMotionVectorScaleX = 1.0f;
+    f32 fidelityFxSssrReprojectMotionVectorScaleY = 1.0f;
+    u32 fidelityFxSssrReprojectMotionVectorContractReady = 1;
+    u32 fidelityFxSssrReprojectHitReprojectionEnabled = 1;
+    u32 fidelityFxSssrReprojectReprojectionContractReady = 1;
     u32 fidelityFxSssrPrefilterResourcesReady = 0;
     u32 fidelityFxSssrPrefilterDescriptorSetsReady = 0;
     u32 fidelityFxSssrPrefilterPipelineReady = 0;
@@ -456,6 +478,21 @@ struct RendererSsrStats {
     u64 fidelityFxSssrResolveTemporalMemoryBytes = 0;
     u32 fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes = 0;
     u32 fidelityFxSssrResolveTemporalHistoryCopies = 0;
+    u32 fidelityFxSssrVisibleOutputClearEnabled = 0;
+    u32 fidelityFxSssrVisibleOutputClears = 0;
+    // 0 = AMD-style glossy validity, 1 = sample-count/variance confidence.
+    u32 fidelityFxSssrCompositeConfidenceMode = 1;
+    u32 fidelityFxSssrSampleCountWritebackReady = 0;
+    u32 fidelityFxSssrDeferredCompositeRequested = 0;
+    u32 fidelityFxSssrDeferredCompositeActive = 0;
+    u32 fidelityFxSssrDeferredCompositeDescriptorBound = 0;
+    u32 fidelityFxSssrDeferredCompositeHistoryValid = 0;
+    u32 fidelityFxSssrDeferredCompositeSourceImageIndex = 0;
+    // 0 = none/internal, 1 = FFX RadianceHistory.
+    u32 fidelityFxSssrDeferredCompositeSource = 0;
+    u32 fidelityFxSssrDeferredCompositeQualityGate = 0;
+    // 0 = none/internal, 1 = ResolveTemporal alpha from sample-count/variance.
+    u32 fidelityFxSssrDeferredCompositeConfidenceSource = 0;
     u32 fidelityFxSssrRayCounterReadbackValid = 0;
     u32 fidelityFxSssrClassifiedRayCount = 0;
     u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
@@ -982,6 +1019,7 @@ struct RendererBindStats {
     u32 ffxSssrResolveTemporalDispatches = 0;
     u32 ffxSssrResolveTemporalDescriptorBinds = 0;
     u32 ffxSssrResolveTemporalHistoryCopies = 0;
+    u32 ffxSssrVisibleOutputClears = 0;
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;
