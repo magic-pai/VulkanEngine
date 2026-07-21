@@ -766,20 +766,24 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.capabilityContractVersion << ','
         << hybridReflections.accelerationStructureContractVersion << ','
         << hybridReflections.rayQueryConsumerContractVersion << ','
+        << hybridReflections.rayQueryHitAttributeContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.rayQueryConsumerRequested << ','
         << hybridReflections.rayQueryConsumerControlDisabled << ','
+        << hybridReflections.rayQueryHitAttributeControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
         << hybridReflections.rayQueryExtensionSupported << ','
         << hybridReflections.rayTracingPipelineExtensionSupported << ','
         << hybridReflections.bufferDeviceAddressFeatureSupported << ','
+        << hybridReflections.shaderInt64FeatureSupported << ','
         << hybridReflections.accelerationStructureFeatureSupported << ','
         << hybridReflections.rayQueryFeatureSupported << ','
         << hybridReflections.rayTracingPipelineFeatureSupported << ','
         << hybridReflections.rayQueryHardwareReady << ','
+        << hybridReflections.shaderInt64DeviceEnabled << ','
         << hybridReflections.rayQueryDeviceEnabled << ','
         << hybridReflections.fullSceneCommandCount << ','
         << hybridReflections.opaqueRigidCommandCount << ','
@@ -815,6 +819,13 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryResultHeight << ','
         << hybridReflections.rayQueryResultFormat << ','
         << hybridReflections.rayQueryMemoryBytes << ','
+        << hybridReflections.rayQueryInstanceMetadataResourcesReady << ','
+        << hybridReflections.rayQueryInstanceMetadataCount << ','
+        << hybridReflections.rayQueryInstanceMetadataCapacity << ','
+        << hybridReflections.rayQueryInstanceMaterialCount << ','
+        << hybridReflections.rayQueryInstanceAddressReadyCount << ','
+        << hybridReflections.rayQueryInstanceMetadataUploadCount << ','
+        << hybridReflections.rayQueryInstanceMetadataBytes << ','
         << hybridReflections.rayQueryReadbackValid << ','
         << hybridReflections.rayQueryCandidateRayCount << ','
         << hybridReflections.rayQueryScreenHitAcceptedCount << ','
@@ -826,6 +837,23 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitDistanceMinMillimeters << ','
         << hybridReflections.rayQueryHitDistanceMaxMillimeters << ','
         << hybridReflections.rayQueryResultPixelWriteCount << ','
+        << hybridReflections.rayQueryHitAttributeResolvedCount << ','
+        << hybridReflections.rayQueryHitAttributeInvalidInstanceCount << ','
+        << hybridReflections.rayQueryHitAttributeInvalidPrimitiveCount << ','
+        << hybridReflections.rayQueryHitAttributeInvalidVertexCount << ','
+        << hybridReflections.rayQueryHitAttributeInvalidBarycentricCount << ','
+        << hybridReflections.rayQueryHitAttributeInvalidValueCount << ','
+        << hybridReflections.rayQueryHitAttributeMaterialResolvedCount << ','
+        << hybridReflections.rayQueryHitAttributeMaterialFallbackCount << ','
+        << hybridReflections.rayQueryHitAttributePositionMismatchCount << ','
+        << hybridReflections.rayQueryHitAttributePositionErrorMaxMicrometers << ','
+        << hybridReflections.rayQueryHitAttributeNormalLengthMinPermille << ','
+        << hybridReflections.rayQueryHitAttributeNormalLengthMaxPermille << ','
+        << hybridReflections.rayQueryHitAttributeBarycentricSumMinPermille << ','
+        << hybridReflections.rayQueryHitAttributeBarycentricSumMaxPermille << ','
+        << hybridReflections.rayQueryHitAttributeIdentityChecksum << ','
+        << hybridReflections.rayQueryHitAttributePrimitiveChecksum << ','
+        << hybridReflections.rayQueryHitAttributeMaterialChecksum << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2290,19 +2318,23 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_capability_contract_version,"
         << "hybrid_reflections_acceleration_structure_contract_version,"
         << "hybrid_reflections_ray_query_consumer_contract_version,"
+        << "hybrid_reflections_ray_query_hit_attribute_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_ray_query_consumer_requested,"
         << "hybrid_reflections_ray_query_consumer_control_disabled,"
+        << "hybrid_reflections_ray_query_hit_attribute_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
         << "hybrid_reflections_ray_query_extension_supported,"
         << "hybrid_reflections_ray_tracing_pipeline_extension_supported,"
         << "hybrid_reflections_buffer_device_address_feature_supported,"
+        << "hybrid_reflections_shader_int64_feature_supported,"
         << "hybrid_reflections_acceleration_structure_feature_supported,"
         << "hybrid_reflections_ray_query_feature_supported,"
         << "hybrid_reflections_ray_tracing_pipeline_feature_supported,"
         << "hybrid_reflections_ray_query_hardware_ready,"
+        << "hybrid_reflections_shader_int64_device_enabled,"
         << "hybrid_reflections_ray_query_device_enabled,"
         << "hybrid_reflections_full_scene_command_count,"
         << "hybrid_reflections_opaque_rigid_command_count,"
@@ -2338,6 +2370,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_result_height,"
         << "hybrid_reflections_ray_query_result_format,"
         << "hybrid_reflections_ray_query_memory_bytes,"
+        << "hybrid_reflections_ray_query_instance_metadata_resources_ready,"
+        << "hybrid_reflections_ray_query_instance_metadata_count,"
+        << "hybrid_reflections_ray_query_instance_metadata_capacity,"
+        << "hybrid_reflections_ray_query_instance_material_count,"
+        << "hybrid_reflections_ray_query_instance_address_ready_count,"
+        << "hybrid_reflections_ray_query_instance_metadata_upload_count,"
+        << "hybrid_reflections_ray_query_instance_metadata_bytes,"
         << "hybrid_reflections_ray_query_readback_valid,"
         << "hybrid_reflections_ray_query_candidate_ray_count,"
         << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
@@ -2349,6 +2388,23 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_hit_distance_min_millimeters,"
         << "hybrid_reflections_ray_query_hit_distance_max_millimeters,"
         << "hybrid_reflections_ray_query_result_pixel_write_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_resolved_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_invalid_instance_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_invalid_primitive_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_invalid_vertex_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_invalid_barycentric_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_invalid_value_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_material_resolved_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_material_fallback_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_position_mismatch_count,"
+        << "hybrid_reflections_ray_query_hit_attribute_position_error_max_micrometers,"
+        << "hybrid_reflections_ray_query_hit_attribute_normal_length_min_permille,"
+        << "hybrid_reflections_ray_query_hit_attribute_normal_length_max_permille,"
+        << "hybrid_reflections_ray_query_hit_attribute_barycentric_sum_min_permille,"
+        << "hybrid_reflections_ray_query_hit_attribute_barycentric_sum_max_permille,"
+        << "hybrid_reflections_ray_query_hit_attribute_identity_checksum,"
+        << "hybrid_reflections_ray_query_hit_attribute_primitive_checksum,"
+        << "hybrid_reflections_ray_query_hit_attribute_material_checksum,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

@@ -6,10 +6,12 @@
 #include "renderer/vulkan/depth_buffer.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/fidelityfx_sssr_adapter.h"
+#include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/image.h"
 #include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/render_targets.h"
 #include "renderer/vulkan/renderer_stats.h"
+#include "renderer/vulkan/vertex.h"
 
 #include <algorithm>
 #include <array>
@@ -23,9 +25,12 @@ namespace se {
 
 namespace {
 
-constexpr u32 kRayQueryContractVersion = 1u;
-constexpr u32 kDiagnosticValueCount = 10u;
+constexpr u32 kRayQueryContractVersion = 2u;
+constexpr u32 kHitAttributeContractVersion = 1u;
+constexpr u32 kDiagnosticValueCount = 27u;
 constexpr u32 kHitDistanceMinDiagnosticIndex = 7u;
+constexpr u32 kNormalLengthMinDiagnosticIndex = 20u;
+constexpr u32 kBarycentricSumMinDiagnosticIndex = 25u;
 constexpr VkFormat kRayQueryResultFormat = VK_FORMAT_R32G32_UINT;
 
 struct alignas(16) RayQueryControls {
@@ -37,9 +42,23 @@ struct alignas(16) RayQueryControls {
     u32 enabled = 0u;
     u32 contractVersion = kRayQueryContractVersion;
     u32 diagnosticsEnabled = 0u;
+    u32 instanceMetadataCount = 0u;
+    u32 instanceMaterialCount = 0u;
+    u32 expectedVertexStride = sizeof(Vertex3D);
+    u32 hitAttributesEnabled = 0u;
 };
 
-static_assert(sizeof(RayQueryControls) == 32u);
+static_assert(sizeof(RayQueryControls) == 48u);
+static_assert(offsetof(RayQueryControls, enabled) == 20u);
+static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
+static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
+static_assert(offsetof(RayQueryControls, instanceMetadataCount) == 32u);
+static_assert(offsetof(RayQueryControls, instanceMaterialCount) == 36u);
+static_assert(offsetof(RayQueryControls, expectedVertexStride) == 40u);
+static_assert(offsetof(RayQueryControls, hitAttributesEnabled) == 44u);
+static_assert(offsetof(Vertex3D, position) == 0u);
+static_assert(offsetof(Vertex3D, normal) == 12u);
+static_assert(offsetof(Vertex3D, texCoord) == 36u);
 
 bool ExtentsDiffer(VkExtent2D lhs, VkExtent2D rhs) {
     return lhs.width != rhs.width || lhs.height != rhs.height;
@@ -106,6 +125,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         pipeline.reset();
         descriptorSets.clear();
         diagnosticsBuffers.clear();
+        instanceMetadataBuffers.clear();
         controlsBuffers.clear();
         resultImages.clear();
         if (descriptorPool != VK_NULL_HANDLE) {
@@ -121,7 +141,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     }
 
     void CreateDescriptorSetLayout(const VulkanDevice& device) {
-        std::array<VkDescriptorSetLayoutBinding, 11> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 12> bindings{};
         auto setBinding = [&](u32 binding, VkDescriptorType type) {
             bindings[binding].binding = binding;
             bindings[binding].descriptorType = type;
@@ -137,6 +157,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         setBinding(8u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         setBinding(9u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         setBinding(10u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        setBinding(11u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 
         VkDescriptorSetLayoutCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -170,12 +191,17 @@ struct VulkanHybridReflectionRayQuery::Impl {
         resultImages.reserve(count);
         controlsBuffers.reserve(count);
         diagnosticsBuffers.reserve(count);
+        instanceMetadataBuffers.reserve(count);
         submitted.assign(count, false);
         frameEnabled.assign(count, false);
         tlasDescriptorReady.assign(count, false);
 
         std::array<u32, kDiagnosticValueCount> diagnostics{};
         diagnostics[kHitDistanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kNormalLengthMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kBarycentricSumMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         const RayQueryControls defaultControls{};
         for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
@@ -209,6 +235,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                 hostMemory
             );
+            auto instanceMetadataBuffer = std::make_unique<VulkanBuffer>(
+                device,
+                physicalDevice,
+                sizeof(HybridReflectionInstanceMetadata) *
+                    kMaxHybridReflectionInstances,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                hostMemory
+            );
             controls->Upload(
                 std::as_bytes(std::span{ &defaultControls, 1u })
             );
@@ -218,6 +252,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
             resultImages.push_back(std::move(result));
             controlsBuffers.push_back(std::move(controls));
             diagnosticsBuffers.push_back(std::move(diagnosticBuffer));
+            instanceMetadataBuffers.push_back(
+                std::move(instanceMetadataBuffer)
+            );
         }
 
         std::array<VkDescriptorPoolSize, 7> poolSizes{};
@@ -247,7 +284,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[6] = {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            static_cast<u32>(count)
+            static_cast<u32>(count * 2u)
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -327,8 +364,13 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 0u,
                 VK_WHOLE_SIZE
             };
+            VkDescriptorBufferInfo instanceMetadataInfo{
+                instanceMetadataBuffers[imageIndex]->Handle(),
+                0u,
+                VK_WHOLE_SIZE
+            };
 
-            std::array<VkWriteDescriptorSet, 10> writes{};
+            std::array<VkWriteDescriptorSet, 11> writes{};
             for (u32 sourceIndex = 0u; sourceIndex < sampledImages.size();
                 ++sourceIndex) {
                 VkWriteDescriptorSet& write = writes[sourceIndex];
@@ -368,6 +410,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
             writes[9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[9].descriptorCount = 1u;
             writes[9].pBufferInfo = &diagnosticsInfo;
+            writes[10] = writes[9];
+            writes[10].dstBinding = 11u;
+            writes[10].pBufferInfo = &instanceMetadataInfo;
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(writes.size()),
@@ -382,13 +427,26 @@ struct VulkanHybridReflectionRayQuery::Impl {
         const VulkanDevice& device,
         u32 imageIndex,
         VkAccelerationStructureKHR topLevelAccelerationStructure,
+        std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
+        u32 instanceMaterialCount,
         bool enabled,
+        bool hitAttributesEnabled,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     ) {
         if (imageIndex >= descriptorSets.size()) {
             throw std::runtime_error(
                 "Hybrid reflection Ray Query frame index is out of range"
+            );
+        }
+        if (instanceMetadata.size() > kMaxHybridReflectionInstances) {
+            throw std::runtime_error(
+                "Hybrid reflection instance metadata exceeds capacity"
+            );
+        }
+        if (!instanceMetadata.empty()) {
+            instanceMetadataBuffers[imageIndex]->Upload(
+                std::as_bytes(instanceMetadata)
             );
         }
 
@@ -406,6 +464,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
             controls.originBiasMin
         );
         controls.enabled = enabled ? 1u : 0u;
+        controls.instanceMetadataCount =
+            static_cast<u32>(instanceMetadata.size());
+        controls.instanceMaterialCount = instanceMaterialCount;
+        controls.hitAttributesEnabled =
+            enabled && hitAttributesEnabled ? 1u : 0u;
 #if !defined(NDEBUG)
         controls.diagnosticsEnabled = enabled ? 1u : 0u;
 #endif
@@ -415,6 +478,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
 
         std::array<u32, kDiagnosticValueCount> diagnostics{};
         diagnostics[kHitDistanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kNormalLengthMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kBarycentricSumMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnosticsBuffers[imageIndex]->Upload(
             std::as_bytes(std::span<const u32>(diagnostics))
@@ -449,6 +516,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         frameEnabled[imageIndex] = enabled && tlasDescriptorReady[imageIndex];
 
         stats.rayQueryConsumerContractVersion = kRayQueryContractVersion;
+        stats.rayQueryHitAttributeContractVersion =
+            kHitAttributeContractVersion;
         stats.rayQueryResourcesReady = 1u;
         stats.rayQueryTlasDescriptorReady =
             tlasDescriptorReady[imageIndex] ? 1u : 0u;
@@ -457,6 +526,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryResultHeight = extent.height;
         stats.rayQueryResultFormat = static_cast<u32>(kRayQueryResultFormat);
         stats.rayQueryMemoryBytes = TotalMemoryBytes();
+        stats.rayQueryInstanceMetadataResourcesReady = 1u;
+        stats.rayQueryInstanceMetadataCapacity =
+            kMaxHybridReflectionInstances;
+        stats.rayQueryInstanceMetadataUploadCount =
+            instanceMetadata.empty() ? 0u : 1u;
+        stats.rayQueryInstanceMetadataBytes =
+            static_cast<u64>(instanceMetadata.size()) *
+            sizeof(HybridReflectionInstanceMetadata);
     }
 
     void Record(
@@ -517,7 +594,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             confidenceForRead
         };
 
-        std::array<VkBufferMemoryBarrier, 3> bufferBarriers{};
+        std::array<VkBufferMemoryBarrier, 4> bufferBarriers{};
         auto setBufferBarrier = [&] (
             VkBufferMemoryBarrier& barrier,
             VkBuffer buffer,
@@ -554,6 +631,13 @@ struct VulkanHybridReflectionRayQuery::Impl {
             diagnosticsBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
+        );
+        setBufferBarrier(
+            bufferBarriers[3],
+            instanceMetadataBuffers[imageIndex]->Handle(),
+            instanceMetadataBuffers[imageIndex]->Size(),
+            VK_ACCESS_HOST_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT
         );
         vkCmdPipelineBarrier(
             commandBuffer,
@@ -650,6 +734,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
             : 0u;
         result.hitDistanceMaxMillimeters = values[8];
         result.resultPixelWriteCount = values[9];
+        result.hitAttributeResolvedCount = values[10];
+        result.invalidInstanceCount = values[11];
+        result.invalidPrimitiveCount = values[12];
+        result.invalidVertexCount = values[13];
+        result.invalidBarycentricCount = values[14];
+        result.invalidAttributeValueCount = values[15];
+        result.materialResolvedCount = values[16];
+        result.materialFallbackCount = values[17];
+        result.positionMismatchCount = values[18];
+        result.positionErrorMaxMicrometers = values[19];
+        result.normalLengthMinPermille =
+            result.hitAttributeResolvedCount > 0u ? values[20] : 0u;
+        result.normalLengthMaxPermille = values[21];
+        result.identityChecksum = values[22];
+        result.primitiveChecksum = values[23];
+        result.materialChecksum = values[24];
+        result.barycentricSumMinPermille =
+            result.hitAttributeResolvedCount > 0u ? values[25] : 0u;
+        result.barycentricSumMaxPermille = values[26];
         return result;
 #endif
     }
@@ -658,7 +761,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
         const u64 resultBytes = static_cast<u64>(extent.width) *
             static_cast<u64>(extent.height) * sizeof(u32) * 2u;
         const u64 perFrameBytes = resultBytes + sizeof(RayQueryControls) +
-            sizeof(u32) * kDiagnosticValueCount;
+            sizeof(u32) * kDiagnosticValueCount +
+            sizeof(HybridReflectionInstanceMetadata) *
+                kMaxHybridReflectionInstances;
         return static_cast<u64>(descriptorSets.size()) * perFrameBytes;
     }
 
@@ -672,6 +777,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     std::vector<std::unique_ptr<VulkanImage>> resultImages;
     std::vector<std::unique_ptr<VulkanBuffer>> controlsBuffers;
     std::vector<std::unique_ptr<VulkanBuffer>> diagnosticsBuffers;
+    std::vector<std::unique_ptr<VulkanBuffer>> instanceMetadataBuffers;
     std::vector<bool> submitted;
     std::vector<bool> frameEnabled;
     std::vector<bool> tlasDescriptorReady;
@@ -709,7 +815,10 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     const VulkanDevice& device,
     u32 imageIndex,
     VkAccelerationStructureKHR topLevelAccelerationStructure,
+    std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
+    u32 instanceMaterialCount,
     bool enabled,
+    bool hitAttributesEnabled,
     const HybridReflectionRayQuerySettings& settings,
     RendererHybridReflectionStats& stats
 ) {
@@ -717,7 +826,10 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         device,
         imageIndex,
         topLevelAccelerationStructure,
+        instanceMetadata,
+        instanceMaterialCount,
         enabled,
+        hitAttributesEnabled,
         settings,
         stats
     );

@@ -2900,3 +2900,37 @@ Validation:
 - LightingShowcase recorded `156599` candidates, `152510` traces, `57975` committed hits, and `94535` misses; Forward3D recorded `6379`, `6234`, `3049`, and `3185` respectively.
 - `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`.
 - `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.
+
+## 2026-07-21 - Ray Query Hit Attributes Need ABI and Device-Feature Closure
+
+Symptom:
+- Ray Query returned valid hit distance and instance IDs, but those values were insufficient to shade off-screen geometry or prove which triangle, vertex attributes, and material had been selected.
+- The first attribute-enabled runtime produced correct data but Vulkan validation reported SPIR-V `Int64` without `VkPhysicalDeviceFeatures::shaderInt64` enabled.
+
+False leads:
+- Treating a committed triangle hit as proof that material identity and vertex data were valid.
+- Adding a new bindless descriptor-array subsystem or changing shader languages before using the engine's existing device-address buffers and DXC path.
+- Treating `bufferDeviceAddress` support as sufficient for every HLSL physical-address operation.
+
+Cause:
+- Vulkan Ray Query built-ins identify the instance and primitive but do not supply application vertex attributes or material ownership. Those must be resolved through an instance record whose identity matches the TLAS build order.
+- DXC lowers `vk::RawBufferLoad` from a 64-bit physical address with the SPIR-V `Int64` capability, which requires `shaderInt64` to be both supported and enabled on the logical device.
+
+Control test:
+- Compare normal requested lanes with `SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF=1`: both must dispatch and trace the same class of rays, while only the normal lane may populate attribute counters.
+- Keep independent consumer-off, RT-off, and not-requested lanes to distinguish metadata ownership from dispatch and device-resource ownership.
+
+Fix:
+- Store vertex/index addresses, counts, vertex stride, and dense material index in one 32-byte record per unculled TLAS instance; make `instanceCustomIndex` equal the record index.
+- Resolve triangle indices and `Vertex3D` position/normal/UV with official DXC physical-address loads, use full barycentrics `(1-u-v,u,v)`, and transform positions/normals with the committed object/world matrices.
+- Add compile-time CPU layout assertions, GPU conservation/range/checksum diagnostics, and make `shaderInt64` part of Ray Query hardware/device readiness.
+
+Prevention:
+- Never enable visible ray-traced radiance from hit distance alone. Require instance identity, bounds-checked primitive/vertex access, material fallback accounting, and reconstructed-position agreement first.
+- Every SPIR-V capability introduced by a shader change must appear in the physical-feature query, logical-device enablement, CSV contract, and disabled/unsupported test lanes.
+- Build hit metadata from the unculled scene queue so off-screen geometry retains the identity needed by the off-screen fallback.
+
+Validation:
+- `spirv-val --target-env vulkan1.2` passes; disassembly contains Ray Query, Physical Storage Buffer, `Int64`, binding `11`, metadata `ArrayStride 32`, barycentrics, and object/world transform operations.
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `138 / 0` across six lanes with zero Vulkan diagnostics. LightingShowcase resolved `57976 / 57976` hits and Forward3D resolved `3055 / 3055`; both had zero invalid records, zero position mismatch, and `2 micrometers` maximum position error.
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`; `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.

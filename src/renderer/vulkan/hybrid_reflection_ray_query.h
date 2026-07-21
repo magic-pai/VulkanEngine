@@ -13,6 +13,7 @@ class VulkanFfxSssrConstantsDescriptorSetLayout;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanPhysicalDevice;
 class VulkanSceneRenderTargets;
+struct HybridReflectionInstanceMetadata;
 struct RendererHybridReflectionStats;
 
 struct HybridReflectionRayQuerySettings {
@@ -35,6 +36,23 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 hitDistanceMinMillimeters = 0u;
     u32 hitDistanceMaxMillimeters = 0u;
     u32 resultPixelWriteCount = 0u;
+    u32 hitAttributeResolvedCount = 0u;
+    u32 invalidInstanceCount = 0u;
+    u32 invalidPrimitiveCount = 0u;
+    u32 invalidVertexCount = 0u;
+    u32 invalidBarycentricCount = 0u;
+    u32 invalidAttributeValueCount = 0u;
+    u32 materialResolvedCount = 0u;
+    u32 materialFallbackCount = 0u;
+    u32 positionMismatchCount = 0u;
+    u32 positionErrorMaxMicrometers = 0u;
+    u32 normalLengthMinPermille = 0u;
+    u32 normalLengthMaxPermille = 0u;
+    u32 barycentricSumMinPermille = 0u;
+    u32 barycentricSumMaxPermille = 0u;
+    u32 identityChecksum = 0u;
+    u32 primitiveChecksum = 0u;
+    u32 materialChecksum = 0u;
 };
 
 class VulkanHybridReflectionRayQuery {
@@ -60,7 +78,10 @@ public:
         const VulkanDevice& device,
         u32 imageIndex,
         VkAccelerationStructureKHR topLevelAccelerationStructure,
+        std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
+        u32 instanceMaterialCount,
         bool enabled,
+        bool hitAttributesEnabled,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     );

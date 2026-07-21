@@ -20,6 +20,7 @@ bool VulkanRayTracingCapabilities::RayQueryExtensionsReady() const {
 
 bool VulkanRayTracingCapabilities::RayQueryFeaturesReady() const {
     return bufferDeviceAddressFeatureSupported &&
+        shaderInt64FeatureSupported &&
         accelerationStructureFeatureSupported &&
         rayQueryFeatureSupported;
 }
@@ -134,6 +135,8 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
 
     m_RayTracingCapabilities.bufferDeviceAddressFeatureSupported =
         supportedBufferDeviceAddress.bufferDeviceAddress == VK_TRUE;
+    m_RayTracingCapabilities.shaderInt64FeatureSupported =
+        supportedFeatures.features.shaderInt64 == VK_TRUE;
     m_RayTracingCapabilities.accelerationStructureFeatureSupported =
         supportedAccelerationStructure.accelerationStructure == VK_TRUE;
     m_RayTracingCapabilities.rayQueryFeatureSupported =
@@ -166,8 +169,10 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
         IsExtensionEnabled(enabledExtensions, VK_KHR_RAY_QUERY_EXTENSION_NAME);
     if (rayQueryExtensionsEnabled &&
         bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE &&
+        supportedFeatures.features.shaderInt64 == VK_TRUE &&
         supportedAccelerationStructure.accelerationStructure == VK_TRUE &&
         supportedRayQuery.rayQuery == VK_TRUE) {
+        deviceFeatures.shaderInt64 = VK_TRUE;
         accelerationStructureFeatures.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
         accelerationStructureFeatures.accelerationStructure = VK_TRUE;
@@ -176,6 +181,7 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
         rayQueryFeatures.rayQuery = VK_TRUE;
         bufferDeviceAddressFeatures.pNext = &accelerationStructureFeatures;
         accelerationStructureFeatures.pNext = &rayQueryFeatures;
+        m_RayTracingCapabilities.shaderInt64DeviceEnabled = true;
         m_RayTracingCapabilities.rayQueryDeviceEnabled = true;
     }
 

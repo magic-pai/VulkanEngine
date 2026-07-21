@@ -16,9 +16,11 @@ struct VulkanRayTracingCapabilities {
     bool rayQueryExtensionSupported = false;
     bool rayTracingPipelineExtensionSupported = false;
     bool bufferDeviceAddressFeatureSupported = false;
+    bool shaderInt64FeatureSupported = false;
     bool accelerationStructureFeatureSupported = false;
     bool rayQueryFeatureSupported = false;
     bool rayTracingPipelineFeatureSupported = false;
+    bool shaderInt64DeviceEnabled = false;
     bool rayQueryDeviceEnabled = false;
 
     bool RayQueryExtensionsReady() const;

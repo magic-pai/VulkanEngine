@@ -9,6 +9,25 @@ class VulkanPhysicalDevice;
 struct RenderCommand;
 struct RendererHybridReflectionStats;
 
+inline constexpr u32 kMaxHybridReflectionInstances = 4096u;
+
+struct alignas(8) HybridReflectionInstanceMetadata {
+    std::array<u32, 2> vertexAddress{};
+    std::array<u32, 2> indexAddress{};
+    u32 vertexCount = 0u;
+    u32 indexCount = 0u;
+    u32 vertexStride = 0u;
+    u32 materialIndex = 0u;
+};
+
+static_assert(sizeof(HybridReflectionInstanceMetadata) == 32u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, vertexAddress) == 0u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, indexAddress) == 8u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, vertexCount) == 16u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, indexCount) == 20u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, vertexStride) == 24u);
+static_assert(offsetof(HybridReflectionInstanceMetadata, materialIndex) == 28u);
+
 class VulkanHybridReflectionAccelerationStructures {
 public:
     VulkanHybridReflectionAccelerationStructures(
@@ -33,6 +52,10 @@ public:
     );
 
     VkAccelerationStructureKHR TopLevelHandle(u32 frameIndex) const;
+    std::span<const HybridReflectionInstanceMetadata> InstanceMetadata(
+        u32 frameIndex
+    ) const;
+    u32 InstanceMaterialCount(u32 frameIndex) const;
 
 private:
     struct Impl;

@@ -5829,6 +5829,10 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF")
             ? 1u
             : 0u;
+    hybridReflections.rayQueryHitAttributeControlDisabled =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF")
+            ? 1u
+            : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -5841,6 +5845,8 @@ void VulkanRenderer::DrawFrame() {
         rayTracingCapabilities.rayTracingPipelineExtensionSupported ? 1u : 0u;
     hybridReflections.bufferDeviceAddressFeatureSupported =
         rayTracingCapabilities.bufferDeviceAddressFeatureSupported ? 1u : 0u;
+    hybridReflections.shaderInt64FeatureSupported =
+        rayTracingCapabilities.shaderInt64FeatureSupported ? 1u : 0u;
     hybridReflections.accelerationStructureFeatureSupported =
         rayTracingCapabilities.accelerationStructureFeatureSupported ? 1u : 0u;
     hybridReflections.rayQueryFeatureSupported =
@@ -5849,6 +5855,8 @@ void VulkanRenderer::DrawFrame() {
         rayTracingCapabilities.rayTracingPipelineFeatureSupported ? 1u : 0u;
     hybridReflections.rayQueryHardwareReady =
         rayTracingCapabilities.RayQueryHardwareReady() ? 1u : 0u;
+    hybridReflections.shaderInt64DeviceEnabled =
+        rayTracingCapabilities.shaderInt64DeviceEnabled ? 1u : 0u;
     hybridReflections.rayQueryDeviceEnabled =
         rayTracingCapabilities.rayQueryDeviceEnabled ? 1u : 0u;
     hybridReflections.runtimeResourcesReady = 0u;
@@ -5956,6 +5964,40 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.hitDistanceMaxMillimeters;
     hybridReflections.rayQueryResultPixelWriteCount =
         hybridRayQueryDiagnostics.resultPixelWriteCount;
+    hybridReflections.rayQueryHitAttributeResolvedCount =
+        hybridRayQueryDiagnostics.hitAttributeResolvedCount;
+    hybridReflections.rayQueryHitAttributeInvalidInstanceCount =
+        hybridRayQueryDiagnostics.invalidInstanceCount;
+    hybridReflections.rayQueryHitAttributeInvalidPrimitiveCount =
+        hybridRayQueryDiagnostics.invalidPrimitiveCount;
+    hybridReflections.rayQueryHitAttributeInvalidVertexCount =
+        hybridRayQueryDiagnostics.invalidVertexCount;
+    hybridReflections.rayQueryHitAttributeInvalidBarycentricCount =
+        hybridRayQueryDiagnostics.invalidBarycentricCount;
+    hybridReflections.rayQueryHitAttributeInvalidValueCount =
+        hybridRayQueryDiagnostics.invalidAttributeValueCount;
+    hybridReflections.rayQueryHitAttributeMaterialResolvedCount =
+        hybridRayQueryDiagnostics.materialResolvedCount;
+    hybridReflections.rayQueryHitAttributeMaterialFallbackCount =
+        hybridRayQueryDiagnostics.materialFallbackCount;
+    hybridReflections.rayQueryHitAttributePositionMismatchCount =
+        hybridRayQueryDiagnostics.positionMismatchCount;
+    hybridReflections.rayQueryHitAttributePositionErrorMaxMicrometers =
+        hybridRayQueryDiagnostics.positionErrorMaxMicrometers;
+    hybridReflections.rayQueryHitAttributeNormalLengthMinPermille =
+        hybridRayQueryDiagnostics.normalLengthMinPermille;
+    hybridReflections.rayQueryHitAttributeNormalLengthMaxPermille =
+        hybridRayQueryDiagnostics.normalLengthMaxPermille;
+    hybridReflections.rayQueryHitAttributeBarycentricSumMinPermille =
+        hybridRayQueryDiagnostics.barycentricSumMinPermille;
+    hybridReflections.rayQueryHitAttributeBarycentricSumMaxPermille =
+        hybridRayQueryDiagnostics.barycentricSumMaxPermille;
+    hybridReflections.rayQueryHitAttributeIdentityChecksum =
+        hybridRayQueryDiagnostics.identityChecksum;
+    hybridReflections.rayQueryHitAttributePrimitiveChecksum =
+        hybridRayQueryDiagnostics.primitiveChecksum;
+    hybridReflections.rayQueryHitAttributeMaterialChecksum =
+        hybridRayQueryDiagnostics.materialChecksum;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8800,7 +8842,14 @@ void VulkanRenderer::DrawFrame() {
             m_HybridReflectionAccelerationStructures->TopLevelHandle(
                 imageIndex
             ),
+            m_HybridReflectionAccelerationStructures->InstanceMetadata(
+                imageIndex
+            ),
+            m_HybridReflectionAccelerationStructures->InstanceMaterialCount(
+                imageIndex
+            ),
             rayQueryConsumerEnabled,
+            hybridReflections.rayQueryHitAttributeControlDisabled == 0u,
             rayQuerySettings,
             hybridReflections
         );

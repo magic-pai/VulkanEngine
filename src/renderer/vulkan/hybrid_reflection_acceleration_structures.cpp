@@ -18,7 +18,6 @@ namespace se {
 namespace {
 
 constexpr u32 kMaxBlasCacheEntries = 1024u;
-constexpr u32 kMaxTlasInstances = 4096u;
 constexpr u32 kInvalidFrameIndex = std::numeric_limits<u32>::max();
 
 VkDeviceSize AlignUp(VkDeviceSize value, VkDeviceSize alignment) {
@@ -30,10 +29,17 @@ VkDeviceSize AlignUp(VkDeviceSize value, VkDeviceSize alignment) {
 
 u32 NextPowerOfTwo(u32 value) {
     u32 result = 1u;
-    while (result < value && result < kMaxTlasInstances) {
+    while (result < value && result < kMaxHybridReflectionInstances) {
         result <<= 1u;
     }
-    return std::min(result, kMaxTlasInstances);
+    return std::min(result, kMaxHybridReflectionInstances);
+}
+
+std::array<u32, 2> SplitDeviceAddress(VkDeviceAddress address) {
+    return {
+        static_cast<u32>(address & 0xffffffffull),
+        static_cast<u32>(address >> 32u)
+    };
 }
 
 VkTransformMatrixKHR ToAccelerationStructureTransform(const glm::mat4& model) {
@@ -90,6 +96,8 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         VkDeviceSize instanceBytes = 0;
         u32 capacity = 0;
         u32 preparedInstanceCount = 0;
+        u32 materialCount = 0;
+        std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
         bool built = false;
         bool prepared = false;
     };
@@ -389,8 +397,11 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         std::vector<VkAccelerationStructureInstanceKHR> instances;
         instances.reserve(std::min<std::size_t>(
             renderCommands.size(),
-            kMaxTlasInstances
+            kMaxHybridReflectionInstances
         ));
+        std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
+        instanceMetadata.reserve(instances.capacity());
+        std::unordered_map<const VulkanMaterial*, u32> materialIndices;
         std::unordered_set<const VulkanMesh*> meshesUsedThisFrame;
         for (const RenderCommand& command : renderCommands) {
             if (command.mesh == nullptr || !command.mesh->Is3D()) {
@@ -409,7 +420,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                 ++stats.invalidGeometryCount;
                 continue;
             }
-            if (instances.size() >= kMaxTlasInstances) {
+            if (instances.size() >= kMaxHybridReflectionInstances) {
                 ++stats.instanceOverflowCount;
                 continue;
             }
@@ -441,7 +452,28 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                 ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR
                 : 0u;
             instance.accelerationStructureReference = blas.address;
+            u32 materialIndex = 0u;
+            if (command.material != nullptr) {
+                const auto [material, inserted] = materialIndices.emplace(
+                    command.material,
+                    static_cast<u32>(materialIndices.size()) + 1u
+                );
+                static_cast<void>(inserted);
+                materialIndex = material->second;
+            }
+            HybridReflectionInstanceMetadata metadata{};
+            metadata.vertexAddress = SplitDeviceAddress(
+                command.mesh->VertexDeviceAddress()
+            );
+            metadata.indexAddress = SplitDeviceAddress(
+                command.mesh->IndexDeviceAddress()
+            );
+            metadata.vertexCount = command.mesh->VertexCount();
+            metadata.indexCount = command.mesh->IndexCount();
+            metadata.vertexStride = command.mesh->VertexStride();
+            metadata.materialIndex = materialIndex;
             instances.push_back(instance);
+            instanceMetadata.push_back(metadata);
             meshesUsedThisFrame.insert(command.mesh);
             ++stats.opaqueRigidCommandCount;
         }
@@ -449,6 +481,8 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         FrameTlas& frame = frames[frameIndex];
         frame.prepared = false;
         frame.preparedInstanceCount = static_cast<u32>(instances.size());
+        frame.materialCount = static_cast<u32>(materialIndices.size());
+        frame.instanceMetadata = std::move(instanceMetadata);
         if (!instances.empty()) {
             EnsureTlasCapacity(frame, static_cast<u32>(instances.size()));
             frame.instances->Upload(std::as_bytes(std::span(instances)));
@@ -478,6 +512,21 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             frame.scratch != nullptr ? frame.scratch->Size() : 0u;
         stats.tlasInstanceBufferBytes = frame.instanceBytes;
         stats.tlasAddressReady = frame.address != 0u ? 1u : 0u;
+        stats.rayQueryInstanceMetadataCount =
+            static_cast<u32>(frame.instanceMetadata.size());
+        stats.rayQueryInstanceMaterialCount = frame.materialCount;
+        stats.rayQueryInstanceAddressReadyCount = static_cast<u32>(
+            std::count_if(
+                frame.instanceMetadata.begin(),
+                frame.instanceMetadata.end(),
+                [](const HybridReflectionInstanceMetadata& metadata) {
+                    return (metadata.vertexAddress[0] != 0u ||
+                            metadata.vertexAddress[1] != 0u) &&
+                        (metadata.indexAddress[0] != 0u ||
+                            metadata.indexAddress[1] != 0u);
+                }
+            )
+        );
         stats.runtimeResourcesReady = 0u;
         stats.active = 0u;
         stats.fallbackReason = 6u;
@@ -709,6 +758,25 @@ VulkanHybridReflectionAccelerationStructures::TopLevelHandle(u32 frameIndex) con
         return VK_NULL_HANDLE;
     }
     return m_Impl->frames[frameIndex].handle;
+}
+
+std::span<const HybridReflectionInstanceMetadata>
+VulkanHybridReflectionAccelerationStructures::InstanceMetadata(
+    u32 frameIndex
+) const {
+    if (frameIndex >= m_Impl->frames.size()) {
+        return {};
+    }
+    return m_Impl->frames[frameIndex].instanceMetadata;
+}
+
+u32 VulkanHybridReflectionAccelerationStructures::InstanceMaterialCount(
+    u32 frameIndex
+) const {
+    if (frameIndex >= m_Impl->frames.size()) {
+        return 0u;
+    }
+    return m_Impl->frames[frameIndex].materialCount;
 }
 
 }
