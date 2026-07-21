@@ -61,6 +61,7 @@ class VulkanGpuTimer;
 class VulkanGBufferDescriptorSets;
 class VulkanGraphicsPipeline;
 class VulkanHybridReflectionAccelerationStructures;
+class VulkanHybridReflectionRayQuery;
 class VulkanHdrDescriptorSets;
 class VulkanWeightedTranslucencyDescriptorSets;
 class VulkanImGuiLayer;
@@ -886,6 +887,8 @@ private:
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
     std::unique_ptr<VulkanHybridReflectionAccelerationStructures>
         m_HybridReflectionAccelerationStructures;
+    std::unique_ptr<VulkanHybridReflectionRayQuery>
+        m_HybridReflectionRayQuery;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;
     std::unique_ptr<VulkanMaterialDescriptorSetLayout> m_MaterialDescriptorSetLayout;
     std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;

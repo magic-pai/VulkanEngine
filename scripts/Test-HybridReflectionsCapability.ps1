@@ -54,6 +54,16 @@ function Get-UIntValue {
     return [uint32]$property.Value
 }
 
+function Get-UInt64Value {
+    param($Row, [string]$Name)
+
+    $property = $Row.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        throw "Missing CSV column: $Name"
+    }
+    return [uint64]$property.Value
+}
+
 function Set-LaneEnvironment {
     param([hashtable]$Values, [string[]]$ManagedKeys)
 
@@ -102,21 +112,30 @@ $showcaseExecutable = Resolve-ProjectPath $ShowcaseExecutablePath
 $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_RT",
     "SE_HYBRID_REFLECTIONS_RT_OFF",
+    "SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF",
+    "SE_SSR",
+    "SE_SSR_BACKEND",
     "SE_FORWARD3D_AA_MODE",
     "SE_BENCHMARK_SCENE",
     "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
     "SE_SCENE_UPDATE_FREEZE",
     "SE_VISUAL_QA_HIDE_IMGUI",
+    "SE_WINDOW_HIDDEN",
+    "SE_AUTO_EXIT_FRAMES",
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_BENCHMARK_CSV"
 )
 $commonEnvironment = @{
+    SE_WINDOW_HIDDEN = "1"
     SE_FORWARD3D_AA_MODE = "taa"
+    SE_SSR = "1"
+    SE_SSR_BACKEND = "ffx-sssr"
     SE_SCENE_UPDATE_FREEZE = "1"
     SE_VISUAL_QA_HIDE_IMGUI = "1"
     SE_BENCHMARK_WARMUP_FRAMES = "2"
-    SE_BENCHMARK_FRAMES = "3"
+    SE_BENCHMARK_FRAMES = "7"
+    SE_AUTO_EXIT_FRAMES = "14"
 }
 $laneSpecs = @(
     [pscustomobject]@{
@@ -124,6 +143,7 @@ $laneSpecs = @(
         executable = $showcaseExecutable
         requested = 1
         disabled = 0
+        consumerDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
         }
@@ -133,16 +153,29 @@ $laneSpecs = @(
         executable = $forwardExecutable
         requested = 1
         disabled = 0
+        consumerDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
         }
     },
     [pscustomobject]@{
-        name = "lighting-showcase-disabled-control"
+        name = "lighting-showcase-consumer-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 1
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-rt-disabled-control"
         executable = $showcaseExecutable
         requested = 1
         disabled = 1
+        consumerDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RT_OFF = "1"
@@ -153,6 +186,7 @@ $laneSpecs = @(
         executable = $forwardExecutable
         requested = 0
         disabled = 0
+        consumerDisabled = 0
         environment = @{
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
         }
@@ -194,12 +228,15 @@ foreach ($lane in $laneSpecs) {
     if ($exitCode -eq 0 -and (Test-Path -LiteralPath $csvPath)) {
         $rows = @(Import-Csv -LiteralPath $csvPath)
         $checks.Add((New-Check "$($lane.name) captures rows" `
-            ($rows.Count -eq 3) $rows.Count 3)) | Out-Null
+            ($rows.Count -eq 7) $rows.Count 7)) | Out-Null
         if ($rows.Count -gt 0) {
             $last = $rows[-1]
             $contract = Get-UIntValue $last "hybrid_reflections_capability_contract_version"
             $requested = Get-UIntValue $last "hybrid_reflections_requested"
             $disabled = Get-UIntValue $last "hybrid_reflections_control_disabled"
+            $rayQueryConsumerContract = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_contract_version"
+            $rayQueryConsumerRequested = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_requested"
+            $rayQueryConsumerDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_control_disabled"
             $bdaExtension = Get-UIntValue $last "hybrid_reflections_buffer_device_address_extension_supported"
             $deferredExtension = Get-UIntValue $last "hybrid_reflections_deferred_host_operations_extension_supported"
             $asExtension = Get-UIntValue $last "hybrid_reflections_acceleration_structure_extension_supported"
@@ -223,8 +260,38 @@ foreach ($lane in $laneSpecs) {
             $tlasAddressReady = Get-UIntValue $last "hybrid_reflections_tlas_address_ready"
             $accelerationStructureResourcesReady = Get-UIntValue $last "hybrid_reflections_acceleration_structure_resources_ready"
             $runtimeReady = Get-UIntValue $last "hybrid_reflections_runtime_resources_ready"
+            $rayQueryResourcesReady = Get-UIntValue $last "hybrid_reflections_ray_query_resources_ready"
+            $rayQueryTlasDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_tlas_descriptor_ready"
+            $rayQueryDispatchReady = Get-UIntValue $last "hybrid_reflections_ray_query_dispatch_ready"
+            $rayQueryDispatchCount = Get-UIntValue $last "hybrid_reflections_ray_query_dispatch_count"
+            $rayQueryDescriptorBindCount = Get-UIntValue $last "hybrid_reflections_ray_query_descriptor_bind_count"
+            $rayQueryResultClearCount = Get-UIntValue $last "hybrid_reflections_ray_query_result_clear_count"
+            $rayQueryResultWidth = Get-UIntValue $last "hybrid_reflections_ray_query_result_width"
+            $rayQueryResultHeight = Get-UIntValue $last "hybrid_reflections_ray_query_result_height"
+            $rayQueryResultFormat = Get-UIntValue $last "hybrid_reflections_ray_query_result_format"
+            $rayQueryMemoryBytes = Get-UInt64Value $last "hybrid_reflections_ray_query_memory_bytes"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
+            $rayQueryReadbackRows = @(
+                $rows | Where-Object {
+                    (Get-UIntValue $_ "hybrid_reflections_ray_query_readback_valid") -eq 1
+                }
+            )
+            $rayQueryReadback = if ($rayQueryReadbackRows.Count -gt 0) {
+                $rayQueryReadbackRows[-1]
+            } else {
+                $last
+            }
+            $rayQueryReadbackValid = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_readback_valid"
+            $rayQueryCandidateCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_candidate_ray_count"
+            $rayQueryScreenAcceptedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_screen_hit_accepted_count"
+            $rayQueryTraceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_trace_count"
+            $rayQueryCommittedHitCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_committed_hit_count"
+            $rayQueryMissCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_miss_count"
+            $rayQueryInvalidCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_invalid_ray_count"
+            $rayQueryDistanceMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_distance_min_millimeters"
+            $rayQueryDistanceMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_distance_max_millimeters"
+            $rayQueryResultWriteCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_result_pixel_write_count"
             $maxBlasBuildCount = [uint32](($rows | ForEach-Object {
                     Get-UIntValue $_ "hybrid_reflections_blas_build_count"
                 } | Measure-Object -Maximum).Maximum)
@@ -253,10 +320,15 @@ foreach ($lane in $laneSpecs) {
                 $lane.requested -eq 1 -and
                 $lane.disabled -eq 0 -and
                 $hardwareReady -eq 1
+            $rayQueryDispatchExpected =
+                $runtimeResourcesExpected -and
+                $lane.consumerDisabled -eq 0
             $fallbackMatches = if ($lane.requested -eq 0) {
                 $fallback -eq 1
             } elseif ($lane.disabled -eq 1) {
                 $fallback -eq 2
+            } elseif ($rayQueryDispatchExpected) {
+                $fallback -eq 8
             } elseif ($runtimeResourcesExpected) {
                 $fallback -eq 7
             } else {
@@ -268,6 +340,11 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) request state" `
                 ($requested -eq $lane.requested -and $disabled -eq $lane.disabled) `
                 "$requested/$disabled" "$($lane.requested)/$($lane.disabled)")) | Out-Null
+            $checks.Add((New-Check "$($lane.name) Ray Query consumer control state" `
+                ($rayQueryConsumerRequested -eq $lane.requested -and `
+                    $rayQueryConsumerDisabled -eq $lane.consumerDisabled) `
+                "$rayQueryConsumerRequested/$rayQueryConsumerDisabled" `
+                "$($lane.requested)/$($lane.consumerDisabled)")) | Out-Null
             $checks.Add((New-Check "$($lane.name) hardware readiness is coherent" `
                 ($hardwareReady -eq [uint32]($extensionReady -and $featureReady)) `
                 "hardware=$hardwareReady,extensions=$extensionReady,features=$featureReady" `
@@ -278,6 +355,9 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) acceleration-structure contract" `
                 ($accelerationStructureContract -eq [uint32]$runtimeResourcesExpected) `
                 $accelerationStructureContract ([uint32]$runtimeResourcesExpected))) | Out-Null
+            $checks.Add((New-Check "$($lane.name) Ray Query consumer contract" `
+                ($rayQueryConsumerContract -eq [uint32]$runtimeResourcesExpected) `
+                $rayQueryConsumerContract ([uint32]$runtimeResourcesExpected))) | Out-Null
             if ($runtimeResourcesExpected) {
                 $resourcesReady =
                     $accelerationStructureResourcesReady -eq 1 -and
@@ -299,6 +379,69 @@ foreach ($lane in $laneSpecs) {
                     ($maxBlasBuildCount -gt 0 -and ($maxTlasBuildCount -gt 0 -or $maxTlasUpdateCount -gt 0)) `
                     "blasBuild=$maxBlasBuildCount,tlasBuild=$maxTlasBuildCount,tlasUpdate=$maxTlasUpdateCount" `
                     "blasBuild>0 and (tlasBuild>0 or tlasUpdate>0)")) | Out-Null
+                $rayQueryResourcesValid =
+                    $rayQueryResourcesReady -eq 1 -and
+                    $rayQueryTlasDescriptorReady -eq 1 -and
+                    $rayQueryResultWidth -gt 0 -and
+                    $rayQueryResultHeight -gt 0 -and
+                    $rayQueryResultFormat -eq 101 -and
+                    $rayQueryMemoryBytes -gt 0
+                $checks.Add((New-Check "$($lane.name) Ray Query resources ready" `
+                    $rayQueryResourcesValid `
+                    "resources=$rayQueryResourcesReady,tlas=$rayQueryTlasDescriptorReady,extent=$($rayQueryResultWidth)x$rayQueryResultHeight,format=$rayQueryResultFormat,memory=$rayQueryMemoryBytes" `
+                    "resources=1,tlas=1,extent>0,format=101,memory>0")) | Out-Null
+                if ($rayQueryDispatchExpected) {
+                    $dispatchRecorded =
+                        $rayQueryDispatchReady -eq 1 -and
+                        $rayQueryDispatchCount -eq 1 -and
+                        $rayQueryDescriptorBindCount -eq 2 -and
+                        $rayQueryResultClearCount -eq 1
+                    $checks.Add((New-Check "$($lane.name) Ray Query dispatch recorded" `
+                        $dispatchRecorded `
+                        "ready=$rayQueryDispatchReady,dispatch=$rayQueryDispatchCount,binds=$rayQueryDescriptorBindCount,clears=$rayQueryResultClearCount" `
+                        "ready=1,dispatch=1,binds=2,clears=1")) | Out-Null
+                    $candidateEquation =
+                        [uint64]$rayQueryCandidateCount -eq
+                        ([uint64]$rayQueryScreenAcceptedCount +
+                            [uint64]$rayQueryTraceCount +
+                            [uint64]$rayQueryInvalidCount)
+                    $traceEquation =
+                        [uint64]$rayQueryTraceCount -eq
+                        ([uint64]$rayQueryCommittedHitCount +
+                            [uint64]$rayQueryMissCount)
+                    $checks.Add((New-Check "$($lane.name) Ray Query readback is populated" `
+                        ($rayQueryReadbackValid -eq 1 -and `
+                            $rayQueryCandidateCount -gt 0 -and `
+                            $rayQueryTraceCount -gt 0 -and `
+                            $rayQueryCommittedHitCount -gt 0 -and `
+                            $rayQueryResultWriteCount -ge $rayQueryTraceCount) `
+                        "valid=$rayQueryReadbackValid,candidates=$rayQueryCandidateCount,traces=$rayQueryTraceCount,hits=$rayQueryCommittedHitCount,writes=$rayQueryResultWriteCount" `
+                        "valid=1,candidates>0,traces>0,hits>0,writes>=traces")) | Out-Null
+                    $checks.Add((New-Check "$($lane.name) Ray Query candidate accounting" `
+                        $candidateEquation `
+                        "$rayQueryCandidateCount=$rayQueryScreenAcceptedCount+$rayQueryTraceCount+$rayQueryInvalidCount" `
+                        "candidate=screenAccepted+trace+invalid")) | Out-Null
+                    $checks.Add((New-Check "$($lane.name) Ray Query trace accounting" `
+                        $traceEquation `
+                        "$rayQueryTraceCount=$rayQueryCommittedHitCount+$rayQueryMissCount" `
+                        "trace=committedHit+miss")) | Out-Null
+                    $checks.Add((New-Check "$($lane.name) Ray Query hit distances are bounded" `
+                        ($rayQueryDistanceMin -gt 0 -and `
+                            $rayQueryDistanceMax -ge $rayQueryDistanceMin) `
+                        "$rayQueryDistanceMin..$rayQueryDistanceMax" `
+                        "0<min<=max")) | Out-Null
+                } else {
+                    $consumerSuppressed =
+                        $rayQueryDispatchReady -eq 0 -and
+                        $rayQueryDispatchCount -eq 0 -and
+                        $rayQueryDescriptorBindCount -eq 0 -and
+                        $rayQueryResultClearCount -eq 0 -and
+                        $rayQueryReadbackRows.Count -eq 0
+                    $checks.Add((New-Check "$($lane.name) Ray Query consumer is suppressed" `
+                        $consumerSuppressed `
+                        "ready=$rayQueryDispatchReady,dispatch=$rayQueryDispatchCount,binds=$rayQueryDescriptorBindCount,clears=$rayQueryResultClearCount,readbacks=$($rayQueryReadbackRows.Count)" `
+                        "all=0")) | Out-Null
+                }
                 $checks.Add((New-Check "$($lane.name) scene geometry accounting" `
                     ($invalidGeometry -eq 0 -and $alphaFallback -ge 0) `
                     "invalid=$invalidGeometry,alphaFallback=$alphaFallback" `
@@ -313,6 +456,9 @@ foreach ($lane in $laneSpecs) {
                     $rows | Where-Object {
                         (Get-UIntValue $_ "hybrid_reflections_acceleration_structure_resources_ready") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_runtime_resources_ready") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_ray_query_resources_ready") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_ray_query_dispatch_count") -ne 0 -or
+                        (Get-UInt64Value $_ "hybrid_reflections_ray_query_memory_bytes") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_blas_cache_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_tlas_instance_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_tlas_address_ready") -ne 0
@@ -325,15 +471,17 @@ foreach ($lane in $laneSpecs) {
             }
             $checks.Add((New-Check "$($lane.name) fallback is explicit" `
                 $fallbackMatches $fallback "lane-specific")) | Out-Null
-            $frameGraphIssues = @(
-                $rows | Where-Object { [uint32]$_.framegraph_validation_issues -ne 0 }
-            ).Count
+            $frameGraphIssues =
+                Get-UIntValue $last "framegraph_validation_issues"
             $checks.Add((New-Check "$($lane.name) framegraph validation" `
                 ($frameGraphIssues -eq 0) $frameGraphIssues 0)) | Out-Null
 
             $metrics = [ordered]@{
                 requested = $requested
                 disabled = $disabled
+                rayQueryConsumerContract = $rayQueryConsumerContract
+                rayQueryConsumerRequested = $rayQueryConsumerRequested
+                rayQueryConsumerDisabled = $rayQueryConsumerDisabled
                 hardwareReady = $hardwareReady
                 deviceEnabled = $deviceEnabled
                 accelerationStructureContract = $accelerationStructureContract
@@ -351,6 +499,18 @@ foreach ($lane in $laneSpecs) {
                 tlasAddressReady = $tlasAddressReady
                 accelerationStructureResourcesReady = $accelerationStructureResourcesReady
                 runtimeReady = $runtimeReady
+                rayQueryResourcesReady = $rayQueryResourcesReady
+                rayQueryTlasDescriptorReady = $rayQueryTlasDescriptorReady
+                rayQueryDispatchReady = $rayQueryDispatchReady
+                rayQueryDispatchCount = $rayQueryDispatchCount
+                rayQueryReadbackValid = $rayQueryReadbackValid
+                rayQueryCandidates = $rayQueryCandidateCount
+                rayQueryScreenAccepted = $rayQueryScreenAcceptedCount
+                rayQueryTraces = $rayQueryTraceCount
+                rayQueryCommittedHits = $rayQueryCommittedHitCount
+                rayQueryMisses = $rayQueryMissCount
+                rayQueryInvalid = $rayQueryInvalidCount
+                rayQueryResultWrites = $rayQueryResultWriteCount
                 active = $active
                 fallbackReason = $fallback
             }

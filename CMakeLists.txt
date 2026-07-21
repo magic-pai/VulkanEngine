@@ -202,6 +202,37 @@ foreach(FFX_SSSR_SHADER_SOURCE ${FFX_SSSR_HLSL_SHADERS})
     list(APPEND SHADER_OUTPUTS ${FFX_SSSR_SHADER_OUTPUT})
 endforeach()
 
+set(HYBRID_REFLECTION_RAY_QUERY_SHADER
+    ${SHADER_SOURCE_DIR}/hybrid_reflection_ray_query.hlsl
+)
+set(HYBRID_REFLECTION_RAY_QUERY_OUTPUT
+    ${SHADER_OUTPUT_DIR}/hybrid_reflection_ray_query.hlsl.spv
+)
+set(HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS)
+foreach(FFX_SSSR_INCLUDE_DIR ${FFX_SSSR_INCLUDE_DIRS})
+    list(APPEND HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS
+        -I${FFX_SSSR_INCLUDE_DIR}
+    )
+endforeach()
+add_custom_command(
+    OUTPUT ${HYBRID_REFLECTION_RAY_QUERY_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${DXC_EXECUTABLE}
+        -spirv
+        "-fspv-target-env=vulkan1.2"
+        -T cs_6_6
+        -E main
+        ${HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS}
+        ${HYBRID_REFLECTION_RAY_QUERY_SHADER}
+        -Fo ${HYBRID_REFLECTION_RAY_QUERY_OUTPUT}
+    DEPENDS
+        ${HYBRID_REFLECTION_RAY_QUERY_SHADER}
+        ${FFX_SSSR_SHADER_SOURCE_DIR}/Common.hlsl
+        ${FFX_SSSR_SOURCE_DIR}/include/ffx-sssr/ffx_sssr.h
+    VERBATIM
+)
+list(APPEND SHADER_OUTPUTS ${HYBRID_REFLECTION_RAY_QUERY_OUTPUT})
+
 add_custom_target(SelfEngineShaders DEPENDS ${SHADER_OUTPUTS})
 
 set(SELFENGINE_COMMON_SOURCES
@@ -250,6 +281,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/reflection_probe_resources.cpp
     src/renderer/vulkan/fidelityfx_sssr_adapter.cpp
     src/renderer/vulkan/hybrid_reflection_acceleration_structures.cpp
+    src/renderer/vulkan/hybrid_reflection_ray_query.cpp
     src/renderer/vulkan/depth_buffer.cpp
     src/renderer/vulkan/surface.cpp
     src/renderer/vulkan/pipeline_spec.cpp

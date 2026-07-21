@@ -2868,3 +2868,35 @@ Validation:
 - LightingShowcase reported `51` TLAS instances and `4` ready BLAS entries; Forward3D reported `8` rigid instances, `3` ready BLAS entries, and `1` skinned fallback.
 - `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`.
 - `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.
+
+## 2026-07-21 - Ray Query Consumers Need Typed Producer Contracts
+
+Symptom:
+- The first hybrid-reflection consumer run recorded one indirect dispatch but returned zero candidate rays and emitted `VUID-VkWriteDescriptorSet-descriptorType-08765` for every frame descriptor.
+
+False leads:
+- Treating the empty diagnostics as a bad TLAS, invalid reflection direction, insufficient ray distance, or readback synchronization failure.
+- Enabling visible RT composition before proving the compact-ray producer/consumer contract.
+
+Cause:
+- FFX owns the ray counter as an `RWBuffer<uint>` backed by a storage-texel buffer. The first consumer declared it as read-only `Buffer<uint>` and bound the same view as `UNIFORM_TEXEL_BUFFER`, but the producer buffer intentionally lacks uniform-texel usage.
+- The first health window was also shorter than the swapchain-image fence/readback cycle, so a valid dispatched image had not yet returned to the CPU.
+
+Control test:
+- Run requested LightingShowcase and animated Forward3D lanes, an independent `SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF=1` lane, the whole-RT-off lane, and a not-requested lane.
+- Assert `candidate = screenAccepted + trace + invalid` and `trace = committedHit + miss` only after the corresponding image fence.
+
+Fix:
+- Preserve the FFX ray counter's storage-texel descriptor type in the consumer and keep the ray list as its existing uniform-texel producer contract.
+- Record enough frames to recycle per-image submissions, keep diagnostics atomics/readback Debug-only, and leave results in an independent `R32G32_UINT` image until hit shading is validated.
+
+Prevention:
+- Derive descriptor type from both shader access and the producer buffer's Vulkan usage flags; a logically read-only consumer does not permit rebinding an `RWBuffer` producer as a different descriptor class.
+- A dispatch count is not proof of useful GPU work. Require nonzero data plus conservation equations and explicit disable/resource-free controls.
+- Do not publish a Ray Query hit buffer as active reflections until material-aware hit shading and visible composition have separate passing gates.
+
+Validation:
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `91 / 0` with zero Vulkan validation messages.
+- LightingShowcase recorded `156599` candidates, `152510` traces, `57975` committed hits, and `94535` misses; Forward3D recorded `6379`, `6234`, `3049`, and `3185` respectively.
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.

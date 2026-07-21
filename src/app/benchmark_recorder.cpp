@@ -765,8 +765,11 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.holeDiagnosticsTemporalMissCarriedPixels << ','
         << hybridReflections.capabilityContractVersion << ','
         << hybridReflections.accelerationStructureContractVersion << ','
+        << hybridReflections.rayQueryConsumerContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
+        << hybridReflections.rayQueryConsumerRequested << ','
+        << hybridReflections.rayQueryConsumerControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
@@ -802,6 +805,27 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.tlasAddressReady << ','
         << hybridReflections.accelerationStructureResourcesReady << ','
         << hybridReflections.runtimeResourcesReady << ','
+        << hybridReflections.rayQueryResourcesReady << ','
+        << hybridReflections.rayQueryTlasDescriptorReady << ','
+        << hybridReflections.rayQueryDispatchReady << ','
+        << hybridReflections.rayQueryDispatchCount << ','
+        << hybridReflections.rayQueryDescriptorBindCount << ','
+        << hybridReflections.rayQueryResultClearCount << ','
+        << hybridReflections.rayQueryResultWidth << ','
+        << hybridReflections.rayQueryResultHeight << ','
+        << hybridReflections.rayQueryResultFormat << ','
+        << hybridReflections.rayQueryMemoryBytes << ','
+        << hybridReflections.rayQueryReadbackValid << ','
+        << hybridReflections.rayQueryCandidateRayCount << ','
+        << hybridReflections.rayQueryScreenHitAcceptedCount << ','
+        << hybridReflections.rayQueryTraceCount << ','
+        << hybridReflections.rayQueryCommittedHitCount << ','
+        << hybridReflections.rayQueryMissCount << ','
+        << hybridReflections.rayQueryInvalidRayCount << ','
+        << hybridReflections.rayQueryHitDistanceSumMillimeters << ','
+        << hybridReflections.rayQueryHitDistanceMinMillimeters << ','
+        << hybridReflections.rayQueryHitDistanceMaxMillimeters << ','
+        << hybridReflections.rayQueryResultPixelWriteCount << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2265,7 +2289,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_hole_diagnostics_temporal_miss_carried_pixels,"
         << "hybrid_reflections_capability_contract_version,"
         << "hybrid_reflections_acceleration_structure_contract_version,"
+        << "hybrid_reflections_ray_query_consumer_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
+        << "hybrid_reflections_ray_query_consumer_requested,"
+        << "hybrid_reflections_ray_query_consumer_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
@@ -2301,6 +2328,27 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_tlas_address_ready,"
         << "hybrid_reflections_acceleration_structure_resources_ready,"
         << "hybrid_reflections_runtime_resources_ready,"
+        << "hybrid_reflections_ray_query_resources_ready,"
+        << "hybrid_reflections_ray_query_tlas_descriptor_ready,"
+        << "hybrid_reflections_ray_query_dispatch_ready,"
+        << "hybrid_reflections_ray_query_dispatch_count,"
+        << "hybrid_reflections_ray_query_descriptor_bind_count,"
+        << "hybrid_reflections_ray_query_result_clear_count,"
+        << "hybrid_reflections_ray_query_result_width,"
+        << "hybrid_reflections_ray_query_result_height,"
+        << "hybrid_reflections_ray_query_result_format,"
+        << "hybrid_reflections_ray_query_memory_bytes,"
+        << "hybrid_reflections_ray_query_readback_valid,"
+        << "hybrid_reflections_ray_query_candidate_ray_count,"
+        << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
+        << "hybrid_reflections_ray_query_trace_count,"
+        << "hybrid_reflections_ray_query_committed_hit_count,"
+        << "hybrid_reflections_ray_query_miss_count,"
+        << "hybrid_reflections_ray_query_invalid_ray_count,"
+        << "hybrid_reflections_ray_query_hit_distance_sum_millimeters,"
+        << "hybrid_reflections_ray_query_hit_distance_min_millimeters,"
+        << "hybrid_reflections_ray_query_hit_distance_max_millimeters,"
+        << "hybrid_reflections_ray_query_result_pixel_write_count,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

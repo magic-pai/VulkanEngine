@@ -21,6 +21,7 @@
 #include "renderer/vulkan/gpu_timer.h"
 #include "renderer/vulkan/graphics_pipeline.h"
 #include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
+#include "renderer/vulkan/hybrid_reflection_ray_query.h"
 #include "renderer/vulkan/imgui_layer.h"
 #include "renderer/vulkan/instance_buffer.h"
 #include "renderer/vulkan/local_shadow_atlas.h"
@@ -5660,6 +5661,7 @@ VulkanRenderer::~VulkanRenderer() {
 
     m_GpuTimer.reset();
     m_CommandBuffer.reset();
+    m_HybridReflectionRayQuery.reset();
     m_HybridReflectionAccelerationStructures.reset();
     m_InstanceBuffer.reset();
     m_Framebuffer.reset();
@@ -5821,6 +5823,12 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT") ? 1u : 0u;
     hybridReflections.controlDisabled =
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT_OFF") ? 1u : 0u;
+    hybridReflections.rayQueryConsumerRequested =
+        hybridReflections.requested;
+    hybridReflections.rayQueryConsumerControlDisabled =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF")
+            ? 1u
+            : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -5922,6 +5930,32 @@ void VulkanRenderer::DrawFrame() {
         ReadPreviousSsrGpuDiagnostics(imageIndex);
     const FrameFfxSssrGpuReadbackStats ffxSssrGpuReadback =
         ReadPreviousFfxSssrGpuReadback(imageIndex);
+    const HybridReflectionRayQueryDiagnostics hybridRayQueryDiagnostics =
+        m_HybridReflectionRayQuery != nullptr
+            ? m_HybridReflectionRayQuery->ReadDiagnostics(imageIndex)
+            : HybridReflectionRayQueryDiagnostics{};
+    hybridReflections.rayQueryReadbackValid =
+        hybridRayQueryDiagnostics.valid ? 1u : 0u;
+    hybridReflections.rayQueryCandidateRayCount =
+        hybridRayQueryDiagnostics.candidateRayCount;
+    hybridReflections.rayQueryScreenHitAcceptedCount =
+        hybridRayQueryDiagnostics.screenHitAcceptedCount;
+    hybridReflections.rayQueryTraceCount =
+        hybridRayQueryDiagnostics.traceCount;
+    hybridReflections.rayQueryCommittedHitCount =
+        hybridRayQueryDiagnostics.committedHitCount;
+    hybridReflections.rayQueryMissCount =
+        hybridRayQueryDiagnostics.missCount;
+    hybridReflections.rayQueryInvalidRayCount =
+        hybridRayQueryDiagnostics.invalidRayCount;
+    hybridReflections.rayQueryHitDistanceSumMillimeters =
+        hybridRayQueryDiagnostics.hitDistanceSumMillimeters;
+    hybridReflections.rayQueryHitDistanceMinMillimeters =
+        hybridRayQueryDiagnostics.hitDistanceMinMillimeters;
+    hybridReflections.rayQueryHitDistanceMaxMillimeters =
+        hybridRayQueryDiagnostics.hitDistanceMaxMillimeters;
+    hybridReflections.rayQueryResultPixelWriteCount =
+        hybridRayQueryDiagnostics.resultPixelWriteCount;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8732,6 +8766,45 @@ void VulkanRenderer::DrawFrame() {
             : 0.0f,
         std::clamp(m_ShadowSettings.casterDepthBiasSlope, 0.0f, 16.0f)
     };
+    if (m_HybridReflectionRayQuery != nullptr &&
+        m_HybridReflectionAccelerationStructures != nullptr) {
+        HybridReflectionRayQuerySettings rayQuerySettings{};
+        rayQuerySettings.maxRayDistance = EnvironmentFloatOrDefault(
+            "SE_HYBRID_REFLECTIONS_RAY_QUERY_MAX_DISTANCE",
+            rayQuerySettings.maxRayDistance
+        );
+        rayQuerySettings.screenHitConfidenceThreshold =
+            EnvironmentFloatOrDefault(
+                "SE_HYBRID_REFLECTIONS_RAY_QUERY_SCREEN_CONFIDENCE",
+                rayQuerySettings.screenHitConfidenceThreshold
+            );
+        rayQuerySettings.originBiasMin = EnvironmentFloatOrDefault(
+            "SE_HYBRID_REFLECTIONS_RAY_QUERY_ORIGIN_BIAS_MIN",
+            rayQuerySettings.originBiasMin
+        );
+        rayQuerySettings.originBiasScale = EnvironmentFloatOrDefault(
+            "SE_HYBRID_REFLECTIONS_RAY_QUERY_ORIGIN_BIAS_SCALE",
+            rayQuerySettings.originBiasScale
+        );
+        rayQuerySettings.originBiasMax = EnvironmentFloatOrDefault(
+            "SE_HYBRID_REFLECTIONS_RAY_QUERY_ORIGIN_BIAS_MAX",
+            rayQuerySettings.originBiasMax
+        );
+        const bool rayQueryConsumerEnabled =
+            hybridReflections.rayQueryConsumerControlDisabled == 0u &&
+            frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u &&
+            hybridReflections.tlasInstanceCount > 0u;
+        m_HybridReflectionRayQuery->PrepareFrame(
+            m_Device,
+            imageIndex,
+            m_HybridReflectionAccelerationStructures->TopLevelHandle(
+                imageIndex
+            ),
+            rayQueryConsumerEnabled,
+            rayQuerySettings,
+            hybridReflections
+        );
+    }
     m_CommandBuffer->Record(
         imageIndex,
         *m_RenderPass,
@@ -8981,6 +9054,7 @@ void VulkanRenderer::DrawFrame() {
         m_SsrReconstructionImagesInitialized,
         frameStats.temporal.historyReset > 0,
         m_HybridReflectionAccelerationStructures.get(),
+        m_HybridReflectionRayQuery.get(),
         &hybridReflections
     );
     if (has3DMainPass && m_SceneRenderTargets != nullptr) {
@@ -10269,6 +10343,24 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_SceneRenderTargets,
             m_SceneTargetSampler->Handle()
         );
+    if (m_HybridReflectionAccelerationStructures != nullptr) {
+        m_HybridReflectionRayQuery =
+            std::make_unique<VulkanHybridReflectionRayQuery>(
+                m_Device,
+                m_PhysicalDevice,
+                m_CommandPool,
+                *m_FfxSssrConstantsDescriptorSetLayout,
+                *m_FfxSssrClassifyTilesResources,
+                *m_FfxSssrPrepareIndirectArgsResources,
+                *m_FfxSssrBlueNoiseResources,
+                *m_SceneRenderTargets,
+                *m_SsrDepthPyramid,
+                std::string(SE_SHADER_DIR) +
+                    "/hybrid_reflection_ray_query.hlsl.spv"
+            );
+    } else {
+        m_HybridReflectionRayQuery.reset();
+    }
     m_HdrDescriptorSets = std::make_unique<VulkanHdrDescriptorSets>(
         m_Device,
         *m_MaterialDescriptorSetLayout,
@@ -10888,6 +10980,7 @@ void VulkanRenderer::RecreateSwapchain() {
 
     m_Window.ResetResizedFlag();
     vkDeviceWaitIdle(m_Device.Handle());
+    m_HybridReflectionRayQuery.reset();
     ResetReflectionCaptureShadowSnapshot();
     ReleaseReflectionCapturePersistentShadowSnapshots();
 
@@ -11656,6 +11749,28 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_SceneRenderTargets,
             m_SceneTargetSampler->Handle()
         );
+    }
+    if (m_HybridReflectionAccelerationStructures != nullptr &&
+        m_FfxSssrConstantsDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_FfxSssrBlueNoiseResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SsrDepthPyramid != nullptr) {
+        m_HybridReflectionRayQuery =
+            std::make_unique<VulkanHybridReflectionRayQuery>(
+                m_Device,
+                m_PhysicalDevice,
+                m_CommandPool,
+                *m_FfxSssrConstantsDescriptorSetLayout,
+                *m_FfxSssrClassifyTilesResources,
+                *m_FfxSssrPrepareIndirectArgsResources,
+                *m_FfxSssrBlueNoiseResources,
+                *m_SceneRenderTargets,
+                *m_SsrDepthPyramid,
+                std::string(SE_SHADER_DIR) +
+                    "/hybrid_reflection_ray_query.hlsl.spv"
+            );
     }
     if (m_GBufferDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&

@@ -552,8 +552,11 @@ struct RendererSsrStats {
 struct RendererHybridReflectionStats {
     u32 capabilityContractVersion = 1;
     u32 accelerationStructureContractVersion = 0;
+    u32 rayQueryConsumerContractVersion = 0;
     u32 requested = 0;
     u32 controlDisabled = 0;
+    u32 rayQueryConsumerRequested = 0;
+    u32 rayQueryConsumerControlDisabled = 0;
     u32 bufferDeviceAddressExtensionSupported = 0;
     u32 deferredHostOperationsExtensionSupported = 0;
     u32 accelerationStructureExtensionSupported = 0;
@@ -589,10 +592,32 @@ struct RendererHybridReflectionStats {
     u32 tlasAddressReady = 0;
     u32 accelerationStructureResourcesReady = 0;
     u32 runtimeResourcesReady = 0;
+    u32 rayQueryResourcesReady = 0;
+    u32 rayQueryTlasDescriptorReady = 0;
+    u32 rayQueryDispatchReady = 0;
+    u32 rayQueryDispatchCount = 0;
+    u32 rayQueryDescriptorBindCount = 0;
+    u32 rayQueryResultClearCount = 0;
+    u32 rayQueryResultWidth = 0;
+    u32 rayQueryResultHeight = 0;
+    u32 rayQueryResultFormat = 0;
+    u64 rayQueryMemoryBytes = 0;
+    u32 rayQueryReadbackValid = 0;
+    u32 rayQueryCandidateRayCount = 0;
+    u32 rayQueryScreenHitAcceptedCount = 0;
+    u32 rayQueryTraceCount = 0;
+    u32 rayQueryCommittedHitCount = 0;
+    u32 rayQueryMissCount = 0;
+    u32 rayQueryInvalidRayCount = 0;
+    u32 rayQueryHitDistanceSumMillimeters = 0;
+    u32 rayQueryHitDistanceMinMillimeters = 0;
+    u32 rayQueryHitDistanceMaxMillimeters = 0;
+    u32 rayQueryResultPixelWriteCount = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,
-    // 6 = runtime resources pending, 7 = ray-query consumer pending.
+    // 6 = runtime resources pending, 7 = ray-query consumer pending,
+    // 8 = hit shading/composite pending.
     u32 fallbackReason = 1;
 };
 

@@ -14,6 +14,7 @@
 #include "renderer/vulkan/gpu_timer.h"
 #include "renderer/vulkan/graphics_pipeline.h"
 #include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
+#include "renderer/vulkan/hybrid_reflection_ray_query.h"
 #include "renderer/vulkan/imgui_layer.h"
 #include "renderer/vulkan/instance_buffer.h"
 #include "renderer/vulkan/material.h"
@@ -2675,6 +2676,7 @@ void VulkanCommandBuffer::Record(
     bool ssrHistoryReset,
     VulkanHybridReflectionAccelerationStructures*
         hybridReflectionAccelerationStructures,
+    VulkanHybridReflectionRayQuery* hybridReflectionRayQuery,
     RendererHybridReflectionStats* hybridReflectionStats
 ) const {
     const std::vector<VkFramebuffer>& framebuffers = framebuffer.Handles();
@@ -4328,6 +4330,19 @@ void VulkanCommandBuffer::Record(
         if (bindStats != nullptr) {
             ++bindStats->ffxSssrIntersectDispatches;
             bindStats->ffxSssrIntersectDescriptorBinds += 2u;
+        }
+
+        if (hybridReflectionRayQuery != nullptr &&
+            hybridReflectionStats != nullptr) {
+            hybridReflectionRayQuery->Record(
+                commandBuffer,
+                static_cast<u32>(imageIndex),
+                ffxConstantsDescriptorSet,
+                ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(
+                    imageIndex
+                ),
+                *hybridReflectionStats
+            );
         }
 
         if (ffxSssrReprojectReady) {

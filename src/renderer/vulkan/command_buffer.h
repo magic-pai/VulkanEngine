@@ -27,6 +27,7 @@ class VulkanHdrRenderPass;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
 class VulkanHybridReflectionAccelerationStructures;
+class VulkanHybridReflectionRayQuery;
 class VulkanFfxSssrClassifyTilesResources;
 class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrConstantsResources;
@@ -357,6 +358,7 @@ public:
         bool ssrHistoryReset = false,
         VulkanHybridReflectionAccelerationStructures*
             hybridReflectionAccelerationStructures = nullptr,
+        VulkanHybridReflectionRayQuery* hybridReflectionRayQuery = nullptr,
         RendererHybridReflectionStats* hybridReflectionStats = nullptr
     ) const;
     void Recreate(
