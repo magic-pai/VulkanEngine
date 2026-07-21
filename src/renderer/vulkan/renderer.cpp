@@ -5811,6 +5811,51 @@ VulkanRenderer::~VulkanRenderer() {
 
 void VulkanRenderer::DrawFrame() {
     RendererStats frameStats{};
+    const VulkanRayTracingCapabilities& rayTracingCapabilities =
+        m_Device.RayTracingCapabilities();
+    RendererHybridReflectionStats& hybridReflections =
+        frameStats.hybridReflections;
+    hybridReflections.requested =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT") ? 1u : 0u;
+    hybridReflections.controlDisabled =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT_OFF") ? 1u : 0u;
+    hybridReflections.bufferDeviceAddressExtensionSupported =
+        rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
+    hybridReflections.deferredHostOperationsExtensionSupported =
+        rayTracingCapabilities.deferredHostOperationsExtensionSupported ? 1u : 0u;
+    hybridReflections.accelerationStructureExtensionSupported =
+        rayTracingCapabilities.accelerationStructureExtensionSupported ? 1u : 0u;
+    hybridReflections.rayQueryExtensionSupported =
+        rayTracingCapabilities.rayQueryExtensionSupported ? 1u : 0u;
+    hybridReflections.rayTracingPipelineExtensionSupported =
+        rayTracingCapabilities.rayTracingPipelineExtensionSupported ? 1u : 0u;
+    hybridReflections.bufferDeviceAddressFeatureSupported =
+        rayTracingCapabilities.bufferDeviceAddressFeatureSupported ? 1u : 0u;
+    hybridReflections.accelerationStructureFeatureSupported =
+        rayTracingCapabilities.accelerationStructureFeatureSupported ? 1u : 0u;
+    hybridReflections.rayQueryFeatureSupported =
+        rayTracingCapabilities.rayQueryFeatureSupported ? 1u : 0u;
+    hybridReflections.rayTracingPipelineFeatureSupported =
+        rayTracingCapabilities.rayTracingPipelineFeatureSupported ? 1u : 0u;
+    hybridReflections.rayQueryHardwareReady =
+        rayTracingCapabilities.RayQueryHardwareReady() ? 1u : 0u;
+    hybridReflections.rayQueryDeviceEnabled =
+        rayTracingCapabilities.rayQueryDeviceEnabled ? 1u : 0u;
+    hybridReflections.runtimeResourcesReady = 0u;
+    hybridReflections.active = 0u;
+    if (hybridReflections.requested == 0u) {
+        hybridReflections.fallbackReason = 1u;
+    } else if (hybridReflections.controlDisabled != 0u) {
+        hybridReflections.fallbackReason = 2u;
+    } else if (!rayTracingCapabilities.RayQueryExtensionsReady()) {
+        hybridReflections.fallbackReason = 3u;
+    } else if (!rayTracingCapabilities.RayQueryFeaturesReady()) {
+        hybridReflections.fallbackReason = 4u;
+    } else if (!rayTracingCapabilities.rayQueryDeviceEnabled) {
+        hybridReflections.fallbackReason = 5u;
+    } else {
+        hybridReflections.fallbackReason = 6u;
+    }
 #if !defined(NDEBUG)
     const bool ssrHoleDiagnosticsRequested =
         EnvironmentFlagEnabled("SE_SSR_HOLE_DIAGNOSTICS");

@@ -192,6 +192,8 @@ void BenchmarkRecorder::RecordFrame(
         stats.weightedTranslucency;
     const RendererSsaoStats& ssao = stats.ssao;
     const RendererSsrStats& ssr = stats.ssr;
+    const RendererHybridReflectionStats& hybridReflections =
+        stats.hybridReflections;
     const RendererIblStats& ibl = stats.ibl;
     const RendererProbeGridStats& probeGrid = stats.probeGrid;
     const RendererBonePaletteDrawStats& bonePaletteDraw = stats.bonePaletteDraw;
@@ -761,6 +763,23 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.holeDiagnosticsRawHitTemporalRejectedPixels << ','
         << ssr.holeDiagnosticsRawHitSpatialRejectedPixels << ','
         << ssr.holeDiagnosticsTemporalMissCarriedPixels << ','
+        << hybridReflections.capabilityContractVersion << ','
+        << hybridReflections.requested << ','
+        << hybridReflections.controlDisabled << ','
+        << hybridReflections.bufferDeviceAddressExtensionSupported << ','
+        << hybridReflections.deferredHostOperationsExtensionSupported << ','
+        << hybridReflections.accelerationStructureExtensionSupported << ','
+        << hybridReflections.rayQueryExtensionSupported << ','
+        << hybridReflections.rayTracingPipelineExtensionSupported << ','
+        << hybridReflections.bufferDeviceAddressFeatureSupported << ','
+        << hybridReflections.accelerationStructureFeatureSupported << ','
+        << hybridReflections.rayQueryFeatureSupported << ','
+        << hybridReflections.rayTracingPipelineFeatureSupported << ','
+        << hybridReflections.rayQueryHardwareReady << ','
+        << hybridReflections.rayQueryDeviceEnabled << ','
+        << hybridReflections.runtimeResourcesReady << ','
+        << hybridReflections.active << ','
+        << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
         << ibl.requestedSource << ','
         << ibl.actualSource << ','
@@ -2220,6 +2239,21 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_hole_diagnostics_raw_hit_temporal_rejected_pixels,"
         << "ssr_hole_diagnostics_raw_hit_spatial_rejected_pixels,"
         << "ssr_hole_diagnostics_temporal_miss_carried_pixels,"
+        << "hybrid_reflections_capability_contract_version,"
+        << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
+        << "hybrid_reflections_buffer_device_address_extension_supported,"
+        << "hybrid_reflections_deferred_host_operations_extension_supported,"
+        << "hybrid_reflections_acceleration_structure_extension_supported,"
+        << "hybrid_reflections_ray_query_extension_supported,"
+        << "hybrid_reflections_ray_tracing_pipeline_extension_supported,"
+        << "hybrid_reflections_buffer_device_address_feature_supported,"
+        << "hybrid_reflections_acceleration_structure_feature_supported,"
+        << "hybrid_reflections_ray_query_feature_supported,"
+        << "hybrid_reflections_ray_tracing_pipeline_feature_supported,"
+        << "hybrid_reflections_ray_query_hardware_ready,"
+        << "hybrid_reflections_ray_query_device_enabled,"
+        << "hybrid_reflections_runtime_resources_ready,"
+        << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"
         << "ibl_cache_fallback_reason,ibl_cache_hit,ibl_runtime_generated,"

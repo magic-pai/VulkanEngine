@@ -69,6 +69,15 @@ inline bool DlssVulkanRequirementsRequestedFromEnvironment() {
         provider == "ngx";
 }
 
+inline bool HybridReflectionsRayQueryDisabledFromEnvironment() {
+    return VulkanEnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT_OFF");
+}
+
+inline bool HybridReflectionsRayQueryRequestedFromEnvironment() {
+    return !HybridReflectionsRayQueryDisabledFromEnvironment() &&
+        VulkanEnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_RT");
+}
+
 inline void AppendUniqueExtension(
     std::vector<const char*>& extensions,
     const char* extensionName
@@ -178,6 +187,23 @@ inline std::vector<const char*> DlssVulkanDeviceExtensionRequirements() {
     return extensions;
 }
 
+inline std::vector<const char*> HybridReflectionsRayQueryExtensionRequirements() {
+    std::vector<const char*> extensions;
+#if defined(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)
+    extensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+#endif
+#if defined(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)
+    extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+#endif
+#if defined(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)
+    extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+#endif
+#if defined(VK_KHR_RAY_QUERY_EXTENSION_NAME)
+    extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+#endif
+    return extensions;
+}
+
 inline std::vector<const char*> EnabledVulkanDeviceExtensionsForPhysicalDevice(
     VkPhysicalDevice physicalDevice
 ) {
@@ -187,6 +213,22 @@ inline std::vector<const char*> EnabledVulkanDeviceExtensionsForPhysicalDevice(
     for (const char* extensionName : DlssVulkanDeviceExtensionRequirements()) {
         if (availableNames.find(extensionName) != availableNames.end()) {
             AppendUniqueExtension(extensions, extensionName);
+        }
+    }
+    if (HybridReflectionsRayQueryRequestedFromEnvironment()) {
+        const std::vector<const char*> rayQueryRequirements =
+            HybridReflectionsRayQueryExtensionRequirements();
+        const bool requirementsAvailable = std::all_of(
+            rayQueryRequirements.begin(),
+            rayQueryRequirements.end(),
+            [&availableNames](const char* extensionName) {
+                return availableNames.find(extensionName) != availableNames.end();
+            }
+        );
+        if (requirementsAvailable && rayQueryRequirements.size() == 4u) {
+            for (const char* extensionName : rayQueryRequirements) {
+                AppendUniqueExtension(extensions, extensionName);
+            }
         }
     }
     return extensions;

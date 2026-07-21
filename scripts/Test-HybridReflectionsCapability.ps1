@@ -1,0 +1,307 @@
+[CmdletBinding()]
+param(
+    [string]$ForwardExecutablePath = "build\Debug\SelfEngineForward3D.exe",
+    [string]$ShowcaseExecutablePath = "build\Debug\SelfEngineLightingShowcase.exe",
+    [switch]$SkipBuild,
+    [switch]$Strict,
+    [string]$OutputDirectory = "tmp\hybrid_reflections_capability"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if (![IO.Path]::IsPathRooted($OutputDirectory)) {
+    $OutputDirectory = Join-Path $projectRoot $OutputDirectory
+}
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+
+function Resolve-ProjectPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $candidate = if ([IO.Path]::IsPathRooted($Path)) {
+        $Path
+    } else {
+        Join-Path $projectRoot $Path
+    }
+    return (Resolve-Path $candidate).Path
+}
+
+function New-Check {
+    param(
+        [string]$Name,
+        [bool]$Passed,
+        [object]$Actual,
+        [object]$Expected
+    )
+
+    return [pscustomobject]@{
+        name = $Name
+        status = if ($Passed) { "pass" } else { "fail" }
+        actual = $Actual
+        expected = $Expected
+    }
+}
+
+function Get-UIntValue {
+    param($Row, [string]$Name)
+
+    $property = $Row.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        throw "Missing CSV column: $Name"
+    }
+    return [uint32]$property.Value
+}
+
+function Set-LaneEnvironment {
+    param([hashtable]$Values, [string[]]$ManagedKeys)
+
+    $previous = @{}
+    foreach ($key in $ManagedKeys) {
+        $previous[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
+        [Environment]::SetEnvironmentVariable($key, $null, "Process")
+    }
+    foreach ($entry in $Values.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable(
+            $entry.Key,
+            [string]$entry.Value,
+            "Process"
+        )
+    }
+    return $previous
+}
+
+function Restore-LaneEnvironment {
+    param([hashtable]$Previous)
+
+    foreach ($entry in $Previous.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable(
+            $entry.Key,
+            $entry.Value,
+            "Process"
+        )
+    }
+}
+
+if (-not $SkipBuild) {
+    $buildCommand = @(
+        'call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1',
+        "cd /d `"$projectRoot\build`"",
+        'MSBuild SelfEngineForward3D.vcxproj /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo',
+        'MSBuild SelfEngineLightingShowcase.vcxproj /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo'
+    ) -join ' && '
+    & cmd.exe /d /c $buildCommand
+    if ($LASTEXITCODE -ne 0) {
+        throw "Hybrid reflections capability build failed with exit code $LASTEXITCODE"
+    }
+}
+
+$forwardExecutable = Resolve-ProjectPath $ForwardExecutablePath
+$showcaseExecutable = Resolve-ProjectPath $ShowcaseExecutablePath
+$managedKeys = @(
+    "SE_HYBRID_REFLECTIONS_RT",
+    "SE_HYBRID_REFLECTIONS_RT_OFF",
+    "SE_FORWARD3D_AA_MODE",
+    "SE_BENCHMARK_SCENE",
+    "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
+    "SE_SCENE_UPDATE_FREEZE",
+    "SE_VISUAL_QA_HIDE_IMGUI",
+    "SE_BENCHMARK_WARMUP_FRAMES",
+    "SE_BENCHMARK_FRAMES",
+    "SE_BENCHMARK_CSV"
+)
+$commonEnvironment = @{
+    SE_FORWARD3D_AA_MODE = "taa"
+    SE_SCENE_UPDATE_FREEZE = "1"
+    SE_VISUAL_QA_HIDE_IMGUI = "1"
+    SE_BENCHMARK_WARMUP_FRAMES = "2"
+    SE_BENCHMARK_FRAMES = "3"
+}
+$laneSpecs = @(
+    [pscustomobject]@{
+        name = "lighting-showcase-requested"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "forward3d-fbx-requested"
+        executable = $forwardExecutable
+        requested = 1
+        disabled = 0
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 1
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_RT_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "forward3d-not-requested-control"
+        executable = $forwardExecutable
+        requested = 0
+        disabled = 0
+        environment = @{
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+        }
+    }
+)
+
+$reports = [Collections.Generic.List[object]]::new()
+foreach ($lane in $laneSpecs) {
+    $laneDirectory = Join-Path $OutputDirectory $lane.name
+    New-Item -ItemType Directory -Force -Path $laneDirectory | Out-Null
+    $csvPath = Join-Path $laneDirectory "hybrid_reflections_capability.csv"
+    $stdoutPath = Join-Path $laneDirectory "process.stdout.log"
+    $stderrPath = Join-Path $laneDirectory "process.stderr.log"
+
+    $environment = $commonEnvironment.Clone()
+    foreach ($entry in $lane.environment.GetEnumerator()) {
+        $environment[$entry.Key] = $entry.Value
+    }
+    $environment["SE_BENCHMARK_CSV"] = $csvPath
+    $previous = Set-LaneEnvironment -Values $environment -ManagedKeys $managedKeys
+    try {
+        $executableDirectory = Split-Path -Parent $lane.executable
+        $commandLine =
+            "cd /d `"$executableDirectory`" && `"$($lane.executable)`" 1> `"$stdoutPath`" 2> `"$stderrPath`""
+        & cmd.exe /d /c $commandLine
+        $exitCode = $LASTEXITCODE
+    } finally {
+        Restore-LaneEnvironment -Previous $previous
+    }
+
+    $checks = [Collections.Generic.List[object]]::new()
+    $checks.Add((New-Check "$($lane.name) process exits" `
+        ($exitCode -eq 0) $exitCode 0)) | Out-Null
+    $checks.Add((New-Check "$($lane.name) writes CSV" `
+        (Test-Path -LiteralPath $csvPath) (Test-Path -LiteralPath $csvPath) $true)) | Out-Null
+
+    $metrics = $null
+    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $csvPath)) {
+        $rows = @(Import-Csv -LiteralPath $csvPath)
+        $checks.Add((New-Check "$($lane.name) captures rows" `
+            ($rows.Count -eq 3) $rows.Count 3)) | Out-Null
+        if ($rows.Count -gt 0) {
+            $last = $rows[-1]
+            $contract = Get-UIntValue $last "hybrid_reflections_capability_contract_version"
+            $requested = Get-UIntValue $last "hybrid_reflections_requested"
+            $disabled = Get-UIntValue $last "hybrid_reflections_control_disabled"
+            $bdaExtension = Get-UIntValue $last "hybrid_reflections_buffer_device_address_extension_supported"
+            $deferredExtension = Get-UIntValue $last "hybrid_reflections_deferred_host_operations_extension_supported"
+            $asExtension = Get-UIntValue $last "hybrid_reflections_acceleration_structure_extension_supported"
+            $rayQueryExtension = Get-UIntValue $last "hybrid_reflections_ray_query_extension_supported"
+            $bdaFeature = Get-UIntValue $last "hybrid_reflections_buffer_device_address_feature_supported"
+            $asFeature = Get-UIntValue $last "hybrid_reflections_acceleration_structure_feature_supported"
+            $rayQueryFeature = Get-UIntValue $last "hybrid_reflections_ray_query_feature_supported"
+            $hardwareReady = Get-UIntValue $last "hybrid_reflections_ray_query_hardware_ready"
+            $deviceEnabled = Get-UIntValue $last "hybrid_reflections_ray_query_device_enabled"
+            $runtimeReady = Get-UIntValue $last "hybrid_reflections_runtime_resources_ready"
+            $active = Get-UIntValue $last "hybrid_reflections_active"
+            $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
+            $extensionReady =
+                $bdaExtension -eq 1 -and $deferredExtension -eq 1 -and
+                $asExtension -eq 1 -and $rayQueryExtension -eq 1
+            $featureReady =
+                $bdaFeature -eq 1 -and $asFeature -eq 1 -and
+                $rayQueryFeature -eq 1
+            $expectedDeviceEnabled =
+                $lane.requested -eq 1 -and $lane.disabled -eq 0 -and
+                $hardwareReady -eq 1
+            $fallbackMatches = if ($lane.requested -eq 0) {
+                $fallback -eq 1
+            } elseif ($lane.disabled -eq 1) {
+                $fallback -eq 2
+            } elseif ($hardwareReady -eq 1) {
+                $fallback -eq 6
+            } else {
+                $fallback -in @(3, 4, 5)
+            }
+
+            $checks.Add((New-Check "$($lane.name) contract version" `
+                ($contract -eq 1) $contract 1)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) request state" `
+                ($requested -eq $lane.requested -and $disabled -eq $lane.disabled) `
+                "$requested/$disabled" "$($lane.requested)/$($lane.disabled)")) | Out-Null
+            $checks.Add((New-Check "$($lane.name) hardware readiness is coherent" `
+                ($hardwareReady -eq [uint32]($extensionReady -and $featureReady)) `
+                "hardware=$hardwareReady,extensions=$extensionReady,features=$featureReady" `
+                "hardware=extensions&&features")) | Out-Null
+            $checks.Add((New-Check "$($lane.name) logical device state" `
+                ($deviceEnabled -eq [uint32]$expectedDeviceEnabled) `
+                $deviceEnabled ([uint32]$expectedDeviceEnabled))) | Out-Null
+            $checks.Add((New-Check "$($lane.name) runtime remains pending" `
+                ($runtimeReady -eq 0 -and $active -eq 0) `
+                "$runtimeReady/$active" "0/0")) | Out-Null
+            $checks.Add((New-Check "$($lane.name) fallback is explicit" `
+                $fallbackMatches $fallback "lane-specific")) | Out-Null
+            $frameGraphIssues = @(
+                $rows | Where-Object { [uint32]$_.framegraph_validation_issues -ne 0 }
+            ).Count
+            $checks.Add((New-Check "$($lane.name) framegraph validation" `
+                ($frameGraphIssues -eq 0) $frameGraphIssues 0)) | Out-Null
+
+            $metrics = [ordered]@{
+                requested = $requested
+                disabled = $disabled
+                hardwareReady = $hardwareReady
+                deviceEnabled = $deviceEnabled
+                runtimeReady = $runtimeReady
+                active = $active
+                fallbackReason = $fallback
+            }
+        }
+    }
+
+    $stdout = Get-Content -Raw -LiteralPath $stdoutPath -ErrorAction SilentlyContinue
+    $stderr = Get-Content -Raw -LiteralPath $stderrPath -ErrorAction SilentlyContinue
+    $processLog = @($stdout, $stderr) -join [Environment]::NewLine
+    $validationMessages = @(
+        $processLog -split "`r?`n" |
+            Where-Object { $_ -match '\[Vulkan Validation\]|\bVUID-' }
+    )
+    $checks.Add((New-Check "$($lane.name) Vulkan validation" `
+        ($validationMessages.Count -eq 0) $validationMessages.Count 0)) | Out-Null
+
+    $laneFailCount = @($checks | Where-Object status -eq "fail").Count
+    $reports.Add([pscustomobject]@{
+        lane = $lane.name
+        executable = $lane.executable
+        csv = $csvPath
+        verdict = if ($laneFailCount -eq 0) { "pass" } else { "fail" }
+        passCount = @($checks | Where-Object status -eq "pass").Count
+        failCount = $laneFailCount
+        metrics = $metrics
+        checks = $checks
+    }) | Out-Null
+}
+
+$passCount = [int](($reports | Measure-Object passCount -Sum).Sum)
+$failCount = [int](($reports | Measure-Object failCount -Sum).Sum)
+$summary = [ordered]@{
+    generatedAt = (Get-Date).ToString("o")
+    outputDirectory = $OutputDirectory
+    verdict = if ($failCount -eq 0) { "pass" } else { "fail" }
+    passCount = $passCount
+    failCount = $failCount
+    reports = $reports
+}
+$summaryPath = Join-Path $OutputDirectory "summary.json"
+$summary | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $summaryPath -Encoding utf8
+[pscustomobject]$summary
+
+if ($Strict -and $failCount -ne 0) {
+    throw "Hybrid reflections capability gate failed: $failCount check(s)"
+}

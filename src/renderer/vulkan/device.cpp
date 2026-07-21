@@ -11,6 +11,23 @@
 
 namespace se {
 
+bool VulkanRayTracingCapabilities::RayQueryExtensionsReady() const {
+    return bufferDeviceAddressExtensionSupported &&
+        deferredHostOperationsExtensionSupported &&
+        accelerationStructureExtensionSupported &&
+        rayQueryExtensionSupported;
+}
+
+bool VulkanRayTracingCapabilities::RayQueryFeaturesReady() const {
+    return bufferDeviceAddressFeatureSupported &&
+        accelerationStructureFeatureSupported &&
+        rayQueryFeatureSupported;
+}
+
+bool VulkanRayTracingCapabilities::RayQueryHardwareReady() const {
+    return RayQueryExtensionsReady() && RayQueryFeaturesReady();
+}
+
 namespace {
 
 std::string ReadDeviceEnvironmentString(const char* name) {
@@ -80,24 +97,86 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
 
     const std::vector<const char*> enabledExtensions =
         EnabledVulkanDeviceExtensionsForPhysicalDevice(physicalDevice.Handle());
+    const std::set<std::string> availableExtensions =
+        AvailableVulkanDeviceExtensionNames(physicalDevice.Handle());
+    auto extensionAvailable = [&availableExtensions](const char* name) {
+        return availableExtensions.find(name) != availableExtensions.end();
+    };
+    m_RayTracingCapabilities.bufferDeviceAddressExtensionSupported =
+        extensionAvailable(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    m_RayTracingCapabilities.deferredHostOperationsExtensionSupported =
+        extensionAvailable(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    m_RayTracingCapabilities.accelerationStructureExtensionSupported =
+        extensionAvailable(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    m_RayTracingCapabilities.rayQueryExtensionSupported =
+        extensionAvailable(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    m_RayTracingCapabilities.rayTracingPipelineExtensionSupported =
+        extensionAvailable(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures supportedBufferDeviceAddress{};
+    supportedBufferDeviceAddress.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR supportedAccelerationStructure{};
+    supportedAccelerationStructure.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    VkPhysicalDeviceRayQueryFeaturesKHR supportedRayQuery{};
+    supportedRayQuery.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR supportedRayTracingPipeline{};
+    supportedRayTracingPipeline.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    supportedBufferDeviceAddress.pNext = &supportedAccelerationStructure;
+    supportedAccelerationStructure.pNext = &supportedRayQuery;
+    supportedRayQuery.pNext = &supportedRayTracingPipeline;
+    VkPhysicalDeviceFeatures2 supportedFeatures{};
+    supportedFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    supportedFeatures.pNext = &supportedBufferDeviceAddress;
+    vkGetPhysicalDeviceFeatures2(physicalDevice.Handle(), &supportedFeatures);
+
+    m_RayTracingCapabilities.bufferDeviceAddressFeatureSupported =
+        supportedBufferDeviceAddress.bufferDeviceAddress == VK_TRUE;
+    m_RayTracingCapabilities.accelerationStructureFeatureSupported =
+        supportedAccelerationStructure.accelerationStructure == VK_TRUE;
+    m_RayTracingCapabilities.rayQueryFeatureSupported =
+        supportedRayQuery.rayQuery == VK_TRUE;
+    m_RayTracingCapabilities.rayTracingPipelineFeatureSupported =
+        supportedRayTracingPipeline.rayTracingPipeline == VK_TRUE;
+
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
     if (IsExtensionEnabled(
         enabledExtensions,
         VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
     )) {
-        VkPhysicalDeviceBufferDeviceAddressFeatures supportedBufferDeviceAddress{};
-        supportedBufferDeviceAddress.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-        VkPhysicalDeviceFeatures2 supportedFeatures{};
-        supportedFeatures.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-        supportedFeatures.pNext = &supportedBufferDeviceAddress;
-        vkGetPhysicalDeviceFeatures2(physicalDevice.Handle(), &supportedFeatures);
-
         bufferDeviceAddressFeatures.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
         bufferDeviceAddressFeatures.bufferDeviceAddress =
             supportedBufferDeviceAddress.bufferDeviceAddress;
+    }
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
+    const bool rayQueryExtensionsEnabled =
+        IsExtensionEnabled(
+            enabledExtensions,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+        ) &&
+        IsExtensionEnabled(
+            enabledExtensions,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME
+        ) &&
+        IsExtensionEnabled(enabledExtensions, VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    if (rayQueryExtensionsEnabled &&
+        bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE &&
+        supportedAccelerationStructure.accelerationStructure == VK_TRUE &&
+        supportedRayQuery.rayQuery == VK_TRUE) {
+        accelerationStructureFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        accelerationStructureFeatures.accelerationStructure = VK_TRUE;
+        rayQueryFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        rayQueryFeatures.rayQuery = VK_TRUE;
+        bufferDeviceAddressFeatures.pNext = &accelerationStructureFeatures;
+        accelerationStructureFeatures.pNext = &rayQueryFeatures;
+        m_RayTracingCapabilities.rayQueryDeviceEnabled = true;
     }
 
     VkDeviceCreateInfo createInfo{};
@@ -177,6 +256,10 @@ VkQueue VulkanDevice::PresentQueue() const {
 
 VkPipelineCache VulkanDevice::PipelineCacheHandle() const {
     return m_PipelineCache != nullptr ? m_PipelineCache->Handle() : VK_NULL_HANDLE;
+}
+
+const VulkanRayTracingCapabilities& VulkanDevice::RayTracingCapabilities() const {
+    return m_RayTracingCapabilities;
 }
 
 void VulkanDevice::SavePipelineCache() const {

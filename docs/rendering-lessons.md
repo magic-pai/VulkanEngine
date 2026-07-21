@@ -2812,3 +2812,25 @@ Validation:
 - `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0` with zero FrameGraph/Vulkan diagnostics.
 - `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0` across the official FFX SSSR bridge and controls.
 - Real `SelfEngineLightingShowcase` visual acceptance confirmed that the suspected self-reflection disappeared.
+
+## 2026-07-21 - Measure SSR Coverage Before Tuning Probe Fallback
+
+Symptom:
+- Forcing captured Probe Mip0 made nearby geometry sharp but exposed incorrect perspective, hollow-looking pedestals, and duplicate silhouettes. Restoring roughness-filtered Probe mips removed the sharp duplication but left the polished sphere looking like blurred IBL.
+
+Cause:
+- The LightingShowcase FFX attribution lane classified `156622` reflection rays: `4070` high-confidence screen-space hits, `1749` partial hits, and `150803` environment fallbacks. About `96.3%` of classified rays therefore had no usable screen-space geometry. A single-point cubemap cannot reconstruct accurate near-field parallax, and a roughness mip can only blur that spatial error.
+
+False leads:
+- Forcing Mip0, sharpening the Probe, lowering material roughness, or cross-fading misaligned SSR and Probe images more aggressively.
+- Treating a valid FFX dispatch/resource chain as proof that the visible receiver has enough screen-space hit coverage.
+
+Production direction:
+- Follow AMD FidelityFX Hybrid Reflections: use SSSR for reliable on-screen hits, hardware ray tracing for off-screen/disoccluded geometry, and Probe/IBL only as the final distant/environment fallback.
+- Keep the RT path optional. Unsupported devices must retain the current SSSR plus Probe fallback without failing logical-device creation.
+
+Validation:
+- The RTX 5070 Ti reports `VK_KHR_acceleration_structure`, `VK_KHR_deferred_host_operations`, `VK_KHR_ray_query`, and `VK_KHR_ray_tracing_pipeline` support.
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `44 / 0` across LightingShowcase, animated Forward3D, explicit-disable, and not-requested lanes.
+- Requested lanes report Ray Query hardware/device readiness `1/1`, runtime resources `0`, and explicit pending fallback `6`; the disable lane reports device readiness `0` and fallback `2`.
+- Existing FFX SSSR and SSR/Hi-Z regressions remain at `1115 / 0` and `809 / 0`.

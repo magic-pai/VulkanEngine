@@ -549,6 +549,29 @@ struct RendererSsrStats {
     u32 holeDiagnosticsContractVersion = 0;
 };
 
+struct RendererHybridReflectionStats {
+    u32 capabilityContractVersion = 1;
+    u32 requested = 0;
+    u32 controlDisabled = 0;
+    u32 bufferDeviceAddressExtensionSupported = 0;
+    u32 deferredHostOperationsExtensionSupported = 0;
+    u32 accelerationStructureExtensionSupported = 0;
+    u32 rayQueryExtensionSupported = 0;
+    u32 rayTracingPipelineExtensionSupported = 0;
+    u32 bufferDeviceAddressFeatureSupported = 0;
+    u32 accelerationStructureFeatureSupported = 0;
+    u32 rayQueryFeatureSupported = 0;
+    u32 rayTracingPipelineFeatureSupported = 0;
+    u32 rayQueryHardwareReady = 0;
+    u32 rayQueryDeviceEnabled = 0;
+    u32 runtimeResourcesReady = 0;
+    u32 active = 0;
+    // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
+    // unavailable, 4 = feature unavailable, 5 = device not enabled,
+    // 6 = runtime resources pending.
+    u32 fallbackReason = 1;
+};
+
 struct RendererIblStats {
     u32 quality = 1;
     u32 requestedSource = 0;
@@ -1475,6 +1498,7 @@ struct RendererStats {
     RendererWeightedTranslucencyStats weightedTranslucency;
     RendererSsaoStats ssao;
     RendererSsrStats ssr;
+    RendererHybridReflectionStats hybridReflections;
     RendererIblStats ibl;
     RendererProbeGridStats probeGrid;
     RendererBonePaletteDrawStats bonePaletteDraw;
