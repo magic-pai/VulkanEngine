@@ -121,6 +121,8 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF",
     "SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF",
     "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF",
+    "SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF",
+    "SE_HYBRID_REFLECTIONS_DIAGNOSTICS",
     "SE_SSR",
     "SE_SSR_BACKEND",
     "SE_FORWARD3D_AA_MODE",
@@ -140,6 +142,7 @@ $commonEnvironment = @{
     SE_FORWARD3D_AA_MODE = "taa"
     SE_SSR = "1"
     SE_SSR_BACKEND = "ffx-sssr"
+    SE_HYBRID_REFLECTIONS_DIAGNOSTICS = "1"
     SE_SCENE_UPDATE_FREEZE = "1"
     SE_VISUAL_QA_HIDE_IMGUI = "1"
     SE_BENCHMARK_WARMUP_FRAMES = "2"
@@ -157,6 +160,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
         }
@@ -171,6 +175,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
@@ -187,6 +192,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF = "1"
@@ -202,6 +208,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF = "1"
@@ -217,6 +224,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 1
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF = "1"
@@ -232,6 +240,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 1
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF = "1"
@@ -247,9 +256,26 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 1
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-denoiser-injection-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 1
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF = "1"
         }
     },
     [pscustomobject]@{
@@ -262,6 +288,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RT_OFF = "1"
@@ -277,6 +304,7 @@ $laneSpecs = @(
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
         shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
         environment = @{
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
             SE_LIGHTING_SHOWCASE_FORCE_OFF = "1"
@@ -330,12 +358,14 @@ foreach ($lane in $laneSpecs) {
             $rayQueryMaterialTableContract = Get-UIntValue $last "hybrid_reflections_ray_query_material_table_contract_version"
             $rayQueryHitLightingContract = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_contract_version"
             $rayQueryShadowVisibilityContract = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_visibility_contract_version"
+            $rayQueryDenoiserBridgeContract = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_bridge_contract_version"
             $rayQueryConsumerRequested = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_requested"
             $rayQueryConsumerDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_control_disabled"
             $rayQueryHitAttributeDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_attribute_control_disabled"
             $rayQueryMaterialTexturesDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_material_texture_control_disabled"
             $rayQueryHitLightingDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_control_disabled"
             $rayQueryShadowVisibilityDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_visibility_control_disabled"
+            $rayQueryDenoiserInjectionDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_injection_control_disabled"
             $bdaExtension = Get-UIntValue $last "hybrid_reflections_buffer_device_address_extension_supported"
             $deferredExtension = Get-UIntValue $last "hybrid_reflections_deferred_host_operations_extension_supported"
             $asExtension = Get-UIntValue $last "hybrid_reflections_acceleration_structure_extension_supported"
@@ -414,6 +444,16 @@ foreach ($lane in $laneSpecs) {
             $shadowMaxLocalLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_max_local_light_count"
             $shadowRectangleSampleCount = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_rectangle_sample_count"
             $shadowMaxRaysPerHit = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_max_rays_per_hit"
+            $denoiserResourcesReady = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_resources_ready"
+            $denoiserRadianceDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_radiance_descriptor_ready"
+            $denoiserConfidenceDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_confidence_descriptor_ready"
+            $denoiserInjectionEnabled = Get-UIntValue $last "hybrid_reflections_ray_query_denoiser_injection_enabled"
+            $ffxReprojectDispatches = Get-UIntValue $last "ssr_ffx_sssr_reproject_dispatches"
+            $ffxPrefilterDispatches = Get-UIntValue $last "ssr_ffx_sssr_prefilter_dispatches"
+            $ffxResolveDispatches = Get-UIntValue $last "ssr_ffx_sssr_resolve_temporal_dispatches"
+            $ffxSameFrameActive = Get-UIntValue $last "ssr_ffx_sssr_same_frame_composite_active"
+            $ffxApplyDraws = Get-UIntValue $last "ssr_ffx_sssr_same_frame_composite_apply_draws"
+            $ffxHitConfidenceApplyBound = Get-UIntValue $last "ssr_ffx_sssr_hit_confidence_apply_bound"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
             $rayQueryReadbackRows = @(
@@ -505,6 +545,10 @@ foreach ($lane in $laneSpecs) {
             $shadowVisibilityMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visibility_min_permille"
             $shadowVisibilityMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visibility_max_permille"
             $localShadowDroppedLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_local_shadow_dropped_luminance_sum_milliunits"
+            $denoiserInjectionResolvedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_denoiser_injection_resolved_count"
+            $denoiserRadiancePixelWriteCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_denoiser_radiance_pixel_write_count"
+            $denoiserConfidencePixelWriteCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_denoiser_confidence_pixel_write_count"
+            $denoiserConfidenceSumPermille = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_denoiser_confidence_sum_permille"
             $invalidHitAttributeCount =
                 [uint64]$hitAttributeInvalidInstanceCount +
                 [uint64]$hitAttributeInvalidPrimitiveCount +
@@ -563,6 +607,12 @@ foreach ($lane in $laneSpecs) {
             ) | Where-Object { $_ -ne 0 })
             $shadowVisibilityDiagnosticsSuppressed =
                 $shadowVisibilityDiagnosticsSuppressed.Count -eq 0
+            $denoiserDiagnosticsSuppressed = @(@(
+                $denoiserInjectionResolvedCount,
+                $denoiserRadiancePixelWriteCount,
+                $denoiserConfidencePixelWriteCount,
+                $denoiserConfidenceSumPermille
+            ) | Where-Object { $_ -ne 0 }).Count -eq 0
             $maxBlasBuildCount = [uint32](($rows | ForEach-Object {
                     Get-UIntValue $_ "hybrid_reflections_blas_build_count"
                 } | Measure-Object -Maximum).Maximum)
@@ -608,6 +658,9 @@ foreach ($lane in $laneSpecs) {
             $shadowVisibilityResolutionExpected =
                 $hitLightingResolutionExpected -and
                 $lane.shadowVisibilityDisabled -eq 0
+            $denoiserInjectionExpected =
+                $shadowVisibilityResolutionExpected -and
+                $lane.denoiserInjectionDisabled -eq 0
             $expectedRayQueryConsumerContract = if ($runtimeResourcesExpected) {
                 2
             } else {
@@ -633,12 +686,21 @@ foreach ($lane in $laneSpecs) {
             } else {
                 0
             }
+            $expectedDenoiserBridgeContract = if ($runtimeResourcesExpected) {
+                1
+            } else {
+                0
+            }
             $fallbackMatches = if ($lane.requested -eq 0) {
                 $fallback -eq 1
             } elseif ($lane.disabled -eq 1) {
                 $fallback -eq 2
             } elseif ($rayQueryDispatchExpected) {
-                $fallback -eq 8
+                if ($denoiserInjectionExpected) {
+                    $fallback -eq 0
+                } else {
+                    $fallback -eq 8
+                }
             } elseif ($runtimeResourcesExpected) {
                 $fallback -eq 7
             } else {
@@ -669,6 +731,11 @@ foreach ($lane in $laneSpecs) {
                     $lane.shadowVisibilityDisabled) `
                 $rayQueryShadowVisibilityDisabled `
                 $lane.shadowVisibilityDisabled)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) denoiser-injection control state" `
+                ($rayQueryDenoiserInjectionDisabled -eq `
+                    $lane.denoiserInjectionDisabled) `
+                $rayQueryDenoiserInjectionDisabled `
+                $lane.denoiserInjectionDisabled)) | Out-Null
             $checks.Add((New-Check "$($lane.name) hardware readiness is coherent" `
                 ($hardwareReady -eq [uint32]($extensionReady -and $featureReady)) `
                 "hardware=$hardwareReady,extensions=$extensionReady,features=$featureReady" `
@@ -699,11 +766,16 @@ foreach ($lane in $laneSpecs) {
                     $expectedShadowVisibilityContract) `
                 $rayQueryShadowVisibilityContract `
                 $expectedShadowVisibilityContract)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) denoiser bridge contract" `
+                ($rayQueryDenoiserBridgeContract -eq `
+                    $expectedDenoiserBridgeContract) `
+                $rayQueryDenoiserBridgeContract `
+                $expectedDenoiserBridgeContract)) | Out-Null
             if ($runtimeResourcesExpected) {
                 $resourcesReady =
                     $accelerationStructureResourcesReady -eq 1 -and
                     $runtimeReady -eq 1 -and
-                    $active -eq 0 -and
+                    $active -eq [uint32]$denoiserInjectionExpected -and
                     $tlasAddressReady -eq 1 -and
                     $tlasInstanceCount -gt 0 -and
                     $tlasInstanceCapacity -ge $tlasInstanceCount -and
@@ -798,6 +870,30 @@ foreach ($lane in $laneSpecs) {
                     $shadowBudgetContractValid `
                     "resources=$shadowVisibilityResourcesReady,local=$shadowMaxLocalLightCount,rectSamples=$shadowRectangleSampleCount,maxRays=$shadowMaxRaysPerHit" `
                     "resources=1,local=8,rectSamples=4,maxRays=directional+32")) | Out-Null
+                $denoiserResourceContractValid =
+                    $denoiserResourcesReady -eq 1 -and
+                    $denoiserRadianceDescriptorReady -eq 1 -and
+                    $denoiserConfidenceDescriptorReady -eq 1 -and
+                    $denoiserInjectionEnabled -eq
+                        [uint32]$denoiserInjectionExpected
+                $checks.Add((New-Check "$($lane.name) DNSR bridge resources and mode" `
+                    $denoiserResourceContractValid `
+                    "resources=$denoiserResourcesReady,radiance=$denoiserRadianceDescriptorReady,confidence=$denoiserConfidenceDescriptorReady,injection=$denoiserInjectionEnabled,active=$active" `
+                    "resources/descriptors=1,injection/active=$([uint32]$denoiserInjectionExpected)")) | Out-Null
+                if ($denoiserInjectionExpected -or
+                    $lane.denoiserInjectionDisabled -eq 1) {
+                    $ffxDenoiserChainValid =
+                        $ffxReprojectDispatches -eq 1 -and
+                        $ffxPrefilterDispatches -eq 1 -and
+                        $ffxResolveDispatches -eq 1 -and
+                        $ffxSameFrameActive -eq 1 -and
+                        $ffxApplyDraws -eq 1 -and
+                        $ffxHitConfidenceApplyBound -eq 1
+                    $checks.Add((New-Check "$($lane.name) existing FFX DNSR and Apply chain remains active" `
+                        $ffxDenoiserChainValid `
+                        "dnsr=$ffxReprojectDispatches/$ffxPrefilterDispatches/$ffxResolveDispatches,apply=$ffxSameFrameActive/$ffxApplyDraws,confidence=$ffxHitConfidenceApplyBound" `
+                        "dnsr=1/1/1,apply=1/1,confidence=1")) | Out-Null
+                }
                 $expectedVisibilityMode = if ($shadowVisibilityResolutionExpected) {
                     2
                 } elseif ($hitLightingResolutionExpected) {
@@ -1025,10 +1121,34 @@ foreach ($lane in $laneSpecs) {
                                         "resolved=$shadowVisibilityResolvedCount,rays=$shadowRayCount,visible/occluded/invalid=$shadowVisibleCount/$shadowOccludedCount/$shadowInvalidCount" `
                                         "all=0 while hit lighting remains independently controlled")) | Out-Null
                                 }
+                                if ($denoiserInjectionExpected) {
+                                    $denoiserInjectionContractValid =
+                                        $denoiserInjectionResolvedCount -eq
+                                            $hitLightingResolvedCount -and
+                                        $denoiserRadiancePixelWriteCount -ge
+                                            $denoiserInjectionResolvedCount -and
+                                        $denoiserRadiancePixelWriteCount -le
+                                            $rayQueryResultWriteCount -and
+                                        $denoiserConfidencePixelWriteCount -eq
+                                            $denoiserRadiancePixelWriteCount -and
+                                        [uint64]$denoiserConfidenceSumPermille -eq
+                                            ([uint64]$denoiserConfidencePixelWriteCount *
+                                                1000)
+                                    $checks.Add((New-Check "$($lane.name) hardware radiance enters the existing DNSR carrier" `
+                                        $denoiserInjectionContractValid `
+                                        "lighting=$hitLightingResolvedCount,injected=$denoiserInjectionResolvedCount,radianceWrites=$denoiserRadiancePixelWriteCount,confidenceWrites=$denoiserConfidencePixelWriteCount,confidenceSum=$denoiserConfidenceSumPermille,resultWrites=$rayQueryResultWriteCount" `
+                                        "lighting=injected,radiance=confidence,injected<=writes<=result,confidence=1000 per pixel")) | Out-Null
+                                } else {
+                                    $checks.Add((New-Check "$($lane.name) DNSR injection is suppressed" `
+                                        $denoiserDiagnosticsSuppressed `
+                                        "resolved=$denoiserInjectionResolvedCount,radiance=$denoiserRadiancePixelWriteCount,confidence=$denoiserConfidencePixelWriteCount/$denoiserConfidenceSumPermille" `
+                                        "all=0 while independent hit diagnostics remain available")) | Out-Null
+                                }
                             } else {
                                 $checks.Add((New-Check "$($lane.name) hit lighting is suppressed" `
                                     ($hitLightingDiagnosticsSuppressed -and `
-                                        $shadowVisibilityDiagnosticsSuppressed) `
+                                        $shadowVisibilityDiagnosticsSuppressed -and `
+                                        $denoiserDiagnosticsSuppressed) `
                                     "resolved=$hitLightingResolvedCount,invalid=$hitLightingInvalidCount,payload=$hitSurfacePayloadWriteCount,checksum=$radianceChecksum" `
                                     "all lighting/payload diagnostics=0 while material sampling remains active")) | Out-Null
                             }
@@ -1043,7 +1163,8 @@ foreach ($lane in $laneSpecs) {
                                 $sampleLodMin -eq 0 -and
                                 $sampleLodMax -eq 0 -and
                                 $hitLightingDiagnosticsSuppressed -and
-                                $shadowVisibilityDiagnosticsSuppressed
+                                $shadowVisibilityDiagnosticsSuppressed -and
+                                $denoiserDiagnosticsSuppressed
                             $checks.Add((New-Check "$($lane.name) material sampling is suppressed" `
                                 $materialSamplingSuppressed `
                                 "records=$materialRecordResolvedCount/$materialRecordFallbackCount,samples=$textureSampleResolvedCount/$textureSampleFallbackCount/$textureSampleInvalidCount,payload=$hitSurfacePayloadWriteCount/$hitSurfacePayloadChecksum" `
@@ -1077,7 +1198,8 @@ foreach ($lane in $laneSpecs) {
                             $hitSurfaceLuminanceMin -eq 0 -and
                             $hitSurfaceLuminanceMax -eq 0 -and
                             $hitLightingDiagnosticsSuppressed -and
-                            $shadowVisibilityDiagnosticsSuppressed
+                            $shadowVisibilityDiagnosticsSuppressed -and
+                            $denoiserDiagnosticsSuppressed
                         $checks.Add((New-Check "$($lane.name) hit attributes are suppressed" `
                             $hitAttributesSuppressed `
                             "resolved=$hitAttributeResolvedCount,invalid=$invalidHitAttributeCount,material=$hitAttributeMaterialResolvedCount/$hitAttributeMaterialFallbackCount,checksums=$hitAttributeIdentityChecksum/$hitAttributePrimitiveChecksum/$hitAttributeMaterialChecksum" `
@@ -1117,6 +1239,7 @@ foreach ($lane in $laneSpecs) {
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_texture_descriptor_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_hit_surface_width") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_hit_lighting_resources_ready") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_ray_query_denoiser_resources_ready") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_dispatch_count") -ne 0 -or
                         (Get-UInt64Value $_ "hybrid_reflections_ray_query_memory_bytes") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_blas_cache_count") -ne 0 -or
@@ -1144,12 +1267,14 @@ foreach ($lane in $laneSpecs) {
                 rayQueryMaterialTableContract = $rayQueryMaterialTableContract
                 rayQueryHitLightingContract = $rayQueryHitLightingContract
                 rayQueryShadowVisibilityContract = $rayQueryShadowVisibilityContract
+                rayQueryDenoiserBridgeContract = $rayQueryDenoiserBridgeContract
                 rayQueryConsumerRequested = $rayQueryConsumerRequested
                 rayQueryConsumerDisabled = $rayQueryConsumerDisabled
                 rayQueryHitAttributeDisabled = $rayQueryHitAttributeDisabled
                 rayQueryMaterialTexturesDisabled = $rayQueryMaterialTexturesDisabled
                 rayQueryHitLightingDisabled = $rayQueryHitLightingDisabled
                 rayQueryShadowVisibilityDisabled = $rayQueryShadowVisibilityDisabled
+                rayQueryDenoiserInjectionDisabled = $rayQueryDenoiserInjectionDisabled
                 hardwareReady = $hardwareReady
                 shaderInt64FeatureSupported = $shaderInt64Feature
                 shaderInt64DeviceEnabled = $shaderInt64Enabled
@@ -1196,6 +1321,8 @@ foreach ($lane in $laneSpecs) {
                 hitLightingVisibility = "$hitLightingVisibilityMode/$hitLightingVisibilityFallback"
                 shadowVisibilityResourcesReady = $shadowVisibilityResourcesReady
                 shadowRayBudget = "$shadowMaxLocalLightCount/$shadowRectangleSampleCount/$shadowMaxRaysPerHit"
+                denoiserBridge = "$denoiserResourcesReady/$denoiserRadianceDescriptorReady/$denoiserConfidenceDescriptorReady/$denoiserInjectionEnabled"
+                denoiserChain = "$ffxReprojectDispatches/$ffxPrefilterDispatches/$ffxResolveDispatches/$ffxSameFrameActive/$ffxApplyDraws/$ffxHitConfidenceApplyBound"
                 rayQueryDispatchReady = $rayQueryDispatchReady
                 rayQueryDispatchCount = $rayQueryDispatchCount
                 rayQueryReadbackValid = $rayQueryReadbackValid
@@ -1245,6 +1372,8 @@ foreach ($lane in $laneSpecs) {
                 shadowHitDistanceMillimeters = "$shadowHitDistanceMin..$shadowHitDistanceMax"
                 shadowVisibilityPermille = "$shadowVisibilityMin..$shadowVisibilityMax"
                 localShadowDroppedEnergyMilliunits = $localShadowDroppedLuminanceSum
+                denoiserInjectionResolved = $denoiserInjectionResolvedCount
+                denoiserInjectionWrites = "$denoiserRadiancePixelWriteCount/$denoiserConfidencePixelWriteCount/$denoiserConfidenceSumPermille"
                 active = $active
                 fallbackReason = $fallback
             }

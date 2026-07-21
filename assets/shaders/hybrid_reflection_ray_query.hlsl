@@ -58,6 +58,10 @@ struct HybridMaterialRecord {
     uint g_shadow_visibility_contract_version;
     uint g_max_shadowed_local_lights;
     uint g_rectangle_shadow_sample_count;
+    uint g_denoiser_injection_enabled;
+    uint g_denoiser_bridge_contract_version;
+    uint g_denoiser_reserved0;
+    uint g_denoiser_reserved1;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -77,6 +81,8 @@ RWTexture2D<float4> g_hit_surface_payload;
 [[vk::binding(18, 1)]] TextureCube<float4> g_ibl_irradiance;
 [[vk::binding(19, 1)]] TextureCube<float4> g_ibl_prefiltered;
 [[vk::binding(20, 1)]] SamplerState g_ibl_sampler;
+[[vk::binding(21, 1)]] RWTexture2D<float4> g_denoiser_radiance;
+[[vk::binding(22, 1)]] RWTexture2D<float> g_denoiser_hit_confidence;
 
 static const uint kDiagnosticCandidateRayCount = 0u;
 static const uint kDiagnosticScreenHitAcceptedCount = 1u;
@@ -157,6 +163,10 @@ static const uint kDiagnosticShadowHitDistanceMaxMillimeters = 75u;
 static const uint kDiagnosticShadowVisibilityMinPermille = 76u;
 static const uint kDiagnosticShadowVisibilityMaxPermille = 77u;
 static const uint kDiagnosticLocalShadowDroppedLuminanceSumMilliunits = 78u;
+static const uint kDiagnosticDenoiserInjectionResolvedCount = 79u;
+static const uint kDiagnosticDenoiserRadiancePixelWriteCount = 80u;
+static const uint kDiagnosticDenoiserConfidencePixelWriteCount = 81u;
+static const uint kDiagnosticDenoiserConfidenceSumPermille = 82u;
 
 static const float kPi = 3.14159265359;
 static const uint kMaxLocalLights = 64u;
@@ -1089,6 +1099,47 @@ void StoreHitSurfacePayload(
     }
 }
 
+void StoreDenoiserPayload(
+    uint2 coordinates,
+    bool copyHorizontal,
+    bool copyVertical,
+    bool copyDiagonal,
+    float4 payload
+) {
+    if (g_denoiser_injection_enabled == 0u) {
+        return;
+    }
+
+    g_denoiser_radiance[coordinates] = payload;
+    g_denoiser_hit_confidence[coordinates] = 1.0;
+    uint writeCount = 1u;
+    uint2 copyTarget = coordinates ^ 1u;
+    if (copyHorizontal && copyTarget.x < g_buffer_dimensions.x) {
+        uint2 target = uint2(copyTarget.x, coordinates.y);
+        g_denoiser_radiance[target] = payload;
+        g_denoiser_hit_confidence[target] = 1.0;
+        ++writeCount;
+    }
+    if (copyVertical && copyTarget.y < g_buffer_dimensions.y) {
+        uint2 target = uint2(coordinates.x, copyTarget.y);
+        g_denoiser_radiance[target] = payload;
+        g_denoiser_hit_confidence[target] = 1.0;
+        ++writeCount;
+    }
+    if (copyDiagonal && all(copyTarget < g_buffer_dimensions)) {
+        g_denoiser_radiance[copyTarget] = payload;
+        g_denoiser_hit_confidence[copyTarget] = 1.0;
+        ++writeCount;
+    }
+    DiagnosticAdd(kDiagnosticDenoiserInjectionResolvedCount, 1u);
+    DiagnosticAdd(kDiagnosticDenoiserRadiancePixelWriteCount, writeCount);
+    DiagnosticAdd(kDiagnosticDenoiserConfidencePixelWriteCount, writeCount);
+    DiagnosticAdd(
+        kDiagnosticDenoiserConfidenceSumPermille,
+        writeCount * 1000u
+    );
+}
+
 [numthreads(8, 8, 1)]
 void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
     uint rayIndex = groupId * 64u + groupIndex;
@@ -1693,6 +1744,13 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 hitDistance
                                             );
                                             StoreHitSurfacePayload(
+                                                coordinates,
+                                                copyHorizontal,
+                                                copyVertical,
+                                                copyDiagonal,
+                                                payload
+                                            );
+                                            StoreDenoiserPayload(
                                                 coordinates,
                                                 copyHorizontal,
                                                 copyVertical,

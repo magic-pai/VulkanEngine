@@ -111,6 +111,10 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 shadowVisibilityMinPermille = 0u;
     u32 shadowVisibilityMaxPermille = 0u;
     u32 localShadowDroppedLuminanceSumMilliunits = 0u;
+    u32 denoiserInjectionResolvedCount = 0u;
+    u32 denoiserRadiancePixelWriteCount = 0u;
+    u32 denoiserConfidencePixelWriteCount = 0u;
+    u32 denoiserConfidenceSumPermille = 0u;
 };
 
 class VulkanHybridReflectionRayQuery {
@@ -149,6 +153,8 @@ public:
         bool materialTexturesEnabled,
         bool hitLightingEnabled,
         bool shadowVisibilityEnabled,
+        bool denoiserInjectionEnabled,
+        bool diagnosticsEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,

@@ -35,12 +35,13 @@ constexpr u32 kHitAttributeContractVersion = 1u;
 constexpr u32 kMaterialTableContractVersion = 1u;
 constexpr u32 kHitLightingContractVersion = 1u;
 constexpr u32 kShadowVisibilityContractVersion = 1u;
+constexpr u32 kDenoiserBridgeContractVersion = 1u;
 constexpr u32 kHitLightingVisibilityModeUnshadowed = 1u;
 constexpr u32 kHitLightingVisibilityModeRayQuery = 2u;
 constexpr u32 kHitLightingVisibilityFallbackPendingRayQuery = 1u;
 constexpr u32 kMaxShadowedLocalLights = 8u;
 constexpr u32 kMaxRectangleShadowSamples = 4u;
-constexpr u32 kDiagnosticValueCount = 79u;
+constexpr u32 kDiagnosticValueCount = 83u;
 constexpr u32 kHitDistanceMinDiagnosticIndex = 7u;
 constexpr u32 kNormalLengthMinDiagnosticIndex = 20u;
 constexpr u32 kBarycentricSumMinDiagnosticIndex = 25u;
@@ -104,9 +105,13 @@ struct alignas(16) RayQueryControls {
     u32 shadowVisibilityContractVersion = kShadowVisibilityContractVersion;
     u32 maxShadowedLocalLights = kMaxShadowedLocalLights;
     u32 rectangleShadowSampleCount = kMaxRectangleShadowSamples;
+    u32 denoiserInjectionEnabled = 0u;
+    u32 denoiserBridgeContractVersion = kDenoiserBridgeContractVersion;
+    u32 denoiserReserved0 = 0u;
+    u32 denoiserReserved1 = 0u;
 };
 
-static_assert(sizeof(RayQueryControls) == 112u);
+static_assert(sizeof(RayQueryControls) == 128u);
 static_assert(offsetof(RayQueryControls, enabled) == 20u);
 static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
 static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
@@ -128,6 +133,8 @@ static_assert(offsetof(RayQueryControls, shadowVisibilityEnabled) == 96u);
 static_assert(offsetof(RayQueryControls, shadowVisibilityContractVersion) == 100u);
 static_assert(offsetof(RayQueryControls, maxShadowedLocalLights) == 104u);
 static_assert(offsetof(RayQueryControls, rectangleShadowSampleCount) == 108u);
+static_assert(offsetof(RayQueryControls, denoiserInjectionEnabled) == 112u);
+static_assert(offsetof(RayQueryControls, denoiserBridgeContractVersion) == 116u);
 static_assert(offsetof(Vertex3D, position) == 0u);
 static_assert(offsetof(Vertex3D, normal) == 12u);
 static_assert(offsetof(Vertex3D, texCoord) == 36u);
@@ -293,7 +300,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     }
 
     void CreateDescriptorSetLayout(const VulkanDevice& device) {
-        std::array<VkDescriptorSetLayoutBinding, 21> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 23> bindings{};
         auto setBinding = [&](u32 binding, VkDescriptorType type, u32 count = 1u) {
             bindings[binding].binding = binding;
             bindings[binding].descriptorType = type;
@@ -327,6 +334,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             setBinding(binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
         }
         setBinding(20u, VK_DESCRIPTOR_TYPE_SAMPLER);
+        setBinding(21u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+        setBinding(22u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
         VkDescriptorSetLayoutCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -388,6 +397,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         materialBuffers.reserve(count);
         submitted.assign(count, false);
         frameEnabled.assign(count, false);
+        denoiserInjectionActive.assign(count, false);
+        diagnosticsActive.assign(count, false);
         tlasDescriptorReady.assign(count, false);
         boundMaterialTextureViews.resize(count);
         boundMaterialSamplers.resize(count);
@@ -510,7 +521,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[4] = {
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            static_cast<u32>(count * 2u)
+            static_cast<u32>(count * 4u)
         };
         poolSizes[5] = {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -597,6 +608,16 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 hitSurfaceImages[imageIndex]->View(),
                 VK_IMAGE_LAYOUT_GENERAL
             };
+            VkDescriptorImageInfo denoiserRadianceImage{
+                VK_NULL_HANDLE,
+                classify.IntersectionOutputView(imageIndex),
+                VK_IMAGE_LAYOUT_GENERAL
+            };
+            VkDescriptorImageInfo denoiserConfidenceImage{
+                VK_NULL_HANDLE,
+                classify.HitConfidenceView(imageIndex),
+                VK_IMAGE_LAYOUT_GENERAL
+            };
             VkDescriptorBufferInfo controlsInfo{
                 controlsBuffers[imageIndex]->Handle(),
                 0u,
@@ -666,7 +687,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     fallbackSampler->Handle();
             }
 
-            std::array<VkWriteDescriptorSet, 20> writes{};
+            std::array<VkWriteDescriptorSet, 22> writes{};
             for (u32 sourceIndex = 0u; sourceIndex < sampledImages.size();
                 ++sourceIndex) {
                 VkWriteDescriptorSet& write = writes[sourceIndex];
@@ -749,6 +770,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
             writes[19].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
             writes[19].descriptorCount = 1u;
             writes[19].pImageInfo = &iblSamplerInfo;
+            writes[20] = writes[14];
+            writes[20].dstBinding = 21u;
+            writes[20].pImageInfo = &denoiserRadianceImage;
+            writes[21] = writes[14];
+            writes[21].dstBinding = 22u;
+            writes[21].pImageInfo = &denoiserConfidenceImage;
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(writes.size()),
@@ -770,6 +797,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         bool materialTexturesEnabled,
         bool hitLightingEnabled,
         bool shadowVisibilityEnabled,
+        bool denoiserInjectionEnabled,
+        bool diagnosticsEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,
@@ -907,6 +936,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
             hitLightingEnabled ? 1u : 0u;
         controls.shadowVisibilityEnabled = controls.hitLightingEnabled != 0u &&
             shadowVisibilityEnabled ? 1u : 0u;
+        controls.denoiserInjectionEnabled =
+            controls.shadowVisibilityEnabled != 0u &&
+            denoiserInjectionEnabled ? 1u : 0u;
         controls.directionalLightCount = std::min(directionalLightCount, 1u);
         controls.localLightCount = std::min(
             localLightCount,
@@ -929,9 +961,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             1u,
             kMaxRectangleShadowSamples
         );
-#if !defined(NDEBUG)
-        controls.diagnosticsEnabled = enabled ? 1u : 0u;
-#endif
+        controls.diagnosticsEnabled = enabled && diagnosticsEnabled ? 1u : 0u;
         controlsBuffers[imageIndex]->Upload(
             std::as_bytes(std::span{ &controls, 1u })
         );
@@ -957,6 +987,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
             std::as_bytes(std::span<const u32>(diagnostics))
         );
         submitted[imageIndex] = false;
+        denoiserInjectionActive[imageIndex] =
+            controls.denoiserInjectionEnabled != 0u;
+        diagnosticsActive[imageIndex] = controls.diagnosticsEnabled != 0u;
 
         tlasDescriptorReady[imageIndex] =
             topLevelAccelerationStructure != VK_NULL_HANDLE;
@@ -1038,6 +1071,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             kHitLightingContractVersion;
         stats.rayQueryShadowVisibilityContractVersion =
             kShadowVisibilityContractVersion;
+        stats.rayQueryDenoiserBridgeContractVersion =
+            kDenoiserBridgeContractVersion;
         stats.rayQueryHitLightingResourcesReady = 1u;
         stats.rayQueryLightBufferDescriptorReady = 1u;
         stats.rayQueryIblBrdfDescriptorReady = 1u;
@@ -1063,6 +1098,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
             controls.directionalLightCount +
             controls.maxShadowedLocalLights *
                 controls.rectangleShadowSampleCount;
+        stats.rayQueryDenoiserResourcesReady = 1u;
+        stats.rayQueryDenoiserRadianceDescriptorReady = 1u;
+        stats.rayQueryDenoiserConfidenceDescriptorReady = 1u;
+        stats.rayQueryDenoiserInjectionEnabled =
+            controls.denoiserInjectionEnabled;
     }
 
     void Record(
@@ -1130,15 +1170,22 @@ struct VulkanHybridReflectionRayQuery::Impl {
         VkImageMemoryBarrier hitSurfaceForWrite = hitSurfaceForClear;
         hitSurfaceForWrite.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         hitSurfaceForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        VkImageMemoryBarrier confidenceForRead = resultForClear;
-        confidenceForRead.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        confidenceForRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        confidenceForRead.image =
+        VkImageMemoryBarrier denoiserRadianceForWrite = resultForClear;
+        denoiserRadianceForWrite.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        denoiserRadianceForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        denoiserRadianceForWrite.image =
+            classifyResources.IntersectionOutputImage(imageIndex);
+        VkImageMemoryBarrier confidenceForReadWrite = resultForClear;
+        confidenceForReadWrite.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        confidenceForReadWrite.dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        confidenceForReadWrite.image =
             classifyResources.HitConfidenceImage(imageIndex);
-        std::array<VkImageMemoryBarrier, 3> imageBarriers{
+        std::array<VkImageMemoryBarrier, 4> imageBarriers{
             resultForWrite,
             hitSurfaceForWrite,
-            confidenceForRead
+            denoiserRadianceForWrite,
+            confidenceForReadWrite
         };
 
         std::array<VkBufferMemoryBarrier, 5> bufferBarriers{};
@@ -1257,17 +1304,15 @@ struct VulkanHybridReflectionRayQuery::Impl {
         ++stats.rayQueryDispatchCount;
         stats.rayQueryDescriptorBindCount += 2u;
         ++stats.rayQueryResultClearCount;
-        stats.active = 0u;
-        stats.fallbackReason = 8u;
+        stats.active = denoiserInjectionActive[imageIndex] ? 1u : 0u;
+        stats.fallbackReason = stats.active != 0u ? 0u : 8u;
     }
 
     HybridReflectionRayQueryDiagnostics ReadDiagnostics(u32 imageIndex) const {
         HybridReflectionRayQueryDiagnostics result{};
-#if defined(NDEBUG)
-        static_cast<void>(imageIndex);
-        return result;
-#else
-        if (imageIndex >= diagnosticsBuffers.size() || !submitted[imageIndex]) {
+        if (imageIndex >= diagnosticsBuffers.size() ||
+            !submitted[imageIndex] ||
+            !diagnosticsActive[imageIndex]) {
             return result;
         }
 
@@ -1365,8 +1410,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
             result.shadowVisibilityResolvedCount > 0u ? values[76] : 0u;
         result.shadowVisibilityMaxPermille = values[77];
         result.localShadowDroppedLuminanceSumMilliunits = values[78];
+        result.denoiserInjectionResolvedCount = values[79];
+        result.denoiserRadiancePixelWriteCount = values[80];
+        result.denoiserConfidencePixelWriteCount = values[81];
+        result.denoiserConfidenceSumPermille = values[82];
         return result;
-#endif
     }
 
     u64 TotalMemoryBytes() const {
@@ -1405,6 +1453,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         boundMaterialSamplers;
     std::vector<bool> submitted;
     std::vector<bool> frameEnabled;
+    std::vector<bool> denoiserInjectionActive;
+    std::vector<bool> diagnosticsActive;
     std::vector<bool> tlasDescriptorReady;
     u32 iblPrefilteredMipCount = 0u;
     std::unique_ptr<VulkanComputePipeline> pipeline;
@@ -1460,6 +1510,8 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     bool materialTexturesEnabled,
     bool hitLightingEnabled,
     bool shadowVisibilityEnabled,
+    bool denoiserInjectionEnabled,
+    bool diagnosticsEnabled,
     u32 directionalLightCount,
     u32 localLightCount,
     const HybridReflectionRayQuerySettings& settings,
@@ -1476,6 +1528,8 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         materialTexturesEnabled,
         hitLightingEnabled,
         shadowVisibilityEnabled,
+        denoiserInjectionEnabled,
+        diagnosticsEnabled,
         directionalLightCount,
         localLightCount,
         settings,

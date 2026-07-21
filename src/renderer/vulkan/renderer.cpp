@@ -5845,6 +5845,10 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF"
         ) ? 1u : 0u;
+    hybridReflections.rayQueryDenoiserInjectionControlDisabled =
+        EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF"
+        ) ? 1u : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -6120,6 +6124,14 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.shadowVisibilityMaxPermille;
     hybridReflections.rayQueryLocalShadowDroppedLuminanceSumMilliunits =
         hybridRayQueryDiagnostics.localShadowDroppedLuminanceSumMilliunits;
+    hybridReflections.rayQueryDenoiserInjectionResolvedCount =
+        hybridRayQueryDiagnostics.denoiserInjectionResolvedCount;
+    hybridReflections.rayQueryDenoiserRadiancePixelWriteCount =
+        hybridRayQueryDiagnostics.denoiserRadiancePixelWriteCount;
+    hybridReflections.rayQueryDenoiserConfidencePixelWriteCount =
+        hybridRayQueryDiagnostics.denoiserConfidencePixelWriteCount;
+    hybridReflections.rayQueryDenoiserConfidenceSumPermille =
+        hybridRayQueryDiagnostics.denoiserConfidenceSumPermille;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8978,6 +8990,16 @@ void VulkanRenderer::DrawFrame() {
             hybridReflections.rayQueryConsumerControlDisabled == 0u &&
             frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u &&
             hybridReflections.tlasInstanceCount > 0u;
+        const bool denoiserInjectionEnabled =
+            hybridReflections.rayQueryDenoiserInjectionControlDisabled == 0u &&
+            ffxSssrSameFrameCompositeActive;
+#if !defined(NDEBUG)
+        constexpr bool rayQueryDiagnosticsEnabled = true;
+#else
+        const bool rayQueryDiagnosticsEnabled = EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_DIAGNOSTICS"
+        );
+#endif
         m_HybridReflectionRayQuery->PrepareFrame(
             m_Device,
             imageIndex,
@@ -8995,6 +9017,8 @@ void VulkanRenderer::DrawFrame() {
             hybridReflections.rayQueryMaterialTextureControlDisabled == 0u,
             hybridReflections.rayQueryHitLightingControlDisabled == 0u,
             hybridReflections.rayQueryShadowVisibilityControlDisabled == 0u,
+            denoiserInjectionEnabled,
+            rayQueryDiagnosticsEnabled,
             frameLightSet.directionalCount,
             frameLightSet.localCount,
             rayQuerySettings,

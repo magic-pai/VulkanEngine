@@ -770,6 +770,7 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryMaterialTableContractVersion << ','
         << hybridReflections.rayQueryHitLightingContractVersion << ','
         << hybridReflections.rayQueryShadowVisibilityContractVersion << ','
+        << hybridReflections.rayQueryDenoiserBridgeContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.rayQueryConsumerRequested << ','
@@ -778,6 +779,7 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryMaterialTextureControlDisabled << ','
         << hybridReflections.rayQueryHitLightingControlDisabled << ','
         << hybridReflections.rayQueryShadowVisibilityControlDisabled << ','
+        << hybridReflections.rayQueryDenoiserInjectionControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
@@ -868,6 +870,10 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryShadowMaxLocalLightCount << ','
         << hybridReflections.rayQueryShadowRectangleSampleCount << ','
         << hybridReflections.rayQueryShadowMaxRaysPerHit << ','
+        << hybridReflections.rayQueryDenoiserResourcesReady << ','
+        << hybridReflections.rayQueryDenoiserRadianceDescriptorReady << ','
+        << hybridReflections.rayQueryDenoiserConfidenceDescriptorReady << ','
+        << hybridReflections.rayQueryDenoiserInjectionEnabled << ','
         << hybridReflections.rayQueryReadbackValid << ','
         << hybridReflections.rayQueryCandidateRayCount << ','
         << hybridReflections.rayQueryScreenHitAcceptedCount << ','
@@ -948,6 +954,10 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryShadowVisibilityMinPermille << ','
         << hybridReflections.rayQueryShadowVisibilityMaxPermille << ','
         << hybridReflections.rayQueryLocalShadowDroppedLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryDenoiserInjectionResolvedCount << ','
+        << hybridReflections.rayQueryDenoiserRadiancePixelWriteCount << ','
+        << hybridReflections.rayQueryDenoiserConfidencePixelWriteCount << ','
+        << hybridReflections.rayQueryDenoiserConfidenceSumPermille << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2416,6 +2426,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_material_table_contract_version,"
         << "hybrid_reflections_ray_query_hit_lighting_contract_version,"
         << "hybrid_reflections_ray_query_shadow_visibility_contract_version,"
+        << "hybrid_reflections_ray_query_denoiser_bridge_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_ray_query_consumer_requested,"
         << "hybrid_reflections_ray_query_consumer_control_disabled,"
@@ -2423,6 +2434,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_material_texture_control_disabled,"
         << "hybrid_reflections_ray_query_hit_lighting_control_disabled,"
         << "hybrid_reflections_ray_query_shadow_visibility_control_disabled,"
+        << "hybrid_reflections_ray_query_denoiser_injection_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
@@ -2513,6 +2525,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_shadow_max_local_light_count,"
         << "hybrid_reflections_ray_query_shadow_rectangle_sample_count,"
         << "hybrid_reflections_ray_query_shadow_max_rays_per_hit,"
+        << "hybrid_reflections_ray_query_denoiser_resources_ready,"
+        << "hybrid_reflections_ray_query_denoiser_radiance_descriptor_ready,"
+        << "hybrid_reflections_ray_query_denoiser_confidence_descriptor_ready,"
+        << "hybrid_reflections_ray_query_denoiser_injection_enabled,"
         << "hybrid_reflections_ray_query_readback_valid,"
         << "hybrid_reflections_ray_query_candidate_ray_count,"
         << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
@@ -2593,6 +2609,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_shadow_visibility_min_permille,"
         << "hybrid_reflections_ray_query_shadow_visibility_max_permille,"
         << "hybrid_reflections_ray_query_local_shadow_dropped_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_denoiser_injection_resolved_count,"
+        << "hybrid_reflections_ray_query_denoiser_radiance_pixel_write_count,"
+        << "hybrid_reflections_ray_query_denoiser_confidence_pixel_write_count,"
+        << "hybrid_reflections_ray_query_denoiser_confidence_sum_permille,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

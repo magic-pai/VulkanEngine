@@ -3040,3 +3040,36 @@ Validation:
 - `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict` passed `324 / 0` across nine lanes with zero Vulkan diagnostics and matching `1733/1733` CSV columns.
 - LightingShowcase recorded `984,030` rays (`600,684` visible, `383,346` occluded, `0` invalid); animated FBX recorded `14,031` (`13,126`, `905`, `0`). Both reported budget `8/4/33`, visibility `0..1000`, and zero classified self-intersection candidates.
 - Debug Forward3D, Debug LightingShowcase, Release Forward3D, `spirv-val --target-env vulkan1.2`, FidelityFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` passed.
+
+## 2026-07-22 - Feed Hybrid Hits Into the Existing FidelityFX DNSR Contract
+
+Symptom:
+- Ray Query could produce material-aware, shadowed off-screen radiance, but keeping it in an independent carrier made the result invisible; directly composing raw hardware hits would reintroduce white blocks, motion flicker, distance-dependent noise, and re-entry exposure.
+
+False leads:
+- Building a second temporal denoiser and history stack around the Ray Query carrier.
+- Integrating NVIDIA NRD before proving that the existing AMD DNSR chain could consume the same radiance and hit-distance contract.
+- Replacing misses or valid screen-space hits instead of preserving the established SSSR/Probe/IBL fallback.
+
+Cause:
+- Hardware hit shading was a valid producer without a production temporal consumer. FidelityFX already owned `IntersectionOutput`, `HitConfidence`, reprojection, prefiltering, temporal resolve, and same-frame composition, so bypassing that ownership would duplicate state and lose the stability fixes already validated for SSSR.
+
+Control test:
+- Compare the normal cross-scene path with `SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF=1` while preserving Ray Query hit lighting and shadow visibility.
+- Require hit-lighting count to equal injection count, radiance writes to equal confidence writes, confidence sum to equal writes times `1000`, the complete FFX DNSR/Apply chain to remain active, and all dependency-off lanes to suppress injection.
+
+Fix:
+- Write valid hardware-hit `float4(radiance, hitDistance)` into the existing FFX `IntersectionOutput` and confidence `1.0` into `HitConfidence` after Intersect and before Reproject.
+- Preserve the existing screen-space and environment values for misses, then consume the mixed carrier through FFX Reproject, Prefilter, ResolveTemporal, and same-frame Apply.
+- Keep diagnostics automatic in Debug and opt-in through `SE_HYBRID_REFLECTIONS_DIAGNOSTICS=1` in Release so normal shipping frames do not perform readback.
+
+Prevention:
+- Before adding a denoiser, identify which subsystem already owns history, hit distance, confidence, rejection, and composition.
+- Do not visibly compose sparse Ray Query radiance until it enters a validated temporal/spatial denoising contract.
+- Never weaken a portability check because a test lane launches the wrong executable; fix the lane and retain the scene-specific evidence.
+
+Validation:
+- Corrected ten-lane Hybrid Reflections gate passed `403 / 0` with matching `1743/1743` CSV columns and zero Vulkan/FrameGraph diagnostics.
+- LightingShowcase recorded `57,957` lighting hits/injections and `57,957 / 57,957 / 57,957,000` radiance/confidence/confidence-sum writes; animated Forward3D recorded `462` injections plus one explicit skinned fallback.
+- Debug Forward3D, Debug LightingShowcase, Release Forward3D, `spirv-val --target-env vulkan1.2`, FidelityFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` passed.
+- The user accepted the real Release LightingShowcase result as natural and stable, with no obvious white blocks, duplicate reflections, motion flicker, or re-entry delay.

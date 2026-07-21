@@ -557,6 +557,7 @@ struct RendererHybridReflectionStats {
     u32 rayQueryMaterialTableContractVersion = 0;
     u32 rayQueryHitLightingContractVersion = 0;
     u32 rayQueryShadowVisibilityContractVersion = 0;
+    u32 rayQueryDenoiserBridgeContractVersion = 0;
     u32 requested = 0;
     u32 controlDisabled = 0;
     u32 rayQueryConsumerRequested = 0;
@@ -565,6 +566,7 @@ struct RendererHybridReflectionStats {
     u32 rayQueryMaterialTextureControlDisabled = 0;
     u32 rayQueryHitLightingControlDisabled = 0;
     u32 rayQueryShadowVisibilityControlDisabled = 0;
+    u32 rayQueryDenoiserInjectionControlDisabled = 0;
     u32 bufferDeviceAddressExtensionSupported = 0;
     u32 deferredHostOperationsExtensionSupported = 0;
     u32 accelerationStructureExtensionSupported = 0;
@@ -655,6 +657,10 @@ struct RendererHybridReflectionStats {
     u32 rayQueryShadowMaxLocalLightCount = 0;
     u32 rayQueryShadowRectangleSampleCount = 0;
     u32 rayQueryShadowMaxRaysPerHit = 0;
+    u32 rayQueryDenoiserResourcesReady = 0;
+    u32 rayQueryDenoiserRadianceDescriptorReady = 0;
+    u32 rayQueryDenoiserConfidenceDescriptorReady = 0;
+    u32 rayQueryDenoiserInjectionEnabled = 0;
     u32 rayQueryReadbackValid = 0;
     u32 rayQueryCandidateRayCount = 0;
     u32 rayQueryScreenHitAcceptedCount = 0;
@@ -735,6 +741,10 @@ struct RendererHybridReflectionStats {
     u32 rayQueryShadowVisibilityMinPermille = 0;
     u32 rayQueryShadowVisibilityMaxPermille = 0;
     u32 rayQueryLocalShadowDroppedLuminanceSumMilliunits = 0;
+    u32 rayQueryDenoiserInjectionResolvedCount = 0;
+    u32 rayQueryDenoiserRadiancePixelWriteCount = 0;
+    u32 rayQueryDenoiserConfidencePixelWriteCount = 0;
+    u32 rayQueryDenoiserConfidenceSumPermille = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,
