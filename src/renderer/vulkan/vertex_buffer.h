@@ -18,14 +18,16 @@ public:
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanCommandPool& commandPool,
         std::span<const Vertex> vertices,
-        VulkanUploadBatch* uploadBatch = nullptr
+        VulkanUploadBatch* uploadBatch = nullptr,
+        bool accelerationStructureInput = false
     );
     VulkanVertexBuffer(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanCommandPool& commandPool,
         std::span<const Vertex3D> vertices,
-        VulkanUploadBatch* uploadBatch = nullptr
+        VulkanUploadBatch* uploadBatch = nullptr,
+        bool accelerationStructureInput = true
     );
 
     ~VulkanVertexBuffer();
@@ -35,6 +37,7 @@ public:
 
     VkBuffer Handle() const;
     u32 VertexCount() const;
+    VkDeviceAddress DeviceAddress() const;
 
 private:
     void CreateVertexBuffer(
@@ -43,12 +46,14 @@ private:
         const VulkanCommandPool& commandPool,
         std::span<const std::byte> vertexBytes,
         u32 vertexCount,
-        VulkanUploadBatch* uploadBatch
+        VulkanUploadBatch* uploadBatch,
+        bool accelerationStructureInput
     );
 
 private:
     std::unique_ptr<VulkanBuffer> m_Buffer;
     u32 m_VertexCount = 0;
+    bool m_DeviceAddressReady = false;
 };
 
 }

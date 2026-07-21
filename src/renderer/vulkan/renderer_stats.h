@@ -551,6 +551,7 @@ struct RendererSsrStats {
 
 struct RendererHybridReflectionStats {
     u32 capabilityContractVersion = 1;
+    u32 accelerationStructureContractVersion = 0;
     u32 requested = 0;
     u32 controlDisabled = 0;
     u32 bufferDeviceAddressExtensionSupported = 0;
@@ -564,11 +565,34 @@ struct RendererHybridReflectionStats {
     u32 rayTracingPipelineFeatureSupported = 0;
     u32 rayQueryHardwareReady = 0;
     u32 rayQueryDeviceEnabled = 0;
+    u32 fullSceneCommandCount = 0;
+    u32 opaqueRigidCommandCount = 0;
+    u32 skinnedFallbackCount = 0;
+    u32 alphaFallbackCount = 0;
+    u32 invalidGeometryCount = 0;
+    u32 instanceOverflowCount = 0;
+    u32 blasCacheCount = 0;
+    u32 blasReadyCount = 0;
+    u32 blasBuildCount = 0;
+    u32 blasReuseCount = 0;
+    u32 frameUniqueBlasCount = 0;
+    u32 blasPrimitiveCount = 0;
+    u64 blasStorageBytes = 0;
+    u64 blasScratchBytes = 0;
+    u32 tlasInstanceCount = 0;
+    u32 tlasInstanceCapacity = 0;
+    u32 tlasBuildCount = 0;
+    u32 tlasUpdateCount = 0;
+    u64 tlasStorageBytes = 0;
+    u64 tlasScratchBytes = 0;
+    u64 tlasInstanceBufferBytes = 0;
+    u32 tlasAddressReady = 0;
+    u32 accelerationStructureResourcesReady = 0;
     u32 runtimeResourcesReady = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,
-    // 6 = runtime resources pending.
+    // 6 = runtime resources pending, 7 = ray-query consumer pending.
     u32 fallbackReason = 1;
 };
 

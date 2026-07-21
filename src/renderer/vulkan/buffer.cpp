@@ -14,8 +14,12 @@ VulkanBuffer::VulkanBuffer(
     const VulkanPhysicalDevice& physicalDevice,
     VkDeviceSize size,
     VkBufferUsageFlags usage,
-    VkMemoryPropertyFlags memoryProperties
-) : m_Device(device.Handle()), m_Size(size), m_MemoryProperties(memoryProperties) {
+    VkMemoryPropertyFlags memoryProperties,
+    VkMemoryAllocateFlags allocationFlags
+) : m_Device(device.Handle()),
+    m_Size(size),
+    m_Usage(usage),
+    m_MemoryProperties(memoryProperties) {
     SE_ASSERT(size > 0, "Vulkan buffer size must be greater than zero");
 
     VkBufferCreateInfo bufferInfo{};
@@ -38,6 +42,12 @@ VulkanBuffer::VulkanBuffer(
         memoryRequirements.memoryTypeBits,
         memoryProperties
     );
+    VkMemoryAllocateFlagsInfo allocateFlagsInfo{};
+    if (allocationFlags != 0) {
+        allocateFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        allocateFlagsInfo.flags = allocationFlags;
+        allocateInfo.pNext = &allocateFlagsInfo;
+    }
 
     if (vkAllocateMemory(device.Handle(), &allocateInfo, nullptr, &m_Memory) != VK_SUCCESS) {
         Release();
@@ -60,6 +70,21 @@ VkBuffer VulkanBuffer::Handle() const {
 
 VkDeviceSize VulkanBuffer::Size() const {
     return m_Size;
+}
+
+VkBufferUsageFlags VulkanBuffer::Usage() const {
+    return m_Usage;
+}
+
+VkDeviceAddress VulkanBuffer::DeviceAddress() const {
+    SE_ASSERT(
+        (m_Usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0,
+        "Vulkan buffer was not created for device-address access"
+    );
+    VkBufferDeviceAddressInfo addressInfo{};
+    addressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    addressInfo.buffer = m_Buffer;
+    return vkGetBufferDeviceAddress(m_Device, &addressInfo);
 }
 
 void VulkanBuffer::Upload(std::span<const std::byte> data) const {
@@ -100,7 +125,9 @@ void VulkanBuffer::Copy(
     VkBuffer source,
     VkBuffer destination,
     VkDeviceSize size,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    VkAccessFlags destinationAccessMask,
+    VkPipelineStageFlags destinationStageMask
 ) {
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
     if (uploadBatch != nullptr) {
@@ -136,9 +163,7 @@ void VulkanBuffer::Copy(
     VkBufferMemoryBarrier bufferBarrier{};
     bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     bufferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    bufferBarrier.dstAccessMask =
-        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
-        VK_ACCESS_INDEX_READ_BIT;
+    bufferBarrier.dstAccessMask = destinationAccessMask;
     bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bufferBarrier.buffer = destination;
@@ -148,7 +173,7 @@ void VulkanBuffer::Copy(
     vkCmdPipelineBarrier(
         commandBuffer,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        destinationStageMask,
         0,
         0,
         nullptr,
@@ -193,6 +218,7 @@ void VulkanBuffer::Release() {
     }
 
     m_Size = 0;
+    m_Usage = 0;
     m_MemoryProperties = 0;
 }
 

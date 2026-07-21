@@ -26,6 +26,7 @@ class VulkanHdrDescriptorSets;
 class VulkanHdrRenderPass;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
+class VulkanHybridReflectionAccelerationStructures;
 class VulkanFfxSssrClassifyTilesResources;
 class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrConstantsResources;
@@ -54,6 +55,7 @@ class VulkanWeightedTranslucencyRenderPass;
 struct RenderCommand;
 struct RenderInstanceBatch;
 struct RendererBindStats;
+struct RendererHybridReflectionStats;
 struct RenderFrameGraphPlan;
 struct FrameMaterialSet;
 struct DirectionalShadowCascadeSet;
@@ -352,7 +354,10 @@ public:
         const VulkanSceneRenderTargets* ssrTargets = nullptr,
         bool ssrReconstructionEnabled = false,
         bool ssrImagesInitialized = false,
-        bool ssrHistoryReset = false
+        bool ssrHistoryReset = false,
+        VulkanHybridReflectionAccelerationStructures*
+            hybridReflectionAccelerationStructures = nullptr,
+        RendererHybridReflectionStats* hybridReflectionStats = nullptr
     ) const;
     void Recreate(
         const VulkanDevice& device,

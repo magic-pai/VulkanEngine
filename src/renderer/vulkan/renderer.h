@@ -60,6 +60,7 @@ class VulkanDlssMaskRenderPass;
 class VulkanGpuTimer;
 class VulkanGBufferDescriptorSets;
 class VulkanGraphicsPipeline;
+class VulkanHybridReflectionAccelerationStructures;
 class VulkanHdrDescriptorSets;
 class VulkanWeightedTranslucencyDescriptorSets;
 class VulkanImGuiLayer;
@@ -856,6 +857,7 @@ private:
     RenderQueue m_RenderQueue;
     RenderQueue m_OverlayRenderQueue;
     RenderQueue m_ShadowRenderQueue;
+    RenderQueue m_HybridReflectionRenderQueue;
     RenderQueue m_ReflectionCaptureRenderQueue;
     RenderQueue m_ReflectionCaptureInfluenceRenderQueue;
     std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
@@ -882,6 +884,8 @@ private:
     std::vector<bool> m_DlssMaskInputsInitialized;
 
     std::unique_ptr<VulkanSwapchain> m_Swapchain;
+    std::unique_ptr<VulkanHybridReflectionAccelerationStructures>
+        m_HybridReflectionAccelerationStructures;
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;
     std::unique_ptr<VulkanMaterialDescriptorSetLayout> m_MaterialDescriptorSetLayout;
     std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;

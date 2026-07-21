@@ -21,9 +21,19 @@ VulkanMesh::VulkanMesh(
         physicalDevice,
         commandPool,
         std::span<const Vertex>(vertices.data(), vertices.size()),
-        uploadBatch
+        uploadBatch,
+        false
     ),
-    m_IndexBuffer(device, physicalDevice, commandPool, std::move(indices), uploadBatch) {
+    m_IndexBuffer(
+        device,
+        physicalDevice,
+        commandPool,
+        std::move(indices),
+        uploadBatch,
+        false
+    ) {
+    m_Is3D = false;
+    m_VertexStride = sizeof(Vertex);
     CalculateBounds(std::span<const Vertex>(vertices.data(), vertices.size()));
 }
 
@@ -39,9 +49,19 @@ VulkanMesh::VulkanMesh(
         physicalDevice,
         commandPool,
         std::span<const Vertex3D>(vertices.data(), vertices.size()),
-        uploadBatch
+        uploadBatch,
+        true
     ),
-    m_IndexBuffer(device, physicalDevice, commandPool, std::move(indices), uploadBatch) {
+    m_IndexBuffer(
+        device,
+        physicalDevice,
+        commandPool,
+        std::move(indices),
+        uploadBatch,
+        true
+    ) {
+    m_Is3D = true;
+    m_VertexStride = sizeof(Vertex3D);
     CalculateBounds(std::span<const Vertex3D>(vertices.data(), vertices.size()));
 }
 
@@ -62,8 +82,36 @@ void VulkanMesh::Bind(VkCommandBuffer commandBuffer) const {
     );
 }
 
+bool VulkanMesh::Is3D() const {
+    return m_Is3D;
+}
+
+bool VulkanMesh::AccelerationStructureInputReady() const {
+    return m_Is3D &&
+        m_VertexBuffer.DeviceAddress() != 0 &&
+        m_IndexBuffer.DeviceAddress() != 0 &&
+        m_VertexBuffer.VertexCount() >= 3u &&
+        m_IndexBuffer.IndexCount() >= 3u;
+}
+
+VkDeviceAddress VulkanMesh::VertexDeviceAddress() const {
+    return m_VertexBuffer.DeviceAddress();
+}
+
+VkDeviceAddress VulkanMesh::IndexDeviceAddress() const {
+    return m_IndexBuffer.DeviceAddress();
+}
+
+u32 VulkanMesh::VertexCount() const {
+    return m_VertexBuffer.VertexCount();
+}
+
 u32 VulkanMesh::IndexCount() const {
     return m_IndexBuffer.IndexCount();
+}
+
+u32 VulkanMesh::VertexStride() const {
+    return m_VertexStride;
 }
 
 const glm::vec3& VulkanMesh::BoundsMin() const {

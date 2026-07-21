@@ -2834,3 +2834,37 @@ Validation:
 - `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `44 / 0` across LightingShowcase, animated Forward3D, explicit-disable, and not-requested lanes.
 - Requested lanes report Ray Query hardware/device readiness `1/1`, runtime resources `0`, and explicit pending fallback `6`; the disable lane reports device readiness `0` and fallback `2`.
 - Existing FFX SSSR and SSR/Hi-Z regressions remain at `1115 / 0` and `809 / 0`.
+
+## 2026-07-21 - Build Hybrid Reflection AS From the Full Scene
+
+Symptom:
+- Screen-space attribution showed that most glossy reflection rays had no usable on-screen hit, but a camera-culled acceleration structure would also drop off-screen geometry that Ray Query is meant to recover.
+
+False leads:
+- Reusing the visible main render queue for TLAS instances.
+- Giving every 2D, transparent, or skinned buffer device-address/AS-input usage merely because Ray Query was enabled on the device.
+- Treating a valid TLAS address as proof that ray-traced reflection radiance is already active.
+
+Cause:
+- Hybrid reflections require a scene-level geometry producer with ownership independent of main-camera visibility. Static/rigid geometry can share BLAS resources; skinned and non-opaque geometry need separate update/intersection policies and must remain measurable fallbacks until those paths exist.
+
+Control test:
+- Compare requested/supported lanes against explicit-disable and not-requested lanes.
+- The requested lanes must build non-empty BLAS/TLAS resources from an unculled queue, while control lanes must retain zero BLAS/TLAS counts, addresses, and memory.
+- The animated Forward3D lane must count its skinned model as fallback instead of silently tracing its bind pose.
+
+Fix:
+- Add device-address and AS-build-input usage only to requested 3D mesh buffers.
+- Cache static/rigid BLAS resources, allocate one update-capable TLAS per swapchain image, and rebuild frame-slot ownership after swapchain recreation.
+- Record host-to-build, BLAS-to-TLAS, and TLAS-to-compute/fragment Ray Query barriers with Debug CSV lifecycle and memory diagnostics.
+
+Prevention:
+- Never build an off-screen fallback structure from the camera-frustum queue.
+- Never call AS resources "active reflections" until a shader consumer is bound and produces validated hit/radiance data.
+- Clear lane output files before every health run so a blocked executable cannot pass by reusing stale CSV data.
+
+Validation:
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `53 / 0` across LightingShowcase, animated Forward3D, explicit-disable, and not-requested lanes with zero Vulkan validation messages.
+- LightingShowcase reported `51` TLAS instances and `4` ready BLAS entries; Forward3D reported `8` rigid instances, `3` ready BLAS entries, and `1` skinned fallback.
+- `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.

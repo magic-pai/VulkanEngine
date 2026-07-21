@@ -40,7 +40,13 @@ public:
     SE_DISABLE_MOVE(VulkanMesh);
 
     void Bind(VkCommandBuffer commandBuffer) const;
+    bool Is3D() const;
+    bool AccelerationStructureInputReady() const;
+    VkDeviceAddress VertexDeviceAddress() const;
+    VkDeviceAddress IndexDeviceAddress() const;
+    u32 VertexCount() const;
     u32 IndexCount() const;
+    u32 VertexStride() const;
     const glm::vec3& BoundsMin() const;
     const glm::vec3& BoundsMax() const;
 
@@ -51,6 +57,8 @@ private:
 private:
     VulkanVertexBuffer m_VertexBuffer;
     VulkanIndexBuffer m_IndexBuffer;
+    bool m_Is3D = false;
+    u32 m_VertexStride = 0;
     glm::vec3 m_BoundsMin{ -0.5f };
     glm::vec3 m_BoundsMax{ 0.5f };
 };

@@ -20,9 +20,17 @@ VulkanIndexBuffer::VulkanIndexBuffer(
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
     std::vector<Index> indices,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    bool accelerationStructureInput
 ) {
-    CreateIndexBuffer(device, physicalDevice, commandPool, indices, uploadBatch);
+    CreateIndexBuffer(
+        device,
+        physicalDevice,
+        commandPool,
+        indices,
+        uploadBatch,
+        accelerationStructureInput
+    );
 }
 
 VulkanIndexBuffer::~VulkanIndexBuffer() = default;
@@ -40,17 +48,26 @@ VkIndexType VulkanIndexBuffer::IndexType() const {
     return VK_INDEX_TYPE_UINT32;
 }
 
+VkDeviceAddress VulkanIndexBuffer::DeviceAddress() const {
+    return m_DeviceAddressReady && m_Buffer != nullptr
+        ? m_Buffer->DeviceAddress()
+        : 0;
+}
+
 void VulkanIndexBuffer::CreateIndexBuffer(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
     std::span<const Index> indices,
-    VulkanUploadBatch* uploadBatch
+    VulkanUploadBatch* uploadBatch,
+    bool accelerationStructureInput
 ) {
     SE_ASSERT(!indices.empty(), "Index buffer must contain at least one index");
 
     m_IndexCount = static_cast<u32>(indices.size());
     const VkDeviceSize bufferSize = sizeof(Index) * indices.size();
+    m_DeviceAddressReady = accelerationStructureInput &&
+        device.RayTracingCapabilities().rayQueryDeviceEnabled;
 
     auto stagingBuffer = std::make_unique<VulkanBuffer>(
         device,
@@ -61,13 +78,30 @@ void VulkanIndexBuffer::CreateIndexBuffer(
     );
     stagingBuffer->Upload(AsBytes(indices));
 
+    VkBufferUsageFlags indexUsage =
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    VkMemoryAllocateFlags allocationFlags = 0;
+    if (m_DeviceAddressReady) {
+        indexUsage |=
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        allocationFlags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    }
     m_Buffer = std::make_unique<VulkanBuffer>(
         device,
         physicalDevice,
         bufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        indexUsage,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        allocationFlags
     );
+
+    VkAccessFlags destinationAccess = VK_ACCESS_INDEX_READ_BIT;
+    VkPipelineStageFlags destinationStage = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+    if (m_DeviceAddressReady) {
+        destinationAccess |= VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        destinationStage |= VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
 
     VulkanBuffer::Copy(
         device,
@@ -75,7 +109,9 @@ void VulkanIndexBuffer::CreateIndexBuffer(
         stagingBuffer->Handle(),
         m_Buffer->Handle(),
         bufferSize,
-        uploadBatch
+        uploadBatch,
+        destinationAccess,
+        destinationStage
     );
     if (uploadBatch != nullptr) {
         uploadBatch->KeepAlive(std::move(stagingBuffer));

@@ -166,6 +166,7 @@ foreach ($lane in $laneSpecs) {
     $csvPath = Join-Path $laneDirectory "hybrid_reflections_capability.csv"
     $stdoutPath = Join-Path $laneDirectory "process.stdout.log"
     $stderrPath = Join-Path $laneDirectory "process.stderr.log"
+    Remove-Item -LiteralPath $csvPath, $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 
     $environment = $commonEnvironment.Clone()
     foreach ($entry in $lane.environment.GetEnumerator()) {
@@ -208,9 +209,37 @@ foreach ($lane in $laneSpecs) {
             $rayQueryFeature = Get-UIntValue $last "hybrid_reflections_ray_query_feature_supported"
             $hardwareReady = Get-UIntValue $last "hybrid_reflections_ray_query_hardware_ready"
             $deviceEnabled = Get-UIntValue $last "hybrid_reflections_ray_query_device_enabled"
+            $accelerationStructureContract = Get-UIntValue $last "hybrid_reflections_acceleration_structure_contract_version"
+            $fullSceneCommands = Get-UIntValue $last "hybrid_reflections_full_scene_command_count"
+            $opaqueRigidCommands = Get-UIntValue $last "hybrid_reflections_opaque_rigid_command_count"
+            $skinnedFallback = Get-UIntValue $last "hybrid_reflections_skinned_fallback_count"
+            $alphaFallback = Get-UIntValue $last "hybrid_reflections_alpha_fallback_count"
+            $invalidGeometry = Get-UIntValue $last "hybrid_reflections_invalid_geometry_count"
+            $instanceOverflow = Get-UIntValue $last "hybrid_reflections_instance_overflow_count"
+            $blasCacheCount = Get-UIntValue $last "hybrid_reflections_blas_cache_count"
+            $blasReadyCount = Get-UIntValue $last "hybrid_reflections_blas_ready_count"
+            $tlasInstanceCount = Get-UIntValue $last "hybrid_reflections_tlas_instance_count"
+            $tlasInstanceCapacity = Get-UIntValue $last "hybrid_reflections_tlas_instance_capacity"
+            $tlasAddressReady = Get-UIntValue $last "hybrid_reflections_tlas_address_ready"
+            $accelerationStructureResourcesReady = Get-UIntValue $last "hybrid_reflections_acceleration_structure_resources_ready"
             $runtimeReady = Get-UIntValue $last "hybrid_reflections_runtime_resources_ready"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
+            $maxBlasBuildCount = [uint32](($rows | ForEach-Object {
+                    Get-UIntValue $_ "hybrid_reflections_blas_build_count"
+                } | Measure-Object -Maximum).Maximum)
+            $maxTlasBuildCount = [uint32](($rows | ForEach-Object {
+                    Get-UIntValue $_ "hybrid_reflections_tlas_build_count"
+                } | Measure-Object -Maximum).Maximum)
+            $maxTlasUpdateCount = [uint32](($rows | ForEach-Object {
+                    Get-UIntValue $_ "hybrid_reflections_tlas_update_count"
+                } | Measure-Object -Maximum).Maximum)
+            $maxAsResourceReady = [uint32](($rows | ForEach-Object {
+                    Get-UIntValue $_ "hybrid_reflections_acceleration_structure_resources_ready"
+                } | Measure-Object -Maximum).Maximum)
+            $maxSkinnedFallback = [uint32](($rows | ForEach-Object {
+                    Get-UIntValue $_ "hybrid_reflections_skinned_fallback_count"
+                } | Measure-Object -Maximum).Maximum)
             $extensionReady =
                 $bdaExtension -eq 1 -and $deferredExtension -eq 1 -and
                 $asExtension -eq 1 -and $rayQueryExtension -eq 1
@@ -220,12 +249,16 @@ foreach ($lane in $laneSpecs) {
             $expectedDeviceEnabled =
                 $lane.requested -eq 1 -and $lane.disabled -eq 0 -and
                 $hardwareReady -eq 1
+            $runtimeResourcesExpected =
+                $lane.requested -eq 1 -and
+                $lane.disabled -eq 0 -and
+                $hardwareReady -eq 1
             $fallbackMatches = if ($lane.requested -eq 0) {
                 $fallback -eq 1
             } elseif ($lane.disabled -eq 1) {
                 $fallback -eq 2
-            } elseif ($hardwareReady -eq 1) {
-                $fallback -eq 6
+            } elseif ($runtimeResourcesExpected) {
+                $fallback -eq 7
             } else {
                 $fallback -in @(3, 4, 5)
             }
@@ -242,9 +275,54 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) logical device state" `
                 ($deviceEnabled -eq [uint32]$expectedDeviceEnabled) `
                 $deviceEnabled ([uint32]$expectedDeviceEnabled))) | Out-Null
-            $checks.Add((New-Check "$($lane.name) runtime remains pending" `
-                ($runtimeReady -eq 0 -and $active -eq 0) `
-                "$runtimeReady/$active" "0/0")) | Out-Null
+            $checks.Add((New-Check "$($lane.name) acceleration-structure contract" `
+                ($accelerationStructureContract -eq [uint32]$runtimeResourcesExpected) `
+                $accelerationStructureContract ([uint32]$runtimeResourcesExpected))) | Out-Null
+            if ($runtimeResourcesExpected) {
+                $resourcesReady =
+                    $accelerationStructureResourcesReady -eq 1 -and
+                    $runtimeReady -eq 1 -and
+                    $active -eq 0 -and
+                    $tlasAddressReady -eq 1 -and
+                    $tlasInstanceCount -gt 0 -and
+                    $tlasInstanceCapacity -ge $tlasInstanceCount -and
+                    $blasCacheCount -gt 0 -and
+                    $blasReadyCount -gt 0 -and
+                    $opaqueRigidCommands -gt 0 -and
+                    $fullSceneCommands -ge $opaqueRigidCommands -and
+                    $instanceOverflow -eq 0
+                $checks.Add((New-Check "$($lane.name) BLAS/TLAS resources ready" `
+                    $resourcesReady `
+                    "asReady=$accelerationStructureResourcesReady,runtime=$runtimeReady,address=$tlasAddressReady,instances=$tlasInstanceCount,blas=$blasReadyCount" `
+                    "resources=1,address=1,instances>0,blas>0")) | Out-Null
+                $checks.Add((New-Check "$($lane.name) acceleration builds recorded" `
+                    ($maxBlasBuildCount -gt 0 -and ($maxTlasBuildCount -gt 0 -or $maxTlasUpdateCount -gt 0)) `
+                    "blasBuild=$maxBlasBuildCount,tlasBuild=$maxTlasBuildCount,tlasUpdate=$maxTlasUpdateCount" `
+                    "blasBuild>0 and (tlasBuild>0 or tlasUpdate>0)")) | Out-Null
+                $checks.Add((New-Check "$($lane.name) scene geometry accounting" `
+                    ($invalidGeometry -eq 0 -and $alphaFallback -ge 0) `
+                    "invalid=$invalidGeometry,alphaFallback=$alphaFallback" `
+                    "invalid=0")) | Out-Null
+                if ($lane.name -eq "forward3d-fbx-requested") {
+                    $checks.Add((New-Check "$($lane.name) skinned geometry uses fallback" `
+                        ($maxSkinnedFallback -gt 0) `
+                        $maxSkinnedFallback ">0")) | Out-Null
+                }
+            } else {
+                $noResources = @(
+                    $rows | Where-Object {
+                        (Get-UIntValue $_ "hybrid_reflections_acceleration_structure_resources_ready") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_runtime_resources_ready") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_blas_cache_count") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_tlas_instance_count") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_tlas_address_ready") -ne 0
+                    }
+                ).Count -eq 0
+                $checks.Add((New-Check "$($lane.name) no AS resources when inactive" `
+                    $noResources `
+                    "asReady=$maxAsResourceReady,blas=$blasCacheCount,instances=$tlasInstanceCount,address=$tlasAddressReady" `
+                    "all=0")) | Out-Null
+            }
             $checks.Add((New-Check "$($lane.name) fallback is explicit" `
                 $fallbackMatches $fallback "lane-specific")) | Out-Null
             $frameGraphIssues = @(
@@ -258,6 +336,20 @@ foreach ($lane in $laneSpecs) {
                 disabled = $disabled
                 hardwareReady = $hardwareReady
                 deviceEnabled = $deviceEnabled
+                accelerationStructureContract = $accelerationStructureContract
+                fullSceneCommands = $fullSceneCommands
+                opaqueRigidCommands = $opaqueRigidCommands
+                skinnedFallback = $skinnedFallback
+                alphaFallback = $alphaFallback
+                blasCacheCount = $blasCacheCount
+                blasReadyCount = $blasReadyCount
+                maxBlasBuildCount = $maxBlasBuildCount
+                tlasInstanceCount = $tlasInstanceCount
+                tlasInstanceCapacity = $tlasInstanceCapacity
+                maxTlasBuildCount = $maxTlasBuildCount
+                maxTlasUpdateCount = $maxTlasUpdateCount
+                tlasAddressReady = $tlasAddressReady
+                accelerationStructureResourcesReady = $accelerationStructureResourcesReady
                 runtimeReady = $runtimeReady
                 active = $active
                 fallbackReason = $fallback

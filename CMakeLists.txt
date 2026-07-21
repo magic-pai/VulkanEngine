@@ -249,6 +249,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/render_targets.cpp
     src/renderer/vulkan/reflection_probe_resources.cpp
     src/renderer/vulkan/fidelityfx_sssr_adapter.cpp
+    src/renderer/vulkan/hybrid_reflection_acceleration_structures.cpp
     src/renderer/vulkan/depth_buffer.cpp
     src/renderer/vulkan/surface.cpp
     src/renderer/vulkan/pipeline_spec.cpp

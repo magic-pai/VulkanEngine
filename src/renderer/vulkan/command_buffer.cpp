@@ -13,6 +13,7 @@
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/gpu_timer.h"
 #include "renderer/vulkan/graphics_pipeline.h"
+#include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/imgui_layer.h"
 #include "renderer/vulkan/instance_buffer.h"
 #include "renderer/vulkan/material.h"
@@ -2671,7 +2672,10 @@ void VulkanCommandBuffer::Record(
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
     bool ssrImagesInitialized,
-    bool ssrHistoryReset
+    bool ssrHistoryReset,
+    VulkanHybridReflectionAccelerationStructures*
+        hybridReflectionAccelerationStructures,
+    RendererHybridReflectionStats* hybridReflectionStats
 ) const {
     const std::vector<VkFramebuffer>& framebuffers = framebuffer.Handles();
     const VkExtent2D extent = swapchain.Extent();
@@ -2754,6 +2758,15 @@ void VulkanCommandBuffer::Record(
         gpuTimer->ResetFrame(commandBuffer, imageIndex);
         gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::FrameStart);
         gpuTimer->WriteTimestamp(commandBuffer, imageIndex, GpuTimestamp::ShadowStart);
+    }
+
+    if (hybridReflectionAccelerationStructures != nullptr &&
+        hybridReflectionStats != nullptr) {
+        hybridReflectionAccelerationStructures->RecordBuilds(
+            commandBuffer,
+            static_cast<u32>(imageIndex),
+            *hybridReflectionStats
+        );
     }
 
     if (shadowRenderPass != nullptr &&

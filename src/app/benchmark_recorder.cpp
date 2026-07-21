@@ -764,6 +764,7 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.holeDiagnosticsRawHitSpatialRejectedPixels << ','
         << ssr.holeDiagnosticsTemporalMissCarriedPixels << ','
         << hybridReflections.capabilityContractVersion << ','
+        << hybridReflections.accelerationStructureContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
@@ -777,6 +778,29 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayTracingPipelineFeatureSupported << ','
         << hybridReflections.rayQueryHardwareReady << ','
         << hybridReflections.rayQueryDeviceEnabled << ','
+        << hybridReflections.fullSceneCommandCount << ','
+        << hybridReflections.opaqueRigidCommandCount << ','
+        << hybridReflections.skinnedFallbackCount << ','
+        << hybridReflections.alphaFallbackCount << ','
+        << hybridReflections.invalidGeometryCount << ','
+        << hybridReflections.instanceOverflowCount << ','
+        << hybridReflections.blasCacheCount << ','
+        << hybridReflections.blasReadyCount << ','
+        << hybridReflections.blasBuildCount << ','
+        << hybridReflections.blasReuseCount << ','
+        << hybridReflections.frameUniqueBlasCount << ','
+        << hybridReflections.blasPrimitiveCount << ','
+        << hybridReflections.blasStorageBytes << ','
+        << hybridReflections.blasScratchBytes << ','
+        << hybridReflections.tlasInstanceCount << ','
+        << hybridReflections.tlasInstanceCapacity << ','
+        << hybridReflections.tlasBuildCount << ','
+        << hybridReflections.tlasUpdateCount << ','
+        << hybridReflections.tlasStorageBytes << ','
+        << hybridReflections.tlasScratchBytes << ','
+        << hybridReflections.tlasInstanceBufferBytes << ','
+        << hybridReflections.tlasAddressReady << ','
+        << hybridReflections.accelerationStructureResourcesReady << ','
         << hybridReflections.runtimeResourcesReady << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
@@ -2240,6 +2264,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_hole_diagnostics_raw_hit_spatial_rejected_pixels,"
         << "ssr_hole_diagnostics_temporal_miss_carried_pixels,"
         << "hybrid_reflections_capability_contract_version,"
+        << "hybrid_reflections_acceleration_structure_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
@@ -2252,6 +2277,29 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_tracing_pipeline_feature_supported,"
         << "hybrid_reflections_ray_query_hardware_ready,"
         << "hybrid_reflections_ray_query_device_enabled,"
+        << "hybrid_reflections_full_scene_command_count,"
+        << "hybrid_reflections_opaque_rigid_command_count,"
+        << "hybrid_reflections_skinned_fallback_count,"
+        << "hybrid_reflections_alpha_fallback_count,"
+        << "hybrid_reflections_invalid_geometry_count,"
+        << "hybrid_reflections_instance_overflow_count,"
+        << "hybrid_reflections_blas_cache_count,"
+        << "hybrid_reflections_blas_ready_count,"
+        << "hybrid_reflections_blas_build_count,"
+        << "hybrid_reflections_blas_reuse_count,"
+        << "hybrid_reflections_frame_unique_blas_count,"
+        << "hybrid_reflections_blas_primitive_count,"
+        << "hybrid_reflections_blas_storage_bytes,"
+        << "hybrid_reflections_blas_scratch_bytes,"
+        << "hybrid_reflections_tlas_instance_count,"
+        << "hybrid_reflections_tlas_instance_capacity,"
+        << "hybrid_reflections_tlas_build_count,"
+        << "hybrid_reflections_tlas_update_count,"
+        << "hybrid_reflections_tlas_storage_bytes,"
+        << "hybrid_reflections_tlas_scratch_bytes,"
+        << "hybrid_reflections_tlas_instance_buffer_bytes,"
+        << "hybrid_reflections_tlas_address_ready,"
+        << "hybrid_reflections_acceleration_structure_resources_ready,"
         << "hybrid_reflections_runtime_resources_ready,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"

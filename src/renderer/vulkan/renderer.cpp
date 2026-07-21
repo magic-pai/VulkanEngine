@@ -20,6 +20,7 @@
 #include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/gpu_timer.h"
 #include "renderer/vulkan/graphics_pipeline.h"
+#include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/imgui_layer.h"
 #include "renderer/vulkan/instance_buffer.h"
 #include "renderer/vulkan/local_shadow_atlas.h"
@@ -5659,6 +5660,7 @@ VulkanRenderer::~VulkanRenderer() {
 
     m_GpuTimer.reset();
     m_CommandBuffer.reset();
+    m_HybridReflectionAccelerationStructures.reset();
     m_InstanceBuffer.reset();
     m_Framebuffer.reset();
     m_BloomUpsamplePipeline.reset();
@@ -6034,6 +6036,23 @@ void VulkanRenderer::DrawFrame() {
             m_Scene->SelectedRenderable()
         );
     }
+    m_HybridReflectionRenderQueue.Clear();
+    if (
+        m_HybridReflectionAccelerationStructures != nullptr &&
+        m_RenderQueueBuilder
+    ) {
+        RenderQueueCacheStats hybridReflectionCacheStats{};
+        m_RenderQueueBuilder(
+            m_HybridReflectionRenderQueue,
+            RenderQueueContext{
+                nullptr,
+                nullptr,
+                &hybridReflectionCacheStats,
+                nullptr,
+                nullptr
+            }
+        );
+    }
     if (m_OverlayScene3D != nullptr) {
         RenderQueueBuildOptions overlayBuildOptions{};
         overlayBuildOptions.frustum = overlayFrustum.has_value() ? &*overlayFrustum : nullptr;
@@ -6057,6 +6076,8 @@ void VulkanRenderer::DrawFrame() {
     sectionStart = sectionEnd;
 
     const std::span<const RenderCommand> mainCommands = m_RenderQueue.Commands();
+    const std::span<const RenderCommand> hybridReflectionCommands =
+        m_HybridReflectionRenderQueue.Commands();
     const std::span<const RenderCommand> overlayCommands = m_OverlayRenderQueue.Commands();
     const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
     const bool shadowSamplingEnabled = shadowPassEnabled && !shadowCommands.empty();
@@ -6077,6 +6098,13 @@ void VulkanRenderer::DrawFrame() {
     const bool has3DMainPass =
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
         m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced;
+    if (m_HybridReflectionAccelerationStructures != nullptr) {
+        m_HybridReflectionAccelerationStructures->PrepareFrame(
+            static_cast<u32>(imageIndex),
+            hybridReflectionCommands,
+            hybridReflections
+        );
+    }
     const bool temporalReconstructionAllowed =
         !DebugViewBypassesTemporalReconstruction(m_RenderDebugSettings.forwardView);
     const bool dlssModeActive =
@@ -8951,7 +8979,9 @@ void VulkanRenderer::DrawFrame() {
         has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
         frameStats.ssr.reconstructionActive > 0,
         m_SsrReconstructionImagesInitialized,
-        frameStats.temporal.historyReset > 0
+        frameStats.temporal.historyReset > 0,
+        m_HybridReflectionAccelerationStructures.get(),
+        &hybridReflections
     );
     if (has3DMainPass && m_SceneRenderTargets != nullptr) {
         m_SsrReconstructionImagesInitialized = true;
@@ -9789,6 +9819,19 @@ void VulkanRenderer::ValidateSceneResources() const {
 
 void VulkanRenderer::CreateSwapchainResources() {
     m_Swapchain = std::make_unique<VulkanSwapchain>(m_Window, m_PhysicalDevice, m_Device, m_Surface);
+    if (
+        HybridReflectionsRayQueryRequestedFromEnvironment() &&
+        m_Device.RayTracingCapabilities().RayQueryHardwareReady()
+    ) {
+        m_HybridReflectionAccelerationStructures =
+            std::make_unique<VulkanHybridReflectionAccelerationStructures>(
+                m_Device,
+                m_PhysicalDevice,
+                static_cast<u32>(m_Swapchain->Images().size())
+            );
+    } else {
+        m_HybridReflectionAccelerationStructures.reset();
+    }
     m_DescriptorSetLayout = std::make_unique<VulkanDescriptorSetLayout>(m_Device);
     m_MaterialDescriptorSetLayout = std::make_unique<VulkanMaterialDescriptorSetLayout>(m_Device);
     m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
@@ -11106,9 +11149,21 @@ void VulkanRenderer::RecreateSwapchain() {
     if (m_LocalShadowBuffer != nullptr) {
         m_LocalShadowBuffer->Release();
     }
+    m_HybridReflectionAccelerationStructures.reset();
     m_Swapchain->Release();
 
     m_Swapchain->Recreate(m_Window, m_PhysicalDevice, m_Device, m_Surface);
+    if (
+        HybridReflectionsRayQueryRequestedFromEnvironment() &&
+        m_Device.RayTracingCapabilities().RayQueryHardwareReady()
+    ) {
+        m_HybridReflectionAccelerationStructures =
+            std::make_unique<VulkanHybridReflectionAccelerationStructures>(
+                m_Device,
+                m_PhysicalDevice,
+                static_cast<u32>(m_Swapchain->Images().size())
+            );
+    }
     m_UniformBuffer->Recreate(m_Device, m_PhysicalDevice, m_Swapchain->Images().size());
     if (m_LightBuffer != nullptr) {
         m_LightBuffer->Recreate(m_Device, m_PhysicalDevice, m_Swapchain->Images().size());
