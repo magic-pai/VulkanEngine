@@ -19,6 +19,16 @@ struct InstanceMetadata {
     uint materialIndex;
 };
 
+struct HybridMaterialRecord {
+    float4 baseColorFactor;
+    float4 emissiveFactor;
+    float4 surfaceControls;
+    float4 uvTransform;
+    float4 uvControls;
+    uint4 textureInfo;
+    uint4 textureExtent;
+};
+
 [[vk::binding(9, 1)]] cbuffer RayQueryControls : register(b1) {
     float g_max_ray_distance;
     float g_screen_hit_confidence_threshold;
@@ -32,6 +42,10 @@ struct InstanceMetadata {
     uint g_instance_material_count;
     uint g_expected_vertex_stride;
     uint g_hit_attributes_enabled;
+    uint g_material_table_count;
+    uint g_material_table_capacity;
+    uint g_material_textures_enabled;
+    uint g_material_table_contract_version;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -39,6 +53,13 @@ struct InstanceMetadata {
 
 [[vk::binding(11, 1)]] StructuredBuffer<InstanceMetadata>
     g_instance_metadata;
+[[vk::binding(12, 1)]] StructuredBuffer<HybridMaterialRecord>
+    g_material_table;
+[[vk::binding(13, 1)]] Texture2D<float4>
+    g_material_albedo_textures[256];
+[[vk::binding(14, 1)]] SamplerState g_material_samplers[256];
+[[vk::binding(15, 1), vk::image_format("rgba16f")]]
+RWTexture2D<float4> g_hit_surface_payload;
 
 static const uint kDiagnosticCandidateRayCount = 0u;
 static const uint kDiagnosticScreenHitAcceptedCount = 1u;
@@ -67,6 +88,18 @@ static const uint kDiagnosticPrimitiveChecksum = 23u;
 static const uint kDiagnosticMaterialChecksum = 24u;
 static const uint kDiagnosticBarycentricSumMinPermille = 25u;
 static const uint kDiagnosticBarycentricSumMaxPermille = 26u;
+static const uint kDiagnosticMaterialRecordResolvedCount = 27u;
+static const uint kDiagnosticMaterialRecordFallbackCount = 28u;
+static const uint kDiagnosticTextureSampleResolvedCount = 29u;
+static const uint kDiagnosticTextureSampleFallbackCount = 30u;
+static const uint kDiagnosticTextureSampleInvalidCount = 31u;
+static const uint kDiagnosticFiniteSampledColorCount = 32u;
+static const uint kDiagnosticSampleLodMinMillilevels = 33u;
+static const uint kDiagnosticSampleLodMaxMillilevels = 34u;
+static const uint kDiagnosticHitSurfacePayloadWriteCount = 35u;
+static const uint kDiagnosticHitSurfacePayloadChecksum = 36u;
+static const uint kDiagnosticHitSurfaceLuminanceMinMilliunits = 37u;
+static const uint kDiagnosticHitSurfaceLuminanceMaxMilliunits = 38u;
 
 void DiagnosticAdd(uint index, uint value) {
     if (g_ray_query_diagnostics_enabled != 0u) {
@@ -134,6 +167,65 @@ float2 LoadVertexFloat2(
             uint64_t(attributeOffset),
         4u
     );
+}
+
+float2 TransformMaterialUv(float2 uv, HybridMaterialRecord material) {
+    if (material.uvControls.y < 0.5) {
+        return uv;
+    }
+
+    float2 transformed = uv * material.uvTransform.zw;
+    float rotation = material.uvControls.x;
+    if (abs(rotation) > 1.0e-5) {
+        float cosine = cos(rotation);
+        float sine = sin(rotation);
+        transformed = float2(
+            cosine * transformed.x - sine * transformed.y,
+            sine * transformed.x + cosine * transformed.y
+        );
+    }
+    return transformed + material.uvTransform.xy;
+}
+
+float EstimateMaterialTextureLod(
+    float3 worldPosition0,
+    float3 worldPosition1,
+    float3 worldPosition2,
+    float2 texCoord0,
+    float2 texCoord1,
+    float2 texCoord2,
+    float hitDistance,
+    uint2 textureExtent,
+    uint mipCount
+) {
+    float worldDoubleArea = length(cross(
+        worldPosition1 - worldPosition0,
+        worldPosition2 - worldPosition0
+    ));
+    float2 uvEdge0 = texCoord1 - texCoord0;
+    float2 uvEdge1 = texCoord2 - texCoord0;
+    float uvDoubleArea = abs(
+        uvEdge0.x * uvEdge1.y - uvEdge0.y * uvEdge1.x
+    );
+    if (worldDoubleArea <= 1.0e-12 || uvDoubleArea <= 1.0e-12) {
+        return 0.0;
+    }
+
+    float texturePixels = max(
+        float(textureExtent.x) * float(textureExtent.y),
+        1.0
+    );
+    float texelsPerWorldUnit = sqrt(
+        uvDoubleArea * texturePixels / worldDoubleArea
+    );
+    float projectionScale = max(abs(g_proj[1][1]), 1.0e-4);
+    float pixelConeWidth = max(
+        2.0 * max(hitDistance, 0.0) /
+            (max(float(g_buffer_dimensions.y), 1.0) * projectionScale),
+        1.0e-6
+    );
+    float lod = log2(max(pixelConeWidth * texelsPerWorldUnit, 1.0));
+    return clamp(lod, 0.0, float(max(mipCount, 1u) - 1u));
 }
 
 float3 SampleGgxVndf(
@@ -227,6 +319,26 @@ void StoreRayQueryResult(
         ++writeCount;
     }
     DiagnosticAdd(kDiagnosticResultPixelWriteCount, writeCount);
+}
+
+void StoreHitSurfacePayload(
+    uint2 coordinates,
+    bool copyHorizontal,
+    bool copyVertical,
+    bool copyDiagonal,
+    float4 payload
+) {
+    g_hit_surface_payload[coordinates] = payload;
+    uint2 copyTarget = coordinates ^ 1u;
+    if (copyHorizontal && copyTarget.x < g_buffer_dimensions.x) {
+        g_hit_surface_payload[uint2(copyTarget.x, coordinates.y)] = payload;
+    }
+    if (copyVertical && copyTarget.y < g_buffer_dimensions.y) {
+        g_hit_surface_payload[uint2(coordinates.x, copyTarget.y)] = payload;
+    }
+    if (copyDiagonal && all(copyTarget < g_buffer_dimensions)) {
+        g_hit_surface_payload[copyTarget] = payload;
+    }
 }
 
 [numthreads(8, 8, 1)]
@@ -406,6 +518,7 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                         } else {
                             static const uint kPositionOffset = 0u;
                             static const uint kNormalOffset = 12u;
+                            static const uint kColorOffset = 24u;
                             static const uint kTexCoordOffset = 36u;
                             float3 position0 = LoadVertexFloat3(
                                 vertexAddress,
@@ -443,6 +556,24 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 metadata.vertexStride,
                                 kNormalOffset
                             );
+                            float3 color0 = LoadVertexFloat3(
+                                vertexAddress,
+                                vertexIndices.x,
+                                metadata.vertexStride,
+                                kColorOffset
+                            );
+                            float3 color1 = LoadVertexFloat3(
+                                vertexAddress,
+                                vertexIndices.y,
+                                metadata.vertexStride,
+                                kColorOffset
+                            );
+                            float3 color2 = LoadVertexFloat3(
+                                vertexAddress,
+                                vertexIndices.z,
+                                metadata.vertexStride,
+                                kColorOffset
+                            );
                             float2 texCoord0 = LoadVertexFloat2(
                                 vertexAddress,
                                 vertexIndices.x,
@@ -469,6 +600,10 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 normal0 * barycentrics.x +
                                 normal1 * barycentrics.y +
                                 normal2 * barycentrics.z;
+                            float3 objectColor =
+                                color0 * barycentrics.x +
+                                color1 * barycentrics.y +
+                                color2 * barycentrics.z;
                             float2 hitTexCoord =
                                 texCoord0 * barycentrics.x +
                                 texCoord1 * barycentrics.y +
@@ -481,6 +616,18 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 float4(objectPosition, 1.0),
                                 objectToWorld
                             );
+                            float3 worldPosition0 = mul(
+                                float4(position0, 1.0),
+                                objectToWorld
+                            );
+                            float3 worldPosition1 = mul(
+                                float4(position1, 1.0),
+                                objectToWorld
+                            );
+                            float3 worldPosition2 = mul(
+                                float4(position2, 1.0),
+                                objectToWorld
+                            );
                             float3 transformedNormal =
                                 mul(worldToObject, objectNormal).xyz;
                             float transformedNormalLength =
@@ -490,8 +637,12 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                             bool attributesValid =
                                 all(isfinite(objectPosition)) &&
                                 all(isfinite(objectNormal)) &&
+                                all(isfinite(objectColor)) &&
                                 all(isfinite(hitTexCoord)) &&
                                 all(isfinite(worldPosition)) &&
+                                all(isfinite(worldPosition0)) &&
+                                all(isfinite(worldPosition1)) &&
+                                all(isfinite(worldPosition2)) &&
                                 all(isfinite(worldShadingNormal)) &&
                                 transformedNormalLength > 1.0e-8;
                             if (!attributesValid) {
@@ -582,6 +733,183 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                     kDiagnosticBarycentricSumMaxPermille,
                                     barycentricSumPermille
                                 );
+
+                                if (g_material_textures_enabled != 0u) {
+                                    float3 surfaceSeed = max(objectColor, 0.0);
+                                    float sampleLod = 0.0;
+                                    bool materialRecordValid =
+                                        metadata.materialIndex > 0u &&
+                                        metadata.materialIndex <=
+                                            g_material_table_count;
+                                    if (materialRecordValid) {
+                                        uint materialSlot =
+                                            metadata.materialIndex - 1u;
+                                        HybridMaterialRecord material =
+                                            g_material_table[materialSlot];
+                                        materialRecordValid =
+                                            material.textureInfo.w != 0u &&
+                                            material.textureInfo.x <
+                                                g_material_table_capacity &&
+                                            material.textureInfo.y <
+                                                g_material_table_capacity &&
+                                            material.textureInfo.z > 0u &&
+                                            all(material.textureExtent.xy > 0u);
+                                        if (materialRecordValid) {
+                                            DiagnosticAdd(
+                                                kDiagnosticMaterialRecordResolvedCount,
+                                                1u
+                                            );
+                                            float2 materialUv =
+                                                TransformMaterialUv(
+                                                    hitTexCoord,
+                                                    material
+                                                );
+                                            float2 materialUv0 =
+                                                TransformMaterialUv(
+                                                    texCoord0,
+                                                    material
+                                                );
+                                            float2 materialUv1 =
+                                                TransformMaterialUv(
+                                                    texCoord1,
+                                                    material
+                                                );
+                                            float2 materialUv2 =
+                                                TransformMaterialUv(
+                                                    texCoord2,
+                                                    material
+                                                );
+                                            sampleLod = EstimateMaterialTextureLod(
+                                                worldPosition0,
+                                                worldPosition1,
+                                                worldPosition2,
+                                                materialUv0,
+                                                materialUv1,
+                                                materialUv2,
+                                                hitDistance,
+                                                material.textureExtent.xy,
+                                                material.textureInfo.z
+                                            );
+                                            uint textureIndex =
+                                                NonUniformResourceIndex(
+                                                    material.textureInfo.x
+                                                );
+                                            uint samplerIndex =
+                                                NonUniformResourceIndex(
+                                                    material.textureInfo.y
+                                                );
+                                            float4 sampledBaseColor =
+                                                g_material_albedo_textures[
+                                                    textureIndex
+                                                ].SampleLevel(
+                                                    g_material_samplers[
+                                                        samplerIndex
+                                                    ],
+                                                    materialUv,
+                                                    sampleLod
+                                                );
+                                            if (all(isfinite(sampledBaseColor))) {
+                                                float textureMix = saturate(
+                                                    material.surfaceControls.x
+                                                );
+                                                surfaceSeed = lerp(
+                                                    max(objectColor, 0.0),
+                                                    max(sampledBaseColor.rgb, 0.0),
+                                                    textureMix
+                                                ) * max(
+                                                    material.baseColorFactor.rgb,
+                                                    0.0
+                                                );
+                                                surfaceSeed += max(
+                                                    material.emissiveFactor.rgb,
+                                                    0.0
+                                                );
+                                                DiagnosticAdd(
+                                                    kDiagnosticTextureSampleResolvedCount,
+                                                    1u
+                                                );
+                                                uint lodMillilevels =
+                                                    SaturatedMetric(
+                                                        sampleLod,
+                                                        1000.0
+                                                    );
+                                                DiagnosticMin(
+                                                    kDiagnosticSampleLodMinMillilevels,
+                                                    lodMillilevels
+                                                );
+                                                DiagnosticMax(
+                                                    kDiagnosticSampleLodMaxMillilevels,
+                                                    lodMillilevels
+                                                );
+                                            } else {
+                                                DiagnosticAdd(
+                                                    kDiagnosticTextureSampleInvalidCount,
+                                                    1u
+                                                );
+                                            }
+                                        }
+                                    }
+                                    if (!materialRecordValid) {
+                                        DiagnosticAdd(
+                                            kDiagnosticMaterialRecordFallbackCount,
+                                            1u
+                                        );
+                                        DiagnosticAdd(
+                                            kDiagnosticTextureSampleFallbackCount,
+                                            1u
+                                        );
+                                    }
+                                    if (!all(isfinite(surfaceSeed))) {
+                                        surfaceSeed = float3(1.0, 1.0, 1.0);
+                                    }
+                                    surfaceSeed = clamp(
+                                        surfaceSeed,
+                                        0.0,
+                                        65504.0
+                                    );
+                                    float luminance = dot(
+                                        surfaceSeed,
+                                        float3(0.2126, 0.7152, 0.0722)
+                                    );
+                                    float4 payload = float4(
+                                        surfaceSeed,
+                                        hitDistance
+                                    );
+                                    StoreHitSurfacePayload(
+                                        coordinates,
+                                        copyHorizontal,
+                                        copyVertical,
+                                        copyDiagonal,
+                                        payload
+                                    );
+                                    DiagnosticAdd(
+                                        kDiagnosticFiniteSampledColorCount,
+                                        1u
+                                    );
+                                    DiagnosticAdd(
+                                        kDiagnosticHitSurfacePayloadWriteCount,
+                                        1u
+                                    );
+                                    DiagnosticAdd(
+                                        kDiagnosticHitSurfacePayloadChecksum,
+                                        HashDiagnosticIdentity(
+                                            asuint(payload.x) ^
+                                            (asuint(payload.y) * 0x9e3779b9u) ^
+                                            (asuint(payload.z) * 0x85ebca6bu) ^
+                                            metadata.materialIndex
+                                        )
+                                    );
+                                    uint luminanceMilliunits =
+                                        SaturatedMetric(luminance, 1000.0);
+                                    DiagnosticMin(
+                                        kDiagnosticHitSurfaceLuminanceMinMilliunits,
+                                        luminanceMilliunits
+                                    );
+                                    DiagnosticMax(
+                                        kDiagnosticHitSurfaceLuminanceMaxMilliunits,
+                                        luminanceMilliunits
+                                    );
+                                }
                             }
                         }
                     }

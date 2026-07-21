@@ -767,11 +767,13 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.accelerationStructureContractVersion << ','
         << hybridReflections.rayQueryConsumerContractVersion << ','
         << hybridReflections.rayQueryHitAttributeContractVersion << ','
+        << hybridReflections.rayQueryMaterialTableContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.rayQueryConsumerRequested << ','
         << hybridReflections.rayQueryConsumerControlDisabled << ','
         << hybridReflections.rayQueryHitAttributeControlDisabled << ','
+        << hybridReflections.rayQueryMaterialTextureControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
@@ -779,11 +781,13 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayTracingPipelineExtensionSupported << ','
         << hybridReflections.bufferDeviceAddressFeatureSupported << ','
         << hybridReflections.shaderInt64FeatureSupported << ','
+        << hybridReflections.sampledImageArrayNonUniformIndexingFeatureSupported << ','
         << hybridReflections.accelerationStructureFeatureSupported << ','
         << hybridReflections.rayQueryFeatureSupported << ','
         << hybridReflections.rayTracingPipelineFeatureSupported << ','
         << hybridReflections.rayQueryHardwareReady << ','
         << hybridReflections.shaderInt64DeviceEnabled << ','
+        << hybridReflections.sampledImageArrayNonUniformIndexingDeviceEnabled << ','
         << hybridReflections.rayQueryDeviceEnabled << ','
         << hybridReflections.fullSceneCommandCount << ','
         << hybridReflections.opaqueRigidCommandCount << ','
@@ -826,6 +830,25 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryInstanceAddressReadyCount << ','
         << hybridReflections.rayQueryInstanceMetadataUploadCount << ','
         << hybridReflections.rayQueryInstanceMetadataBytes << ','
+        << hybridReflections.rayQueryMaterialTableResourcesReady << ','
+        << hybridReflections.rayQueryMaterialTableCount << ','
+        << hybridReflections.rayQueryMaterialTableCapacity << ','
+        << hybridReflections.rayQueryMaterialTableOverflowCount << ','
+        << hybridReflections.rayQueryMaterialBufferReady << ','
+        << hybridReflections.rayQueryMaterialBufferUploadCount << ','
+        << hybridReflections.rayQueryMaterialBufferBytes << ','
+        << hybridReflections.rayQueryTextureDescriptorCount << ','
+        << hybridReflections.rayQueryTextureDescriptorCapacity << ','
+        << hybridReflections.rayQuerySamplerDescriptorCount << ','
+        << hybridReflections.rayQuerySamplerDescriptorCapacity << ','
+        << hybridReflections.rayQueryDistinctTextureCount << ','
+        << hybridReflections.rayQueryDistinctSamplerCount << ','
+        << hybridReflections.rayQueryDuplicateTextureCount << ','
+        << hybridReflections.rayQueryDuplicateSamplerCount << ','
+        << hybridReflections.rayQueryFallbackDescriptorCount << ','
+        << hybridReflections.rayQueryHitSurfaceWidth << ','
+        << hybridReflections.rayQueryHitSurfaceHeight << ','
+        << hybridReflections.rayQueryHitSurfaceFormat << ','
         << hybridReflections.rayQueryReadbackValid << ','
         << hybridReflections.rayQueryCandidateRayCount << ','
         << hybridReflections.rayQueryScreenHitAcceptedCount << ','
@@ -854,6 +877,18 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitAttributeIdentityChecksum << ','
         << hybridReflections.rayQueryHitAttributePrimitiveChecksum << ','
         << hybridReflections.rayQueryHitAttributeMaterialChecksum << ','
+        << hybridReflections.rayQueryMaterialRecordResolvedCount << ','
+        << hybridReflections.rayQueryMaterialRecordFallbackCount << ','
+        << hybridReflections.rayQueryTextureSampleResolvedCount << ','
+        << hybridReflections.rayQueryTextureSampleFallbackCount << ','
+        << hybridReflections.rayQueryTextureSampleInvalidCount << ','
+        << hybridReflections.rayQueryFiniteSampledColorCount << ','
+        << hybridReflections.rayQuerySampleLodMinMillilevels << ','
+        << hybridReflections.rayQuerySampleLodMaxMillilevels << ','
+        << hybridReflections.rayQueryHitSurfacePayloadWriteCount << ','
+        << hybridReflections.rayQueryHitSurfacePayloadChecksum << ','
+        << hybridReflections.rayQueryHitSurfaceLuminanceMinMilliunits << ','
+        << hybridReflections.rayQueryHitSurfaceLuminanceMaxMilliunits << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2319,10 +2354,12 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_acceleration_structure_contract_version,"
         << "hybrid_reflections_ray_query_consumer_contract_version,"
         << "hybrid_reflections_ray_query_hit_attribute_contract_version,"
+        << "hybrid_reflections_ray_query_material_table_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_ray_query_consumer_requested,"
         << "hybrid_reflections_ray_query_consumer_control_disabled,"
         << "hybrid_reflections_ray_query_hit_attribute_control_disabled,"
+        << "hybrid_reflections_ray_query_material_texture_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
@@ -2330,11 +2367,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_tracing_pipeline_extension_supported,"
         << "hybrid_reflections_buffer_device_address_feature_supported,"
         << "hybrid_reflections_shader_int64_feature_supported,"
+        << "hybrid_reflections_sampled_image_array_non_uniform_indexing_feature_supported,"
         << "hybrid_reflections_acceleration_structure_feature_supported,"
         << "hybrid_reflections_ray_query_feature_supported,"
         << "hybrid_reflections_ray_tracing_pipeline_feature_supported,"
         << "hybrid_reflections_ray_query_hardware_ready,"
         << "hybrid_reflections_shader_int64_device_enabled,"
+        << "hybrid_reflections_sampled_image_array_non_uniform_indexing_device_enabled,"
         << "hybrid_reflections_ray_query_device_enabled,"
         << "hybrid_reflections_full_scene_command_count,"
         << "hybrid_reflections_opaque_rigid_command_count,"
@@ -2377,6 +2416,25 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_instance_address_ready_count,"
         << "hybrid_reflections_ray_query_instance_metadata_upload_count,"
         << "hybrid_reflections_ray_query_instance_metadata_bytes,"
+        << "hybrid_reflections_ray_query_material_table_resources_ready,"
+        << "hybrid_reflections_ray_query_material_table_count,"
+        << "hybrid_reflections_ray_query_material_table_capacity,"
+        << "hybrid_reflections_ray_query_material_table_overflow_count,"
+        << "hybrid_reflections_ray_query_material_buffer_ready,"
+        << "hybrid_reflections_ray_query_material_buffer_upload_count,"
+        << "hybrid_reflections_ray_query_material_buffer_bytes,"
+        << "hybrid_reflections_ray_query_texture_descriptor_count,"
+        << "hybrid_reflections_ray_query_texture_descriptor_capacity,"
+        << "hybrid_reflections_ray_query_sampler_descriptor_count,"
+        << "hybrid_reflections_ray_query_sampler_descriptor_capacity,"
+        << "hybrid_reflections_ray_query_distinct_texture_count,"
+        << "hybrid_reflections_ray_query_distinct_sampler_count,"
+        << "hybrid_reflections_ray_query_duplicate_texture_count,"
+        << "hybrid_reflections_ray_query_duplicate_sampler_count,"
+        << "hybrid_reflections_ray_query_fallback_descriptor_count,"
+        << "hybrid_reflections_ray_query_hit_surface_width,"
+        << "hybrid_reflections_ray_query_hit_surface_height,"
+        << "hybrid_reflections_ray_query_hit_surface_format,"
         << "hybrid_reflections_ray_query_readback_valid,"
         << "hybrid_reflections_ray_query_candidate_ray_count,"
         << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
@@ -2405,6 +2463,18 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_hit_attribute_identity_checksum,"
         << "hybrid_reflections_ray_query_hit_attribute_primitive_checksum,"
         << "hybrid_reflections_ray_query_hit_attribute_material_checksum,"
+        << "hybrid_reflections_ray_query_material_record_resolved_count,"
+        << "hybrid_reflections_ray_query_material_record_fallback_count,"
+        << "hybrid_reflections_ray_query_texture_sample_resolved_count,"
+        << "hybrid_reflections_ray_query_texture_sample_fallback_count,"
+        << "hybrid_reflections_ray_query_texture_sample_invalid_count,"
+        << "hybrid_reflections_ray_query_finite_sampled_color_count,"
+        << "hybrid_reflections_ray_query_sample_lod_min_millilevels,"
+        << "hybrid_reflections_ray_query_sample_lod_max_millilevels,"
+        << "hybrid_reflections_ray_query_hit_surface_payload_write_count,"
+        << "hybrid_reflections_ray_query_hit_surface_payload_checksum,"
+        << "hybrid_reflections_ray_query_hit_surface_luminance_min_milliunits,"
+        << "hybrid_reflections_ray_query_hit_surface_luminance_max_milliunits,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

@@ -567,6 +567,23 @@ bool BenchmarkGridSceneRequested() {
 
 bool LightingShowcaseSceneRequested() {
 #if SE_FORCE_LIGHTING_SHOWCASE
+#if !defined(NDEBUG)
+    const std::string forceOff = LowerAscii(
+        ReadEnvironmentString("SE_LIGHTING_SHOWCASE_FORCE_OFF")
+    );
+    const std::string sceneName = Forward3DBenchmarkSceneName();
+    const bool explicitlyRequestsShowcase =
+        sceneName == "lighting-showcase" ||
+        sceneName == "lighting_showcase" ||
+        sceneName == "showcase" ||
+        sceneName == "lighting" ||
+        sceneName == "LightingShowcase";
+    if (!explicitlyRequestsShowcase &&
+        (forceOff == "1" || forceOff == "true" || forceOff == "on" ||
+            forceOff == "yes")) {
+        return false;
+    }
+#endif
     return true;
 #else
     const std::string sceneName = Forward3DBenchmarkSceneName();

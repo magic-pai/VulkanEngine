@@ -5833,6 +5833,10 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF")
             ? 1u
             : 0u;
+    hybridReflections.rayQueryMaterialTextureControlDisabled =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF")
+            ? 1u
+            : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -5847,6 +5851,9 @@ void VulkanRenderer::DrawFrame() {
         rayTracingCapabilities.bufferDeviceAddressFeatureSupported ? 1u : 0u;
     hybridReflections.shaderInt64FeatureSupported =
         rayTracingCapabilities.shaderInt64FeatureSupported ? 1u : 0u;
+    hybridReflections.sampledImageArrayNonUniformIndexingFeatureSupported =
+        rayTracingCapabilities
+            .sampledImageArrayNonUniformIndexingFeatureSupported ? 1u : 0u;
     hybridReflections.accelerationStructureFeatureSupported =
         rayTracingCapabilities.accelerationStructureFeatureSupported ? 1u : 0u;
     hybridReflections.rayQueryFeatureSupported =
@@ -5857,6 +5864,9 @@ void VulkanRenderer::DrawFrame() {
         rayTracingCapabilities.RayQueryHardwareReady() ? 1u : 0u;
     hybridReflections.shaderInt64DeviceEnabled =
         rayTracingCapabilities.shaderInt64DeviceEnabled ? 1u : 0u;
+    hybridReflections.sampledImageArrayNonUniformIndexingDeviceEnabled =
+        rayTracingCapabilities
+            .sampledImageArrayNonUniformIndexingDeviceEnabled ? 1u : 0u;
     hybridReflections.rayQueryDeviceEnabled =
         rayTracingCapabilities.rayQueryDeviceEnabled ? 1u : 0u;
     hybridReflections.runtimeResourcesReady = 0u;
@@ -5998,6 +6008,30 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.primitiveChecksum;
     hybridReflections.rayQueryHitAttributeMaterialChecksum =
         hybridRayQueryDiagnostics.materialChecksum;
+    hybridReflections.rayQueryMaterialRecordResolvedCount =
+        hybridRayQueryDiagnostics.materialRecordResolvedCount;
+    hybridReflections.rayQueryMaterialRecordFallbackCount =
+        hybridRayQueryDiagnostics.materialRecordFallbackCount;
+    hybridReflections.rayQueryTextureSampleResolvedCount =
+        hybridRayQueryDiagnostics.textureSampleResolvedCount;
+    hybridReflections.rayQueryTextureSampleFallbackCount =
+        hybridRayQueryDiagnostics.textureSampleFallbackCount;
+    hybridReflections.rayQueryTextureSampleInvalidCount =
+        hybridRayQueryDiagnostics.textureSampleInvalidCount;
+    hybridReflections.rayQueryFiniteSampledColorCount =
+        hybridRayQueryDiagnostics.finiteSampledColorCount;
+    hybridReflections.rayQuerySampleLodMinMillilevels =
+        hybridRayQueryDiagnostics.sampleLodMinMillilevels;
+    hybridReflections.rayQuerySampleLodMaxMillilevels =
+        hybridRayQueryDiagnostics.sampleLodMaxMillilevels;
+    hybridReflections.rayQueryHitSurfacePayloadWriteCount =
+        hybridRayQueryDiagnostics.hitSurfacePayloadWriteCount;
+    hybridReflections.rayQueryHitSurfacePayloadChecksum =
+        hybridRayQueryDiagnostics.hitSurfacePayloadChecksum;
+    hybridReflections.rayQueryHitSurfaceLuminanceMinMilliunits =
+        hybridRayQueryDiagnostics.hitSurfaceLuminanceMinMilliunits;
+    hybridReflections.rayQueryHitSurfaceLuminanceMaxMilliunits =
+        hybridRayQueryDiagnostics.hitSurfaceLuminanceMaxMilliunits;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8845,11 +8879,12 @@ void VulkanRenderer::DrawFrame() {
             m_HybridReflectionAccelerationStructures->InstanceMetadata(
                 imageIndex
             ),
-            m_HybridReflectionAccelerationStructures->InstanceMaterialCount(
+            m_HybridReflectionAccelerationStructures->InstanceMaterials(
                 imageIndex
             ),
             rayQueryConsumerEnabled,
             hybridReflections.rayQueryHitAttributeControlDisabled == 0u,
+            hybridReflections.rayQueryMaterialTextureControlDisabled == 0u,
             rayQuerySettings,
             hybridReflections
         );

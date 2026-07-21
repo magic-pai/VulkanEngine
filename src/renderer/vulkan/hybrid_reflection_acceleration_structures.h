@@ -5,6 +5,7 @@
 namespace se {
 
 class VulkanDevice;
+class VulkanMaterial;
 class VulkanPhysicalDevice;
 struct RenderCommand;
 struct RendererHybridReflectionStats;
@@ -55,7 +56,9 @@ public:
     std::span<const HybridReflectionInstanceMetadata> InstanceMetadata(
         u32 frameIndex
     ) const;
-    u32 InstanceMaterialCount(u32 frameIndex) const;
+    std::span<const VulkanMaterial* const> InstanceMaterials(
+        u32 frameIndex
+    ) const;
 
 private:
     struct Impl;

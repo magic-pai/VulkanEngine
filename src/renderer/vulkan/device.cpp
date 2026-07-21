@@ -21,6 +21,7 @@ bool VulkanRayTracingCapabilities::RayQueryExtensionsReady() const {
 bool VulkanRayTracingCapabilities::RayQueryFeaturesReady() const {
     return bufferDeviceAddressFeatureSupported &&
         shaderInt64FeatureSupported &&
+        sampledImageArrayNonUniformIndexingFeatureSupported &&
         accelerationStructureFeatureSupported &&
         rayQueryFeatureSupported;
 }
@@ -114,6 +115,9 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     m_RayTracingCapabilities.rayTracingPipelineExtensionSupported =
         extensionAvailable(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
+    VkPhysicalDeviceDescriptorIndexingFeatures supportedDescriptorIndexing{};
+    supportedDescriptorIndexing.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
     VkPhysicalDeviceBufferDeviceAddressFeatures supportedBufferDeviceAddress{};
     supportedBufferDeviceAddress.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
@@ -125,18 +129,22 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     VkPhysicalDeviceRayTracingPipelineFeaturesKHR supportedRayTracingPipeline{};
     supportedRayTracingPipeline.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    supportedDescriptorIndexing.pNext = &supportedBufferDeviceAddress;
     supportedBufferDeviceAddress.pNext = &supportedAccelerationStructure;
     supportedAccelerationStructure.pNext = &supportedRayQuery;
     supportedRayQuery.pNext = &supportedRayTracingPipeline;
     VkPhysicalDeviceFeatures2 supportedFeatures{};
     supportedFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    supportedFeatures.pNext = &supportedBufferDeviceAddress;
+    supportedFeatures.pNext = &supportedDescriptorIndexing;
     vkGetPhysicalDeviceFeatures2(physicalDevice.Handle(), &supportedFeatures);
 
     m_RayTracingCapabilities.bufferDeviceAddressFeatureSupported =
         supportedBufferDeviceAddress.bufferDeviceAddress == VK_TRUE;
     m_RayTracingCapabilities.shaderInt64FeatureSupported =
         supportedFeatures.features.shaderInt64 == VK_TRUE;
+    m_RayTracingCapabilities.sampledImageArrayNonUniformIndexingFeatureSupported =
+        supportedDescriptorIndexing.shaderSampledImageArrayNonUniformIndexing ==
+        VK_TRUE;
     m_RayTracingCapabilities.accelerationStructureFeatureSupported =
         supportedAccelerationStructure.accelerationStructure == VK_TRUE;
     m_RayTracingCapabilities.rayQueryFeatureSupported =
@@ -157,6 +165,7 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures{};
     VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{};
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{};
     const bool rayQueryExtensionsEnabled =
         IsExtensionEnabled(
             enabledExtensions,
@@ -170,6 +179,8 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     if (rayQueryExtensionsEnabled &&
         bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE &&
         supportedFeatures.features.shaderInt64 == VK_TRUE &&
+        supportedDescriptorIndexing.shaderSampledImageArrayNonUniformIndexing ==
+            VK_TRUE &&
         supportedAccelerationStructure.accelerationStructure == VK_TRUE &&
         supportedRayQuery.rayQuery == VK_TRUE) {
         deviceFeatures.shaderInt64 = VK_TRUE;
@@ -179,9 +190,16 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
         rayQueryFeatures.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
         rayQueryFeatures.rayQuery = VK_TRUE;
+        descriptorIndexingFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        descriptorIndexingFeatures.shaderSampledImageArrayNonUniformIndexing =
+            VK_TRUE;
         bufferDeviceAddressFeatures.pNext = &accelerationStructureFeatures;
         accelerationStructureFeatures.pNext = &rayQueryFeatures;
+        rayQueryFeatures.pNext = &descriptorIndexingFeatures;
         m_RayTracingCapabilities.shaderInt64DeviceEnabled = true;
+        m_RayTracingCapabilities.sampledImageArrayNonUniformIndexingDeviceEnabled =
+            true;
         m_RayTracingCapabilities.rayQueryDeviceEnabled = true;
     }
 

@@ -8,9 +8,13 @@
 #include "renderer/vulkan/fidelityfx_sssr_adapter.h"
 #include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/image.h"
+#include "renderer/vulkan/material.h"
 #include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/render_targets.h"
 #include "renderer/vulkan/renderer_stats.h"
+#include "renderer/vulkan/sampler.h"
+#include "renderer/vulkan/texture_2d.h"
+#include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vertex.h"
 
 #include <algorithm>
@@ -19,6 +23,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 namespace se {
@@ -27,11 +32,38 @@ namespace {
 
 constexpr u32 kRayQueryContractVersion = 2u;
 constexpr u32 kHitAttributeContractVersion = 1u;
-constexpr u32 kDiagnosticValueCount = 27u;
+constexpr u32 kMaterialTableContractVersion = 1u;
+constexpr u32 kDiagnosticValueCount = 39u;
 constexpr u32 kHitDistanceMinDiagnosticIndex = 7u;
 constexpr u32 kNormalLengthMinDiagnosticIndex = 20u;
 constexpr u32 kBarycentricSumMinDiagnosticIndex = 25u;
+constexpr u32 kSampleLodMinDiagnosticIndex = 33u;
+constexpr u32 kHitSurfaceLuminanceMinDiagnosticIndex = 37u;
 constexpr VkFormat kRayQueryResultFormat = VK_FORMAT_R32G32_UINT;
+constexpr VkFormat kHitSurfaceFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+struct alignas(16) HybridReflectionMaterialRecord {
+    glm::vec4 baseColorFactor{ 1.0f };
+    glm::vec4 emissiveFactor{ 0.0f };
+    // x: texture mix, y: metallic, z: roughness, w: alpha.
+    glm::vec4 surfaceControls{ 0.0f, 0.0f, 1.0f, 1.0f };
+    glm::vec4 uvTransform{ 0.0f, 0.0f, 1.0f, 1.0f };
+    glm::vec4 uvControls{ 0.0f };
+    // x: albedo texture index, y: sampler index, z: mip count, w: ready.
+    glm::uvec4 textureInfo{ 0u };
+    // x/y: texture dimensions, z/w reserved.
+    glm::uvec4 textureExtent{ 1u, 1u, 0u, 0u };
+};
+
+static_assert(kMaxHybridReflectionMaterials == kMaxFrameMaterials);
+static_assert(sizeof(HybridReflectionMaterialRecord) == 112u);
+static_assert(offsetof(HybridReflectionMaterialRecord, baseColorFactor) == 0u);
+static_assert(offsetof(HybridReflectionMaterialRecord, emissiveFactor) == 16u);
+static_assert(offsetof(HybridReflectionMaterialRecord, surfaceControls) == 32u);
+static_assert(offsetof(HybridReflectionMaterialRecord, uvTransform) == 48u);
+static_assert(offsetof(HybridReflectionMaterialRecord, uvControls) == 64u);
+static_assert(offsetof(HybridReflectionMaterialRecord, textureInfo) == 80u);
+static_assert(offsetof(HybridReflectionMaterialRecord, textureExtent) == 96u);
 
 struct alignas(16) RayQueryControls {
     f32 maxRayDistance = 100.0f;
@@ -46,9 +78,13 @@ struct alignas(16) RayQueryControls {
     u32 instanceMaterialCount = 0u;
     u32 expectedVertexStride = sizeof(Vertex3D);
     u32 hitAttributesEnabled = 0u;
+    u32 materialTableCount = 0u;
+    u32 materialTableCapacity = kMaxHybridReflectionMaterials;
+    u32 materialTexturesEnabled = 0u;
+    u32 materialTableContractVersion = kMaterialTableContractVersion;
 };
 
-static_assert(sizeof(RayQueryControls) == 48u);
+static_assert(sizeof(RayQueryControls) == 64u);
 static_assert(offsetof(RayQueryControls, enabled) == 20u);
 static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
 static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
@@ -56,12 +92,69 @@ static_assert(offsetof(RayQueryControls, instanceMetadataCount) == 32u);
 static_assert(offsetof(RayQueryControls, instanceMaterialCount) == 36u);
 static_assert(offsetof(RayQueryControls, expectedVertexStride) == 40u);
 static_assert(offsetof(RayQueryControls, hitAttributesEnabled) == 44u);
+static_assert(offsetof(RayQueryControls, materialTableCount) == 48u);
+static_assert(offsetof(RayQueryControls, materialTexturesEnabled) == 56u);
+static_assert(offsetof(RayQueryControls, materialTableContractVersion) == 60u);
 static_assert(offsetof(Vertex3D, position) == 0u);
 static_assert(offsetof(Vertex3D, normal) == 12u);
 static_assert(offsetof(Vertex3D, texCoord) == 36u);
 
 bool ExtentsDiffer(VkExtent2D lhs, VkExtent2D rhs) {
     return lhs.width != rhs.width || lhs.height != rhs.height;
+}
+
+HybridReflectionMaterialRecord BuildMaterialRecord(
+    const VulkanMaterial& material,
+    u32 descriptorIndex
+) {
+    const MaterialProperties& properties = material.Properties();
+    const VulkanTexture2D& texture = material.AlbedoTexture();
+    const VkExtent2D textureExtent = texture.Extent();
+
+    HybridReflectionMaterialRecord record{};
+    record.baseColorFactor = glm::vec4(
+        properties.baseColorFactor[0],
+        properties.baseColorFactor[1],
+        properties.baseColorFactor[2],
+        properties.baseColorFactor[3]
+    );
+    record.emissiveFactor = glm::vec4(
+        properties.emissiveFactor[0],
+        properties.emissiveFactor[1],
+        properties.emissiveFactor[2],
+        0.0f
+    );
+    record.surfaceControls = glm::vec4(
+        std::clamp(properties.textureMix, 0.0f, 1.0f),
+        std::clamp(properties.cameraControls[0], 0.0f, 1.0f),
+        std::clamp(properties.cameraControls[1], 0.04f, 1.0f),
+        std::clamp(properties.baseColorFactor[3], 0.0f, 1.0f)
+    );
+    record.uvTransform = glm::vec4(
+        properties.uvTransform[0],
+        properties.uvTransform[1],
+        properties.uvTransform[2],
+        properties.uvTransform[3]
+    );
+    record.uvControls = glm::vec4(
+        properties.uvControls[0],
+        properties.uvControls[1],
+        properties.uvControls[2],
+        properties.uvControls[3]
+    );
+    record.textureInfo = glm::uvec4(
+        descriptorIndex,
+        descriptorIndex,
+        std::max(texture.MipLevels(), 1u),
+        1u
+    );
+    record.textureExtent = glm::uvec4(
+        std::max(textureExtent.width, 1u),
+        std::max(textureExtent.height, 1u),
+        0u,
+        0u
+    );
+    return record;
 }
 
 }
@@ -126,8 +219,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         descriptorSets.clear();
         diagnosticsBuffers.clear();
         instanceMetadataBuffers.clear();
+        materialBuffers.clear();
         controlsBuffers.clear();
+        hitSurfaceImages.clear();
         resultImages.clear();
+        fallbackSampler.reset();
+        fallbackTexture.reset();
         if (descriptorPool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(deviceHandle, descriptorPool, nullptr);
         }
@@ -141,11 +238,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
     }
 
     void CreateDescriptorSetLayout(const VulkanDevice& device) {
-        std::array<VkDescriptorSetLayoutBinding, 12> bindings{};
-        auto setBinding = [&](u32 binding, VkDescriptorType type) {
+        std::array<VkDescriptorSetLayoutBinding, 16> bindings{};
+        auto setBinding = [&](u32 binding, VkDescriptorType type, u32 count = 1u) {
             bindings[binding].binding = binding;
             bindings[binding].descriptorType = type;
-            bindings[binding].descriptorCount = 1u;
+            bindings[binding].descriptorCount = count;
             bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         };
         setBinding(0u, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
@@ -158,6 +255,18 @@ struct VulkanHybridReflectionRayQuery::Impl {
         setBinding(9u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
         setBinding(10u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         setBinding(11u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        setBinding(12u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        setBinding(
+            13u,
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            kMaxHybridReflectionMaterials
+        );
+        setBinding(
+            14u,
+            VK_DESCRIPTOR_TYPE_SAMPLER,
+            kMaxHybridReflectionMaterials
+        );
+        setBinding(15u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
         VkDescriptorSetLayoutCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -188,13 +297,35 @@ struct VulkanHybridReflectionRayQuery::Impl {
         constexpr VkMemoryPropertyFlags hostMemory =
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        constexpr std::array<u8, 4> fallbackPixels{ 255u, 255u, 255u, 255u };
+        fallbackTexture = std::make_unique<VulkanTexture2D>(
+            device,
+            physicalDevice,
+            commandPool,
+            VulkanTexturePixels{
+                std::span<const u8>(fallbackPixels),
+                1u,
+                1u
+            },
+            false,
+            false
+        );
+        fallbackSampler = std::make_unique<VulkanSampler>(
+            device,
+            physicalDevice,
+            1u
+        );
         resultImages.reserve(count);
+        hitSurfaceImages.reserve(count);
         controlsBuffers.reserve(count);
         diagnosticsBuffers.reserve(count);
         instanceMetadataBuffers.reserve(count);
+        materialBuffers.reserve(count);
         submitted.assign(count, false);
         frameEnabled.assign(count, false);
         tlasDescriptorReady.assign(count, false);
+        boundMaterialTextureViews.resize(count);
+        boundMaterialSamplers.resize(count);
 
         std::array<u32, kDiagnosticValueCount> diagnostics{};
         diagnostics[kHitDistanceMinDiagnosticIndex] =
@@ -202,6 +333,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kNormalLengthMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kBarycentricSumMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kSampleLodMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         const RayQueryControls defaultControls{};
         for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
@@ -216,6 +351,22 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 VK_IMAGE_ASPECT_COLOR_BIT
             );
             result->TransitionLayout(
+                device,
+                commandPool,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL
+            );
+            auto hitSurface = std::make_unique<VulkanImage>(
+                device,
+                physicalDevice,
+                extent,
+                kHitSurfaceFormat,
+                VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            );
+            hitSurface->TransitionLayout(
                 device,
                 commandPool,
                 VK_IMAGE_LAYOUT_UNDEFINED,
@@ -243,6 +394,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                 hostMemory
             );
+            auto materialBuffer = std::make_unique<VulkanBuffer>(
+                device,
+                physicalDevice,
+                sizeof(HybridReflectionMaterialRecord) *
+                    kMaxHybridReflectionMaterials,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                hostMemory
+            );
             controls->Upload(
                 std::as_bytes(std::span{ &defaultControls, 1u })
             );
@@ -250,21 +409,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 std::as_bytes(std::span<const u32>(diagnostics))
             );
             resultImages.push_back(std::move(result));
+            hitSurfaceImages.push_back(std::move(hitSurface));
             controlsBuffers.push_back(std::move(controls));
             diagnosticsBuffers.push_back(std::move(diagnosticBuffer));
             instanceMetadataBuffers.push_back(
                 std::move(instanceMetadataBuffer)
             );
+            materialBuffers.push_back(std::move(materialBuffer));
         }
 
-        std::array<VkDescriptorPoolSize, 7> poolSizes{};
+        std::array<VkDescriptorPoolSize, 8> poolSizes{};
         poolSizes[0] = {
             VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR,
             static_cast<u32>(count)
         };
         poolSizes[1] = {
             VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            static_cast<u32>(count * 5u)
+            static_cast<u32>(
+                count * (5u + kMaxHybridReflectionMaterials)
+            )
         };
         poolSizes[2] = {
             VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
@@ -276,7 +439,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[4] = {
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            static_cast<u32>(count)
+            static_cast<u32>(count * 2u)
         };
         poolSizes[5] = {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -284,7 +447,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[6] = {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            static_cast<u32>(count * 2u)
+            static_cast<u32>(count * 3u)
+        };
+        poolSizes[7] = {
+            VK_DESCRIPTOR_TYPE_SAMPLER,
+            static_cast<u32>(count * kMaxHybridReflectionMaterials)
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -354,6 +521,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 resultImages[imageIndex]->View(),
                 VK_IMAGE_LAYOUT_GENERAL
             };
+            VkDescriptorImageInfo hitSurfaceImage{
+                VK_NULL_HANDLE,
+                hitSurfaceImages[imageIndex]->View(),
+                VK_IMAGE_LAYOUT_GENERAL
+            };
             VkDescriptorBufferInfo controlsInfo{
                 controlsBuffers[imageIndex]->Handle(),
                 0u,
@@ -369,8 +541,37 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 0u,
                 VK_WHOLE_SIZE
             };
+            VkDescriptorBufferInfo materialInfo{
+                materialBuffers[imageIndex]->Handle(),
+                0u,
+                VK_WHOLE_SIZE
+            };
+            std::array<
+                VkDescriptorImageInfo,
+                kMaxHybridReflectionMaterials
+            > materialTextureInfos{};
+            std::array<
+                VkDescriptorImageInfo,
+                kMaxHybridReflectionMaterials
+            > materialSamplerInfos{};
+            for (u32 slot = 0u; slot < kMaxHybridReflectionMaterials; ++slot) {
+                materialTextureInfos[slot] = {
+                    VK_NULL_HANDLE,
+                    fallbackTexture->View(),
+                    fallbackTexture->Layout()
+                };
+                materialSamplerInfos[slot] = {
+                    fallbackSampler->Handle(),
+                    VK_NULL_HANDLE,
+                    VK_IMAGE_LAYOUT_UNDEFINED
+                };
+                boundMaterialTextureViews[imageIndex][slot] =
+                    fallbackTexture->View();
+                boundMaterialSamplers[imageIndex][slot] =
+                    fallbackSampler->Handle();
+            }
 
-            std::array<VkWriteDescriptorSet, 11> writes{};
+            std::array<VkWriteDescriptorSet, 15> writes{};
             for (u32 sourceIndex = 0u; sourceIndex < sampledImages.size();
                 ++sourceIndex) {
                 VkWriteDescriptorSet& write = writes[sourceIndex];
@@ -413,6 +614,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
             writes[10] = writes[9];
             writes[10].dstBinding = 11u;
             writes[10].pBufferInfo = &instanceMetadataInfo;
+            writes[11] = writes[10];
+            writes[11].dstBinding = 12u;
+            writes[11].pBufferInfo = &materialInfo;
+            writes[12].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[12].dstSet = descriptorSets[imageIndex];
+            writes[12].dstBinding = 13u;
+            writes[12].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[12].descriptorCount = kMaxHybridReflectionMaterials;
+            writes[12].pImageInfo = materialTextureInfos.data();
+            writes[13] = writes[12];
+            writes[13].dstBinding = 14u;
+            writes[13].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            writes[13].pImageInfo = materialSamplerInfos.data();
+            writes[14].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[14].dstSet = descriptorSets[imageIndex];
+            writes[14].dstBinding = 15u;
+            writes[14].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[14].descriptorCount = 1u;
+            writes[14].pImageInfo = &hitSurfaceImage;
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(writes.size()),
@@ -428,9 +648,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         u32 imageIndex,
         VkAccelerationStructureKHR topLevelAccelerationStructure,
         std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
-        u32 instanceMaterialCount,
+        std::span<const VulkanMaterial* const> instanceMaterials,
         bool enabled,
         bool hitAttributesEnabled,
+        bool materialTexturesEnabled,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     ) {
@@ -450,6 +671,96 @@ struct VulkanHybridReflectionRayQuery::Impl {
             );
         }
 
+        const u32 sourceMaterialCount = static_cast<u32>(
+            instanceMaterials.size()
+        );
+        const u32 materialCount = std::min(
+            sourceMaterialCount,
+            kMaxHybridReflectionMaterials
+        );
+        std::array<
+            HybridReflectionMaterialRecord,
+            kMaxHybridReflectionMaterials
+        > materialRecords{};
+        std::array<
+            VkDescriptorImageInfo,
+            kMaxHybridReflectionMaterials
+        > materialTextureInfos{};
+        std::array<
+            VkDescriptorImageInfo,
+            kMaxHybridReflectionMaterials
+        > materialSamplerInfos{};
+        std::unordered_set<VkImageView> distinctTextureViews;
+        std::unordered_set<VkSampler> distinctSamplers;
+        u32 invalidMaterialCount = 0u;
+        bool descriptorsChanged = false;
+        for (u32 slot = 0u; slot < kMaxHybridReflectionMaterials; ++slot) {
+            const VulkanMaterial* material = slot < materialCount
+                ? instanceMaterials[slot]
+                : nullptr;
+            VkImageView textureView = fallbackTexture->View();
+            VkImageLayout textureLayout = fallbackTexture->Layout();
+            VkSampler sampler = fallbackSampler->Handle();
+            if (material != nullptr) {
+                materialRecords[slot] = BuildMaterialRecord(*material, slot);
+                textureView = material->AlbedoTexture().View();
+                textureLayout = material->AlbedoTexture().Layout();
+                sampler = material->Sampler().Handle();
+                distinctTextureViews.insert(textureView);
+                distinctSamplers.insert(sampler);
+            } else if (slot < materialCount) {
+                ++invalidMaterialCount;
+            }
+
+            materialTextureInfos[slot] = {
+                VK_NULL_HANDLE,
+                textureView,
+                textureLayout
+            };
+            materialSamplerInfos[slot] = {
+                sampler,
+                VK_NULL_HANDLE,
+                VK_IMAGE_LAYOUT_UNDEFINED
+            };
+            descriptorsChanged = descriptorsChanged ||
+                boundMaterialTextureViews[imageIndex][slot] != textureView ||
+                boundMaterialSamplers[imageIndex][slot] != sampler;
+        }
+        if (descriptorsChanged) {
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = descriptorSets[imageIndex];
+            descriptorWrites[0].dstBinding = 13u;
+            descriptorWrites[0].descriptorType =
+                VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            descriptorWrites[0].descriptorCount =
+                kMaxHybridReflectionMaterials;
+            descriptorWrites[0].pImageInfo = materialTextureInfos.data();
+            descriptorWrites[1] = descriptorWrites[0];
+            descriptorWrites[1].dstBinding = 14u;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            descriptorWrites[1].pImageInfo = materialSamplerInfos.data();
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                static_cast<u32>(descriptorWrites.size()),
+                descriptorWrites.data(),
+                0u,
+                nullptr
+            );
+            for (u32 slot = 0u; slot < kMaxHybridReflectionMaterials; ++slot) {
+                boundMaterialTextureViews[imageIndex][slot] =
+                    materialTextureInfos[slot].imageView;
+                boundMaterialSamplers[imageIndex][slot] =
+                    materialSamplerInfos[slot].sampler;
+            }
+        }
+        if (materialCount > 0u) {
+            materialBuffers[imageIndex]->Upload(std::as_bytes(std::span(
+                materialRecords.data(),
+                materialCount
+            )));
+        }
+
         RayQueryControls controls{};
         controls.maxRayDistance = std::max(settings.maxRayDistance, 0.01f);
         controls.screenHitConfidenceThreshold = std::clamp(
@@ -466,9 +777,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         controls.enabled = enabled ? 1u : 0u;
         controls.instanceMetadataCount =
             static_cast<u32>(instanceMetadata.size());
-        controls.instanceMaterialCount = instanceMaterialCount;
+        controls.instanceMaterialCount = sourceMaterialCount;
         controls.hitAttributesEnabled =
             enabled && hitAttributesEnabled ? 1u : 0u;
+        controls.materialTableCount = materialCount;
+        controls.materialTexturesEnabled = enabled && hitAttributesEnabled &&
+            materialTexturesEnabled ? 1u : 0u;
 #if !defined(NDEBUG)
         controls.diagnosticsEnabled = enabled ? 1u : 0u;
 #endif
@@ -482,6 +796,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kNormalLengthMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kBarycentricSumMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kSampleLodMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnosticsBuffers[imageIndex]->Upload(
             std::as_bytes(std::span<const u32>(diagnostics))
@@ -518,6 +836,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryConsumerContractVersion = kRayQueryContractVersion;
         stats.rayQueryHitAttributeContractVersion =
             kHitAttributeContractVersion;
+        stats.rayQueryMaterialTableContractVersion =
+            kMaterialTableContractVersion;
         stats.rayQueryResourcesReady = 1u;
         stats.rayQueryTlasDescriptorReady =
             tlasDescriptorReady[imageIndex] ? 1u : 0u;
@@ -534,6 +854,34 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryInstanceMetadataBytes =
             static_cast<u64>(instanceMetadata.size()) *
             sizeof(HybridReflectionInstanceMetadata);
+        stats.rayQueryMaterialTableResourcesReady = 1u;
+        stats.rayQueryMaterialTableCount = materialCount;
+        stats.rayQueryMaterialTableCapacity = kMaxHybridReflectionMaterials;
+        stats.rayQueryMaterialTableOverflowCount =
+            sourceMaterialCount - materialCount;
+        stats.rayQueryMaterialBufferReady = 1u;
+        stats.rayQueryMaterialBufferUploadCount = materialCount > 0u ? 1u : 0u;
+        stats.rayQueryMaterialBufferBytes =
+            static_cast<u64>(materialCount) *
+            sizeof(HybridReflectionMaterialRecord);
+        stats.rayQueryTextureDescriptorCount = materialCount;
+        stats.rayQueryTextureDescriptorCapacity = kMaxHybridReflectionMaterials;
+        stats.rayQuerySamplerDescriptorCount = materialCount;
+        stats.rayQuerySamplerDescriptorCapacity = kMaxHybridReflectionMaterials;
+        stats.rayQueryDistinctTextureCount =
+            static_cast<u32>(distinctTextureViews.size());
+        stats.rayQueryDistinctSamplerCount =
+            static_cast<u32>(distinctSamplers.size());
+        stats.rayQueryDuplicateTextureCount = materialCount -
+            invalidMaterialCount - stats.rayQueryDistinctTextureCount;
+        stats.rayQueryDuplicateSamplerCount = materialCount -
+            invalidMaterialCount - stats.rayQueryDistinctSamplerCount;
+        stats.rayQueryFallbackDescriptorCount =
+            (kMaxHybridReflectionMaterials - materialCount +
+                invalidMaterialCount) * 2u;
+        stats.rayQueryHitSurfaceWidth = extent.width;
+        stats.rayQueryHitSurfaceHeight = extent.height;
+        stats.rayQueryHitSurfaceFormat = static_cast<u32>(kHitSurfaceFormat);
     }
 
     void Record(
@@ -559,6 +907,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         resultForClear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         resultForClear.subresourceRange.levelCount = 1u;
         resultForClear.subresourceRange.layerCount = 1u;
+        VkImageMemoryBarrier hitSurfaceForClear = resultForClear;
+        hitSurfaceForClear.image = hitSurfaceImages[imageIndex]->Handle();
+        std::array<VkImageMemoryBarrier, 2> imagesForClear{
+            resultForClear,
+            hitSurfaceForClear
+        };
         vkCmdPipelineBarrier(
             commandBuffer,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -568,8 +922,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             nullptr,
             0u,
             nullptr,
-            1u,
-            &resultForClear
+            static_cast<u32>(imagesForClear.size()),
+            imagesForClear.data()
         );
         constexpr VkClearColorValue clearValue{};
         vkCmdClearColorImage(
@@ -580,21 +934,33 @@ struct VulkanHybridReflectionRayQuery::Impl {
             1u,
             &resultForClear.subresourceRange
         );
+        vkCmdClearColorImage(
+            commandBuffer,
+            hitSurfaceImages[imageIndex]->Handle(),
+            VK_IMAGE_LAYOUT_GENERAL,
+            &clearValue,
+            1u,
+            &hitSurfaceForClear.subresourceRange
+        );
 
         VkImageMemoryBarrier resultForWrite = resultForClear;
         resultForWrite.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         resultForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        VkImageMemoryBarrier hitSurfaceForWrite = hitSurfaceForClear;
+        hitSurfaceForWrite.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        hitSurfaceForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         VkImageMemoryBarrier confidenceForRead = resultForClear;
         confidenceForRead.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         confidenceForRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         confidenceForRead.image =
             classifyResources.HitConfidenceImage(imageIndex);
-        std::array<VkImageMemoryBarrier, 2> imageBarriers{
+        std::array<VkImageMemoryBarrier, 3> imageBarriers{
             resultForWrite,
+            hitSurfaceForWrite,
             confidenceForRead
         };
 
-        std::array<VkBufferMemoryBarrier, 4> bufferBarriers{};
+        std::array<VkBufferMemoryBarrier, 5> bufferBarriers{};
         auto setBufferBarrier = [&] (
             VkBufferMemoryBarrier& barrier,
             VkBuffer buffer,
@@ -636,6 +1002,13 @@ struct VulkanHybridReflectionRayQuery::Impl {
             bufferBarriers[3],
             instanceMetadataBuffers[imageIndex]->Handle(),
             instanceMetadataBuffers[imageIndex]->Size(),
+            VK_ACCESS_HOST_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT
+        );
+        setBufferBarrier(
+            bufferBarriers[4],
+            materialBuffers[imageIndex]->Handle(),
+            materialBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT
         );
@@ -753,6 +1126,21 @@ struct VulkanHybridReflectionRayQuery::Impl {
         result.barycentricSumMinPermille =
             result.hitAttributeResolvedCount > 0u ? values[25] : 0u;
         result.barycentricSumMaxPermille = values[26];
+        result.materialRecordResolvedCount = values[27];
+        result.materialRecordFallbackCount = values[28];
+        result.textureSampleResolvedCount = values[29];
+        result.textureSampleFallbackCount = values[30];
+        result.textureSampleInvalidCount = values[31];
+        result.finiteSampledColorCount = values[32];
+        result.sampleLodMinMillilevels = result.textureSampleResolvedCount > 0u
+            ? values[33]
+            : 0u;
+        result.sampleLodMaxMillilevels = values[34];
+        result.hitSurfacePayloadWriteCount = values[35];
+        result.hitSurfacePayloadChecksum = values[36];
+        result.hitSurfaceLuminanceMinMilliunits =
+            result.hitSurfacePayloadWriteCount > 0u ? values[37] : 0u;
+        result.hitSurfaceLuminanceMaxMilliunits = values[38];
         return result;
 #endif
     }
@@ -760,10 +1148,15 @@ struct VulkanHybridReflectionRayQuery::Impl {
     u64 TotalMemoryBytes() const {
         const u64 resultBytes = static_cast<u64>(extent.width) *
             static_cast<u64>(extent.height) * sizeof(u32) * 2u;
-        const u64 perFrameBytes = resultBytes + sizeof(RayQueryControls) +
+        const u64 hitSurfaceBytes = static_cast<u64>(extent.width) *
+            static_cast<u64>(extent.height) * sizeof(u16) * 4u;
+        const u64 perFrameBytes = resultBytes + hitSurfaceBytes +
+            sizeof(RayQueryControls) +
             sizeof(u32) * kDiagnosticValueCount +
             sizeof(HybridReflectionInstanceMetadata) *
-                kMaxHybridReflectionInstances;
+                kMaxHybridReflectionInstances +
+            sizeof(HybridReflectionMaterialRecord) *
+                kMaxHybridReflectionMaterials;
         return static_cast<u64>(descriptorSets.size()) * perFrameBytes;
     }
 
@@ -775,9 +1168,17 @@ struct VulkanHybridReflectionRayQuery::Impl {
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets;
     std::vector<std::unique_ptr<VulkanImage>> resultImages;
+    std::vector<std::unique_ptr<VulkanImage>> hitSurfaceImages;
     std::vector<std::unique_ptr<VulkanBuffer>> controlsBuffers;
     std::vector<std::unique_ptr<VulkanBuffer>> diagnosticsBuffers;
     std::vector<std::unique_ptr<VulkanBuffer>> instanceMetadataBuffers;
+    std::vector<std::unique_ptr<VulkanBuffer>> materialBuffers;
+    std::unique_ptr<VulkanTexture2D> fallbackTexture;
+    std::unique_ptr<VulkanSampler> fallbackSampler;
+    std::vector<std::array<VkImageView, kMaxHybridReflectionMaterials>>
+        boundMaterialTextureViews;
+    std::vector<std::array<VkSampler, kMaxHybridReflectionMaterials>>
+        boundMaterialSamplers;
     std::vector<bool> submitted;
     std::vector<bool> frameEnabled;
     std::vector<bool> tlasDescriptorReady;
@@ -816,9 +1217,10 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     u32 imageIndex,
     VkAccelerationStructureKHR topLevelAccelerationStructure,
     std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
-    u32 instanceMaterialCount,
+    std::span<const VulkanMaterial* const> instanceMaterials,
     bool enabled,
     bool hitAttributesEnabled,
+    bool materialTexturesEnabled,
     const HybridReflectionRayQuerySettings& settings,
     RendererHybridReflectionStats& stats
 ) {
@@ -827,9 +1229,10 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         imageIndex,
         topLevelAccelerationStructure,
         instanceMetadata,
-        instanceMaterialCount,
+        instanceMaterials,
         enabled,
         hitAttributesEnabled,
+        materialTexturesEnabled,
         settings,
         stats
     );
@@ -866,6 +1269,24 @@ VkExtent2D VulkanHybridReflectionRayQuery::Extent() const {
 
 VkFormat VulkanHybridReflectionRayQuery::ResultFormat() const {
     return kRayQueryResultFormat;
+}
+
+VkImage VulkanHybridReflectionRayQuery::HitSurfaceImage(u32 imageIndex) const {
+    if (imageIndex >= m_Impl->hitSurfaceImages.size()) {
+        return VK_NULL_HANDLE;
+    }
+    return m_Impl->hitSurfaceImages[imageIndex]->Handle();
+}
+
+VkImageView VulkanHybridReflectionRayQuery::HitSurfaceView(u32 imageIndex) const {
+    if (imageIndex >= m_Impl->hitSurfaceImages.size()) {
+        return VK_NULL_HANDLE;
+    }
+    return m_Impl->hitSurfaceImages[imageIndex]->View();
+}
+
+VkFormat VulkanHybridReflectionRayQuery::HitSurfaceFormat() const {
+    return kHitSurfaceFormat;
 }
 
 u64 VulkanHybridReflectionRayQuery::TotalMemoryBytes() const {

@@ -550,15 +550,17 @@ struct RendererSsrStats {
 };
 
 struct RendererHybridReflectionStats {
-    u32 capabilityContractVersion = 1;
+    u32 capabilityContractVersion = 2;
     u32 accelerationStructureContractVersion = 0;
     u32 rayQueryConsumerContractVersion = 0;
     u32 rayQueryHitAttributeContractVersion = 0;
+    u32 rayQueryMaterialTableContractVersion = 0;
     u32 requested = 0;
     u32 controlDisabled = 0;
     u32 rayQueryConsumerRequested = 0;
     u32 rayQueryConsumerControlDisabled = 0;
     u32 rayQueryHitAttributeControlDisabled = 0;
+    u32 rayQueryMaterialTextureControlDisabled = 0;
     u32 bufferDeviceAddressExtensionSupported = 0;
     u32 deferredHostOperationsExtensionSupported = 0;
     u32 accelerationStructureExtensionSupported = 0;
@@ -566,11 +568,13 @@ struct RendererHybridReflectionStats {
     u32 rayTracingPipelineExtensionSupported = 0;
     u32 bufferDeviceAddressFeatureSupported = 0;
     u32 shaderInt64FeatureSupported = 0;
+    u32 sampledImageArrayNonUniformIndexingFeatureSupported = 0;
     u32 accelerationStructureFeatureSupported = 0;
     u32 rayQueryFeatureSupported = 0;
     u32 rayTracingPipelineFeatureSupported = 0;
     u32 rayQueryHardwareReady = 0;
     u32 shaderInt64DeviceEnabled = 0;
+    u32 sampledImageArrayNonUniformIndexingDeviceEnabled = 0;
     u32 rayQueryDeviceEnabled = 0;
     u32 fullSceneCommandCount = 0;
     u32 opaqueRigidCommandCount = 0;
@@ -613,6 +617,25 @@ struct RendererHybridReflectionStats {
     u32 rayQueryInstanceAddressReadyCount = 0;
     u32 rayQueryInstanceMetadataUploadCount = 0;
     u64 rayQueryInstanceMetadataBytes = 0;
+    u32 rayQueryMaterialTableResourcesReady = 0;
+    u32 rayQueryMaterialTableCount = 0;
+    u32 rayQueryMaterialTableCapacity = 0;
+    u32 rayQueryMaterialTableOverflowCount = 0;
+    u32 rayQueryMaterialBufferReady = 0;
+    u32 rayQueryMaterialBufferUploadCount = 0;
+    u64 rayQueryMaterialBufferBytes = 0;
+    u32 rayQueryTextureDescriptorCount = 0;
+    u32 rayQueryTextureDescriptorCapacity = 0;
+    u32 rayQuerySamplerDescriptorCount = 0;
+    u32 rayQuerySamplerDescriptorCapacity = 0;
+    u32 rayQueryDistinctTextureCount = 0;
+    u32 rayQueryDistinctSamplerCount = 0;
+    u32 rayQueryDuplicateTextureCount = 0;
+    u32 rayQueryDuplicateSamplerCount = 0;
+    u32 rayQueryFallbackDescriptorCount = 0;
+    u32 rayQueryHitSurfaceWidth = 0;
+    u32 rayQueryHitSurfaceHeight = 0;
+    u32 rayQueryHitSurfaceFormat = 0;
     u32 rayQueryReadbackValid = 0;
     u32 rayQueryCandidateRayCount = 0;
     u32 rayQueryScreenHitAcceptedCount = 0;
@@ -641,6 +664,18 @@ struct RendererHybridReflectionStats {
     u32 rayQueryHitAttributeIdentityChecksum = 0;
     u32 rayQueryHitAttributePrimitiveChecksum = 0;
     u32 rayQueryHitAttributeMaterialChecksum = 0;
+    u32 rayQueryMaterialRecordResolvedCount = 0;
+    u32 rayQueryMaterialRecordFallbackCount = 0;
+    u32 rayQueryTextureSampleResolvedCount = 0;
+    u32 rayQueryTextureSampleFallbackCount = 0;
+    u32 rayQueryTextureSampleInvalidCount = 0;
+    u32 rayQueryFiniteSampledColorCount = 0;
+    u32 rayQuerySampleLodMinMillilevels = 0;
+    u32 rayQuerySampleLodMaxMillilevels = 0;
+    u32 rayQueryHitSurfacePayloadWriteCount = 0;
+    u32 rayQueryHitSurfacePayloadChecksum = 0;
+    u32 rayQueryHitSurfaceLuminanceMinMilliunits = 0;
+    u32 rayQueryHitSurfaceLuminanceMaxMilliunits = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,

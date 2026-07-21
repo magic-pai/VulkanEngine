@@ -2934,3 +2934,41 @@ Validation:
 - `spirv-val --target-env vulkan1.2` passes; disassembly contains Ray Query, Physical Storage Buffer, `Int64`, binding `11`, metadata `ArrayStride 32`, barycentrics, and object/world transform operations.
 - `Test-HybridReflectionsCapability.ps1 -SkipBuild -Strict` passed `138 / 0` across six lanes with zero Vulkan diagnostics. LightingShowcase resolved `57976 / 57976` hits and Forward3D resolved `3055 / 3055`; both had zero invalid records, zero position mismatch, and `2 micrometers` maximum position error.
 - `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict` passed `1115 / 0`; `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict` passed `809 / 0`.
+
+## 2026-07-21 - Ray Query Material Tables Must Share TLAS Identity
+
+Symptom:
+- Ray Query could reconstruct valid hit attributes and a dense material index, but the existing frame material table was built from camera-visible commands and could not identify off-screen TLAS hits reliably.
+- The first `RGBA16F` payload run produced valid counters but Vulkan reported that HLSL had declared the storage image as `Rgba32f`.
+
+False leads:
+- Reusing visible `FrameMaterialSet` IDs because both tables happened to contain the same showcase materials.
+- Binding existing per-draw material descriptor sets from one indirect Ray Query dispatch.
+- Packing every material texture into a fixed-resolution atlas or forcing every hit to texture LOD zero.
+- Treating a finite sampled albedo as final production radiance.
+
+Cause:
+- A Ray Query dispatch needs material identity from the same unculled ordering that produced TLAS instance metadata, plus dynamically indexed texture/sampler ownership. Per-draw descriptors and camera-culled IDs do not satisfy that contract.
+- DXC infers a typed storage-image format from `RWTexture2D<float4>` unless `vk::image_format` states the narrower Vulkan format explicitly.
+
+Control test:
+- Compare LightingShowcase and animated FBX requested lanes with consumer-off, hit-attribute-off, material-texture-off, RT-off, and not-requested lanes.
+- Require `hit attributes = material records = texture outcomes = finite colors = payload writes` in active lanes; material-texture-off must retain tracing/attributes while all new sample and payload counters remain zero.
+- Validate SPIR-V capabilities, `NonUniform` decorations, and the storage-image format independently of runtime screenshots.
+
+Fix:
+- Retain a first-use-ordered material pointer table per TLAS frame and upload a bounded 256-entry GPU table from that exact identity source.
+- Enable `shaderSampledImageArrayNonUniformIndexing`, fully populate fixed texture/sampler arrays with valid fallbacks, and use `NonUniformResourceIndex` for both descriptors.
+- Use transformed UVs and a triangle-area/ray-cone mip estimate, then write finite surface color plus hit distance into an independent `R16G16B16A16_SFLOAT` carrier declared with `vk::image_format("rgba16f")`.
+
+Prevention:
+- Every many-to-one GPU table must preserve the producer's ordering explicitly; equal counts are not evidence of equal identities.
+- Query and enable every Vulkan feature implied by new SPIR-V capabilities, and lock it in CSV plus disabled/unsupported lanes.
+- Match typed HLSL storage images to their Vulkan image-view formats explicitly; passing `spirv-val` alone does not catch descriptor-time format mismatch.
+- Do not blend a new hit carrier into visible reflections until its material, sample, fallback, LOD, finite-value, and payload conservation checks all pass across structurally different scenes.
+
+Validation:
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict` passed `189 / 0` across seven lanes with zero Vulkan diagnostics.
+- LightingShowcase resolved `57967` hits/samples/payloads across `51` instances and `17` materials; animated FBX resolved `3043` across `8` rigid instances and `6` materials with one explicit skinned fallback.
+- `spirv-val --target-env vulkan1.2` passed; disassembly contains `SPV_EXT_descriptor_indexing`, `ShaderNonUniform`, two `NonUniform` indices, bindings `13/14/15`, and `Rgba16f`.
+- Debug Forward3D, Debug LightingShowcase, and Release Forward3D builds passed; FidelityFX SSSR remained `1115 / 0` and SSR/Hi-Z remained `809 / 0`.

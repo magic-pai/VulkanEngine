@@ -11,10 +11,13 @@ class VulkanFfxSssrBlueNoiseResources;
 class VulkanFfxSssrClassifyTilesResources;
 class VulkanFfxSssrConstantsDescriptorSetLayout;
 class VulkanFfxSssrPrepareIndirectArgsResources;
+class VulkanMaterial;
 class VulkanPhysicalDevice;
 class VulkanSceneRenderTargets;
 struct HybridReflectionInstanceMetadata;
 struct RendererHybridReflectionStats;
+
+inline constexpr u32 kMaxHybridReflectionMaterials = 256u;
 
 struct HybridReflectionRayQuerySettings {
     f32 maxRayDistance = 100.0f;
@@ -53,6 +56,18 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 identityChecksum = 0u;
     u32 primitiveChecksum = 0u;
     u32 materialChecksum = 0u;
+    u32 materialRecordResolvedCount = 0u;
+    u32 materialRecordFallbackCount = 0u;
+    u32 textureSampleResolvedCount = 0u;
+    u32 textureSampleFallbackCount = 0u;
+    u32 textureSampleInvalidCount = 0u;
+    u32 finiteSampledColorCount = 0u;
+    u32 sampleLodMinMillilevels = 0u;
+    u32 sampleLodMaxMillilevels = 0u;
+    u32 hitSurfacePayloadWriteCount = 0u;
+    u32 hitSurfacePayloadChecksum = 0u;
+    u32 hitSurfaceLuminanceMinMilliunits = 0u;
+    u32 hitSurfaceLuminanceMaxMilliunits = 0u;
 };
 
 class VulkanHybridReflectionRayQuery {
@@ -79,9 +94,10 @@ public:
         u32 imageIndex,
         VkAccelerationStructureKHR topLevelAccelerationStructure,
         std::span<const HybridReflectionInstanceMetadata> instanceMetadata,
-        u32 instanceMaterialCount,
+        std::span<const VulkanMaterial* const> instanceMaterials,
         bool enabled,
         bool hitAttributesEnabled,
+        bool materialTexturesEnabled,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     );
@@ -97,6 +113,9 @@ public:
     std::size_t Count() const;
     VkExtent2D Extent() const;
     VkFormat ResultFormat() const;
+    VkImage HitSurfaceImage(u32 imageIndex) const;
+    VkImageView HitSurfaceView(u32 imageIndex) const;
+    VkFormat HitSurfaceFormat() const;
     u64 TotalMemoryBytes() const;
 
 private:

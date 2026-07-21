@@ -98,6 +98,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         u32 preparedInstanceCount = 0;
         u32 materialCount = 0;
         std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
+        std::vector<const VulkanMaterial*> instanceMaterials;
         bool built = false;
         bool prepared = false;
     };
@@ -402,6 +403,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
         instanceMetadata.reserve(instances.capacity());
         std::unordered_map<const VulkanMaterial*, u32> materialIndices;
+        std::vector<const VulkanMaterial*> instanceMaterials;
         std::unordered_set<const VulkanMesh*> meshesUsedThisFrame;
         for (const RenderCommand& command : renderCommands) {
             if (command.mesh == nullptr || !command.mesh->Is3D()) {
@@ -458,7 +460,9 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                     command.material,
                     static_cast<u32>(materialIndices.size()) + 1u
                 );
-                static_cast<void>(inserted);
+                if (inserted) {
+                    instanceMaterials.push_back(command.material);
+                }
                 materialIndex = material->second;
             }
             HybridReflectionInstanceMetadata metadata{};
@@ -483,6 +487,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         frame.preparedInstanceCount = static_cast<u32>(instances.size());
         frame.materialCount = static_cast<u32>(materialIndices.size());
         frame.instanceMetadata = std::move(instanceMetadata);
+        frame.instanceMaterials = std::move(instanceMaterials);
         if (!instances.empty()) {
             EnsureTlasCapacity(frame, static_cast<u32>(instances.size()));
             frame.instances->Upload(std::as_bytes(std::span(instances)));
@@ -770,13 +775,14 @@ VulkanHybridReflectionAccelerationStructures::InstanceMetadata(
     return m_Impl->frames[frameIndex].instanceMetadata;
 }
 
-u32 VulkanHybridReflectionAccelerationStructures::InstanceMaterialCount(
+std::span<const VulkanMaterial* const>
+VulkanHybridReflectionAccelerationStructures::InstanceMaterials(
     u32 frameIndex
 ) const {
     if (frameIndex >= m_Impl->frames.size()) {
-        return 0u;
+        return {};
     }
-    return m_Impl->frames[frameIndex].materialCount;
+    return m_Impl->frames[frameIndex].instanceMaterials;
 }
 
 }
