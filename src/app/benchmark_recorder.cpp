@@ -769,6 +769,7 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitAttributeContractVersion << ','
         << hybridReflections.rayQueryMaterialTableContractVersion << ','
         << hybridReflections.rayQueryHitLightingContractVersion << ','
+        << hybridReflections.rayQueryShadowVisibilityContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.rayQueryConsumerRequested << ','
@@ -776,6 +777,7 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitAttributeControlDisabled << ','
         << hybridReflections.rayQueryMaterialTextureControlDisabled << ','
         << hybridReflections.rayQueryHitLightingControlDisabled << ','
+        << hybridReflections.rayQueryShadowVisibilityControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
@@ -862,6 +864,10 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryLocalLightCount << ','
         << hybridReflections.rayQueryHitLightingVisibilityMode << ','
         << hybridReflections.rayQueryHitLightingVisibilityFallbackReason << ','
+        << hybridReflections.rayQueryShadowVisibilityResourcesReady << ','
+        << hybridReflections.rayQueryShadowMaxLocalLightCount << ','
+        << hybridReflections.rayQueryShadowRectangleSampleCount << ','
+        << hybridReflections.rayQueryShadowMaxRaysPerHit << ','
         << hybridReflections.rayQueryReadbackValid << ','
         << hybridReflections.rayQueryCandidateRayCount << ','
         << hybridReflections.rayQueryScreenHitAcceptedCount << ','
@@ -922,6 +928,26 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryRadianceLuminanceMinMilliunits << ','
         << hybridReflections.rayQueryRadianceLuminanceMaxMilliunits << ','
         << hybridReflections.rayQueryRadianceChecksum << ','
+        << hybridReflections.rayQueryShadowVisibilityResolvedCount << ','
+        << hybridReflections.rayQueryShadowRayCount << ','
+        << hybridReflections.rayQueryShadowVisibleCount << ','
+        << hybridReflections.rayQueryShadowOccludedCount << ','
+        << hybridReflections.rayQueryShadowInvalidCount << ','
+        << hybridReflections.rayQueryDirectionalShadowRayCount << ','
+        << hybridReflections.rayQueryPointShadowRayCount << ','
+        << hybridReflections.rayQuerySpotShadowRayCount << ','
+        << hybridReflections.rayQueryRectShadowRayCount << ','
+        << hybridReflections.rayQueryLocalShadowCandidateCount << ','
+        << hybridReflections.rayQueryLocalShadowSelectedCount << ','
+        << hybridReflections.rayQueryLocalShadowDroppedCount << ','
+        << hybridReflections.rayQueryUnshadowedDirectLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryVisibleDirectLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryShadowSelfIntersectionCandidateCount << ','
+        << hybridReflections.rayQueryShadowHitDistanceMinMillimeters << ','
+        << hybridReflections.rayQueryShadowHitDistanceMaxMillimeters << ','
+        << hybridReflections.rayQueryShadowVisibilityMinPermille << ','
+        << hybridReflections.rayQueryShadowVisibilityMaxPermille << ','
+        << hybridReflections.rayQueryLocalShadowDroppedLuminanceSumMilliunits << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2389,12 +2415,14 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_hit_attribute_contract_version,"
         << "hybrid_reflections_ray_query_material_table_contract_version,"
         << "hybrid_reflections_ray_query_hit_lighting_contract_version,"
+        << "hybrid_reflections_ray_query_shadow_visibility_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_ray_query_consumer_requested,"
         << "hybrid_reflections_ray_query_consumer_control_disabled,"
         << "hybrid_reflections_ray_query_hit_attribute_control_disabled,"
         << "hybrid_reflections_ray_query_material_texture_control_disabled,"
         << "hybrid_reflections_ray_query_hit_lighting_control_disabled,"
+        << "hybrid_reflections_ray_query_shadow_visibility_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
@@ -2481,6 +2509,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_local_light_count,"
         << "hybrid_reflections_ray_query_hit_lighting_visibility_mode,"
         << "hybrid_reflections_ray_query_hit_lighting_visibility_fallback_reason,"
+        << "hybrid_reflections_ray_query_shadow_visibility_resources_ready,"
+        << "hybrid_reflections_ray_query_shadow_max_local_light_count,"
+        << "hybrid_reflections_ray_query_shadow_rectangle_sample_count,"
+        << "hybrid_reflections_ray_query_shadow_max_rays_per_hit,"
         << "hybrid_reflections_ray_query_readback_valid,"
         << "hybrid_reflections_ray_query_candidate_ray_count,"
         << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
@@ -2541,6 +2573,26 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_radiance_luminance_min_milliunits,"
         << "hybrid_reflections_ray_query_radiance_luminance_max_milliunits,"
         << "hybrid_reflections_ray_query_radiance_checksum,"
+        << "hybrid_reflections_ray_query_shadow_visibility_resolved_count,"
+        << "hybrid_reflections_ray_query_shadow_ray_count,"
+        << "hybrid_reflections_ray_query_shadow_visible_count,"
+        << "hybrid_reflections_ray_query_shadow_occluded_count,"
+        << "hybrid_reflections_ray_query_shadow_invalid_count,"
+        << "hybrid_reflections_ray_query_directional_shadow_ray_count,"
+        << "hybrid_reflections_ray_query_point_shadow_ray_count,"
+        << "hybrid_reflections_ray_query_spot_shadow_ray_count,"
+        << "hybrid_reflections_ray_query_rect_shadow_ray_count,"
+        << "hybrid_reflections_ray_query_local_shadow_candidate_count,"
+        << "hybrid_reflections_ray_query_local_shadow_selected_count,"
+        << "hybrid_reflections_ray_query_local_shadow_dropped_count,"
+        << "hybrid_reflections_ray_query_unshadowed_direct_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_visible_direct_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_shadow_self_intersection_candidate_count,"
+        << "hybrid_reflections_ray_query_shadow_hit_distance_min_millimeters,"
+        << "hybrid_reflections_ray_query_shadow_hit_distance_max_millimeters,"
+        << "hybrid_reflections_ray_query_shadow_visibility_min_permille,"
+        << "hybrid_reflections_ray_query_shadow_visibility_max_permille,"
+        << "hybrid_reflections_ray_query_local_shadow_dropped_luminance_sum_milliunits,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

@@ -2,64 +2,33 @@
 
 ## Latest Completed Slice
 
-AMD FidelityFX SSSR has advanced through the official DNSR ResolveTemporal
-bridge and into the first controlled visible Deferred composite. The engine
-vendors the SSSR/DNSR/SPD shader subset, compiles eight FFX HLSL compute
-shaders to SPIR-V, creates a scene-independent `FidelityFxSssrAdapter`, and
-dispatches `ClassifyTiles.hlsl`, `PrepareIndirectArgs.hlsl`,
-`PrepareBlueNoiseTexture.hlsl`, `Intersect.hlsl`, `Reproject.hlsl`,
-`Prefilter.hlsl`, and `ResolveTemporal.hlsl` when
-`SE_SSR_BACKEND=ffx-sssr`.
+Hybrid Reflections now has bounded direct-light visibility for hardware Ray
+Query hit radiance. Each committed off-screen hit can issue one directional
+shadow query and ranks local lights by unshadowed BRDF luminance before tracing
+only the top eight. Point and spot lights use one endpoint-contracted query;
+rectangle lights use up to four emitter samples, keeping the worst-case budget
+at `1 + 8 * 4 = 33` rays per hit. Lower-ranked direct energy is omitted and
+diagnosed instead of being presented as falsely unshadowed.
 
-The bridge allocates the vendor-shaped constants buffer plus per-swapchain ray
-counter, ray list, denoiser tile list, extracted roughness, variance placeholder,
-intersection output, generated blue-noise texture, indirect-args resources,
-real history images, Reproject output images for reprojected radiance,
-average radiance, variance, and sample count, plus Prefilter output images for
-prefiltered radiance, variance, and sample count. ResolveTemporal now consumes
-extracted roughness, average radiance, prefiltered radiance/variance/sample
-count, reprojected radiance, and the denoiser tile list, then writes the
-RadianceHistory, VarianceHistory, and SampleCountHistory images consumed by the
-next Reproject pass. AMD typed buffers are bound as
-`VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER` or
-`VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER` with `VK_FORMAT_R32_UINT`. The
-`RWTexture2D<float4>` intersection output remains
-`VK_FORMAT_R32G32B32A32_SFLOAT`; Reproject's RGB radiance outputs are stored in
-RGBA32F images with a documented Vulkan compatibility shader patch that writes
-`.xyzz`, because RGB32F sampled/storage images are not portable on the current
-device. `PrepareBlueNoiseTexture` uses the official AMD 128x128 1spp
-Sobol/ranking/scrambling tables and writes a `VK_FORMAT_R32G32_SFLOAT`
-blue-noise texture. `Intersect` runs after HDR lighting so it can consume the
-lit scene color mip0 view, depth pyramid, GBuffer normal, extracted roughness,
-environment map, generated blue noise, ray list, and prepared indirect ray
-count. Reproject then consumes the denoiser tile list and the second indirect
-dispatch record at byte offset `12`; Prefilter and ResolveTemporal use the same
-denoiser indirect record. ResolveTemporal writes the current swapchain history
-slot and the bridge copies that FFX history state to the other slots so the next
-frame's Reproject and Deferred reflection composite have a coherent starting
-point. The Deferred consumer now binds the previous completed FFX
-`RadianceHistory` as binding 17 when `SE_SSR_BACKEND=ffx-sssr`, a valid
-previous temporal frame exists, and the FFX history has completed at least once.
-The shader marks this with the `131072` SSR control bit so it treats the source
-as radiance history instead of internal `SSRResolved` alpha-confidence metadata,
-then blends it conservatively over the probe/IBL fallback.
+The implementation follows Khronos inline Ray Query first-hit traversal and
+uses the Waechter/Binder floating-point origin-offset method documented by
+NVIDIA. Smooth normals remain responsible for BRDF shading while reconstructed
+world geometric normals choose the shadow-ray origin side. The existing
+`SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF=1` control restores the prior
+unshadowed radiance seed and reports visibility state `1/1`; the production
+data path reports Ray Query visibility state `2/0`.
 
-Validation: `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict
--OutputDirectory tmp\ffx_sssr_deferred_composite_bridge` passed `125 pass / 0
-fail`, with LightingShowcase and Forward3D FBX FFX lanes reporting backend
-requested/active `1/1`, runtime active `1`, deferred composite
-requested/active/descriptor/history/source `1/1/1/1/1`, `radianceSource=4`,
-FrameGraph validation `0`, and Vulkan validation diagnostics `0`. The
-internal-backend control reports requested/active `0/0`, deferred composite
-`0/0/0/0/0`, `radianceSource=2`, FrameGraph validation `0`, and Vulkan
-validation diagnostics `0`. Existing SSR regression
-`scripts\Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict
--OutputDirectory tmp\ssr_regression_after_ffx_deferred_composite` passed
-`691 pass / 0 fail`.
-
-The next SSR slice is visual acceptance of the controlled FFX composite and then
-quality refinement of the visible SSSR contribution, keeping the stable
-probe/IBL fallback as the off-screen and low-confidence baseline.
+Validation: the nine-lane hybrid gate passed `324 pass / 0 fail` across
+LightingShowcase, the animated FBX scene, dependency-off controls, RT-off, and
+not-requested paths. LightingShowcase resolved `57,980` visibility hits using
+`984,030 = 600,684 visible + 383,346 occluded + 0 invalid` shadow rays; the FBX
+lane resolved `2,659` hits using `14,031 = 13,126 + 905 + 0` rays. Both lanes
+reported the `8/4/33` budget, full `0..1000` visibility range, and zero
+classified self-intersection candidates. Debug Forward3D, Debug
+LightingShowcase, Release Forward3D, DXC/SPIR-V validation, FidelityFX SSSR
+`1115 / 0`, and SSR/Hi-Z `809 / 0` all pass. The carrier remains data-only
+(`active=0`, fallback `8`); the next slice is temporal denoise and controlled
+visible hybrid composition, not additional showcase-specific tuning.
 
 ## Goal
 
@@ -738,6 +707,7 @@ Current execution slice: reflection-capture/probe blending has data coverage for
 - Hybrid Reflections hit-attribute/material-identity data slice complete: each TLAS instance now owns a scene-independent 32-byte record containing vertex/index device addresses, counts, `Vertex3D` stride, and a dense full-scene material index. The Ray Query consumer adapts NVIDIA's Apache-2.0 ray-query hit-state pattern and official DXC `vk::RawBufferLoad`: `CommittedInstanceID/InstanceIndex/PrimitiveIndex/TriangleBarycentrics` select the record and triangle, position/normal/UV are barycentrically interpolated, object/world transforms reconstruct the world hit, and the reconstructed position is checked against `origin + direction * t`. Compile-time offset/stride assertions lock the CPU/HLSL ABI. DXC physical-address loads declare SPIR-V `Int64`, so `shaderInt64` support and logical-device enablement are now explicit parts of Ray Query readiness instead of an unchecked assumption. `SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF=1` preserves an independent Debug control. The six-lane strict gate passes `138 / 0` with zero Vulkan diagnostics: LightingShowcase resolves `57976 / 57976` committed hits across `51` instances and `17` materials; animated Forward3D resolves `3055 / 3055` across `8` rigid instances and `6` materials, with zero invalid instance/primitive/vertex/barycentric/value records, zero material fallback, zero position mismatch, `2 micrometers` maximum recorded position error, and `1000..1000` permille normal/barycentric invariants. The attribute-off lane still dispatches Ray Query while all attribute counters remain zero; consumer-off still builds metadata/AS resources with zero dispatch; RT-off and not-requested lanes remain resource-free. Visible output remains unchanged at `active=0`, fallback `8`; the next slice is a bounded GPU material record plus texture/sampler ownership for actual off-screen hit radiance, followed by a separate composition gate.
 - Hybrid Reflections bounded material/surface-payload data slice complete: the unculled TLAS builder now retains the exact first-use-ordered `VulkanMaterial*` table that produced each 1-based instance material index, so Ray Query no longer risks reusing camera-visible `FrameMaterialSet` identities. The consumer adapts NVIDIA's fixed material-buffer/bindless-texture pattern and AMD Cauldron's bounded material/texture/sampler ownership without adding Slang or a lossy atlas: Vulkan explicitly queries/enables `shaderSampledImageArrayNonUniformIndexing`, each frame owns a 256-entry/112-byte material-record table, fixed 256-entry sampled-image and sampler arrays are fully populated with valid fallbacks, and HLSL uses `NonUniformResourceIndex`. Barycentric vertex color and transformed UV feed albedo sampling; a triangle-area texel-density estimate plus camera ray-cone footprint selects a bounded mip. Results are written to an independent `R16G16B16A16_SFLOAT` hit-surface carrier and are not composed into visible SSR/Probe/IBL. The seven-lane strict gate passes `189 / 0` with zero Vulkan diagnostics: LightingShowcase resolves `57967` material records/samples/payloads across `51` instances and `17` materials, while the animated FBX control resolves `3043` across `8` rigid instances and `6` materials with one explicit skinned fallback; both report zero material/sample fallback and zero invalid samples. `SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF=1` preserves tracing and hit attributes while suppressing all material/payload counters. At 1280x720 with three frame images, Ray Query now owns `44,716,692` bytes including the independent payload carrier. SPIR-V Vulkan 1.2 validation passes and disassembly records `SPV_EXT_descriptor_indexing`, `ShaderNonUniform`, both `NonUniform` descriptor indices, and an explicit `Rgba16f` storage-image format. Debug Forward3D, Debug LightingShowcase, and Release Forward3D builds pass; existing FidelityFX SSSR and SSR/Hi-Z regressions remain `1115 / 0` and `809 / 0`. This slice remains data-only (`active=0`, fallback `8`); the next slice adds physically coherent direct/IBL hit radiance to this carrier before any temporal denoise or visible composition gate.
 - Hybrid Reflections hit-radiance data slice complete: the Ray Query consumer now binds the existing full-scene `VulkanLightBuffer`, BRDF LUT, diffuse irradiance cube, prefiltered environment cube, and IBL sampler at bindings `16..20`. Committed material hits evaluate the same Cook-Torrance GGX/Smith/Schlick metallic-roughness baseline used by the deferred path, iterate the bounded unculled directional/point/spot/rectangle light set directly, use four rectangle samples, and add split-sum IBL plus emissive radiance into the independent `RGBA16F` carrier. Screen-tile assignments and camera-relative shadow atlases are intentionally rejected for off-screen hit ownership. Visibility is therefore explicit mode `1`, fallback `1`: an unshadowed radiance seed pending bounded shadow Ray Queries, not a claim of final production visibility. `SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF=1` preserves material sampling while suppressing all lighting and carrier writes. The eight-lane strict gate passes `255 / 0` with zero Vulkan diagnostics: LightingShowcase resolves `57,979 / 57,979` finite radiance hits from `1 + 11` lights with direct/IBL/emissive energy sums `11,033,047 / 16,614,338 / 1,696,579` milliunits; the animated FBX control resolves `3,052 / 3,052` from `1 + 3` lights with zero invalid radiance. Point, spot, and rectangle evaluation/contribution counts are nonzero in both real scenes, and all dependency-off lanes conserve zero lighting output. At 1280x720 with three images the expanded controls/readback bring Ray Query memory to `44,717,028` bytes. DXC and `spirv-val --target-env vulkan1.2` pass. Visible hybrid composition remains disabled (`active=0`, fallback `8`); the next slice adds off-screen direct-light visibility with bounded Ray Query shadow rays before temporal denoise and visible blending.
+- Hybrid Reflections shadow-visibility data slice complete: committed off-screen hits now use bounded second-level inline Ray Queries for direct-light visibility. The implementation adapts Khronos opaque first-hit traversal and NVIDIA's Waechter/Binder robust origin offset; BRDF evaluation uses the smooth shading normal while origin orientation uses the reconstructed world geometric normal. One directional query plus luminance-ranked top-eight local lights, with one point/spot query or four rectangle-emitter queries, limits the worst case to `33` rays per hit. Lower-ranked local energy is omitted and audited rather than left unshadowed. `SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF=1` restores visibility mode/fallback `1/1`; the active data path reports `2/0`. The nine-lane strict gate passes `324 / 0`: LightingShowcase resolves `57,980` visibility hits with `984,030 = 600,684 visible + 383,346 occluded + 0 invalid` rays and animated FBX resolves `2,659` with `14,031 = 13,126 + 905 + 0`; both report budget `8/4/33`, visibility `0..1000`, and zero classified self-intersection candidates. Debug Forward3D, Debug LightingShowcase, Release Forward3D, Vulkan 1.2 SPIR-V validation, FFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` pass. NVIDIA RTXDI remains rejected for this bounded `<=64`-light slice because its reservoir/spatiotemporal infrastructure is intended for substantially larger many-light workloads. Visible output remains unchanged at `active=0`, fallback `8`; temporal denoise and controlled visible hybrid composition are next.
 - Next renderer-first slices: start filling the still-missing mainstream 3A systems rather than returning to UE scene work. Near-term candidates are imported-model/skinned/object velocity baselines for DLSS, authored/material-specific reactive/transparency mask tuning for particles/water/refraction/emissive cases, larger moving-scene visual references, real reflection-capture/probe blending on top of the new IBL carriers, authored/per-volume color grading on top of the neutral LUT carrier, volumetric fog/aerial perspective beyond the first analytic fog tier, GTAO/SSR history and denoise, TAA/velocity correctness, dynamic-resolution/upscaler scaffolding with CAS/RCAS or TAAU-coupled sharpening, classic LOD/Hi-Z visibility, bloom quality polish, and renderer-owned visual-diff/reference captures. Keep finishing shadow quality in parallel through CSM stability captures, local-shadow invalidation/bias/filter evidence, contact-shadow stability, and WBOIT/forward-reference parity. Deferred/HDR should become the default only after imported-model/material parity, lighting/IBL, shadow/probe/SSR/AO coverage, translucency, temporal/post stability, visibility scaling, and diagnostics are all strong enough.
 
 Current renderer answer: do not make deferred/HDR the default yet. It is now visible through `Deferred HDR` and component views, and its inputs are inspectable through GBuffer/debug views, but legacy forward remains the default reference until imported-model parity, light data ownership, lighting quality, shadow/probe/SSR/AO coverage, translucency behavior, temporal/post stability, visibility scaling, and diagnostics are strong enough. The current plan is not complete until the mainstream 3A renderer feature set is implemented, benchmarked, and debuggable; UE project preview remains frozen until then.

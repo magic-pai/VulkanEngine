@@ -5841,6 +5841,10 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF")
             ? 1u
             : 0u;
+    hybridReflections.rayQueryShadowVisibilityControlDisabled =
+        EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF"
+        ) ? 1u : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -6076,6 +6080,46 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.radianceLuminanceMaxMilliunits;
     hybridReflections.rayQueryRadianceChecksum =
         hybridRayQueryDiagnostics.radianceChecksum;
+    hybridReflections.rayQueryShadowVisibilityResolvedCount =
+        hybridRayQueryDiagnostics.shadowVisibilityResolvedCount;
+    hybridReflections.rayQueryShadowRayCount =
+        hybridRayQueryDiagnostics.shadowRayCount;
+    hybridReflections.rayQueryShadowVisibleCount =
+        hybridRayQueryDiagnostics.shadowVisibleCount;
+    hybridReflections.rayQueryShadowOccludedCount =
+        hybridRayQueryDiagnostics.shadowOccludedCount;
+    hybridReflections.rayQueryShadowInvalidCount =
+        hybridRayQueryDiagnostics.shadowInvalidCount;
+    hybridReflections.rayQueryDirectionalShadowRayCount =
+        hybridRayQueryDiagnostics.directionalShadowRayCount;
+    hybridReflections.rayQueryPointShadowRayCount =
+        hybridRayQueryDiagnostics.pointShadowRayCount;
+    hybridReflections.rayQuerySpotShadowRayCount =
+        hybridRayQueryDiagnostics.spotShadowRayCount;
+    hybridReflections.rayQueryRectShadowRayCount =
+        hybridRayQueryDiagnostics.rectShadowRayCount;
+    hybridReflections.rayQueryLocalShadowCandidateCount =
+        hybridRayQueryDiagnostics.localShadowCandidateCount;
+    hybridReflections.rayQueryLocalShadowSelectedCount =
+        hybridRayQueryDiagnostics.localShadowSelectedCount;
+    hybridReflections.rayQueryLocalShadowDroppedCount =
+        hybridRayQueryDiagnostics.localShadowDroppedCount;
+    hybridReflections.rayQueryUnshadowedDirectLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.unshadowedDirectLuminanceSumMilliunits;
+    hybridReflections.rayQueryVisibleDirectLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.visibleDirectLuminanceSumMilliunits;
+    hybridReflections.rayQueryShadowSelfIntersectionCandidateCount =
+        hybridRayQueryDiagnostics.shadowSelfIntersectionCandidateCount;
+    hybridReflections.rayQueryShadowHitDistanceMinMillimeters =
+        hybridRayQueryDiagnostics.shadowHitDistanceMinMillimeters;
+    hybridReflections.rayQueryShadowHitDistanceMaxMillimeters =
+        hybridRayQueryDiagnostics.shadowHitDistanceMaxMillimeters;
+    hybridReflections.rayQueryShadowVisibilityMinPermille =
+        hybridRayQueryDiagnostics.shadowVisibilityMinPermille;
+    hybridReflections.rayQueryShadowVisibilityMaxPermille =
+        hybridRayQueryDiagnostics.shadowVisibilityMaxPermille;
+    hybridReflections.rayQueryLocalShadowDroppedLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.localShadowDroppedLuminanceSumMilliunits;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8910,6 +8954,26 @@ void VulkanRenderer::DrawFrame() {
             "SE_HYBRID_REFLECTIONS_RAY_QUERY_ORIGIN_BIAS_MAX",
             rayQuerySettings.originBiasMax
         );
+        rayQuerySettings.maxShadowedLocalLights = static_cast<u32>(std::clamp(
+            std::round(EnvironmentFloatOrDefault(
+                "SE_HYBRID_REFLECTIONS_SHADOW_MAX_LOCAL_LIGHTS",
+                static_cast<f32>(rayQuerySettings.maxShadowedLocalLights)
+            )),
+            1.0f,
+            8.0f
+        ));
+        rayQuerySettings.rectangleShadowSampleCount = static_cast<u32>(
+            std::clamp(
+                std::round(EnvironmentFloatOrDefault(
+                    "SE_HYBRID_REFLECTIONS_SHADOW_RECT_SAMPLES",
+                    static_cast<f32>(
+                        rayQuerySettings.rectangleShadowSampleCount
+                    )
+                )),
+                1.0f,
+                4.0f
+            )
+        );
         const bool rayQueryConsumerEnabled =
             hybridReflections.rayQueryConsumerControlDisabled == 0u &&
             frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u &&
@@ -8930,6 +8994,7 @@ void VulkanRenderer::DrawFrame() {
             hybridReflections.rayQueryHitAttributeControlDisabled == 0u,
             hybridReflections.rayQueryMaterialTextureControlDisabled == 0u,
             hybridReflections.rayQueryHitLightingControlDisabled == 0u,
+            hybridReflections.rayQueryShadowVisibilityControlDisabled == 0u,
             frameLightSet.directionalCount,
             frameLightSet.localCount,
             rayQuerySettings,

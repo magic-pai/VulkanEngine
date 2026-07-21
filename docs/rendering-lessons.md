@@ -3006,3 +3006,37 @@ Validation:
 - `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict` passed `255 / 0` across eight lanes with zero Vulkan diagnostics.
 - LightingShowcase resolved `57,979` finite radiance hits from `1 + 11` lights; animated FBX resolved `3,052` from `1 + 3`, both with zero invalid radiance.
 - DXC and `spirv-val --target-env vulkan1.2` passed for the updated Ray Query shader.
+
+## 2026-07-22 - Secondary Hit Visibility Needs Bounded World-Space Shadow Rays
+
+Symptom:
+- Off-screen Ray Query hits had finite material-aware direct and IBL radiance, but direct lights were unshadowed because camera-owned shadow maps and screen tiles did not cover the secondary world-space receiver.
+- An initial fixed `1 mm` diagnostic threshold classified valid grazing intersections as suspicious self hits.
+
+False leads:
+- Reusing the primary camera's directional/local shadow atlases for arbitrary secondary hits.
+- Leaving lower-priority local lights unshadowed when the shadow-ray budget was exhausted.
+- Treating every very short same-instance hit as self-intersection without relating the threshold to the actual floating-point origin displacement.
+
+Cause:
+- Secondary receivers need visibility in their own world-space domain. Their light ownership, ray endpoint, and geometric origin normal differ from the source screen pixel.
+- A world-unit self-hit threshold is scene-scale dependent; the relevant error bound is the displacement introduced by the robust origin offset.
+
+Control test:
+- Compare normal LightingShowcase and animated FBX lanes against `SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF=1` while preserving hit material and lighting work.
+- Require bounded ray conservation by outcome and light kind, selected-plus-dropped local-light conservation, visible direct energy no greater than unshadowed energy, zero invalid rays, and zero self-hit candidates relative to `2 * actual origin offset`.
+
+Fix:
+- Use inline opaque first-hit Ray Queries with one directional ray, luminance-ranked top-eight local lights, endpoint contraction for finite emitters, and four rectangle-emitter samples.
+- Apply the Waechter/Binder floating-point origin offset along the reconstructed world geometric normal; retain smooth normals only for BRDF evaluation.
+- Omit and diagnose lower-ranked local-light energy instead of silently treating it as visible.
+
+Prevention:
+- Never sample camera-relative visibility for an off-screen secondary receiver unless the spatial coverage contract proves it is valid.
+- Bound recursive visibility work before composition and expose the exact per-hit budget and fallback mode.
+- Diagnose near self hits relative to the actual numerical origin displacement, not a scene-tuned fixed distance.
+
+Validation:
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict` passed `324 / 0` across nine lanes with zero Vulkan diagnostics and matching `1733/1733` CSV columns.
+- LightingShowcase recorded `984,030` rays (`600,684` visible, `383,346` occluded, `0` invalid); animated FBX recorded `14,031` (`13,126`, `905`, `0`). Both reported budget `8/4/33`, visibility `0..1000`, and zero classified self-intersection candidates.
+- Debug Forward3D, Debug LightingShowcase, Release Forward3D, `spirv-val --target-env vulkan1.2`, FidelityFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` passed.

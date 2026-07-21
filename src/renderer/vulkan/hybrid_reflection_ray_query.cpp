@@ -34,15 +34,21 @@ constexpr u32 kRayQueryContractVersion = 2u;
 constexpr u32 kHitAttributeContractVersion = 1u;
 constexpr u32 kMaterialTableContractVersion = 1u;
 constexpr u32 kHitLightingContractVersion = 1u;
+constexpr u32 kShadowVisibilityContractVersion = 1u;
 constexpr u32 kHitLightingVisibilityModeUnshadowed = 1u;
+constexpr u32 kHitLightingVisibilityModeRayQuery = 2u;
 constexpr u32 kHitLightingVisibilityFallbackPendingRayQuery = 1u;
-constexpr u32 kDiagnosticValueCount = 59u;
+constexpr u32 kMaxShadowedLocalLights = 8u;
+constexpr u32 kMaxRectangleShadowSamples = 4u;
+constexpr u32 kDiagnosticValueCount = 79u;
 constexpr u32 kHitDistanceMinDiagnosticIndex = 7u;
 constexpr u32 kNormalLengthMinDiagnosticIndex = 20u;
 constexpr u32 kBarycentricSumMinDiagnosticIndex = 25u;
 constexpr u32 kSampleLodMinDiagnosticIndex = 33u;
 constexpr u32 kHitSurfaceLuminanceMinDiagnosticIndex = 37u;
 constexpr u32 kRadianceLuminanceMinDiagnosticIndex = 56u;
+constexpr u32 kShadowHitDistanceMinDiagnosticIndex = 74u;
+constexpr u32 kShadowVisibilityMinDiagnosticIndex = 76u;
 constexpr VkFormat kRayQueryResultFormat = VK_FORMAT_R32G32_UINT;
 constexpr VkFormat kHitSurfaceFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
@@ -94,9 +100,13 @@ struct alignas(16) RayQueryControls {
     u32 hitLightingVisibilityMode = 0u;
     u32 iblResourcesReady = 0u;
     u32 reserved = 0u;
+    u32 shadowVisibilityEnabled = 0u;
+    u32 shadowVisibilityContractVersion = kShadowVisibilityContractVersion;
+    u32 maxShadowedLocalLights = kMaxShadowedLocalLights;
+    u32 rectangleShadowSampleCount = kMaxRectangleShadowSamples;
 };
 
-static_assert(sizeof(RayQueryControls) == 96u);
+static_assert(sizeof(RayQueryControls) == 112u);
 static_assert(offsetof(RayQueryControls, enabled) == 20u);
 static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
 static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
@@ -114,6 +124,10 @@ static_assert(offsetof(RayQueryControls, localLightCount) == 76u);
 static_assert(offsetof(RayQueryControls, iblPrefilteredMipCount) == 80u);
 static_assert(offsetof(RayQueryControls, hitLightingVisibilityMode) == 84u);
 static_assert(offsetof(RayQueryControls, iblResourcesReady) == 88u);
+static_assert(offsetof(RayQueryControls, shadowVisibilityEnabled) == 96u);
+static_assert(offsetof(RayQueryControls, shadowVisibilityContractVersion) == 100u);
+static_assert(offsetof(RayQueryControls, maxShadowedLocalLights) == 104u);
+static_assert(offsetof(RayQueryControls, rectangleShadowSampleCount) == 108u);
 static_assert(offsetof(Vertex3D, position) == 0u);
 static_assert(offsetof(Vertex3D, normal) == 12u);
 static_assert(offsetof(Vertex3D, texCoord) == 36u);
@@ -390,6 +404,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kRadianceLuminanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kShadowHitDistanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kShadowVisibilityMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         const RayQueryControls defaultControls{};
         for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
@@ -751,6 +769,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         bool hitAttributesEnabled,
         bool materialTexturesEnabled,
         bool hitLightingEnabled,
+        bool shadowVisibilityEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,
@@ -886,16 +905,30 @@ struct VulkanHybridReflectionRayQuery::Impl {
             materialTexturesEnabled ? 1u : 0u;
         controls.hitLightingEnabled = controls.materialTexturesEnabled != 0u &&
             hitLightingEnabled ? 1u : 0u;
+        controls.shadowVisibilityEnabled = controls.hitLightingEnabled != 0u &&
+            shadowVisibilityEnabled ? 1u : 0u;
         controls.directionalLightCount = std::min(directionalLightCount, 1u);
         controls.localLightCount = std::min(
             localLightCount,
             static_cast<u32>(kMaxFrameLocalLights)
         );
         controls.iblPrefilteredMipCount = iblPrefilteredMipCount;
-        controls.hitLightingVisibilityMode = controls.hitLightingEnabled != 0u
-            ? kHitLightingVisibilityModeUnshadowed
-            : 0u;
+        controls.hitLightingVisibilityMode = controls.hitLightingEnabled == 0u
+            ? 0u
+            : controls.shadowVisibilityEnabled != 0u
+                ? kHitLightingVisibilityModeRayQuery
+                : kHitLightingVisibilityModeUnshadowed;
         controls.iblResourcesReady = 1u;
+        controls.maxShadowedLocalLights = std::clamp(
+            settings.maxShadowedLocalLights,
+            1u,
+            kMaxShadowedLocalLights
+        );
+        controls.rectangleShadowSampleCount = std::clamp(
+            settings.rectangleShadowSampleCount,
+            1u,
+            kMaxRectangleShadowSamples
+        );
 #if !defined(NDEBUG)
         controls.diagnosticsEnabled = enabled ? 1u : 0u;
 #endif
@@ -915,6 +948,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kRadianceLuminanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kShadowHitDistanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kShadowVisibilityMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnosticsBuffers[imageIndex]->Upload(
             std::as_bytes(std::span<const u32>(diagnostics))
@@ -999,6 +1036,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryHitSurfaceFormat = static_cast<u32>(kHitSurfaceFormat);
         stats.rayQueryHitLightingContractVersion =
             kHitLightingContractVersion;
+        stats.rayQueryShadowVisibilityContractVersion =
+            kShadowVisibilityContractVersion;
         stats.rayQueryHitLightingResourcesReady = 1u;
         stats.rayQueryLightBufferDescriptorReady = 1u;
         stats.rayQueryIblBrdfDescriptorReady = 1u;
@@ -1011,9 +1050,19 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryHitLightingVisibilityMode =
             controls.hitLightingVisibilityMode;
         stats.rayQueryHitLightingVisibilityFallbackReason =
-            controls.hitLightingEnabled != 0u
+            controls.hitLightingEnabled != 0u &&
+                controls.shadowVisibilityEnabled == 0u
                 ? kHitLightingVisibilityFallbackPendingRayQuery
                 : 0u;
+        stats.rayQueryShadowVisibilityResourcesReady = 1u;
+        stats.rayQueryShadowMaxLocalLightCount =
+            controls.maxShadowedLocalLights;
+        stats.rayQueryShadowRectangleSampleCount =
+            controls.rectangleShadowSampleCount;
+        stats.rayQueryShadowMaxRaysPerHit =
+            controls.directionalLightCount +
+            controls.maxShadowedLocalLights *
+                controls.rectangleShadowSampleCount;
     }
 
     void Record(
@@ -1294,6 +1343,28 @@ struct VulkanHybridReflectionRayQuery::Impl {
             result.finiteRadianceCount > 0u ? values[56] : 0u;
         result.radianceLuminanceMaxMilliunits = values[57];
         result.radianceChecksum = values[58];
+        result.shadowVisibilityResolvedCount = values[59];
+        result.shadowRayCount = values[60];
+        result.shadowVisibleCount = values[61];
+        result.shadowOccludedCount = values[62];
+        result.shadowInvalidCount = values[63];
+        result.directionalShadowRayCount = values[64];
+        result.pointShadowRayCount = values[65];
+        result.spotShadowRayCount = values[66];
+        result.rectShadowRayCount = values[67];
+        result.localShadowCandidateCount = values[68];
+        result.localShadowSelectedCount = values[69];
+        result.localShadowDroppedCount = values[70];
+        result.unshadowedDirectLuminanceSumMilliunits = values[71];
+        result.visibleDirectLuminanceSumMilliunits = values[72];
+        result.shadowSelfIntersectionCandidateCount = values[73];
+        result.shadowHitDistanceMinMillimeters =
+            result.shadowOccludedCount > 0u ? values[74] : 0u;
+        result.shadowHitDistanceMaxMillimeters = values[75];
+        result.shadowVisibilityMinPermille =
+            result.shadowVisibilityResolvedCount > 0u ? values[76] : 0u;
+        result.shadowVisibilityMaxPermille = values[77];
+        result.localShadowDroppedLuminanceSumMilliunits = values[78];
         return result;
 #endif
     }
@@ -1388,6 +1459,7 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     bool hitAttributesEnabled,
     bool materialTexturesEnabled,
     bool hitLightingEnabled,
+    bool shadowVisibilityEnabled,
     u32 directionalLightCount,
     u32 localLightCount,
     const HybridReflectionRayQuerySettings& settings,
@@ -1403,6 +1475,7 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         hitAttributesEnabled,
         materialTexturesEnabled,
         hitLightingEnabled,
+        shadowVisibilityEnabled,
         directionalLightCount,
         localLightCount,
         settings,

@@ -54,6 +54,10 @@ struct HybridMaterialRecord {
     uint g_hit_lighting_visibility_mode;
     uint g_ibl_resources_ready;
     uint g_hit_lighting_reserved;
+    uint g_shadow_visibility_enabled;
+    uint g_shadow_visibility_contract_version;
+    uint g_max_shadowed_local_lights;
+    uint g_rectangle_shadow_sample_count;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -133,9 +137,30 @@ static const uint kDiagnosticEmissiveLuminanceSumMilliunits = 55u;
 static const uint kDiagnosticRadianceLuminanceMinMilliunits = 56u;
 static const uint kDiagnosticRadianceLuminanceMaxMilliunits = 57u;
 static const uint kDiagnosticRadianceChecksum = 58u;
+static const uint kDiagnosticShadowVisibilityResolvedCount = 59u;
+static const uint kDiagnosticShadowRayCount = 60u;
+static const uint kDiagnosticShadowVisibleCount = 61u;
+static const uint kDiagnosticShadowOccludedCount = 62u;
+static const uint kDiagnosticShadowInvalidCount = 63u;
+static const uint kDiagnosticDirectionalShadowRayCount = 64u;
+static const uint kDiagnosticPointShadowRayCount = 65u;
+static const uint kDiagnosticSpotShadowRayCount = 66u;
+static const uint kDiagnosticRectShadowRayCount = 67u;
+static const uint kDiagnosticLocalShadowCandidateCount = 68u;
+static const uint kDiagnosticLocalShadowSelectedCount = 69u;
+static const uint kDiagnosticLocalShadowDroppedCount = 70u;
+static const uint kDiagnosticUnshadowedDirectLuminanceSumMilliunits = 71u;
+static const uint kDiagnosticVisibleDirectLuminanceSumMilliunits = 72u;
+static const uint kDiagnosticShadowSelfIntersectionCandidateCount = 73u;
+static const uint kDiagnosticShadowHitDistanceMinMillimeters = 74u;
+static const uint kDiagnosticShadowHitDistanceMaxMillimeters = 75u;
+static const uint kDiagnosticShadowVisibilityMinPermille = 76u;
+static const uint kDiagnosticShadowVisibilityMaxPermille = 77u;
+static const uint kDiagnosticLocalShadowDroppedLuminanceSumMilliunits = 78u;
 
 static const float kPi = 3.14159265359;
 static const uint kMaxLocalLights = 64u;
+static const uint kMaxShadowedLocalLights = 8u;
 static const uint kLightDirectionalOffset = 0u;
 static const uint kLightAmbientOffset = 16u;
 static const uint kLightCountsOffset = 32u;
@@ -288,6 +313,110 @@ float FiniteRadiusAttenuation(float distanceToLight, float radius) {
     return window * window;
 }
 
+float OffsetRayOriginComponent(float position, float normal) {
+    static const float kOrigin = 1.0 / 32.0;
+    static const float kFloatScale = 1.0 / 65536.0;
+    static const int kIntegerScale = 256;
+    int integerOffset = int(float(kIntegerScale) * normal);
+    float integerPosition = asfloat(
+        asint(position) + (position < 0.0 ? -integerOffset : integerOffset)
+    );
+    return abs(position) < kOrigin
+        ? position + kFloatScale * normal
+        : integerPosition;
+}
+
+float3 OffsetRayOrigin(float3 position, float3 normal) {
+    return float3(
+        OffsetRayOriginComponent(position.x, normal.x),
+        OffsetRayOriginComponent(position.y, normal.y),
+        OffsetRayOriginComponent(position.z, normal.z)
+    );
+}
+
+float TraceShadowVisibility(
+    float3 worldPosition,
+    float3 worldNormal,
+    float3 lightDirection,
+    float maximumDistance,
+    uint sourceInstanceId,
+    uint lightKind
+) {
+    DiagnosticAdd(kDiagnosticShadowRayCount, 1u);
+    DiagnosticAdd(
+        lightKind == 0u
+            ? kDiagnosticDirectionalShadowRayCount
+            : lightKind == 1u
+                ? kDiagnosticPointShadowRayCount
+                : lightKind == 2u
+                    ? kDiagnosticSpotShadowRayCount
+                    : kDiagnosticRectShadowRayCount,
+        1u
+    );
+    if (!all(isfinite(worldPosition)) ||
+        !all(isfinite(worldNormal)) ||
+        !all(isfinite(lightDirection)) ||
+        !isfinite(maximumDistance) ||
+        dot(lightDirection, lightDirection) < 0.99 ||
+        maximumDistance <= 1.0e-4) {
+        DiagnosticAdd(kDiagnosticShadowInvalidCount, 1u);
+        return 0.0;
+    }
+
+    float3 offsetNormal = dot(worldNormal, lightDirection) >= 0.0
+        ? worldNormal
+        : -worldNormal;
+    RayDesc shadowRay;
+    shadowRay.Origin = OffsetRayOrigin(worldPosition, offsetNormal);
+    shadowRay.TMin = 0.0;
+    shadowRay.Direction = lightDirection;
+    shadowRay.TMax = maximumDistance;
+    RayQuery<
+        RAY_FLAG_FORCE_OPAQUE |
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+    > shadowQuery;
+    shadowQuery.TraceRayInline(
+        g_scene_acceleration_structure,
+        RAY_FLAG_NONE,
+        0xffu,
+        shadowRay
+    );
+    while (shadowQuery.Proceed()) {
+    }
+
+    if (shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+        float hitDistance = shadowQuery.CommittedRayT();
+        uint hitDistanceMillimeters = SaturatedMetric(hitDistance, 1000.0);
+        DiagnosticAdd(kDiagnosticShadowOccludedCount, 1u);
+        DiagnosticMin(
+            kDiagnosticShadowHitDistanceMinMillimeters,
+            hitDistanceMillimeters
+        );
+        DiagnosticMax(
+            kDiagnosticShadowHitDistanceMaxMillimeters,
+            hitDistanceMillimeters
+        );
+        float originOffsetDistance = length(
+            shadowRay.Origin - worldPosition
+        );
+        float selfIntersectionThreshold = max(
+            originOffsetDistance * 2.0,
+            1.0e-6
+        );
+        if (shadowQuery.CommittedInstanceID() == sourceInstanceId &&
+            hitDistance <= selfIntersectionThreshold) {
+            DiagnosticAdd(
+                kDiagnosticShadowSelfIntersectionCandidateCount,
+                1u
+            );
+        }
+        return 0.0;
+    }
+
+    DiagnosticAdd(kDiagnosticShadowVisibleCount, 1u);
+    return 1.0;
+}
+
 float3 EvaluatePointOrSpotLight(
     HitLocalLightRecord light,
     uint lightKind,
@@ -341,8 +470,11 @@ float3 EvaluateRectLight(
     float metallic,
     float roughness,
     float3 normal,
+    float3 shadowOriginNormal,
     float3 viewDirection,
-    float3 worldPosition
+    float3 worldPosition,
+    bool traceVisibility,
+    uint sourceInstanceId
 ) {
     if (light.colorIntensity.w <= 0.0) {
         return 0.0;
@@ -366,9 +498,14 @@ float3 EvaluateRectLight(
         float2(0.57735, 0.57735)
     };
 
+    uint sampleCount = clamp(g_rectangle_shadow_sample_count, 1u, 4u);
+    float sampleWeight = rcp(float(sampleCount));
     float3 result = 0.0;
     [unroll]
     for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex) {
+        if (sampleIndex >= sampleCount) {
+            continue;
+        }
         float3 samplePosition = light.positionRadius.xyz +
             rectTangent * halfSize.x * sampleSigns[sampleIndex].x +
             rectBitangent * halfSize.y * sampleSigns[sampleIndex].y;
@@ -382,7 +519,19 @@ float3 EvaluateRectLight(
         float attenuation = FiniteRadiusAttenuation(distanceToLight, radius) *
             emitterFacing;
         float3 radiance = max(light.colorIntensity.rgb, 0.0) *
-            max(light.colorIntensity.w, 0.0) * attenuation * 0.25;
+            max(light.colorIntensity.w, 0.0) * attenuation * sampleWeight;
+        float visibility = 1.0;
+        if (traceVisibility) {
+            float endpointContraction = max(0.001, distanceToLight * 1.0e-4);
+            visibility = TraceShadowVisibility(
+                worldPosition,
+                shadowOriginNormal,
+                lightDirection,
+                distanceToLight - endpointContraction,
+                sourceInstanceId,
+                3u
+            );
+        }
         result += EvaluateDirectBrdf(
             baseColor,
             metallic,
@@ -390,7 +539,7 @@ float3 EvaluateRectLight(
             normal,
             viewDirection,
             lightDirection,
-            radiance
+            radiance * visibility
         );
     }
     return result;
@@ -402,8 +551,10 @@ bool EvaluateHitRadiance(
     float roughness,
     float3 emissive,
     float3 normal,
+    float3 geometricNormal,
     float3 viewDirection,
     float3 worldPosition,
+    uint sourceInstanceId,
     out float3 directRadiance,
     out float3 iblRadiance,
     out float3 finalRadiance
@@ -412,11 +563,18 @@ bool EvaluateHitRadiance(
     iblRadiance = 0.0;
     finalRadiance = 0.0;
     if (g_ibl_resources_ready == 0u ||
-        g_hit_lighting_visibility_mode != 1u) {
+        (g_hit_lighting_visibility_mode != 1u &&
+            g_hit_lighting_visibility_mode != 2u)) {
         return false;
     }
 
     normal = dot(normal, viewDirection) >= 0.0 ? normal : -normal;
+    geometricNormal = dot(geometricNormal, viewDirection) >= 0.0
+        ? geometricNormal
+        : -geometricNormal;
+    bool shadowVisibilityEnabled =
+        g_shadow_visibility_enabled != 0u &&
+        g_hit_lighting_visibility_mode == 2u;
     float4 directionalLight = LoadLightFloat4(kLightDirectionalOffset);
     float4 ambientLight = LoadLightFloat4(kLightAmbientOffset);
     float4 lightCounts = LoadLightFloat4(kLightCountsOffset);
@@ -427,6 +585,27 @@ bool EvaluateHitRadiance(
     uint localLightCount = min(
         min(g_local_light_count, kMaxLocalLights),
         (uint)clamp(lightCounts.z + 0.5, 0.0, float(kMaxLocalLights))
+    );
+    float3 unshadowedDirectRadiance = 0.0;
+    float3 totalLocalCandidateRadiance = 0.0;
+    float candidateScores[kMaxShadowedLocalLights];
+    float3 candidateContributions[kMaxShadowedLocalLights];
+    uint candidateLightIndices[kMaxShadowedLocalLights];
+    uint candidateLightKinds[kMaxShadowedLocalLights];
+    [unroll]
+    for (uint candidateSlot = 0u;
+        candidateSlot < kMaxShadowedLocalLights;
+        ++candidateSlot) {
+        candidateScores[candidateSlot] = 0.0;
+        candidateContributions[candidateSlot] = 0.0;
+        candidateLightIndices[candidateSlot] = 0u;
+        candidateLightKinds[candidateSlot] = 0u;
+    }
+    uint localCandidateCount = 0u;
+    uint localShadowBudget = clamp(
+        g_max_shadowed_local_lights,
+        1u,
+        kMaxShadowedLocalLights
     );
 
     if (directionalCount > 0u) {
@@ -444,9 +623,22 @@ bool EvaluateHitRadiance(
             lightDirection,
             max(directionalLight.w, 0.0)
         );
-        directRadiance += contribution;
         if (dot(contribution, contribution) > 1.0e-12) {
             DiagnosticAdd(kDiagnosticDirectionalLightContributionCount, 1u);
+            if (shadowVisibilityEnabled) {
+                unshadowedDirectRadiance += contribution;
+                float visibility = TraceShadowVisibility(
+                    worldPosition,
+                    geometricNormal,
+                    lightDirection,
+                    max(g_max_ray_distance, 0.01),
+                    sourceInstanceId,
+                    0u
+                );
+                directRadiance += contribution * visibility;
+            } else {
+                directRadiance += contribution;
+            }
         }
     }
 
@@ -463,8 +655,11 @@ bool EvaluateHitRadiance(
                 metallic,
                 roughness,
                 normal,
+                geometricNormal,
                 viewDirection,
-                worldPosition
+                worldPosition,
+                false,
+                sourceInstanceId
             );
             if (dot(contribution, contribution) > 1.0e-12) {
                 DiagnosticAdd(kDiagnosticRectLightContributionCount, 1u);
@@ -494,7 +689,152 @@ bool EvaluateHitRadiance(
                 );
             }
         }
-        directRadiance += contribution;
+        if (dot(contribution, contribution) > 1.0e-12) {
+            if (!shadowVisibilityEnabled) {
+                directRadiance += contribution;
+                continue;
+            }
+
+            ++localCandidateCount;
+            totalLocalCandidateRadiance += contribution;
+            float candidateScore = dot(
+                contribution,
+                float3(0.2126, 0.7152, 0.0722)
+            );
+            uint insertionSlot = localShadowBudget;
+            [unroll]
+            for (uint candidateSlot = 0u;
+                candidateSlot < kMaxShadowedLocalLights;
+                ++candidateSlot) {
+                if (candidateSlot < localShadowBudget &&
+                    insertionSlot == localShadowBudget &&
+                    candidateScore > candidateScores[candidateSlot]) {
+                    insertionSlot = candidateSlot;
+                }
+            }
+            if (insertionSlot < localShadowBudget) {
+                [unroll]
+                for (int shiftSlot = int(kMaxShadowedLocalLights) - 1;
+                    shiftSlot > 0;
+                    --shiftSlot) {
+                    if (uint(shiftSlot) < localShadowBudget &&
+                        uint(shiftSlot) > insertionSlot) {
+                        candidateScores[shiftSlot] =
+                            candidateScores[shiftSlot - 1];
+                        candidateContributions[shiftSlot] =
+                            candidateContributions[shiftSlot - 1];
+                        candidateLightIndices[shiftSlot] =
+                            candidateLightIndices[shiftSlot - 1];
+                        candidateLightKinds[shiftSlot] =
+                            candidateLightKinds[shiftSlot - 1];
+                    }
+                }
+                candidateScores[insertionSlot] = candidateScore;
+                candidateContributions[insertionSlot] = contribution;
+                candidateLightIndices[insertionSlot] = lightIndex;
+                candidateLightKinds[insertionSlot] = lightKind;
+            }
+        }
+    }
+
+    if (shadowVisibilityEnabled) {
+        uint selectedLocalCount = min(localCandidateCount, localShadowBudget);
+        float3 selectedLocalRadiance = 0.0;
+        [loop]
+        for (uint candidateSlot = 0u;
+            candidateSlot < selectedLocalCount;
+            ++candidateSlot) {
+            uint lightIndex = candidateLightIndices[candidateSlot];
+            uint lightKind = candidateLightKinds[candidateSlot];
+            HitLocalLightRecord light = LoadLocalLight(lightIndex);
+            float3 unshadowedContribution =
+                candidateContributions[candidateSlot];
+            selectedLocalRadiance += unshadowedContribution;
+            unshadowedDirectRadiance += unshadowedContribution;
+            if (lightKind == 2u) {
+                directRadiance += EvaluateRectLight(
+                    light,
+                    baseColor,
+                    metallic,
+                    roughness,
+                    normal,
+                    geometricNormal,
+                    viewDirection,
+                    worldPosition,
+                    true,
+                    sourceInstanceId
+                );
+            } else {
+                float3 toLight = light.positionRadius.xyz - worldPosition;
+                float distanceToLight = length(toLight);
+                float3 lightDirection = toLight /
+                    max(distanceToLight, 0.001);
+                float endpointContraction = max(
+                    0.001,
+                    distanceToLight * 1.0e-4
+                );
+                float visibility = TraceShadowVisibility(
+                    worldPosition,
+                    geometricNormal,
+                    lightDirection,
+                    distanceToLight - endpointContraction,
+                    sourceInstanceId,
+                    lightKind == 1u ? 2u : 1u
+                );
+                directRadiance += unshadowedContribution * visibility;
+            }
+        }
+
+        uint droppedLocalCount = localCandidateCount - selectedLocalCount;
+        float3 droppedLocalRadiance = max(
+            totalLocalCandidateRadiance - selectedLocalRadiance,
+            0.0
+        );
+        float unshadowedLuminance = dot(
+            max(unshadowedDirectRadiance, 0.0),
+            float3(0.2126, 0.7152, 0.0722)
+        );
+        float visibleLuminance = dot(
+            max(directRadiance, 0.0),
+            float3(0.2126, 0.7152, 0.0722)
+        );
+        float visibilityRatio = unshadowedLuminance > 1.0e-8
+            ? saturate(visibleLuminance / unshadowedLuminance)
+            : 1.0;
+        uint visibilityPermille = SaturatedMetric(visibilityRatio, 1000.0);
+        DiagnosticAdd(kDiagnosticShadowVisibilityResolvedCount, 1u);
+        DiagnosticAdd(
+            kDiagnosticLocalShadowCandidateCount,
+            localCandidateCount
+        );
+        DiagnosticAdd(
+            kDiagnosticLocalShadowSelectedCount,
+            selectedLocalCount
+        );
+        DiagnosticAdd(
+            kDiagnosticLocalShadowDroppedCount,
+            droppedLocalCount
+        );
+        DiagnosticAdd(
+            kDiagnosticUnshadowedDirectLuminanceSumMilliunits,
+            BoundedLuminanceMetric(unshadowedDirectRadiance)
+        );
+        DiagnosticAdd(
+            kDiagnosticVisibleDirectLuminanceSumMilliunits,
+            BoundedLuminanceMetric(directRadiance)
+        );
+        DiagnosticAdd(
+            kDiagnosticLocalShadowDroppedLuminanceSumMilliunits,
+            BoundedLuminanceMetric(droppedLocalRadiance)
+        );
+        DiagnosticMin(
+            kDiagnosticShadowVisibilityMinPermille,
+            visibilityPermille
+        );
+        DiagnosticMax(
+            kDiagnosticShadowVisibilityMaxPermille,
+            visibilityPermille
+        );
     }
 
     float nDotV = saturate(dot(normal, viewDirection));
@@ -1042,6 +1382,15 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 length(transformedNormal);
                             float3 worldShadingNormal = transformedNormal /
                                 max(transformedNormalLength, 1.0e-12);
+                            float3 geometricNormalVector = cross(
+                                worldPosition1 - worldPosition0,
+                                worldPosition2 - worldPosition0
+                            );
+                            float geometricNormalLength =
+                                length(geometricNormalVector);
+                            float3 worldGeometricNormal =
+                                geometricNormalVector /
+                                max(geometricNormalLength, 1.0e-12);
                             bool attributesValid =
                                 all(isfinite(objectPosition)) &&
                                 all(isfinite(objectNormal)) &&
@@ -1052,7 +1401,9 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 all(isfinite(worldPosition1)) &&
                                 all(isfinite(worldPosition2)) &&
                                 all(isfinite(worldShadingNormal)) &&
-                                transformedNormalLength > 1.0e-8;
+                                all(isfinite(worldGeometricNormal)) &&
+                                transformedNormalLength > 1.0e-8 &&
+                                geometricNormalLength > 1.0e-8;
                             if (!attributesValid) {
                                 DiagnosticAdd(
                                     kDiagnosticInvalidAttributeValueCount,
@@ -1307,8 +1658,10 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 surfaceRoughness,
                                                 surfaceEmissive,
                                                 worldShadingNormal,
+                                                worldGeometricNormal,
                                                 hitViewDirection,
                                                 worldPosition,
+                                                instanceId,
                                                 directRadiance,
                                                 iblRadiance,
                                                 finalRadiance

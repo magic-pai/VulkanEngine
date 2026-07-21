@@ -120,6 +120,7 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF",
     "SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF",
     "SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF",
+    "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF",
     "SE_SSR",
     "SE_SSR_BACKEND",
     "SE_FORWARD3D_AA_MODE",
@@ -155,6 +156,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
         }
@@ -168,6 +170,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
@@ -183,6 +186,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF = "1"
@@ -197,6 +201,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 1
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF = "1"
@@ -211,6 +216,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 1
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF = "1"
@@ -225,9 +231,25 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 1
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-shadow-visibility-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 0
+        shadowVisibilityDisabled = 1
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF = "1"
         }
     },
     [pscustomobject]@{
@@ -239,6 +261,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RT_OFF = "1"
@@ -253,6 +276,7 @@ $laneSpecs = @(
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
         hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
         environment = @{
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
             SE_LIGHTING_SHOWCASE_FORCE_OFF = "1"
@@ -305,11 +329,13 @@ foreach ($lane in $laneSpecs) {
             $rayQueryHitAttributeContract = Get-UIntValue $last "hybrid_reflections_ray_query_hit_attribute_contract_version"
             $rayQueryMaterialTableContract = Get-UIntValue $last "hybrid_reflections_ray_query_material_table_contract_version"
             $rayQueryHitLightingContract = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_contract_version"
+            $rayQueryShadowVisibilityContract = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_visibility_contract_version"
             $rayQueryConsumerRequested = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_requested"
             $rayQueryConsumerDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_control_disabled"
             $rayQueryHitAttributeDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_attribute_control_disabled"
             $rayQueryMaterialTexturesDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_material_texture_control_disabled"
             $rayQueryHitLightingDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_control_disabled"
+            $rayQueryShadowVisibilityDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_visibility_control_disabled"
             $bdaExtension = Get-UIntValue $last "hybrid_reflections_buffer_device_address_extension_supported"
             $deferredExtension = Get-UIntValue $last "hybrid_reflections_deferred_host_operations_extension_supported"
             $asExtension = Get-UIntValue $last "hybrid_reflections_acceleration_structure_extension_supported"
@@ -384,6 +410,10 @@ foreach ($lane in $laneSpecs) {
             $localLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_local_light_count"
             $hitLightingVisibilityMode = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_visibility_mode"
             $hitLightingVisibilityFallback = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_visibility_fallback_reason"
+            $shadowVisibilityResourcesReady = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_visibility_resources_ready"
+            $shadowMaxLocalLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_max_local_light_count"
+            $shadowRectangleSampleCount = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_rectangle_sample_count"
+            $shadowMaxRaysPerHit = Get-UIntValue $last "hybrid_reflections_ray_query_shadow_max_rays_per_hit"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
             $rayQueryReadbackRows = @(
@@ -455,6 +485,26 @@ foreach ($lane in $laneSpecs) {
             $radianceLuminanceMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_luminance_min_milliunits"
             $radianceLuminanceMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_luminance_max_milliunits"
             $radianceChecksum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_checksum"
+            $shadowVisibilityResolvedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visibility_resolved_count"
+            $shadowRayCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_ray_count"
+            $shadowVisibleCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visible_count"
+            $shadowOccludedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_occluded_count"
+            $shadowInvalidCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_invalid_count"
+            $directionalShadowRayCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_directional_shadow_ray_count"
+            $pointShadowRayCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_point_shadow_ray_count"
+            $spotShadowRayCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_spot_shadow_ray_count"
+            $rectShadowRayCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_rect_shadow_ray_count"
+            $localShadowCandidateCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_local_shadow_candidate_count"
+            $localShadowSelectedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_local_shadow_selected_count"
+            $localShadowDroppedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_local_shadow_dropped_count"
+            $unshadowedDirectLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_unshadowed_direct_luminance_sum_milliunits"
+            $visibleDirectLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_visible_direct_luminance_sum_milliunits"
+            $shadowSelfIntersectionCandidateCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_self_intersection_candidate_count"
+            $shadowHitDistanceMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_hit_distance_min_millimeters"
+            $shadowHitDistanceMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_hit_distance_max_millimeters"
+            $shadowVisibilityMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visibility_min_permille"
+            $shadowVisibilityMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_shadow_visibility_max_permille"
+            $localShadowDroppedLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_local_shadow_dropped_luminance_sum_milliunits"
             $invalidHitAttributeCount =
                 [uint64]$hitAttributeInvalidInstanceCount +
                 [uint64]$hitAttributeInvalidPrimitiveCount +
@@ -489,6 +539,30 @@ foreach ($lane in $laneSpecs) {
             ) | Where-Object { $_ -ne 0 })
             $hitLightingDiagnosticsSuppressed =
                 $hitLightingDiagnosticsSuppressed.Count -eq 0
+            $shadowVisibilityDiagnosticsSuppressed = @(@(
+                $shadowVisibilityResolvedCount,
+                $shadowRayCount,
+                $shadowVisibleCount,
+                $shadowOccludedCount,
+                $shadowInvalidCount,
+                $directionalShadowRayCount,
+                $pointShadowRayCount,
+                $spotShadowRayCount,
+                $rectShadowRayCount,
+                $localShadowCandidateCount,
+                $localShadowSelectedCount,
+                $localShadowDroppedCount,
+                $unshadowedDirectLuminanceSum,
+                $visibleDirectLuminanceSum,
+                $shadowSelfIntersectionCandidateCount,
+                $shadowHitDistanceMin,
+                $shadowHitDistanceMax,
+                $shadowVisibilityMin,
+                $shadowVisibilityMax,
+                $localShadowDroppedLuminanceSum
+            ) | Where-Object { $_ -ne 0 })
+            $shadowVisibilityDiagnosticsSuppressed =
+                $shadowVisibilityDiagnosticsSuppressed.Count -eq 0
             $maxBlasBuildCount = [uint32](($rows | ForEach-Object {
                     Get-UIntValue $_ "hybrid_reflections_blas_build_count"
                 } | Measure-Object -Maximum).Maximum)
@@ -531,6 +605,9 @@ foreach ($lane in $laneSpecs) {
             $hitLightingResolutionExpected =
                 $materialTextureResolutionExpected -and
                 $lane.hitLightingDisabled -eq 0
+            $shadowVisibilityResolutionExpected =
+                $hitLightingResolutionExpected -and
+                $lane.shadowVisibilityDisabled -eq 0
             $expectedRayQueryConsumerContract = if ($runtimeResourcesExpected) {
                 2
             } else {
@@ -547,6 +624,11 @@ foreach ($lane in $laneSpecs) {
                 0
             }
             $expectedHitLightingContract = if ($runtimeResourcesExpected) {
+                1
+            } else {
+                0
+            }
+            $expectedShadowVisibilityContract = if ($runtimeResourcesExpected) {
                 1
             } else {
                 0
@@ -582,6 +664,11 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) hit-lighting control state" `
                 ($rayQueryHitLightingDisabled -eq $lane.hitLightingDisabled) `
                 $rayQueryHitLightingDisabled $lane.hitLightingDisabled)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) shadow-visibility control state" `
+                ($rayQueryShadowVisibilityDisabled -eq `
+                    $lane.shadowVisibilityDisabled) `
+                $rayQueryShadowVisibilityDisabled `
+                $lane.shadowVisibilityDisabled)) | Out-Null
             $checks.Add((New-Check "$($lane.name) hardware readiness is coherent" `
                 ($hardwareReady -eq [uint32]($extensionReady -and $featureReady)) `
                 "hardware=$hardwareReady,extensions=$extensionReady,features=$featureReady" `
@@ -607,6 +694,11 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) hit-lighting contract" `
                 ($rayQueryHitLightingContract -eq $expectedHitLightingContract) `
                 $rayQueryHitLightingContract $expectedHitLightingContract)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) shadow-visibility contract" `
+                ($rayQueryShadowVisibilityContract -eq `
+                    $expectedShadowVisibilityContract) `
+                $rayQueryShadowVisibilityContract `
+                $expectedShadowVisibilityContract)) | Out-Null
             if ($runtimeResourcesExpected) {
                 $resourcesReady =
                     $accelerationStructureResourcesReady -eq 1 -and
@@ -696,8 +788,27 @@ foreach ($lane in $laneSpecs) {
                     $hitLightingResourceContractValid `
                     "resources=$hitLightingResourcesReady,light=$lightBufferDescriptorReady,ibl=$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady,mips=$iblPrefilteredMipCount,lights=$directionalLightCount+$localLightCount" `
                     "resources/light/ibl=1,mips>0,directional<=1,local<=64")) | Out-Null
-                $expectedVisibilityMode = if ($hitLightingResolutionExpected) { 1 } else { 0 }
-                $expectedVisibilityFallback = if ($hitLightingResolutionExpected) { 1 } else { 0 }
+                $shadowBudgetContractValid =
+                    $shadowVisibilityResourcesReady -eq 1 -and
+                    $shadowMaxLocalLightCount -eq 8 -and
+                    $shadowRectangleSampleCount -eq 4 -and
+                    $shadowMaxRaysPerHit -eq
+                        ($directionalLightCount + 32)
+                $checks.Add((New-Check "$($lane.name) shadow-ray budget is bounded" `
+                    $shadowBudgetContractValid `
+                    "resources=$shadowVisibilityResourcesReady,local=$shadowMaxLocalLightCount,rectSamples=$shadowRectangleSampleCount,maxRays=$shadowMaxRaysPerHit" `
+                    "resources=1,local=8,rectSamples=4,maxRays=directional+32")) | Out-Null
+                $expectedVisibilityMode = if ($shadowVisibilityResolutionExpected) {
+                    2
+                } elseif ($hitLightingResolutionExpected) {
+                    1
+                } else {
+                    0
+                }
+                $expectedVisibilityFallback = if (
+                    $hitLightingResolutionExpected -and
+                    !$shadowVisibilityResolutionExpected
+                ) { 1 } else { 0 }
                 $checks.Add((New-Check "$($lane.name) off-screen visibility mode is explicit" `
                     ($hitLightingVisibilityMode -eq $expectedVisibilityMode -and `
                         $hitLightingVisibilityFallback -eq $expectedVisibilityFallback) `
@@ -861,9 +972,63 @@ foreach ($lane in $laneSpecs) {
                                     $lightEvaluationContractValid `
                                     "lights=$directionalLightCount+$localLightCount,evaluations=$directionalLightEvaluationCount/$pointLightEvaluationCount/$spotLightEvaluationCount/$rectLightEvaluationCount,contributions=$directionalLightContributionCount/$pointLightContributionCount/$spotLightContributionCount/$rectLightContributionCount" `
                                     "configured kinds evaluated,contributions<=evaluations")) | Out-Null
+                                if ($shadowVisibilityResolutionExpected) {
+                                    $shadowRayEquation =
+                                        [uint64]$shadowRayCount -eq
+                                        ([uint64]$shadowVisibleCount +
+                                            [uint64]$shadowOccludedCount +
+                                            [uint64]$shadowInvalidCount)
+                                    $shadowKindEquation =
+                                        [uint64]$shadowRayCount -eq
+                                        ([uint64]$directionalShadowRayCount +
+                                            [uint64]$pointShadowRayCount +
+                                            [uint64]$spotShadowRayCount +
+                                            [uint64]$rectShadowRayCount)
+                                    $shadowBudgetValid =
+                                        $shadowVisibilityResolvedCount -eq
+                                            $hitLightingResolvedCount -and
+                                        $shadowRayCount -gt 0 -and
+                                        [uint64]$shadowRayCount -le
+                                            ([uint64]$hitLightingResolvedCount *
+                                                [uint64]$shadowMaxRaysPerHit) -and
+                                        $shadowRayEquation -and
+                                        $shadowKindEquation -and
+                                        $localShadowCandidateCount -eq
+                                            ($localShadowSelectedCount +
+                                                $localShadowDroppedCount) -and
+                                        [uint64]$localShadowSelectedCount -le
+                                            ([uint64]$hitLightingResolvedCount *
+                                                [uint64]$shadowMaxLocalLightCount)
+                                    $checks.Add((New-Check "$($lane.name) shadow rays obey the per-hit budget" `
+                                        $shadowBudgetValid `
+                                        "resolved=$shadowVisibilityResolvedCount,rays=$shadowRayCount=$shadowVisibleCount+$shadowOccludedCount+$shadowInvalidCount,kinds=$directionalShadowRayCount+$pointShadowRayCount+$spotShadowRayCount+$rectShadowRayCount,local=$localShadowCandidateCount=$localShadowSelectedCount+$localShadowDroppedCount,max=$shadowMaxRaysPerHit" `
+                                        "resolved=lighting,rays=visible+occluded+invalid=kinds,0<rays<=resolved*max,candidates=selected+dropped")) | Out-Null
+                                    $shadowVisibilityValuesValid =
+                                        $shadowInvalidCount -eq 0 -and
+                                        $shadowSelfIntersectionCandidateCount -eq 0 -and
+                                        $shadowVisibleCount -gt 0 -and
+                                        $shadowOccludedCount -gt 0 -and
+                                        $visibleDirectLuminanceSum -le
+                                            $unshadowedDirectLuminanceSum -and
+                                        $shadowVisibilityMin -le
+                                            $shadowVisibilityMax -and
+                                        $shadowVisibilityMax -le 1000 -and
+                                        $shadowHitDistanceMax -ge
+                                            $shadowHitDistanceMin
+                                    $checks.Add((New-Check "$($lane.name) shadow visibility is finite and non-self-intersecting" `
+                                        $shadowVisibilityValuesValid `
+                                        "invalid=$shadowInvalidCount,self=$shadowSelfIntersectionCandidateCount,visible/occluded=$shadowVisibleCount/$shadowOccludedCount,direct=$visibleDirectLuminanceSum<=$unshadowedDirectLuminanceSum,visibility=$shadowVisibilityMin..$shadowVisibilityMax,hitMm=$shadowHitDistanceMin..$shadowHitDistanceMax,droppedEnergy=$localShadowDroppedLuminanceSum" `
+                                        "invalid/self=0,visible/occluded>0,visibleDirect<=unshadowed,visibility=0..1000,hit distance ordered")) | Out-Null
+                                } else {
+                                    $checks.Add((New-Check "$($lane.name) shadow visibility is suppressed" `
+                                        $shadowVisibilityDiagnosticsSuppressed `
+                                        "resolved=$shadowVisibilityResolvedCount,rays=$shadowRayCount,visible/occluded/invalid=$shadowVisibleCount/$shadowOccludedCount/$shadowInvalidCount" `
+                                        "all=0 while hit lighting remains independently controlled")) | Out-Null
+                                }
                             } else {
                                 $checks.Add((New-Check "$($lane.name) hit lighting is suppressed" `
-                                    $hitLightingDiagnosticsSuppressed `
+                                    ($hitLightingDiagnosticsSuppressed -and `
+                                        $shadowVisibilityDiagnosticsSuppressed) `
                                     "resolved=$hitLightingResolvedCount,invalid=$hitLightingInvalidCount,payload=$hitSurfacePayloadWriteCount,checksum=$radianceChecksum" `
                                     "all lighting/payload diagnostics=0 while material sampling remains active")) | Out-Null
                             }
@@ -877,7 +1042,8 @@ foreach ($lane in $laneSpecs) {
                                 $finiteSampledColorCount -eq 0 -and
                                 $sampleLodMin -eq 0 -and
                                 $sampleLodMax -eq 0 -and
-                                $hitLightingDiagnosticsSuppressed
+                                $hitLightingDiagnosticsSuppressed -and
+                                $shadowVisibilityDiagnosticsSuppressed
                             $checks.Add((New-Check "$($lane.name) material sampling is suppressed" `
                                 $materialSamplingSuppressed `
                                 "records=$materialRecordResolvedCount/$materialRecordFallbackCount,samples=$textureSampleResolvedCount/$textureSampleFallbackCount/$textureSampleInvalidCount,payload=$hitSurfacePayloadWriteCount/$hitSurfacePayloadChecksum" `
@@ -910,7 +1076,8 @@ foreach ($lane in $laneSpecs) {
                             $hitSurfacePayloadChecksum -eq 0 -and
                             $hitSurfaceLuminanceMin -eq 0 -and
                             $hitSurfaceLuminanceMax -eq 0 -and
-                            $hitLightingDiagnosticsSuppressed
+                            $hitLightingDiagnosticsSuppressed -and
+                            $shadowVisibilityDiagnosticsSuppressed
                         $checks.Add((New-Check "$($lane.name) hit attributes are suppressed" `
                             $hitAttributesSuppressed `
                             "resolved=$hitAttributeResolvedCount,invalid=$invalidHitAttributeCount,material=$hitAttributeMaterialResolvedCount/$hitAttributeMaterialFallbackCount,checksums=$hitAttributeIdentityChecksum/$hitAttributePrimitiveChecksum/$hitAttributeMaterialChecksum" `
@@ -976,11 +1143,13 @@ foreach ($lane in $laneSpecs) {
                 rayQueryHitAttributeContract = $rayQueryHitAttributeContract
                 rayQueryMaterialTableContract = $rayQueryMaterialTableContract
                 rayQueryHitLightingContract = $rayQueryHitLightingContract
+                rayQueryShadowVisibilityContract = $rayQueryShadowVisibilityContract
                 rayQueryConsumerRequested = $rayQueryConsumerRequested
                 rayQueryConsumerDisabled = $rayQueryConsumerDisabled
                 rayQueryHitAttributeDisabled = $rayQueryHitAttributeDisabled
                 rayQueryMaterialTexturesDisabled = $rayQueryMaterialTexturesDisabled
                 rayQueryHitLightingDisabled = $rayQueryHitLightingDisabled
+                rayQueryShadowVisibilityDisabled = $rayQueryShadowVisibilityDisabled
                 hardwareReady = $hardwareReady
                 shaderInt64FeatureSupported = $shaderInt64Feature
                 shaderInt64DeviceEnabled = $shaderInt64Enabled
@@ -1025,6 +1194,8 @@ foreach ($lane in $laneSpecs) {
                 hitLightingDescriptors = "$lightBufferDescriptorReady/$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady"
                 hitLightingLightCounts = "$directionalLightCount+$localLightCount"
                 hitLightingVisibility = "$hitLightingVisibilityMode/$hitLightingVisibilityFallback"
+                shadowVisibilityResourcesReady = $shadowVisibilityResourcesReady
+                shadowRayBudget = "$shadowMaxLocalLightCount/$shadowRectangleSampleCount/$shadowMaxRaysPerHit"
                 rayQueryDispatchReady = $rayQueryDispatchReady
                 rayQueryDispatchCount = $rayQueryDispatchCount
                 rayQueryReadbackValid = $rayQueryReadbackValid
@@ -1064,6 +1235,16 @@ foreach ($lane in $laneSpecs) {
                 hitLightingEnergyMilliunits = "$directLuminanceSum/$iblLuminanceSum/$emissiveLuminanceSum"
                 hitLightingRadianceRange = "$radianceLuminanceMin..$radianceLuminanceMax"
                 hitLightingRadianceChecksum = $radianceChecksum
+                shadowVisibilityResolved = $shadowVisibilityResolvedCount
+                shadowRays = $shadowRayCount
+                shadowOutcomes = "$shadowVisibleCount/$shadowOccludedCount/$shadowInvalidCount"
+                shadowRaysByKind = "$directionalShadowRayCount/$pointShadowRayCount/$spotShadowRayCount/$rectShadowRayCount"
+                localShadowSelection = "$localShadowCandidateCount/$localShadowSelectedCount/$localShadowDroppedCount"
+                shadowDirectEnergyMilliunits = "$unshadowedDirectLuminanceSum/$visibleDirectLuminanceSum"
+                shadowSelfIntersectionCandidates = $shadowSelfIntersectionCandidateCount
+                shadowHitDistanceMillimeters = "$shadowHitDistanceMin..$shadowHitDistanceMax"
+                shadowVisibilityPermille = "$shadowVisibilityMin..$shadowVisibilityMax"
+                localShadowDroppedEnergyMilliunits = $localShadowDroppedLuminanceSum
                 active = $active
                 fallbackReason = $fallback
             }

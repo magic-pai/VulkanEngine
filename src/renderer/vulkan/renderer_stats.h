@@ -556,6 +556,7 @@ struct RendererHybridReflectionStats {
     u32 rayQueryHitAttributeContractVersion = 0;
     u32 rayQueryMaterialTableContractVersion = 0;
     u32 rayQueryHitLightingContractVersion = 0;
+    u32 rayQueryShadowVisibilityContractVersion = 0;
     u32 requested = 0;
     u32 controlDisabled = 0;
     u32 rayQueryConsumerRequested = 0;
@@ -563,6 +564,7 @@ struct RendererHybridReflectionStats {
     u32 rayQueryHitAttributeControlDisabled = 0;
     u32 rayQueryMaterialTextureControlDisabled = 0;
     u32 rayQueryHitLightingControlDisabled = 0;
+    u32 rayQueryShadowVisibilityControlDisabled = 0;
     u32 bufferDeviceAddressExtensionSupported = 0;
     u32 deferredHostOperationsExtensionSupported = 0;
     u32 accelerationStructureExtensionSupported = 0;
@@ -649,6 +651,10 @@ struct RendererHybridReflectionStats {
     u32 rayQueryLocalLightCount = 0;
     u32 rayQueryHitLightingVisibilityMode = 0;
     u32 rayQueryHitLightingVisibilityFallbackReason = 0;
+    u32 rayQueryShadowVisibilityResourcesReady = 0;
+    u32 rayQueryShadowMaxLocalLightCount = 0;
+    u32 rayQueryShadowRectangleSampleCount = 0;
+    u32 rayQueryShadowMaxRaysPerHit = 0;
     u32 rayQueryReadbackValid = 0;
     u32 rayQueryCandidateRayCount = 0;
     u32 rayQueryScreenHitAcceptedCount = 0;
@@ -709,6 +715,26 @@ struct RendererHybridReflectionStats {
     u32 rayQueryRadianceLuminanceMinMilliunits = 0;
     u32 rayQueryRadianceLuminanceMaxMilliunits = 0;
     u32 rayQueryRadianceChecksum = 0;
+    u32 rayQueryShadowVisibilityResolvedCount = 0;
+    u32 rayQueryShadowRayCount = 0;
+    u32 rayQueryShadowVisibleCount = 0;
+    u32 rayQueryShadowOccludedCount = 0;
+    u32 rayQueryShadowInvalidCount = 0;
+    u32 rayQueryDirectionalShadowRayCount = 0;
+    u32 rayQueryPointShadowRayCount = 0;
+    u32 rayQuerySpotShadowRayCount = 0;
+    u32 rayQueryRectShadowRayCount = 0;
+    u32 rayQueryLocalShadowCandidateCount = 0;
+    u32 rayQueryLocalShadowSelectedCount = 0;
+    u32 rayQueryLocalShadowDroppedCount = 0;
+    u32 rayQueryUnshadowedDirectLuminanceSumMilliunits = 0;
+    u32 rayQueryVisibleDirectLuminanceSumMilliunits = 0;
+    u32 rayQueryShadowSelfIntersectionCandidateCount = 0;
+    u32 rayQueryShadowHitDistanceMinMillimeters = 0;
+    u32 rayQueryShadowHitDistanceMaxMillimeters = 0;
+    u32 rayQueryShadowVisibilityMinPermille = 0;
+    u32 rayQueryShadowVisibilityMaxPermille = 0;
+    u32 rayQueryLocalShadowDroppedLuminanceSumMilliunits = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,

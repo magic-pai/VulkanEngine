@@ -26,6 +26,8 @@ struct HybridReflectionRayQuerySettings {
     f32 originBiasMin = 0.002f;
     f32 originBiasScale = 0.00025f;
     f32 originBiasMax = 0.05f;
+    u32 maxShadowedLocalLights = 8u;
+    u32 rectangleShadowSampleCount = 4u;
 };
 
 struct HybridReflectionRayQueryDiagnostics {
@@ -89,6 +91,26 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 radianceLuminanceMinMilliunits = 0u;
     u32 radianceLuminanceMaxMilliunits = 0u;
     u32 radianceChecksum = 0u;
+    u32 shadowVisibilityResolvedCount = 0u;
+    u32 shadowRayCount = 0u;
+    u32 shadowVisibleCount = 0u;
+    u32 shadowOccludedCount = 0u;
+    u32 shadowInvalidCount = 0u;
+    u32 directionalShadowRayCount = 0u;
+    u32 pointShadowRayCount = 0u;
+    u32 spotShadowRayCount = 0u;
+    u32 rectShadowRayCount = 0u;
+    u32 localShadowCandidateCount = 0u;
+    u32 localShadowSelectedCount = 0u;
+    u32 localShadowDroppedCount = 0u;
+    u32 unshadowedDirectLuminanceSumMilliunits = 0u;
+    u32 visibleDirectLuminanceSumMilliunits = 0u;
+    u32 shadowSelfIntersectionCandidateCount = 0u;
+    u32 shadowHitDistanceMinMillimeters = 0u;
+    u32 shadowHitDistanceMaxMillimeters = 0u;
+    u32 shadowVisibilityMinPermille = 0u;
+    u32 shadowVisibilityMaxPermille = 0u;
+    u32 localShadowDroppedLuminanceSumMilliunits = 0u;
 };
 
 class VulkanHybridReflectionRayQuery {
@@ -126,6 +148,7 @@ public:
         bool hitAttributesEnabled,
         bool materialTexturesEnabled,
         bool hitLightingEnabled,
+        bool shadowVisibilityEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,
