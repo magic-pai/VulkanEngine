@@ -2972,3 +2972,37 @@ Validation:
 - LightingShowcase resolved `57967` hits/samples/payloads across `51` instances and `17` materials; animated FBX resolved `3043` across `8` rigid instances and `6` materials with one explicit skinned fallback.
 - `spirv-val --target-env vulkan1.2` passed; disassembly contains `SPV_EXT_descriptor_indexing`, `ShaderNonUniform`, two `NonUniform` indices, bindings `13/14/15`, and `Rgba16f`.
 - Debug Forward3D, Debug LightingShowcase, and Release Forward3D builds passed; FidelityFX SSSR remained `1115 / 0` and SSR/Hi-Z remained `809 / 0`.
+
+## 2026-07-22 - Off-Screen Hit Lighting Cannot Reuse Screen-Space Light Ownership
+
+Symptom:
+- Ray Query had valid geometry, material identity, sampled albedo, and an independent carrier, but the payload was only a surface seed rather than reflected radiance.
+- The deferred path's per-tile light lists and camera-relative shadow atlases looked reusable, but they do not cover arbitrary off-screen hit positions.
+
+False leads:
+- Sampling only the environment and calling the result hybrid hit shading.
+- Reusing the source screen pixel's tile-light list for a secondary hit elsewhere in the scene.
+- Sampling directional/local shadow atlases whose coverage and projection were selected for the camera-visible receiver rather than the off-screen hit.
+
+Cause:
+- A secondary hit owns a different world position, normal, outgoing direction, and light set than the screen-space source pixel. Its lighting must consume scene-owned bounded lights directly, and its visibility needs either spatially valid world-space data or new shadow Ray Queries.
+
+Control test:
+- Run LightingShowcase and the animated FBX scene with the normal path and with `SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF=1` while material textures stay enabled.
+- Require `texture samples = hit-lighting resolved = finite direct = finite IBL = finite emissive = finite final radiance = carrier writes`, zero invalid radiance, nonzero energy/checksum, and bounded per-kind evaluation/contribution counts.
+- Keep consumer-off, hit-attribute-off, material-texture-off, RT-off, and not-requested lanes to prove dependency suppression and resource ownership.
+
+Fix:
+- Bind the full-scene light storage buffer and the existing BRDF LUT/irradiance/prefiltered IBL resources to the Ray Query consumer.
+- Evaluate Cook-Torrance GGX/Smith/Schlick direct lighting for the bounded directional, point, spot, and four-sample rectangle lights, then add split-sum IBL and emissive radiance.
+- Keep the output independent and publish visibility mode `unshadowed seed / shadow Ray Query pending`; do not compose it visibly yet.
+
+Prevention:
+- Never use screen-tile identities for an off-screen world-space hit.
+- Never label unshadowed direct radiance as final hit lighting; expose visibility mode and fallback explicitly.
+- Paired raster/ray paths must share the BRDF/material/light semantics before visible blending, and must have conservation checks that survive each dependency-off control.
+
+Validation:
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict` passed `255 / 0` across eight lanes with zero Vulkan diagnostics.
+- LightingShowcase resolved `57,979` finite radiance hits from `1 + 11` lights; animated FBX resolved `3,052` from `1 + 3`, both with zero invalid radiance.
+- DXC and `spirv-val --target-env vulkan1.2` passed for the updated Ray Query shader.

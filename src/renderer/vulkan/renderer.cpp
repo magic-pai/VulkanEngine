@@ -5837,6 +5837,10 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF")
             ? 1u
             : 0u;
+    hybridReflections.rayQueryHitLightingControlDisabled =
+        EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF")
+            ? 1u
+            : 0u;
     hybridReflections.bufferDeviceAddressExtensionSupported =
         rayTracingCapabilities.bufferDeviceAddressExtensionSupported ? 1u : 0u;
     hybridReflections.deferredHostOperationsExtensionSupported =
@@ -6032,6 +6036,46 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.hitSurfaceLuminanceMinMilliunits;
     hybridReflections.rayQueryHitSurfaceLuminanceMaxMilliunits =
         hybridRayQueryDiagnostics.hitSurfaceLuminanceMaxMilliunits;
+    hybridReflections.rayQueryHitLightingResolvedCount =
+        hybridRayQueryDiagnostics.hitLightingResolvedCount;
+    hybridReflections.rayQueryHitLightingInvalidCount =
+        hybridRayQueryDiagnostics.hitLightingInvalidCount;
+    hybridReflections.rayQueryDirectionalLightEvaluationCount =
+        hybridRayQueryDiagnostics.directionalLightEvaluationCount;
+    hybridReflections.rayQueryDirectionalLightContributionCount =
+        hybridRayQueryDiagnostics.directionalLightContributionCount;
+    hybridReflections.rayQueryPointLightEvaluationCount =
+        hybridRayQueryDiagnostics.pointLightEvaluationCount;
+    hybridReflections.rayQueryPointLightContributionCount =
+        hybridRayQueryDiagnostics.pointLightContributionCount;
+    hybridReflections.rayQuerySpotLightEvaluationCount =
+        hybridRayQueryDiagnostics.spotLightEvaluationCount;
+    hybridReflections.rayQuerySpotLightContributionCount =
+        hybridRayQueryDiagnostics.spotLightContributionCount;
+    hybridReflections.rayQueryRectLightEvaluationCount =
+        hybridRayQueryDiagnostics.rectLightEvaluationCount;
+    hybridReflections.rayQueryRectLightContributionCount =
+        hybridRayQueryDiagnostics.rectLightContributionCount;
+    hybridReflections.rayQueryFiniteDirectRadianceCount =
+        hybridRayQueryDiagnostics.finiteDirectRadianceCount;
+    hybridReflections.rayQueryFiniteIblRadianceCount =
+        hybridRayQueryDiagnostics.finiteIblRadianceCount;
+    hybridReflections.rayQueryFiniteEmissiveRadianceCount =
+        hybridRayQueryDiagnostics.finiteEmissiveRadianceCount;
+    hybridReflections.rayQueryFiniteRadianceCount =
+        hybridRayQueryDiagnostics.finiteRadianceCount;
+    hybridReflections.rayQueryDirectLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.directLuminanceSumMilliunits;
+    hybridReflections.rayQueryIblLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.iblLuminanceSumMilliunits;
+    hybridReflections.rayQueryEmissiveLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.emissiveLuminanceSumMilliunits;
+    hybridReflections.rayQueryRadianceLuminanceMinMilliunits =
+        hybridRayQueryDiagnostics.radianceLuminanceMinMilliunits;
+    hybridReflections.rayQueryRadianceLuminanceMaxMilliunits =
+        hybridRayQueryDiagnostics.radianceLuminanceMaxMilliunits;
+    hybridReflections.rayQueryRadianceChecksum =
+        hybridRayQueryDiagnostics.radianceChecksum;
     const FrameAutoExposureReadbackStats autoExposureStats =
         ReadPreviousAutoExposureStats(imageIndex);
 
@@ -8885,6 +8929,9 @@ void VulkanRenderer::DrawFrame() {
             rayQueryConsumerEnabled,
             hybridReflections.rayQueryHitAttributeControlDisabled == 0u,
             hybridReflections.rayQueryMaterialTextureControlDisabled == 0u,
+            hybridReflections.rayQueryHitLightingControlDisabled == 0u,
+            frameLightSet.directionalCount,
+            frameLightSet.localCount,
             rayQuerySettings,
             hybridReflections
         );
@@ -10439,6 +10486,12 @@ void VulkanRenderer::CreateSwapchainResources() {
                 *m_FfxSssrBlueNoiseResources,
                 *m_SceneRenderTargets,
                 *m_SsrDepthPyramid,
+                *m_LightBuffer,
+                m_IblBrdfImage->View(),
+                m_IblIrradianceView,
+                m_IblPrefilteredView,
+                m_IblSampler,
+                m_IblGenerationInfo.prefilteredMipCount,
                 std::string(SE_SHADER_DIR) +
                     "/hybrid_reflection_ray_query.hlsl.spv"
             );
@@ -11840,7 +11893,13 @@ void VulkanRenderer::RecreateSwapchain() {
         m_FfxSssrPrepareIndirectArgsResources != nullptr &&
         m_FfxSssrBlueNoiseResources != nullptr &&
         m_SceneRenderTargets != nullptr &&
-        m_SsrDepthPyramid != nullptr) {
+        m_SsrDepthPyramid != nullptr &&
+        m_LightBuffer != nullptr &&
+        m_IblBrdfImage != nullptr &&
+        m_IblBrdfImage->View() != VK_NULL_HANDLE &&
+        m_IblIrradianceView != VK_NULL_HANDLE &&
+        m_IblPrefilteredView != VK_NULL_HANDLE &&
+        m_IblSampler != VK_NULL_HANDLE) {
         m_HybridReflectionRayQuery =
             std::make_unique<VulkanHybridReflectionRayQuery>(
                 m_Device,
@@ -11852,6 +11911,12 @@ void VulkanRenderer::RecreateSwapchain() {
                 *m_FfxSssrBlueNoiseResources,
                 *m_SceneRenderTargets,
                 *m_SsrDepthPyramid,
+                *m_LightBuffer,
+                m_IblBrdfImage->View(),
+                m_IblIrradianceView,
+                m_IblPrefilteredView,
+                m_IblSampler,
+                m_IblGenerationInfo.prefilteredMipCount,
                 std::string(SE_SHADER_DIR) +
                     "/hybrid_reflection_ray_query.hlsl.spv"
             );

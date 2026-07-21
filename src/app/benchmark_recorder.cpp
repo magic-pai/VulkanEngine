@@ -768,12 +768,14 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryConsumerContractVersion << ','
         << hybridReflections.rayQueryHitAttributeContractVersion << ','
         << hybridReflections.rayQueryMaterialTableContractVersion << ','
+        << hybridReflections.rayQueryHitLightingContractVersion << ','
         << hybridReflections.requested << ','
         << hybridReflections.controlDisabled << ','
         << hybridReflections.rayQueryConsumerRequested << ','
         << hybridReflections.rayQueryConsumerControlDisabled << ','
         << hybridReflections.rayQueryHitAttributeControlDisabled << ','
         << hybridReflections.rayQueryMaterialTextureControlDisabled << ','
+        << hybridReflections.rayQueryHitLightingControlDisabled << ','
         << hybridReflections.bufferDeviceAddressExtensionSupported << ','
         << hybridReflections.deferredHostOperationsExtensionSupported << ','
         << hybridReflections.accelerationStructureExtensionSupported << ','
@@ -849,6 +851,17 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitSurfaceWidth << ','
         << hybridReflections.rayQueryHitSurfaceHeight << ','
         << hybridReflections.rayQueryHitSurfaceFormat << ','
+        << hybridReflections.rayQueryHitLightingResourcesReady << ','
+        << hybridReflections.rayQueryLightBufferDescriptorReady << ','
+        << hybridReflections.rayQueryIblBrdfDescriptorReady << ','
+        << hybridReflections.rayQueryIblIrradianceDescriptorReady << ','
+        << hybridReflections.rayQueryIblPrefilteredDescriptorReady << ','
+        << hybridReflections.rayQueryIblSamplerDescriptorReady << ','
+        << hybridReflections.rayQueryIblPrefilteredMipCount << ','
+        << hybridReflections.rayQueryDirectionalLightCount << ','
+        << hybridReflections.rayQueryLocalLightCount << ','
+        << hybridReflections.rayQueryHitLightingVisibilityMode << ','
+        << hybridReflections.rayQueryHitLightingVisibilityFallbackReason << ','
         << hybridReflections.rayQueryReadbackValid << ','
         << hybridReflections.rayQueryCandidateRayCount << ','
         << hybridReflections.rayQueryScreenHitAcceptedCount << ','
@@ -889,6 +902,26 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryHitSurfacePayloadChecksum << ','
         << hybridReflections.rayQueryHitSurfaceLuminanceMinMilliunits << ','
         << hybridReflections.rayQueryHitSurfaceLuminanceMaxMilliunits << ','
+        << hybridReflections.rayQueryHitLightingResolvedCount << ','
+        << hybridReflections.rayQueryHitLightingInvalidCount << ','
+        << hybridReflections.rayQueryDirectionalLightEvaluationCount << ','
+        << hybridReflections.rayQueryDirectionalLightContributionCount << ','
+        << hybridReflections.rayQueryPointLightEvaluationCount << ','
+        << hybridReflections.rayQueryPointLightContributionCount << ','
+        << hybridReflections.rayQuerySpotLightEvaluationCount << ','
+        << hybridReflections.rayQuerySpotLightContributionCount << ','
+        << hybridReflections.rayQueryRectLightEvaluationCount << ','
+        << hybridReflections.rayQueryRectLightContributionCount << ','
+        << hybridReflections.rayQueryFiniteDirectRadianceCount << ','
+        << hybridReflections.rayQueryFiniteIblRadianceCount << ','
+        << hybridReflections.rayQueryFiniteEmissiveRadianceCount << ','
+        << hybridReflections.rayQueryFiniteRadianceCount << ','
+        << hybridReflections.rayQueryDirectLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryIblLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryEmissiveLuminanceSumMilliunits << ','
+        << hybridReflections.rayQueryRadianceLuminanceMinMilliunits << ','
+        << hybridReflections.rayQueryRadianceLuminanceMaxMilliunits << ','
+        << hybridReflections.rayQueryRadianceChecksum << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2355,11 +2388,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_consumer_contract_version,"
         << "hybrid_reflections_ray_query_hit_attribute_contract_version,"
         << "hybrid_reflections_ray_query_material_table_contract_version,"
+        << "hybrid_reflections_ray_query_hit_lighting_contract_version,"
         << "hybrid_reflections_requested,hybrid_reflections_control_disabled,"
         << "hybrid_reflections_ray_query_consumer_requested,"
         << "hybrid_reflections_ray_query_consumer_control_disabled,"
         << "hybrid_reflections_ray_query_hit_attribute_control_disabled,"
         << "hybrid_reflections_ray_query_material_texture_control_disabled,"
+        << "hybrid_reflections_ray_query_hit_lighting_control_disabled,"
         << "hybrid_reflections_buffer_device_address_extension_supported,"
         << "hybrid_reflections_deferred_host_operations_extension_supported,"
         << "hybrid_reflections_acceleration_structure_extension_supported,"
@@ -2435,6 +2470,17 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_hit_surface_width,"
         << "hybrid_reflections_ray_query_hit_surface_height,"
         << "hybrid_reflections_ray_query_hit_surface_format,"
+        << "hybrid_reflections_ray_query_hit_lighting_resources_ready,"
+        << "hybrid_reflections_ray_query_light_buffer_descriptor_ready,"
+        << "hybrid_reflections_ray_query_ibl_brdf_descriptor_ready,"
+        << "hybrid_reflections_ray_query_ibl_irradiance_descriptor_ready,"
+        << "hybrid_reflections_ray_query_ibl_prefiltered_descriptor_ready,"
+        << "hybrid_reflections_ray_query_ibl_sampler_descriptor_ready,"
+        << "hybrid_reflections_ray_query_ibl_prefiltered_mip_count,"
+        << "hybrid_reflections_ray_query_directional_light_count,"
+        << "hybrid_reflections_ray_query_local_light_count,"
+        << "hybrid_reflections_ray_query_hit_lighting_visibility_mode,"
+        << "hybrid_reflections_ray_query_hit_lighting_visibility_fallback_reason,"
         << "hybrid_reflections_ray_query_readback_valid,"
         << "hybrid_reflections_ray_query_candidate_ray_count,"
         << "hybrid_reflections_ray_query_screen_hit_accepted_count,"
@@ -2475,6 +2521,26 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_hit_surface_payload_checksum,"
         << "hybrid_reflections_ray_query_hit_surface_luminance_min_milliunits,"
         << "hybrid_reflections_ray_query_hit_surface_luminance_max_milliunits,"
+        << "hybrid_reflections_ray_query_hit_lighting_resolved_count,"
+        << "hybrid_reflections_ray_query_hit_lighting_invalid_count,"
+        << "hybrid_reflections_ray_query_directional_light_evaluation_count,"
+        << "hybrid_reflections_ray_query_directional_light_contribution_count,"
+        << "hybrid_reflections_ray_query_point_light_evaluation_count,"
+        << "hybrid_reflections_ray_query_point_light_contribution_count,"
+        << "hybrid_reflections_ray_query_spot_light_evaluation_count,"
+        << "hybrid_reflections_ray_query_spot_light_contribution_count,"
+        << "hybrid_reflections_ray_query_rect_light_evaluation_count,"
+        << "hybrid_reflections_ray_query_rect_light_contribution_count,"
+        << "hybrid_reflections_ray_query_finite_direct_radiance_count,"
+        << "hybrid_reflections_ray_query_finite_ibl_radiance_count,"
+        << "hybrid_reflections_ray_query_finite_emissive_radiance_count,"
+        << "hybrid_reflections_ray_query_finite_radiance_count,"
+        << "hybrid_reflections_ray_query_direct_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_ibl_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_emissive_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_radiance_luminance_min_milliunits,"
+        << "hybrid_reflections_ray_query_radiance_luminance_max_milliunits,"
+        << "hybrid_reflections_ray_query_radiance_checksum,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

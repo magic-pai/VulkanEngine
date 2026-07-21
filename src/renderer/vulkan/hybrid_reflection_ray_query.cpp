@@ -33,12 +33,16 @@ namespace {
 constexpr u32 kRayQueryContractVersion = 2u;
 constexpr u32 kHitAttributeContractVersion = 1u;
 constexpr u32 kMaterialTableContractVersion = 1u;
-constexpr u32 kDiagnosticValueCount = 39u;
+constexpr u32 kHitLightingContractVersion = 1u;
+constexpr u32 kHitLightingVisibilityModeUnshadowed = 1u;
+constexpr u32 kHitLightingVisibilityFallbackPendingRayQuery = 1u;
+constexpr u32 kDiagnosticValueCount = 59u;
 constexpr u32 kHitDistanceMinDiagnosticIndex = 7u;
 constexpr u32 kNormalLengthMinDiagnosticIndex = 20u;
 constexpr u32 kBarycentricSumMinDiagnosticIndex = 25u;
 constexpr u32 kSampleLodMinDiagnosticIndex = 33u;
 constexpr u32 kHitSurfaceLuminanceMinDiagnosticIndex = 37u;
+constexpr u32 kRadianceLuminanceMinDiagnosticIndex = 56u;
 constexpr VkFormat kRayQueryResultFormat = VK_FORMAT_R32G32_UINT;
 constexpr VkFormat kHitSurfaceFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
@@ -82,9 +86,17 @@ struct alignas(16) RayQueryControls {
     u32 materialTableCapacity = kMaxHybridReflectionMaterials;
     u32 materialTexturesEnabled = 0u;
     u32 materialTableContractVersion = kMaterialTableContractVersion;
+    u32 hitLightingEnabled = 0u;
+    u32 hitLightingContractVersion = kHitLightingContractVersion;
+    u32 directionalLightCount = 0u;
+    u32 localLightCount = 0u;
+    u32 iblPrefilteredMipCount = 0u;
+    u32 hitLightingVisibilityMode = 0u;
+    u32 iblResourcesReady = 0u;
+    u32 reserved = 0u;
 };
 
-static_assert(sizeof(RayQueryControls) == 64u);
+static_assert(sizeof(RayQueryControls) == 96u);
 static_assert(offsetof(RayQueryControls, enabled) == 20u);
 static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
 static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
@@ -95,6 +107,13 @@ static_assert(offsetof(RayQueryControls, hitAttributesEnabled) == 44u);
 static_assert(offsetof(RayQueryControls, materialTableCount) == 48u);
 static_assert(offsetof(RayQueryControls, materialTexturesEnabled) == 56u);
 static_assert(offsetof(RayQueryControls, materialTableContractVersion) == 60u);
+static_assert(offsetof(RayQueryControls, hitLightingEnabled) == 64u);
+static_assert(offsetof(RayQueryControls, hitLightingContractVersion) == 68u);
+static_assert(offsetof(RayQueryControls, directionalLightCount) == 72u);
+static_assert(offsetof(RayQueryControls, localLightCount) == 76u);
+static_assert(offsetof(RayQueryControls, iblPrefilteredMipCount) == 80u);
+static_assert(offsetof(RayQueryControls, hitLightingVisibilityMode) == 84u);
+static_assert(offsetof(RayQueryControls, iblResourcesReady) == 88u);
 static_assert(offsetof(Vertex3D, position) == 0u);
 static_assert(offsetof(Vertex3D, normal) == 12u);
 static_assert(offsetof(Vertex3D, texCoord) == 36u);
@@ -170,6 +189,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanDepthPyramid& depthPyramid,
+        const VulkanLightBuffer& lightBuffer,
+        VkImageView iblBrdfView,
+        VkImageView iblIrradianceView,
+        VkImageView iblPrefilteredView,
+        VkSampler iblSampler,
+        u32 iblPrefilteredMipCount,
         const std::string& computeShaderPath
     ) : deviceHandle(device.Handle()),
         extent(renderTargets.Extent()),
@@ -185,12 +210,23 @@ struct VulkanHybridReflectionRayQuery::Impl {
             prepareResources.Count() != count ||
             blueNoiseResources.Count() != count ||
             depthPyramid.Count() != count ||
+            lightBuffer.Count() != count ||
             ExtentsDiffer(classifyResources.Extent(), extent) ||
             ExtentsDiffer(depthPyramid.Extent(), extent)) {
             throw std::runtime_error(
                 "Hybrid reflection Ray Query producer resources do not match"
             );
         }
+        if (iblBrdfView == VK_NULL_HANDLE ||
+            iblIrradianceView == VK_NULL_HANDLE ||
+            iblPrefilteredView == VK_NULL_HANDLE ||
+            iblSampler == VK_NULL_HANDLE ||
+            iblPrefilteredMipCount == 0u) {
+            throw std::runtime_error(
+                "Hybrid reflection Ray Query IBL resources are incomplete"
+            );
+        }
+        this->iblPrefilteredMipCount = iblPrefilteredMipCount;
 
         CreateDescriptorSetLayout(device);
         CreateResources(
@@ -200,7 +236,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
             classifyResources,
             prepareResources,
             blueNoiseResources,
-            renderTargets
+            renderTargets,
+            lightBuffer,
+            iblBrdfView,
+            iblIrradianceView,
+            iblPrefilteredView,
+            iblSampler
         );
 
         const std::array<VkDescriptorSetLayout, 2> layouts{
@@ -238,7 +279,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     }
 
     void CreateDescriptorSetLayout(const VulkanDevice& device) {
-        std::array<VkDescriptorSetLayoutBinding, 16> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 21> bindings{};
         auto setBinding = [&](u32 binding, VkDescriptorType type, u32 count = 1u) {
             bindings[binding].binding = binding;
             bindings[binding].descriptorType = type;
@@ -267,6 +308,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
             kMaxHybridReflectionMaterials
         );
         setBinding(15u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+        setBinding(16u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        for (u32 binding = 17u; binding <= 19u; ++binding) {
+            setBinding(binding, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+        }
+        setBinding(20u, VK_DESCRIPTOR_TYPE_SAMPLER);
 
         VkDescriptorSetLayoutCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -291,7 +337,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         const VulkanFfxSssrClassifyTilesResources& classify,
         const VulkanFfxSssrPrepareIndirectArgsResources& prepare,
         const VulkanFfxSssrBlueNoiseResources& blueNoise,
-        const VulkanSceneRenderTargets& renderTargets
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanLightBuffer& lightBuffer,
+        VkImageView iblBrdfView,
+        VkImageView iblIrradianceView,
+        VkImageView iblPrefilteredView,
+        VkSampler iblSampler
     ) {
         const std::size_t count = renderTargets.Count();
         constexpr VkMemoryPropertyFlags hostMemory =
@@ -337,6 +388,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kSampleLodMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kRadianceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         const RayQueryControls defaultControls{};
         for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
@@ -426,7 +479,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         poolSizes[1] = {
             VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             static_cast<u32>(
-                count * (5u + kMaxHybridReflectionMaterials)
+                count * (8u + kMaxHybridReflectionMaterials)
             )
         };
         poolSizes[2] = {
@@ -447,11 +500,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[6] = {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            static_cast<u32>(count * 3u)
+            static_cast<u32>(count * 4u)
         };
         poolSizes[7] = {
             VK_DESCRIPTOR_TYPE_SAMPLER,
-            static_cast<u32>(count * kMaxHybridReflectionMaterials)
+            static_cast<u32>(count * (kMaxHybridReflectionMaterials + 1u))
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -546,6 +599,30 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 0u,
                 VK_WHOLE_SIZE
             };
+            const VkDescriptorBufferInfo lightInfo =
+                lightBuffer.DescriptorInfo(imageIndex);
+            const std::array<VkDescriptorImageInfo, 3> iblImageInfos{
+                VkDescriptorImageInfo{
+                    VK_NULL_HANDLE,
+                    iblBrdfView,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                },
+                VkDescriptorImageInfo{
+                    VK_NULL_HANDLE,
+                    iblIrradianceView,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                },
+                VkDescriptorImageInfo{
+                    VK_NULL_HANDLE,
+                    iblPrefilteredView,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                }
+            };
+            const VkDescriptorImageInfo iblSamplerInfo{
+                iblSampler,
+                VK_NULL_HANDLE,
+                VK_IMAGE_LAYOUT_UNDEFINED
+            };
             std::array<
                 VkDescriptorImageInfo,
                 kMaxHybridReflectionMaterials
@@ -571,7 +648,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     fallbackSampler->Handle();
             }
 
-            std::array<VkWriteDescriptorSet, 15> writes{};
+            std::array<VkWriteDescriptorSet, 20> writes{};
             for (u32 sourceIndex = 0u; sourceIndex < sampledImages.size();
                 ++sourceIndex) {
                 VkWriteDescriptorSet& write = writes[sourceIndex];
@@ -633,6 +710,27 @@ struct VulkanHybridReflectionRayQuery::Impl {
             writes[14].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[14].descriptorCount = 1u;
             writes[14].pImageInfo = &hitSurfaceImage;
+            writes[15] = writes[11];
+            writes[15].dstBinding = 16u;
+            writes[15].pBufferInfo = &lightInfo;
+            for (u32 sourceIndex = 0u; sourceIndex < iblImageInfos.size();
+                ++sourceIndex) {
+                writes[16u + sourceIndex].sType =
+                    VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[16u + sourceIndex].dstSet = descriptorSets[imageIndex];
+                writes[16u + sourceIndex].dstBinding = 17u + sourceIndex;
+                writes[16u + sourceIndex].descriptorType =
+                    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                writes[16u + sourceIndex].descriptorCount = 1u;
+                writes[16u + sourceIndex].pImageInfo =
+                    &iblImageInfos[sourceIndex];
+            }
+            writes[19].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[19].dstSet = descriptorSets[imageIndex];
+            writes[19].dstBinding = 20u;
+            writes[19].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            writes[19].descriptorCount = 1u;
+            writes[19].pImageInfo = &iblSamplerInfo;
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(writes.size()),
@@ -652,6 +750,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
         bool enabled,
         bool hitAttributesEnabled,
         bool materialTexturesEnabled,
+        bool hitLightingEnabled,
+        u32 directionalLightCount,
+        u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     ) {
@@ -783,6 +884,18 @@ struct VulkanHybridReflectionRayQuery::Impl {
         controls.materialTableCount = materialCount;
         controls.materialTexturesEnabled = enabled && hitAttributesEnabled &&
             materialTexturesEnabled ? 1u : 0u;
+        controls.hitLightingEnabled = controls.materialTexturesEnabled != 0u &&
+            hitLightingEnabled ? 1u : 0u;
+        controls.directionalLightCount = std::min(directionalLightCount, 1u);
+        controls.localLightCount = std::min(
+            localLightCount,
+            static_cast<u32>(kMaxFrameLocalLights)
+        );
+        controls.iblPrefilteredMipCount = iblPrefilteredMipCount;
+        controls.hitLightingVisibilityMode = controls.hitLightingEnabled != 0u
+            ? kHitLightingVisibilityModeUnshadowed
+            : 0u;
+        controls.iblResourcesReady = 1u;
 #if !defined(NDEBUG)
         controls.diagnosticsEnabled = enabled ? 1u : 0u;
 #endif
@@ -800,6 +913,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnostics[kSampleLodMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnostics[kHitSurfaceLuminanceMinDiagnosticIndex] =
+            std::numeric_limits<u32>::max();
+        diagnostics[kRadianceLuminanceMinDiagnosticIndex] =
             std::numeric_limits<u32>::max();
         diagnosticsBuffers[imageIndex]->Upload(
             std::as_bytes(std::span<const u32>(diagnostics))
@@ -882,6 +997,23 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryHitSurfaceWidth = extent.width;
         stats.rayQueryHitSurfaceHeight = extent.height;
         stats.rayQueryHitSurfaceFormat = static_cast<u32>(kHitSurfaceFormat);
+        stats.rayQueryHitLightingContractVersion =
+            kHitLightingContractVersion;
+        stats.rayQueryHitLightingResourcesReady = 1u;
+        stats.rayQueryLightBufferDescriptorReady = 1u;
+        stats.rayQueryIblBrdfDescriptorReady = 1u;
+        stats.rayQueryIblIrradianceDescriptorReady = 1u;
+        stats.rayQueryIblPrefilteredDescriptorReady = 1u;
+        stats.rayQueryIblSamplerDescriptorReady = 1u;
+        stats.rayQueryIblPrefilteredMipCount = iblPrefilteredMipCount;
+        stats.rayQueryDirectionalLightCount = controls.directionalLightCount;
+        stats.rayQueryLocalLightCount = controls.localLightCount;
+        stats.rayQueryHitLightingVisibilityMode =
+            controls.hitLightingVisibilityMode;
+        stats.rayQueryHitLightingVisibilityFallbackReason =
+            controls.hitLightingEnabled != 0u
+                ? kHitLightingVisibilityFallbackPendingRayQuery
+                : 0u;
     }
 
     void Record(
@@ -1141,6 +1273,27 @@ struct VulkanHybridReflectionRayQuery::Impl {
         result.hitSurfaceLuminanceMinMilliunits =
             result.hitSurfacePayloadWriteCount > 0u ? values[37] : 0u;
         result.hitSurfaceLuminanceMaxMilliunits = values[38];
+        result.hitLightingResolvedCount = values[39];
+        result.hitLightingInvalidCount = values[40];
+        result.directionalLightEvaluationCount = values[41];
+        result.directionalLightContributionCount = values[42];
+        result.pointLightEvaluationCount = values[43];
+        result.pointLightContributionCount = values[44];
+        result.spotLightEvaluationCount = values[45];
+        result.spotLightContributionCount = values[46];
+        result.rectLightEvaluationCount = values[47];
+        result.rectLightContributionCount = values[48];
+        result.finiteDirectRadianceCount = values[49];
+        result.finiteIblRadianceCount = values[50];
+        result.finiteEmissiveRadianceCount = values[51];
+        result.finiteRadianceCount = values[52];
+        result.directLuminanceSumMilliunits = values[53];
+        result.iblLuminanceSumMilliunits = values[54];
+        result.emissiveLuminanceSumMilliunits = values[55];
+        result.radianceLuminanceMinMilliunits =
+            result.finiteRadianceCount > 0u ? values[56] : 0u;
+        result.radianceLuminanceMaxMilliunits = values[57];
+        result.radianceChecksum = values[58];
         return result;
 #endif
     }
@@ -1182,6 +1335,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     std::vector<bool> submitted;
     std::vector<bool> frameEnabled;
     std::vector<bool> tlasDescriptorReady;
+    u32 iblPrefilteredMipCount = 0u;
     std::unique_ptr<VulkanComputePipeline> pipeline;
 };
 
@@ -1195,6 +1349,12 @@ VulkanHybridReflectionRayQuery::VulkanHybridReflectionRayQuery(
     const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
     const VulkanSceneRenderTargets& renderTargets,
     const VulkanDepthPyramid& depthPyramid,
+    const VulkanLightBuffer& lightBuffer,
+    VkImageView iblBrdfView,
+    VkImageView iblIrradianceView,
+    VkImageView iblPrefilteredView,
+    VkSampler iblSampler,
+    u32 iblPrefilteredMipCount,
     const std::string& computeShaderPath
 ) : m_Impl(std::make_unique<Impl>(
         device,
@@ -1206,6 +1366,12 @@ VulkanHybridReflectionRayQuery::VulkanHybridReflectionRayQuery(
         blueNoiseResources,
         renderTargets,
         depthPyramid,
+        lightBuffer,
+        iblBrdfView,
+        iblIrradianceView,
+        iblPrefilteredView,
+        iblSampler,
+        iblPrefilteredMipCount,
         computeShaderPath
     )) {
 }
@@ -1221,6 +1387,9 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     bool enabled,
     bool hitAttributesEnabled,
     bool materialTexturesEnabled,
+    bool hitLightingEnabled,
+    u32 directionalLightCount,
+    u32 localLightCount,
     const HybridReflectionRayQuerySettings& settings,
     RendererHybridReflectionStats& stats
 ) {
@@ -1233,6 +1402,9 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         enabled,
         hitAttributesEnabled,
         materialTexturesEnabled,
+        hitLightingEnabled,
+        directionalLightCount,
+        localLightCount,
         settings,
         stats
     );

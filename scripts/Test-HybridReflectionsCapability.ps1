@@ -119,6 +119,7 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF",
     "SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF",
     "SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF",
+    "SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF",
     "SE_SSR",
     "SE_SSR_BACKEND",
     "SE_FORWARD3D_AA_MODE",
@@ -153,6 +154,7 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
         }
@@ -165,6 +167,7 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
@@ -179,6 +182,7 @@ $laneSpecs = @(
         consumerDisabled = 1
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RAY_QUERY_OFF = "1"
@@ -192,6 +196,7 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 1
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_HIT_ATTRIBUTES_OFF = "1"
@@ -205,9 +210,24 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 0
         materialTexturesDisabled = 1
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_MATERIAL_TEXTURES_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-hit-lighting-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 1
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF = "1"
         }
     },
     [pscustomobject]@{
@@ -218,6 +238,7 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_HYBRID_REFLECTIONS_RT_OFF = "1"
@@ -231,6 +252,7 @@ $laneSpecs = @(
         consumerDisabled = 0
         hitAttributesDisabled = 0
         materialTexturesDisabled = 0
+        hitLightingDisabled = 0
         environment = @{
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
             SE_LIGHTING_SHOWCASE_FORCE_OFF = "1"
@@ -282,10 +304,12 @@ foreach ($lane in $laneSpecs) {
             $rayQueryConsumerContract = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_contract_version"
             $rayQueryHitAttributeContract = Get-UIntValue $last "hybrid_reflections_ray_query_hit_attribute_contract_version"
             $rayQueryMaterialTableContract = Get-UIntValue $last "hybrid_reflections_ray_query_material_table_contract_version"
+            $rayQueryHitLightingContract = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_contract_version"
             $rayQueryConsumerRequested = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_requested"
             $rayQueryConsumerDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_consumer_control_disabled"
             $rayQueryHitAttributeDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_attribute_control_disabled"
             $rayQueryMaterialTexturesDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_material_texture_control_disabled"
+            $rayQueryHitLightingDisabled = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_control_disabled"
             $bdaExtension = Get-UIntValue $last "hybrid_reflections_buffer_device_address_extension_supported"
             $deferredExtension = Get-UIntValue $last "hybrid_reflections_deferred_host_operations_extension_supported"
             $asExtension = Get-UIntValue $last "hybrid_reflections_acceleration_structure_extension_supported"
@@ -349,6 +373,17 @@ foreach ($lane in $laneSpecs) {
             $hitSurfaceWidth = Get-UIntValue $last "hybrid_reflections_ray_query_hit_surface_width"
             $hitSurfaceHeight = Get-UIntValue $last "hybrid_reflections_ray_query_hit_surface_height"
             $hitSurfaceFormat = Get-UIntValue $last "hybrid_reflections_ray_query_hit_surface_format"
+            $hitLightingResourcesReady = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_resources_ready"
+            $lightBufferDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_light_buffer_descriptor_ready"
+            $iblBrdfDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_brdf_descriptor_ready"
+            $iblIrradianceDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_irradiance_descriptor_ready"
+            $iblPrefilteredDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_prefiltered_descriptor_ready"
+            $iblSamplerDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_sampler_descriptor_ready"
+            $iblPrefilteredMipCount = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_prefiltered_mip_count"
+            $directionalLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_directional_light_count"
+            $localLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_local_light_count"
+            $hitLightingVisibilityMode = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_visibility_mode"
+            $hitLightingVisibilityFallback = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_visibility_fallback_reason"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
             $rayQueryReadbackRows = @(
@@ -400,12 +435,60 @@ foreach ($lane in $laneSpecs) {
             $hitSurfacePayloadChecksum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_surface_payload_checksum"
             $hitSurfaceLuminanceMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_surface_luminance_min_milliunits"
             $hitSurfaceLuminanceMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_surface_luminance_max_milliunits"
+            $hitLightingResolvedCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_lighting_resolved_count"
+            $hitLightingInvalidCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_hit_lighting_invalid_count"
+            $directionalLightEvaluationCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_directional_light_evaluation_count"
+            $directionalLightContributionCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_directional_light_contribution_count"
+            $pointLightEvaluationCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_point_light_evaluation_count"
+            $pointLightContributionCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_point_light_contribution_count"
+            $spotLightEvaluationCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_spot_light_evaluation_count"
+            $spotLightContributionCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_spot_light_contribution_count"
+            $rectLightEvaluationCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_rect_light_evaluation_count"
+            $rectLightContributionCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_rect_light_contribution_count"
+            $finiteDirectRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_direct_radiance_count"
+            $finiteIblRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_ibl_radiance_count"
+            $finiteEmissiveRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_emissive_radiance_count"
+            $finiteRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_radiance_count"
+            $directLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_direct_luminance_sum_milliunits"
+            $iblLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_ibl_luminance_sum_milliunits"
+            $emissiveLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_emissive_luminance_sum_milliunits"
+            $radianceLuminanceMin = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_luminance_min_milliunits"
+            $radianceLuminanceMax = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_luminance_max_milliunits"
+            $radianceChecksum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_radiance_checksum"
             $invalidHitAttributeCount =
                 [uint64]$hitAttributeInvalidInstanceCount +
                 [uint64]$hitAttributeInvalidPrimitiveCount +
                 [uint64]$hitAttributeInvalidVertexCount +
                 [uint64]$hitAttributeInvalidBarycentricCount +
                 [uint64]$hitAttributeInvalidValueCount
+            $hitLightingDiagnosticsSuppressed = @(@(
+                $hitLightingResolvedCount,
+                $hitLightingInvalidCount,
+                $directionalLightEvaluationCount,
+                $directionalLightContributionCount,
+                $pointLightEvaluationCount,
+                $pointLightContributionCount,
+                $spotLightEvaluationCount,
+                $spotLightContributionCount,
+                $rectLightEvaluationCount,
+                $rectLightContributionCount,
+                $finiteDirectRadianceCount,
+                $finiteIblRadianceCount,
+                $finiteEmissiveRadianceCount,
+                $finiteRadianceCount,
+                $directLuminanceSum,
+                $iblLuminanceSum,
+                $emissiveLuminanceSum,
+                $radianceLuminanceMin,
+                $radianceLuminanceMax,
+                $radianceChecksum,
+                $hitSurfacePayloadWriteCount,
+                $hitSurfacePayloadChecksum,
+                $hitSurfaceLuminanceMin,
+                $hitSurfaceLuminanceMax
+            ) | Where-Object { $_ -ne 0 })
+            $hitLightingDiagnosticsSuppressed =
+                $hitLightingDiagnosticsSuppressed.Count -eq 0
             $maxBlasBuildCount = [uint32](($rows | ForEach-Object {
                     Get-UIntValue $_ "hybrid_reflections_blas_build_count"
                 } | Measure-Object -Maximum).Maximum)
@@ -445,6 +528,9 @@ foreach ($lane in $laneSpecs) {
             $materialTextureResolutionExpected =
                 $hitAttributeResolutionExpected -and
                 $lane.materialTexturesDisabled -eq 0
+            $hitLightingResolutionExpected =
+                $materialTextureResolutionExpected -and
+                $lane.hitLightingDisabled -eq 0
             $expectedRayQueryConsumerContract = if ($runtimeResourcesExpected) {
                 2
             } else {
@@ -456,6 +542,11 @@ foreach ($lane in $laneSpecs) {
                 0
             }
             $expectedMaterialTableContract = if ($runtimeResourcesExpected) {
+                1
+            } else {
+                0
+            }
+            $expectedHitLightingContract = if ($runtimeResourcesExpected) {
                 1
             } else {
                 0
@@ -488,6 +579,9 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) material-texture control state" `
                 ($rayQueryMaterialTexturesDisabled -eq $lane.materialTexturesDisabled) `
                 $rayQueryMaterialTexturesDisabled $lane.materialTexturesDisabled)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) hit-lighting control state" `
+                ($rayQueryHitLightingDisabled -eq $lane.hitLightingDisabled) `
+                $rayQueryHitLightingDisabled $lane.hitLightingDisabled)) | Out-Null
             $checks.Add((New-Check "$($lane.name) hardware readiness is coherent" `
                 ($hardwareReady -eq [uint32]($extensionReady -and $featureReady)) `
                 "hardware=$hardwareReady,extensions=$extensionReady,features=$featureReady" `
@@ -510,6 +604,9 @@ foreach ($lane in $laneSpecs) {
             $checks.Add((New-Check "$($lane.name) material-table contract" `
                 ($rayQueryMaterialTableContract -eq $expectedMaterialTableContract) `
                 $rayQueryMaterialTableContract $expectedMaterialTableContract)) | Out-Null
+            $checks.Add((New-Check "$($lane.name) hit-lighting contract" `
+                ($rayQueryHitLightingContract -eq $expectedHitLightingContract) `
+                $rayQueryHitLightingContract $expectedHitLightingContract)) | Out-Null
             if ($runtimeResourcesExpected) {
                 $resourcesReady =
                     $accelerationStructureResourcesReady -eq 1 -and
@@ -585,6 +682,27 @@ foreach ($lane in $laneSpecs) {
                     $materialTableContractValid `
                     "ready=$materialTableResourcesReady,count=$materialTableCount/$materialTableCapacity,overflow=$materialTableOverflow,buffer=$materialBufferReady/$materialBufferUploadCount/$materialBufferBytes,descriptors=$textureDescriptorCount/$samplerDescriptorCount,distinct=$distinctTextureCount/$distinctSamplerCount,duplicates=$duplicateTextureCount/$duplicateSamplerCount,fallback=$fallbackDescriptorCount,payload=$($hitSurfaceWidth)x$hitSurfaceHeight/$hitSurfaceFormat" `
                     "ready=1,count=instance materials,capacity=256,overflow=0,bytes=count*112,descriptor identities conserved,payload=ray extent/RGBA16F")) | Out-Null
+                $hitLightingResourceContractValid =
+                    $hitLightingResourcesReady -eq 1 -and
+                    $lightBufferDescriptorReady -eq 1 -and
+                    $iblBrdfDescriptorReady -eq 1 -and
+                    $iblIrradianceDescriptorReady -eq 1 -and
+                    $iblPrefilteredDescriptorReady -eq 1 -and
+                    $iblSamplerDescriptorReady -eq 1 -and
+                    $iblPrefilteredMipCount -gt 0 -and
+                    $directionalLightCount -le 1 -and
+                    $localLightCount -le 64
+                $checks.Add((New-Check "$($lane.name) hit-lighting descriptors and bounded lights" `
+                    $hitLightingResourceContractValid `
+                    "resources=$hitLightingResourcesReady,light=$lightBufferDescriptorReady,ibl=$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady,mips=$iblPrefilteredMipCount,lights=$directionalLightCount+$localLightCount" `
+                    "resources/light/ibl=1,mips>0,directional<=1,local<=64")) | Out-Null
+                $expectedVisibilityMode = if ($hitLightingResolutionExpected) { 1 } else { 0 }
+                $expectedVisibilityFallback = if ($hitLightingResolutionExpected) { 1 } else { 0 }
+                $checks.Add((New-Check "$($lane.name) off-screen visibility mode is explicit" `
+                    ($hitLightingVisibilityMode -eq $expectedVisibilityMode -and `
+                        $hitLightingVisibilityFallback -eq $expectedVisibilityFallback) `
+                    "$hitLightingVisibilityMode/$hitLightingVisibilityFallback" `
+                    "$expectedVisibilityMode/$expectedVisibilityFallback")) | Out-Null
                 if ($rayQueryDispatchExpected) {
                     $dispatchRecorded =
                         $rayQueryDispatchReady -eq 1 -and
@@ -675,7 +793,7 @@ foreach ($lane in $laneSpecs) {
                                 ([uint64]$textureSampleResolvedCount +
                                     [uint64]$textureSampleFallbackCount +
                                     [uint64]$textureSampleInvalidCount)
-                            $payloadContractValid =
+                            $materialSamplingContractValid =
                                 $materialRecordEquation -and
                                 $textureSampleEquation -and
                                 $materialRecordResolvedCount -eq
@@ -687,17 +805,68 @@ foreach ($lane in $laneSpecs) {
                                 $textureSampleInvalidCount -eq 0 -and
                                 $finiteSampledColorCount -eq
                                     $hitAttributeResolvedCount -and
-                                $hitSurfacePayloadWriteCount -eq
-                                    $textureSampleResolvedCount -and
-                                $hitSurfacePayloadChecksum -ne 0 -and
-                                $sampleLodMax -ge $sampleLodMin -and
-                                $hitSurfaceLuminanceMax -ge
-                                    $hitSurfaceLuminanceMin -and
-                                $hitSurfaceLuminanceMax -gt 0
-                            $checks.Add((New-Check "$($lane.name) material samples produce finite hit payloads" `
-                                $payloadContractValid `
-                                "attributes=$hitAttributeResolvedCount,records=$materialRecordResolvedCount+$materialRecordFallbackCount,samples=$textureSampleResolvedCount+$textureSampleFallbackCount+$textureSampleInvalidCount,finite=$finiteSampledColorCount,lod=$sampleLodMin..$sampleLodMax,payload=$hitSurfacePayloadWriteCount/$hitSurfacePayloadChecksum,luminance=$hitSurfaceLuminanceMin..$hitSurfaceLuminanceMax" `
-                                "attributes=records=samples=finite=payload,resolved>0,fallback=invalid=0,finite ranges,checksum!=0")) | Out-Null
+                                $sampleLodMax -ge $sampleLodMin
+                            $checks.Add((New-Check "$($lane.name) material samples are finite" `
+                                $materialSamplingContractValid `
+                                "attributes=$hitAttributeResolvedCount,records=$materialRecordResolvedCount+$materialRecordFallbackCount,samples=$textureSampleResolvedCount+$textureSampleFallbackCount+$textureSampleInvalidCount,finite=$finiteSampledColorCount,lod=$sampleLodMin..$sampleLodMax" `
+                                "attributes=records=samples=finite,resolved>0,fallback=invalid=0,finite LOD")) | Out-Null
+                            if ($hitLightingResolutionExpected) {
+                                $hitLightingContractValid =
+                                    $hitLightingResolvedCount -eq
+                                        $textureSampleResolvedCount -and
+                                    $hitLightingInvalidCount -eq 0 -and
+                                    $finiteDirectRadianceCount -eq
+                                        $hitLightingResolvedCount -and
+                                    $finiteIblRadianceCount -eq
+                                        $hitLightingResolvedCount -and
+                                    $finiteEmissiveRadianceCount -eq
+                                        $hitLightingResolvedCount -and
+                                    $finiteRadianceCount -eq
+                                        $hitLightingResolvedCount -and
+                                    $hitSurfacePayloadWriteCount -eq
+                                        $hitLightingResolvedCount -and
+                                    $hitSurfacePayloadChecksum -eq
+                                        $radianceChecksum -and
+                                    $radianceChecksum -ne 0 -and
+                                    $radianceLuminanceMax -ge
+                                        $radianceLuminanceMin -and
+                                    $radianceLuminanceMax -gt 0 -and
+                                    $hitSurfaceLuminanceMin -eq
+                                        $radianceLuminanceMin -and
+                                    $hitSurfaceLuminanceMax -eq
+                                        $radianceLuminanceMax -and
+                                    ($directLuminanceSum -gt 0 -or
+                                        $iblLuminanceSum -gt 0 -or
+                                        $emissiveLuminanceSum -gt 0)
+                                $checks.Add((New-Check "$($lane.name) hit lighting produces finite radiance" `
+                                    $hitLightingContractValid `
+                                    "samples=$textureSampleResolvedCount,resolved=$hitLightingResolvedCount,invalid=$hitLightingInvalidCount,finite=$finiteDirectRadianceCount/$finiteIblRadianceCount/$finiteEmissiveRadianceCount/$finiteRadianceCount,payload=$hitSurfacePayloadWriteCount,energy=$directLuminanceSum/$iblLuminanceSum/$emissiveLuminanceSum,range=$radianceLuminanceMin..$radianceLuminanceMax,checksum=$radianceChecksum" `
+                                    "samples=resolved=all finite=payload,invalid=0,energy>0,valid range/checksum")) | Out-Null
+                                $lightEvaluationContractValid =
+                                    ($directionalLightCount -eq 0 -or
+                                        $directionalLightEvaluationCount -gt 0) -and
+                                    ($localLightCount -eq 0 -or
+                                        ($pointLightEvaluationCount +
+                                            $spotLightEvaluationCount +
+                                            $rectLightEvaluationCount) -gt 0) -and
+                                    $directionalLightContributionCount -le
+                                        $directionalLightEvaluationCount -and
+                                    $pointLightContributionCount -le
+                                        $pointLightEvaluationCount -and
+                                    $spotLightContributionCount -le
+                                        $spotLightEvaluationCount -and
+                                    $rectLightContributionCount -le
+                                        $rectLightEvaluationCount
+                                $checks.Add((New-Check "$($lane.name) bounded light kinds are evaluated" `
+                                    $lightEvaluationContractValid `
+                                    "lights=$directionalLightCount+$localLightCount,evaluations=$directionalLightEvaluationCount/$pointLightEvaluationCount/$spotLightEvaluationCount/$rectLightEvaluationCount,contributions=$directionalLightContributionCount/$pointLightContributionCount/$spotLightContributionCount/$rectLightContributionCount" `
+                                    "configured kinds evaluated,contributions<=evaluations")) | Out-Null
+                            } else {
+                                $checks.Add((New-Check "$($lane.name) hit lighting is suppressed" `
+                                    $hitLightingDiagnosticsSuppressed `
+                                    "resolved=$hitLightingResolvedCount,invalid=$hitLightingInvalidCount,payload=$hitSurfacePayloadWriteCount,checksum=$radianceChecksum" `
+                                    "all lighting/payload diagnostics=0 while material sampling remains active")) | Out-Null
+                            }
                         } else {
                             $materialSamplingSuppressed =
                                 $materialRecordResolvedCount -eq 0 -and
@@ -708,10 +877,7 @@ foreach ($lane in $laneSpecs) {
                                 $finiteSampledColorCount -eq 0 -and
                                 $sampleLodMin -eq 0 -and
                                 $sampleLodMax -eq 0 -and
-                                $hitSurfacePayloadWriteCount -eq 0 -and
-                                $hitSurfacePayloadChecksum -eq 0 -and
-                                $hitSurfaceLuminanceMin -eq 0 -and
-                                $hitSurfaceLuminanceMax -eq 0
+                                $hitLightingDiagnosticsSuppressed
                             $checks.Add((New-Check "$($lane.name) material sampling is suppressed" `
                                 $materialSamplingSuppressed `
                                 "records=$materialRecordResolvedCount/$materialRecordFallbackCount,samples=$textureSampleResolvedCount/$textureSampleFallbackCount/$textureSampleInvalidCount,payload=$hitSurfacePayloadWriteCount/$hitSurfacePayloadChecksum" `
@@ -743,7 +909,8 @@ foreach ($lane in $laneSpecs) {
                             $hitSurfacePayloadWriteCount -eq 0 -and
                             $hitSurfacePayloadChecksum -eq 0 -and
                             $hitSurfaceLuminanceMin -eq 0 -and
-                            $hitSurfaceLuminanceMax -eq 0
+                            $hitSurfaceLuminanceMax -eq 0 -and
+                            $hitLightingDiagnosticsSuppressed
                         $checks.Add((New-Check "$($lane.name) hit attributes are suppressed" `
                             $hitAttributesSuppressed `
                             "resolved=$hitAttributeResolvedCount,invalid=$invalidHitAttributeCount,material=$hitAttributeMaterialResolvedCount/$hitAttributeMaterialFallbackCount,checksums=$hitAttributeIdentityChecksum/$hitAttributePrimitiveChecksum/$hitAttributeMaterialChecksum" `
@@ -782,6 +949,7 @@ foreach ($lane in $laneSpecs) {
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_material_table_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_texture_descriptor_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_hit_surface_width") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_ray_query_hit_lighting_resources_ready") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_dispatch_count") -ne 0 -or
                         (Get-UInt64Value $_ "hybrid_reflections_ray_query_memory_bytes") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_blas_cache_count") -ne 0 -or
@@ -807,10 +975,12 @@ foreach ($lane in $laneSpecs) {
                 rayQueryConsumerContract = $rayQueryConsumerContract
                 rayQueryHitAttributeContract = $rayQueryHitAttributeContract
                 rayQueryMaterialTableContract = $rayQueryMaterialTableContract
+                rayQueryHitLightingContract = $rayQueryHitLightingContract
                 rayQueryConsumerRequested = $rayQueryConsumerRequested
                 rayQueryConsumerDisabled = $rayQueryConsumerDisabled
                 rayQueryHitAttributeDisabled = $rayQueryHitAttributeDisabled
                 rayQueryMaterialTexturesDisabled = $rayQueryMaterialTexturesDisabled
+                rayQueryHitLightingDisabled = $rayQueryHitLightingDisabled
                 hardwareReady = $hardwareReady
                 shaderInt64FeatureSupported = $shaderInt64Feature
                 shaderInt64DeviceEnabled = $shaderInt64Enabled
@@ -851,6 +1021,10 @@ foreach ($lane in $laneSpecs) {
                 distinctSamplerCount = $distinctSamplerCount
                 fallbackDescriptorCount = $fallbackDescriptorCount
                 hitSurface = "$($hitSurfaceWidth)x$hitSurfaceHeight/$hitSurfaceFormat"
+                hitLightingResourcesReady = $hitLightingResourcesReady
+                hitLightingDescriptors = "$lightBufferDescriptorReady/$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady"
+                hitLightingLightCounts = "$directionalLightCount+$localLightCount"
+                hitLightingVisibility = "$hitLightingVisibilityMode/$hitLightingVisibilityFallback"
                 rayQueryDispatchReady = $rayQueryDispatchReady
                 rayQueryDispatchCount = $rayQueryDispatchCount
                 rayQueryReadbackValid = $rayQueryReadbackValid
@@ -882,6 +1056,14 @@ foreach ($lane in $laneSpecs) {
                 hitSurfacePayloadWrites = $hitSurfacePayloadWriteCount
                 hitSurfacePayloadChecksum = $hitSurfacePayloadChecksum
                 hitSurfaceLuminanceMilliunits = "$hitSurfaceLuminanceMin..$hitSurfaceLuminanceMax"
+                hitLightingResolved = $hitLightingResolvedCount
+                hitLightingInvalid = $hitLightingInvalidCount
+                hitLightingEvaluations = "$directionalLightEvaluationCount/$pointLightEvaluationCount/$spotLightEvaluationCount/$rectLightEvaluationCount"
+                hitLightingContributions = "$directionalLightContributionCount/$pointLightContributionCount/$spotLightContributionCount/$rectLightContributionCount"
+                hitLightingFinite = "$finiteDirectRadianceCount/$finiteIblRadianceCount/$finiteEmissiveRadianceCount/$finiteRadianceCount"
+                hitLightingEnergyMilliunits = "$directLuminanceSum/$iblLuminanceSum/$emissiveLuminanceSum"
+                hitLightingRadianceRange = "$radianceLuminanceMin..$radianceLuminanceMax"
+                hitLightingRadianceChecksum = $radianceChecksum
                 active = $active
                 fallbackReason = $fallback
             }

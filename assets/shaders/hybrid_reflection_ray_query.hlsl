@@ -46,6 +46,14 @@ struct HybridMaterialRecord {
     uint g_material_table_capacity;
     uint g_material_textures_enabled;
     uint g_material_table_contract_version;
+    uint g_hit_lighting_enabled;
+    uint g_hit_lighting_contract_version;
+    uint g_directional_light_count;
+    uint g_local_light_count;
+    uint g_ibl_prefiltered_mip_count;
+    uint g_hit_lighting_visibility_mode;
+    uint g_ibl_resources_ready;
+    uint g_hit_lighting_reserved;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -60,6 +68,11 @@ struct HybridMaterialRecord {
 [[vk::binding(14, 1)]] SamplerState g_material_samplers[256];
 [[vk::binding(15, 1), vk::image_format("rgba16f")]]
 RWTexture2D<float4> g_hit_surface_payload;
+[[vk::binding(16, 1)]] ByteAddressBuffer g_light_data;
+[[vk::binding(17, 1)]] Texture2D<float2> g_ibl_brdf_lut;
+[[vk::binding(18, 1)]] TextureCube<float4> g_ibl_irradiance;
+[[vk::binding(19, 1)]] TextureCube<float4> g_ibl_prefiltered;
+[[vk::binding(20, 1)]] SamplerState g_ibl_sampler;
 
 static const uint kDiagnosticCandidateRayCount = 0u;
 static const uint kDiagnosticScreenHitAcceptedCount = 1u;
@@ -100,6 +113,34 @@ static const uint kDiagnosticHitSurfacePayloadWriteCount = 35u;
 static const uint kDiagnosticHitSurfacePayloadChecksum = 36u;
 static const uint kDiagnosticHitSurfaceLuminanceMinMilliunits = 37u;
 static const uint kDiagnosticHitSurfaceLuminanceMaxMilliunits = 38u;
+static const uint kDiagnosticHitLightingResolvedCount = 39u;
+static const uint kDiagnosticHitLightingInvalidCount = 40u;
+static const uint kDiagnosticDirectionalLightEvaluationCount = 41u;
+static const uint kDiagnosticDirectionalLightContributionCount = 42u;
+static const uint kDiagnosticPointLightEvaluationCount = 43u;
+static const uint kDiagnosticPointLightContributionCount = 44u;
+static const uint kDiagnosticSpotLightEvaluationCount = 45u;
+static const uint kDiagnosticSpotLightContributionCount = 46u;
+static const uint kDiagnosticRectLightEvaluationCount = 47u;
+static const uint kDiagnosticRectLightContributionCount = 48u;
+static const uint kDiagnosticFiniteDirectRadianceCount = 49u;
+static const uint kDiagnosticFiniteIblRadianceCount = 50u;
+static const uint kDiagnosticFiniteEmissiveRadianceCount = 51u;
+static const uint kDiagnosticFiniteRadianceCount = 52u;
+static const uint kDiagnosticDirectLuminanceSumMilliunits = 53u;
+static const uint kDiagnosticIblLuminanceSumMilliunits = 54u;
+static const uint kDiagnosticEmissiveLuminanceSumMilliunits = 55u;
+static const uint kDiagnosticRadianceLuminanceMinMilliunits = 56u;
+static const uint kDiagnosticRadianceLuminanceMaxMilliunits = 57u;
+static const uint kDiagnosticRadianceChecksum = 58u;
+
+static const float kPi = 3.14159265359;
+static const uint kMaxLocalLights = 64u;
+static const uint kLightDirectionalOffset = 0u;
+static const uint kLightAmbientOffset = 16u;
+static const uint kLightCountsOffset = 32u;
+static const uint kLocalLightsOffset = 64u;
+static const uint kLocalLightStride = 64u;
 
 void DiagnosticAdd(uint index, uint value) {
     if (g_ray_query_diagnostics_enabled != 0u) {
@@ -130,6 +171,373 @@ uint HashDiagnosticIdentity(uint value) {
 
 uint SaturatedMetric(float value, float scale) {
     return (uint)min(max(value * scale + 0.5, 0.0), 4294967040.0);
+}
+
+uint BoundedLuminanceMetric(float3 radiance) {
+    float luminance = dot(max(radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
+    return min(SaturatedMetric(luminance, 1000.0), 1000000u);
+}
+
+struct HitLocalLightRecord {
+    float4 positionRadius;
+    float4 colorIntensity;
+    float4 directionType;
+    float4 parameters;
+};
+
+float4 LoadLightFloat4(uint byteOffset) {
+    return asfloat(g_light_data.Load4(byteOffset));
+}
+
+HitLocalLightRecord LoadLocalLight(uint lightIndex) {
+    uint baseOffset = kLocalLightsOffset + lightIndex * kLocalLightStride;
+    HitLocalLightRecord light;
+    light.positionRadius = LoadLightFloat4(baseOffset);
+    light.colorIntensity = LoadLightFloat4(baseOffset + 16u);
+    light.directionType = LoadLightFloat4(baseOffset + 32u);
+    light.parameters = LoadLightFloat4(baseOffset + 48u);
+    return light;
+}
+
+float DistributionGgx(float3 normal, float3 halfDirection, float roughness) {
+    float alpha = roughness * roughness;
+    float alphaSquared = alpha * alpha;
+    float nDotH = saturate(dot(normal, halfDirection));
+    float denominator = nDotH * nDotH * (alphaSquared - 1.0) + 1.0;
+    return alphaSquared / max(kPi * denominator * denominator, 1.0e-6);
+}
+
+float GeometrySchlickGgx(float nDotDirection, float roughness) {
+    float r = roughness + 1.0;
+    float k = r * r * 0.125;
+    return nDotDirection /
+        max(nDotDirection * (1.0 - k) + k, 1.0e-6);
+}
+
+float GeometrySmithGgx(
+    float3 normal,
+    float3 viewDirection,
+    float3 lightDirection,
+    float roughness
+) {
+    return GeometrySchlickGgx(saturate(dot(normal, viewDirection)), roughness) *
+        GeometrySchlickGgx(saturate(dot(normal, lightDirection)), roughness);
+}
+
+float3 FresnelSchlickGgx(float cosine, float3 f0) {
+    float factor = saturate(1.0 - cosine);
+    float factorSquared = factor * factor;
+    float factorFifth = factorSquared * factorSquared * factor;
+    return f0 + (1.0 - f0) * factorFifth;
+}
+
+float3 FresnelSchlickRoughnessGgx(
+    float cosine,
+    float3 f0,
+    float roughness
+) {
+    float factor = saturate(1.0 - cosine);
+    float factorSquared = factor * factor;
+    float factorFifth = factorSquared * factorSquared * factor;
+    return f0 + (max(1.0 - roughness, f0) - f0) * factorFifth;
+}
+
+float3 EvaluateDirectBrdf(
+    float3 baseColor,
+    float metallic,
+    float roughness,
+    float3 normal,
+    float3 viewDirection,
+    float3 lightDirection,
+    float3 radiance
+) {
+    float nDotL = saturate(dot(normal, lightDirection));
+    float nDotV = saturate(dot(normal, viewDirection));
+    if (nDotL <= 1.0e-6 || nDotV <= 1.0e-6) {
+        return 0.0;
+    }
+
+    float3 halfVector = viewDirection + lightDirection;
+    float halfLengthSquared = dot(halfVector, halfVector);
+    if (halfLengthSquared <= 1.0e-8) {
+        return 0.0;
+    }
+    float3 halfDirection = halfVector * rsqrt(halfLengthSquared);
+    float3 f0 = lerp(0.04, baseColor, metallic);
+    float3 fresnel = FresnelSchlickGgx(
+        saturate(dot(halfDirection, viewDirection)),
+        f0
+    );
+    float distribution = DistributionGgx(normal, halfDirection, roughness);
+    float geometry = GeometrySmithGgx(
+        normal,
+        viewDirection,
+        lightDirection,
+        roughness
+    );
+    float3 specular = distribution * geometry * fresnel /
+        max(4.0 * nDotV * nDotL, 1.0e-6);
+    float3 diffuse = (1.0 - fresnel) * (1.0 - metallic) *
+        baseColor / kPi;
+    return (diffuse + specular) * radiance * nDotL;
+}
+
+float FiniteRadiusAttenuation(float distanceToLight, float radius) {
+    float normalizedDistance = saturate(distanceToLight / max(radius, 0.001));
+    float window = 1.0 - normalizedDistance * normalizedDistance;
+    return window * window;
+}
+
+float3 EvaluatePointOrSpotLight(
+    HitLocalLightRecord light,
+    uint lightKind,
+    float3 baseColor,
+    float metallic,
+    float roughness,
+    float3 normal,
+    float3 viewDirection,
+    float3 worldPosition
+) {
+    float3 toLight = light.positionRadius.xyz - worldPosition;
+    float distanceToLight = length(toLight);
+    float radius = max(light.positionRadius.w, 0.001);
+    if (distanceToLight >= radius || light.colorIntensity.w <= 0.0) {
+        return 0.0;
+    }
+
+    float3 lightDirection = toLight / max(distanceToLight, 0.001);
+    float attenuation = FiniteRadiusAttenuation(distanceToLight, radius);
+    if (lightKind == 1u) {
+        float3 spotDirection = light.directionType.xyz;
+        spotDirection = dot(spotDirection, spotDirection) > 1.0e-4
+            ? normalize(spotDirection)
+            : float3(0.0, -1.0, 0.0);
+        float innerCone = max(light.parameters.x, light.parameters.y);
+        float outerCone = min(light.parameters.x, light.parameters.y);
+        float coneCosine = dot(
+            normalize(worldPosition - light.positionRadius.xyz),
+            spotDirection
+        );
+        attenuation *= saturate(
+            (coneCosine - outerCone) / max(innerCone - outerCone, 1.0e-4)
+        );
+    }
+    float3 radiance = max(light.colorIntensity.rgb, 0.0) *
+        max(light.colorIntensity.w, 0.0) * attenuation;
+    return EvaluateDirectBrdf(
+        baseColor,
+        metallic,
+        roughness,
+        normal,
+        viewDirection,
+        lightDirection,
+        radiance
+    );
+}
+
+float3 EvaluateRectLight(
+    HitLocalLightRecord light,
+    float3 baseColor,
+    float metallic,
+    float roughness,
+    float3 normal,
+    float3 viewDirection,
+    float3 worldPosition
+) {
+    if (light.colorIntensity.w <= 0.0) {
+        return 0.0;
+    }
+
+    float3 rectNormal = light.directionType.xyz;
+    rectNormal = dot(rectNormal, rectNormal) > 1.0e-4
+        ? normalize(rectNormal)
+        : float3(0.0, -1.0, 0.0);
+    float3 referenceAxis = abs(rectNormal.y) > 0.95
+        ? float3(1.0, 0.0, 0.0)
+        : float3(0.0, 1.0, 0.0);
+    float3 rectTangent = normalize(cross(referenceAxis, rectNormal));
+    float3 rectBitangent = normalize(cross(rectNormal, rectTangent));
+    float2 halfSize = max(light.parameters.zw * 0.5, 0.001);
+    float radius = max(light.positionRadius.w, length(halfSize));
+    const float2 sampleSigns[4] = {
+        float2(-0.57735, -0.57735),
+        float2(0.57735, -0.57735),
+        float2(-0.57735, 0.57735),
+        float2(0.57735, 0.57735)
+    };
+
+    float3 result = 0.0;
+    [unroll]
+    for (uint sampleIndex = 0u; sampleIndex < 4u; ++sampleIndex) {
+        float3 samplePosition = light.positionRadius.xyz +
+            rectTangent * halfSize.x * sampleSigns[sampleIndex].x +
+            rectBitangent * halfSize.y * sampleSigns[sampleIndex].y;
+        float3 toLight = samplePosition - worldPosition;
+        float distanceToLight = length(toLight);
+        if (distanceToLight >= radius) {
+            continue;
+        }
+        float3 lightDirection = toLight / max(distanceToLight, 0.001);
+        float emitterFacing = saturate(dot(-lightDirection, rectNormal));
+        float attenuation = FiniteRadiusAttenuation(distanceToLight, radius) *
+            emitterFacing;
+        float3 radiance = max(light.colorIntensity.rgb, 0.0) *
+            max(light.colorIntensity.w, 0.0) * attenuation * 0.25;
+        result += EvaluateDirectBrdf(
+            baseColor,
+            metallic,
+            roughness,
+            normal,
+            viewDirection,
+            lightDirection,
+            radiance
+        );
+    }
+    return result;
+}
+
+bool EvaluateHitRadiance(
+    float3 baseColor,
+    float metallic,
+    float roughness,
+    float3 emissive,
+    float3 normal,
+    float3 viewDirection,
+    float3 worldPosition,
+    out float3 directRadiance,
+    out float3 iblRadiance,
+    out float3 finalRadiance
+) {
+    directRadiance = 0.0;
+    iblRadiance = 0.0;
+    finalRadiance = 0.0;
+    if (g_ibl_resources_ready == 0u ||
+        g_hit_lighting_visibility_mode != 1u) {
+        return false;
+    }
+
+    normal = dot(normal, viewDirection) >= 0.0 ? normal : -normal;
+    float4 directionalLight = LoadLightFloat4(kLightDirectionalOffset);
+    float4 ambientLight = LoadLightFloat4(kLightAmbientOffset);
+    float4 lightCounts = LoadLightFloat4(kLightCountsOffset);
+    uint directionalCount = min(
+        g_directional_light_count,
+        (uint)clamp(lightCounts.y + 0.5, 0.0, 1.0)
+    );
+    uint localLightCount = min(
+        min(g_local_light_count, kMaxLocalLights),
+        (uint)clamp(lightCounts.z + 0.5, 0.0, float(kMaxLocalLights))
+    );
+
+    if (directionalCount > 0u) {
+        DiagnosticAdd(kDiagnosticDirectionalLightEvaluationCount, 1u);
+        float3 lightDirection = directionalLight.xyz;
+        lightDirection = dot(lightDirection, lightDirection) > 1.0e-4
+            ? normalize(-lightDirection)
+            : normalize(float3(0.45, 0.82, 0.35));
+        float3 contribution = EvaluateDirectBrdf(
+            baseColor,
+            metallic,
+            roughness,
+            normal,
+            viewDirection,
+            lightDirection,
+            max(directionalLight.w, 0.0)
+        );
+        directRadiance += contribution;
+        if (dot(contribution, contribution) > 1.0e-12) {
+            DiagnosticAdd(kDiagnosticDirectionalLightContributionCount, 1u);
+        }
+    }
+
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < localLightCount; ++lightIndex) {
+        HitLocalLightRecord light = LoadLocalLight(lightIndex);
+        uint lightKind = (uint)clamp(light.directionType.w + 0.5, 0.0, 2.0);
+        float3 contribution = 0.0;
+        if (lightKind == 2u) {
+            DiagnosticAdd(kDiagnosticRectLightEvaluationCount, 1u);
+            contribution = EvaluateRectLight(
+                light,
+                baseColor,
+                metallic,
+                roughness,
+                normal,
+                viewDirection,
+                worldPosition
+            );
+            if (dot(contribution, contribution) > 1.0e-12) {
+                DiagnosticAdd(kDiagnosticRectLightContributionCount, 1u);
+            }
+        } else {
+            if (lightKind == 1u) {
+                DiagnosticAdd(kDiagnosticSpotLightEvaluationCount, 1u);
+            } else {
+                DiagnosticAdd(kDiagnosticPointLightEvaluationCount, 1u);
+            }
+            contribution = EvaluatePointOrSpotLight(
+                light,
+                lightKind,
+                baseColor,
+                metallic,
+                roughness,
+                normal,
+                viewDirection,
+                worldPosition
+            );
+            if (dot(contribution, contribution) > 1.0e-12) {
+                DiagnosticAdd(
+                    lightKind == 1u
+                        ? kDiagnosticSpotLightContributionCount
+                        : kDiagnosticPointLightContributionCount,
+                    1u
+                );
+            }
+        }
+        directRadiance += contribution;
+    }
+
+    float nDotV = saturate(dot(normal, viewDirection));
+    float3 f0 = lerp(0.04, baseColor, metallic);
+    float3 environmentFresnel = FresnelSchlickRoughnessGgx(
+        nDotV,
+        f0,
+        roughness
+    );
+    float3 diffuseWeight = (1.0 - environmentFresnel) * (1.0 - metallic);
+    float3 reflectionDirection = reflect(-viewDirection, normal);
+    float2 environmentBrdf = max(
+        g_ibl_brdf_lut.SampleLevel(
+            g_ibl_sampler,
+            float2(nDotV, roughness),
+            0.0
+        ),
+        0.0
+    );
+    float3 diffuseEnvironment = max(
+        g_ibl_irradiance.SampleLevel(g_ibl_sampler, normal, 0.0).rgb,
+        0.0
+    );
+    float prefilteredLod = roughness *
+        float(max(g_ibl_prefiltered_mip_count, 1u) - 1u);
+    float3 specularEnvironment = max(
+        g_ibl_prefiltered.SampleLevel(
+            g_ibl_sampler,
+            reflectionDirection,
+            prefilteredLod
+        ).rgb,
+        0.0
+    );
+    iblRadiance = diffuseWeight * baseColor * diffuseEnvironment *
+        max(ambientLight.x, 0.0) +
+        specularEnvironment *
+        max(f0 * environmentBrdf.x + environmentBrdf.y, 0.0) *
+        max(ambientLight.y, 0.0);
+    finalRadiance = directRadiance + iblRadiance + max(emissive, 0.0);
+    return all(isfinite(directRadiance)) &&
+        all(isfinite(iblRadiance)) &&
+        all(isfinite(emissive)) &&
+        all(isfinite(finalRadiance));
 }
 
 uint64_t DeviceAddress(uint2 address) {
@@ -735,8 +1143,12 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                 );
 
                                 if (g_material_textures_enabled != 0u) {
-                                    float3 surfaceSeed = max(objectColor, 0.0);
+                                    float3 surfaceBaseColor = max(objectColor, 0.0);
+                                    float3 surfaceEmissive = 0.0;
+                                    float surfaceMetallic = 0.0;
+                                    float surfaceRoughness = 1.0;
                                     float sampleLod = 0.0;
+                                    bool textureSampleValid = false;
                                     bool materialRecordValid =
                                         metadata.materialIndex > 0u &&
                                         metadata.materialIndex <=
@@ -758,6 +1170,18 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                             DiagnosticAdd(
                                                 kDiagnosticMaterialRecordResolvedCount,
                                                 1u
+                                            );
+                                            surfaceMetallic = saturate(
+                                                material.surfaceControls.y
+                                            );
+                                            surfaceRoughness = clamp(
+                                                material.surfaceControls.z,
+                                                0.04,
+                                                1.0
+                                            );
+                                            surfaceEmissive = max(
+                                                material.emissiveFactor.rgb,
+                                                0.0
                                             );
                                             float2 materialUv =
                                                 TransformMaterialUv(
@@ -812,7 +1236,7 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 float textureMix = saturate(
                                                     material.surfaceControls.x
                                                 );
-                                                surfaceSeed = lerp(
+                                                surfaceBaseColor = lerp(
                                                     max(objectColor, 0.0),
                                                     max(sampledBaseColor.rgb, 0.0),
                                                     textureMix
@@ -820,10 +1244,9 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                     material.baseColorFactor.rgb,
                                                     0.0
                                                 );
-                                                surfaceSeed += max(
-                                                    material.emissiveFactor.rgb,
-                                                    0.0
-                                                );
+                                                textureSampleValid = all(
+                                                    isfinite(surfaceBaseColor)
+                                                ) && all(isfinite(surfaceEmissive));
                                                 DiagnosticAdd(
                                                     kDiagnosticTextureSampleResolvedCount,
                                                     1u
@@ -859,56 +1282,162 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                             1u
                                         );
                                     }
-                                    if (!all(isfinite(surfaceSeed))) {
-                                        surfaceSeed = float3(1.0, 1.0, 1.0);
+                                    if (textureSampleValid) {
+                                        DiagnosticAdd(
+                                            kDiagnosticFiniteSampledColorCount,
+                                            1u
+                                        );
                                     }
-                                    surfaceSeed = clamp(
-                                        surfaceSeed,
-                                        0.0,
-                                        65504.0
-                                    );
-                                    float luminance = dot(
-                                        surfaceSeed,
-                                        float3(0.2126, 0.7152, 0.0722)
-                                    );
-                                    float4 payload = float4(
-                                        surfaceSeed,
-                                        hitDistance
-                                    );
-                                    StoreHitSurfacePayload(
-                                        coordinates,
-                                        copyHorizontal,
-                                        copyVertical,
-                                        copyDiagonal,
-                                        payload
-                                    );
-                                    DiagnosticAdd(
-                                        kDiagnosticFiniteSampledColorCount,
-                                        1u
-                                    );
-                                    DiagnosticAdd(
-                                        kDiagnosticHitSurfacePayloadWriteCount,
-                                        1u
-                                    );
-                                    DiagnosticAdd(
-                                        kDiagnosticHitSurfacePayloadChecksum,
-                                        HashDiagnosticIdentity(
-                                            asuint(payload.x) ^
-                                            (asuint(payload.y) * 0x9e3779b9u) ^
-                                            (asuint(payload.z) * 0x85ebca6bu) ^
-                                            metadata.materialIndex
-                                        )
-                                    );
-                                    uint luminanceMilliunits =
-                                        SaturatedMetric(luminance, 1000.0);
-                                    DiagnosticMin(
-                                        kDiagnosticHitSurfaceLuminanceMinMilliunits,
-                                        luminanceMilliunits
-                                    );
-                                    DiagnosticMax(
-                                        kDiagnosticHitSurfaceLuminanceMaxMilliunits,
-                                        luminanceMilliunits
-                                    );
+                                    if (g_hit_lighting_enabled != 0u) {
+                                        float3 directRadiance;
+                                        float3 iblRadiance;
+                                        float3 finalRadiance;
+                                        float3 hitViewDirection = normalize(
+                                            -rayDescription.Direction
+                                        );
+                                        bool lightingValid =
+                                            textureSampleValid &&
+                                            EvaluateHitRadiance(
+                                                clamp(
+                                                    surfaceBaseColor,
+                                                    0.0,
+                                                    65504.0
+                                                ),
+                                                surfaceMetallic,
+                                                surfaceRoughness,
+                                                surfaceEmissive,
+                                                worldShadingNormal,
+                                                hitViewDirection,
+                                                worldPosition,
+                                                directRadiance,
+                                                iblRadiance,
+                                                finalRadiance
+                                            );
+                                        if (lightingValid) {
+                                            directRadiance = clamp(
+                                                directRadiance,
+                                                0.0,
+                                                65504.0
+                                            );
+                                            iblRadiance = clamp(
+                                                iblRadiance,
+                                                0.0,
+                                                65504.0
+                                            );
+                                            surfaceEmissive = clamp(
+                                                surfaceEmissive,
+                                                0.0,
+                                                65504.0
+                                            );
+                                            finalRadiance = clamp(
+                                                directRadiance + iblRadiance +
+                                                    surfaceEmissive,
+                                                0.0,
+                                                65504.0
+                                            );
+                                            float4 payload = float4(
+                                                finalRadiance,
+                                                hitDistance
+                                            );
+                                            StoreHitSurfacePayload(
+                                                coordinates,
+                                                copyHorizontal,
+                                                copyVertical,
+                                                copyDiagonal,
+                                                payload
+                                            );
+                                            uint directLuminance =
+                                                BoundedLuminanceMetric(
+                                                    directRadiance
+                                                );
+                                            uint iblLuminance =
+                                                BoundedLuminanceMetric(
+                                                    iblRadiance
+                                                );
+                                            uint emissiveLuminance =
+                                                BoundedLuminanceMetric(
+                                                    surfaceEmissive
+                                                );
+                                            uint finalLuminance =
+                                                BoundedLuminanceMetric(
+                                                    finalRadiance
+                                                );
+                                            uint radianceHash =
+                                                HashDiagnosticIdentity(
+                                                    asuint(payload.x) ^
+                                                    (asuint(payload.y) *
+                                                        0x9e3779b9u) ^
+                                                    (asuint(payload.z) *
+                                                        0x85ebca6bu) ^
+                                                    metadata.materialIndex
+                                                );
+                                            DiagnosticAdd(
+                                                kDiagnosticHitLightingResolvedCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticFiniteDirectRadianceCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticFiniteIblRadianceCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticFiniteEmissiveRadianceCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticFiniteRadianceCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticDirectLuminanceSumMilliunits,
+                                                directLuminance
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticIblLuminanceSumMilliunits,
+                                                iblLuminance
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticEmissiveLuminanceSumMilliunits,
+                                                emissiveLuminance
+                                            );
+                                            DiagnosticMin(
+                                                kDiagnosticRadianceLuminanceMinMilliunits,
+                                                finalLuminance
+                                            );
+                                            DiagnosticMax(
+                                                kDiagnosticRadianceLuminanceMaxMilliunits,
+                                                finalLuminance
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticRadianceChecksum,
+                                                radianceHash
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticHitSurfacePayloadWriteCount,
+                                                1u
+                                            );
+                                            DiagnosticAdd(
+                                                kDiagnosticHitSurfacePayloadChecksum,
+                                                radianceHash
+                                            );
+                                            DiagnosticMin(
+                                                kDiagnosticHitSurfaceLuminanceMinMilliunits,
+                                                finalLuminance
+                                            );
+                                            DiagnosticMax(
+                                                kDiagnosticHitSurfaceLuminanceMaxMilliunits,
+                                                finalLuminance
+                                            );
+                                        } else {
+                                            DiagnosticAdd(
+                                                kDiagnosticHitLightingInvalidCount,
+                                                1u
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }

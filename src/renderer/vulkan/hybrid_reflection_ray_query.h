@@ -12,6 +12,7 @@ class VulkanFfxSssrClassifyTilesResources;
 class VulkanFfxSssrConstantsDescriptorSetLayout;
 class VulkanFfxSssrPrepareIndirectArgsResources;
 class VulkanMaterial;
+class VulkanLightBuffer;
 class VulkanPhysicalDevice;
 class VulkanSceneRenderTargets;
 struct HybridReflectionInstanceMetadata;
@@ -68,6 +69,26 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 hitSurfacePayloadChecksum = 0u;
     u32 hitSurfaceLuminanceMinMilliunits = 0u;
     u32 hitSurfaceLuminanceMaxMilliunits = 0u;
+    u32 hitLightingResolvedCount = 0u;
+    u32 hitLightingInvalidCount = 0u;
+    u32 directionalLightEvaluationCount = 0u;
+    u32 directionalLightContributionCount = 0u;
+    u32 pointLightEvaluationCount = 0u;
+    u32 pointLightContributionCount = 0u;
+    u32 spotLightEvaluationCount = 0u;
+    u32 spotLightContributionCount = 0u;
+    u32 rectLightEvaluationCount = 0u;
+    u32 rectLightContributionCount = 0u;
+    u32 finiteDirectRadianceCount = 0u;
+    u32 finiteIblRadianceCount = 0u;
+    u32 finiteEmissiveRadianceCount = 0u;
+    u32 finiteRadianceCount = 0u;
+    u32 directLuminanceSumMilliunits = 0u;
+    u32 iblLuminanceSumMilliunits = 0u;
+    u32 emissiveLuminanceSumMilliunits = 0u;
+    u32 radianceLuminanceMinMilliunits = 0u;
+    u32 radianceLuminanceMaxMilliunits = 0u;
+    u32 radianceChecksum = 0u;
 };
 
 class VulkanHybridReflectionRayQuery {
@@ -82,6 +103,12 @@ public:
         const VulkanFfxSssrBlueNoiseResources& blueNoiseResources,
         const VulkanSceneRenderTargets& renderTargets,
         const VulkanDepthPyramid& depthPyramid,
+        const VulkanLightBuffer& lightBuffer,
+        VkImageView iblBrdfView,
+        VkImageView iblIrradianceView,
+        VkImageView iblPrefilteredView,
+        VkSampler iblSampler,
+        u32 iblPrefilteredMipCount,
         const std::string& computeShaderPath
     );
     ~VulkanHybridReflectionRayQuery();
@@ -98,6 +125,9 @@ public:
         bool enabled,
         bool hitAttributesEnabled,
         bool materialTexturesEnabled,
+        bool hitLightingEnabled,
+        u32 directionalLightCount,
+        u32 localLightCount,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     );
