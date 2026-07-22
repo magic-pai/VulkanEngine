@@ -139,7 +139,16 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         VK_SHADER_STAGE_FRAGMENT_BIT;
     localReflectionProbeIrradianceMapBinding.pImmutableSamplers = nullptr;
 
-    const std::array<VkDescriptorSetLayoutBinding, 14> bindings = {
+    VkDescriptorSetLayoutBinding reflectionFullAuditBufferBinding{};
+    reflectionFullAuditBufferBinding.binding = 14;
+    reflectionFullAuditBufferBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    reflectionFullAuditBufferBinding.descriptorCount = 1;
+    reflectionFullAuditBufferBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT;
+    reflectionFullAuditBufferBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 15> bindings = {
         uniformBufferLayoutBinding,
         lightBufferLayoutBinding,
         materialBufferLayoutBinding,
@@ -153,7 +162,8 @@ void VulkanDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDevice& de
         autoExposureBinding,
         localReflectionProbeMapBinding,
         visibleSkyboxTextureBinding,
-        localReflectionProbeIrradianceMapBinding
+        localReflectionProbeIrradianceMapBinding,
+        reflectionFullAuditBufferBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};
@@ -332,10 +342,16 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
     ssrHistoryMetadataSamplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     ssrHistoryMetadataSamplerLayoutBinding.pImmutableSamplers = nullptr;
 
-    const std::array<
-        VkDescriptorSetLayoutBinding,
-        kMaterialDescriptorCombinedImageSamplerCount
-    > bindings = {
+    VkDescriptorSetLayoutBinding reflectionAuditObjectIdSamplerLayoutBinding{};
+    reflectionAuditObjectIdSamplerLayoutBinding.binding = 19;
+    reflectionAuditObjectIdSamplerLayoutBinding.descriptorType =
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    reflectionAuditObjectIdSamplerLayoutBinding.descriptorCount = 1;
+    reflectionAuditObjectIdSamplerLayoutBinding.stageFlags =
+        VK_SHADER_STAGE_FRAGMENT_BIT;
+    reflectionAuditObjectIdSamplerLayoutBinding.pImmutableSamplers = nullptr;
+
+    const std::array<VkDescriptorSetLayoutBinding, 20> bindings = {
         albedoSamplerLayoutBinding,
         colorMapSamplerLayoutBinding,
         cubemapSamplerLayoutBinding,
@@ -354,7 +370,8 @@ void VulkanMaterialDescriptorSetLayout::CreateDescriptorSetLayout(const VulkanDe
         ssrDepthPyramidSamplerLayoutBinding,
         ssrSceneColorHistorySamplerLayoutBinding,
         ssrResolvedSamplerLayoutBinding,
-        ssrHistoryMetadataSamplerLayoutBinding
+        ssrHistoryMetadataSamplerLayoutBinding,
+        reflectionAuditObjectIdSamplerLayoutBinding
     };
 
     VkDescriptorSetLayoutCreateInfo createInfo{};

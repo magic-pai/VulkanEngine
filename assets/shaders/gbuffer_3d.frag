@@ -15,6 +15,9 @@ layout(location = 2) out vec4 outMaterial;
 layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out vec2 outVelocity;
 layout(location = 5) out vec2 outMaterialAux;
+#if defined(SE_REFLECTION_FULL_AUDIT)
+layout(location = 6) out uint outReflectionAuditObjectId;
+#endif
 
 struct MaterialRecord {
     vec4 baseColorFactor;
@@ -239,4 +242,8 @@ void main() {
         max(hasClearcoatRoughnessTexture ? clearcoatRoughness : 0.0, bonePaletteDiagnosticAux),
         hasTransmissionTexture ? transmission : 0.0
     );
+#if defined(SE_REFLECTION_FULL_AUDIT)
+    // In the GBuffer pass viewport.z is reserved for the opt-in audit ID.
+    outReflectionAuditObjectId = floatBitsToUint(objectData.viewport.z);
+#endif
 }

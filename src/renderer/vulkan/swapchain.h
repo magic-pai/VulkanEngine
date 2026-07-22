@@ -26,6 +26,7 @@ public:
     VkSwapchainKHR Handle() const;
     VkFormat ImageFormat() const;
     VkExtent2D Extent() const;
+    bool TransferSourceSupported() const;
 
     const std::vector<VkImage>& Images() const;
     const std::vector<VkImageView>& ImageViews() const;
@@ -56,6 +57,7 @@ private:
 
     VkFormat m_ImageFormat = VK_FORMAT_UNDEFINED;
     VkExtent2D m_Extent{};
+    bool m_TransferSourceSupported = false;
 };
 
 }

@@ -2066,11 +2066,9 @@ std::string ClassifyDebugCasterName(std::string_view name) {
 }
 
 u64 DebugCasterIdentityFor(const RenderCommand& command) {
-#if !defined(NDEBUG)
-    if (command.debugRenderableIdentity != 0u) {
-        return command.debugRenderableIdentity;
+    if (command.renderableIdentity != 0u) {
+        return command.renderableIdentity;
     }
-#endif
 
     u64 identity = 0xb30f76518d8a723dull;
     identity = HashCombine(identity, static_cast<u64>(command.meshSortKey));
@@ -2321,6 +2319,14 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "ON" ||
         value == "yes" ||
         value == "YES";
+}
+
+bool HybridReflectionFullAuditRequested() {
+#if !defined(NDEBUG)
+    return EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_FULL_AUDIT");
+#else
+    return false;
+#endif
 }
 
 bool ShutdownTraceEnabled() {
@@ -3562,11 +3568,9 @@ u32 ReflectionProbeRegionMaskForPoint(
 }
 
 u32 ReflectionProbeRenderableIdentityBit(const RenderCommand& command) {
-#if !defined(NDEBUG)
-    if (command.debugRenderableIdentity != 0u) {
-        return ReflectionProbeInfluenceBit(command.debugRenderableIdentity);
+    if (command.renderableIdentity != 0u) {
+        return ReflectionProbeInfluenceBit(command.renderableIdentity);
     }
-#endif
     u64 key = 0x9e3779b97f4a7c15ull;
     key = HashCombine(key, static_cast<u64>(command.submissionIndex + 1u));
     key = HashCombine(key, static_cast<u64>(command.meshSortKey));
@@ -5964,6 +5968,17 @@ void VulkanRenderer::DrawFrame() {
         m_HybridReflectionRayQuery != nullptr
             ? m_HybridReflectionRayQuery->ReadDiagnostics(imageIndex)
             : HybridReflectionRayQueryDiagnostics{};
+    if (m_HybridReflectionRayQuery != nullptr &&
+        m_HybridReflectionAccelerationStructures != nullptr) {
+        m_HybridReflectionRayQuery->WriteFullAuditFrame(
+            imageIndex,
+            m_TemporalFrameCounter,
+            m_HybridReflectionAccelerationStructures->InstanceAuditRecords(
+                imageIndex
+            ),
+            hybridReflections
+        );
+    }
     hybridReflections.rayQueryReadbackValid =
         hybridRayQueryDiagnostics.valid ? 1u : 0u;
     hybridReflections.rayQueryCandidateRayCount =
@@ -5978,6 +5993,12 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.missCount;
     hybridReflections.rayQueryInvalidRayCount =
         hybridRayQueryDiagnostics.invalidRayCount;
+    hybridReflections.rayQueryDiagnosticTargetCommittedHitCount =
+        hybridRayQueryDiagnostics.diagnosticTargetCommittedHitCount;
+    hybridReflections.rayQueryDiagnosticTargetAttributeResolvedCount =
+        hybridRayQueryDiagnostics.diagnosticTargetAttributeResolvedCount;
+    hybridReflections.rayQueryDiagnosticTargetDenoiserWriteCount =
+        hybridRayQueryDiagnostics.diagnosticTargetDenoiserWriteCount;
     hybridReflections.rayQueryHitDistanceSumMillimeters =
         hybridRayQueryDiagnostics.hitDistanceSumMillimeters;
     hybridReflections.rayQueryHitDistanceMinMillimeters =
@@ -6459,7 +6480,9 @@ void VulkanRenderer::DrawFrame() {
             ffxSssrSameFrameCompositeView,
             VK_IMAGE_LAYOUT_GENERAL,
             ffxSssrSameFrameCompositeResourcesReady
-                ? m_FfxSssrReprojectResources->HitConfidenceView(imageIndex)
+                ? m_FfxSssrReprojectResources->HitConfidenceHistoryView(
+                    imageIndex
+                )
                 : VK_NULL_HANDLE,
             VK_IMAGE_LAYOUT_GENERAL
         );
@@ -7232,7 +7255,7 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.fidelityFxSssrDeferredCompositeConfidenceSource =
         frameStats.ssr.fidelityFxSssrDeferredCompositeActive > 0u ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrHitConfidenceContractVersion =
-        m_FfxSssrReprojectResources != nullptr ? 1u : 0u;
+        m_FfxSssrReprojectResources != nullptr ? 2u : 0u;
     frameStats.ssr.fidelityFxSssrHitConfidenceResourcesReady =
         m_FfxSssrClassifyTilesResources != nullptr &&
                 m_FfxSssrReprojectResources != nullptr &&
@@ -7248,6 +7271,8 @@ void VulkanRenderer::DrawFrame() {
             : 0u;
     frameStats.ssr.fidelityFxSssrHitConfidenceApplyBound =
         ffxSssrSameFrameCompositeDescriptorUpdated ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrApplyConfidenceSource =
+        ffxSssrSameFrameCompositeDescriptorUpdated ? 2u : 0u;
     frameStats.ssr.fidelityFxSssrProbeFallbackConsumer =
         ffxSssrSameFrameCompositeActive &&
                 !ffxSssrHitConfidenceReverseControlActive
@@ -8986,6 +9011,43 @@ void VulkanRenderer::DrawFrame() {
                 4.0f
             )
         );
+        const f32 diagnosticTargetSubmission = EnvironmentFloatOrDefault(
+            "SE_HYBRID_REFLECTIONS_DIAGNOSTIC_TARGET_SUBMISSION",
+            -1.0f
+        );
+        rayQuerySettings.diagnosticTargetSubmissionIndex =
+            diagnosticTargetSubmission >= 0.0f
+                ? static_cast<u32>(std::clamp(
+                    std::round(diagnosticTargetSubmission),
+                    0.0f,
+                    static_cast<f32>(std::numeric_limits<u32>::max() - 1u)
+                ))
+                : std::numeric_limits<u32>::max();
+        rayQuerySettings.diagnosticTargetInstanceIndex =
+            m_HybridReflectionAccelerationStructures
+                ->FindInstanceIndexBySubmissionIndex(
+                    static_cast<u32>(imageIndex),
+                    rayQuerySettings.diagnosticTargetSubmissionIndex
+                );
+        rayQuerySettings.forceAllRayQueries = EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES"
+        );
+        rayQuerySettings.cullBackFacingTriangles = !EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF"
+        );
+#if !defined(NDEBUG)
+        const u64 fullAuditStartFrame = static_cast<u64>(std::max(
+            0.0f,
+            EnvironmentFloatOrDefault(
+                "SE_HYBRID_REFLECTIONS_FULL_AUDIT_START_FRAME",
+                0.0f
+            )
+        ));
+        rayQuerySettings.fullAuditEnabled = HybridReflectionFullAuditRequested() &&
+            m_TemporalFrameCounter >= fullAuditStartFrame;
+#else
+        rayQuerySettings.fullAuditEnabled = false;
+#endif
         const bool rayQueryConsumerEnabled =
             hybridReflections.rayQueryConsumerControlDisabled == 0u &&
             frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u &&
@@ -9023,6 +9085,201 @@ void VulkanRenderer::DrawFrame() {
             frameLightSet.localCount,
             rayQuerySettings,
             hybridReflections
+        );
+    }
+    if (m_HybridReflectionRayQuery != nullptr &&
+        HybridReflectionFullAuditRequested()) {
+        std::vector<HybridReflectionFullAuditLightRecord> auditLights;
+        auditLights.reserve(1u + frameLightSet.localCount);
+        HybridReflectionFullAuditLightRecord directional{};
+        directional.index = 0u;
+        directional.kind = static_cast<u32>(RendererLightKind::Directional);
+        directional.enabled = frameLightSet.directionalCount > 0u &&
+            frameLightSet.primaryDirectional.intensity > 0.0f ? 1u : 0u;
+        directional.castsShadow = shadowSamplingEnabled ? 1u : 0u;
+        directional.colorIntensity = glm::vec4(
+            1.0f,
+            1.0f,
+            1.0f,
+            frameLightSet.primaryDirectional.intensity
+        );
+        directional.directionAndCones = glm::vec4(
+            frameLightSet.primaryDirectional.direction,
+            frameLightSet.primaryDirectional.angularRadiusRadians
+        );
+        directional.shapeAndSpecular = glm::vec4(
+            0.0f,
+            0.0f,
+            0.0f,
+            frameLightSet.primaryDirectional.specular
+        );
+        directional.requestedShadowTiles = directionalShadowCascades.configuredCount;
+        directional.assignedShadowTiles = directionalShadowCascades.activeCount;
+        directional.shadowTileRangeValid = directionalShadowCascades.activeCount <=
+            directionalShadowCascades.configuredCount ? 1u : 0u;
+        auditLights.push_back(directional);
+        const u32 auditLocalLightCount = std::min<u32>(
+            frameLightSet.localCount,
+            static_cast<u32>(frameLightSet.localLights.size())
+        );
+        for (u32 lightIndex = 0u; lightIndex < auditLocalLightCount; ++lightIndex) {
+            const RendererLocalLight& source = frameLightSet.localLights[lightIndex];
+            HybridReflectionFullAuditLightRecord record{};
+            record.index = lightIndex + 1u;
+            record.kind = static_cast<u32>(source.kind);
+            record.enabled = source.intensity > 0.0f && source.radius > 0.0f ? 1u : 0u;
+            record.castsShadow = m_ShadowSettings.enabled ? 1u : 0u;
+            record.positionRadius = glm::vec4(source.position, source.radius);
+            record.colorIntensity = glm::vec4(source.color, source.intensity);
+            record.directionAndCones = glm::vec4(
+                source.direction,
+                source.innerConeCos
+            );
+            record.outerConeCos = source.outerConeCos;
+            record.shapeAndSpecular = glm::vec4(
+                source.width,
+                source.height,
+                source.sourceRadius,
+                source.specular
+            );
+            if (lightIndex < localShadowTiles.requestedTilesByLocalLight.size()) {
+                record.requestedShadowTiles =
+                    localShadowTiles.requestedTilesByLocalLight[lightIndex];
+                record.assignedShadowTiles =
+                    localShadowTiles.assignedTilesByLocalLight[lightIndex];
+                record.firstShadowTile =
+                    localShadowTiles.firstAssignedTileByLocalLight[lightIndex];
+                record.shadowTileRangeValid = record.assignedShadowTiles <= 6u &&
+                    (record.assignedShadowTiles == 0u ||
+                        (record.firstShadowTile < localShadowTiles.assignedCount &&
+                         record.firstShadowTile + record.assignedShadowTiles <=
+                            localShadowTiles.assignedCount)) ? 1u : 0u;
+            }
+            auditLights.push_back(record);
+        }
+
+        std::vector<HybridReflectionFullAuditProbeRecord> auditProbes;
+        auditProbes.reserve(
+            1u + frameReflectionProbes.selectedProbeCount
+        );
+        auto appendProbe = [&](u32 index, const RendererReflectionProbe& probe,
+                               u32 captureSlot, u32 resourceReady,
+                               u32 descriptorBound, u32 fallbackReason,
+                               u32 mipCount, f32 blendWeight,
+                               f32 normalizedBlendWeight, u32 boxProjection) {
+            HybridReflectionFullAuditProbeRecord record{};
+            record.index = index;
+            record.sceneIndex = probe.sceneIndex;
+            record.enabled = probe.enabled ? 1u : 0u;
+            record.sceneOwned = probe.sceneOwned ? 1u : 0u;
+            record.captureSource = static_cast<u32>(probe.captureSource);
+            record.refreshPolicy = static_cast<u32>(probe.refreshPolicy);
+            record.captureResourceReady = resourceReady;
+            record.captureDescriptorBound = descriptorBound;
+            record.fallbackReason = fallbackReason;
+            record.captureSlot = captureSlot;
+            record.captureMipCount = mipCount;
+            record.centerRadius = glm::vec4(probe.center, probe.radius);
+            record.boxExtents = glm::vec4(probe.boxExtents, 0.0f);
+            record.colorIntensity = glm::vec4(probe.color, probe.intensity);
+            record.blendFalloffProjection = glm::vec4(
+                blendWeight,
+                probe.falloff,
+                static_cast<f32>(boxProjection),
+                normalizedBlendWeight
+            );
+            auditProbes.push_back(record);
+        };
+        appendProbe(
+            std::numeric_limits<u32>::max(),
+            frameReflectionProbes.localProbe,
+            0u,
+            frameReflectionProbes.captureResourceReady ? 1u : 0u,
+            frameReflectionProbes.captureDescriptorBound ? 1u : 0u,
+            static_cast<u32>(frameReflectionProbes.captureFallbackReason),
+            0u,
+            frameReflectionProbes.maxBlendWeight,
+            frameReflectionProbes.normalizedBlendWeightSum,
+            frameReflectionProbes.boxProjectionEnabled ? 1u : 0u
+        );
+        for (u32 probeIndex = 0u;
+             probeIndex < frameReflectionProbes.selectedProbeCount;
+             ++probeIndex) {
+            const u32 bit = 1u << probeIndex;
+            appendProbe(
+                probeIndex,
+                frameReflectionProbes.selectedProbes[probeIndex],
+                frameReflectionProbes.selectedCaptureSlots[probeIndex] >= 0
+                    ? static_cast<u32>(frameReflectionProbes.selectedCaptureSlots[probeIndex])
+                    : std::numeric_limits<u32>::max(),
+                frameReflectionProbes.selectedCaptureResourceReady[probeIndex]
+                    ? 1u : 0u,
+                frameReflectionProbes.selectedCaptureDescriptorBound[probeIndex]
+                    ? 1u : 0u,
+                static_cast<u32>(frameReflectionProbes.selectedCaptureFallbackReasons[probeIndex]),
+                frameReflectionProbes.selectedCaptureMipCounts[probeIndex],
+                frameReflectionProbes.selectedBlendWeights[probeIndex],
+                frameReflectionProbes.selectedNormalizedBlendWeights[probeIndex],
+                (frameReflectionProbes.selectedBoxProjectionMask & bit) != 0u
+                    ? 1u : 0u
+            );
+        }
+
+        std::vector<HybridReflectionFullAuditQueueCommandRecord> auditCommands;
+        auto appendQueue = [&](u32 queueKind, std::span<const RenderCommand> commands) {
+            const u32 commandCount = static_cast<u32>(
+                std::min<std::size_t>(commands.size(), std::numeric_limits<u32>::max())
+            );
+            auditCommands.reserve(auditCommands.size() + commandCount);
+            for (u32 commandIndex = 0u; commandIndex < commandCount; ++commandIndex) {
+                const RenderCommand& source = commands[commandIndex];
+                HybridReflectionFullAuditQueueCommandRecord record{};
+                record.queueKind = queueKind;
+                record.commandIndex = commandIndex;
+                record.submissionIndex = static_cast<u32>(std::min<std::size_t>(
+                    source.submissionIndex,
+                    std::numeric_limits<u32>::max()
+                ));
+                record.reflectionAuditObjectId = source.reflectionAuditObjectId;
+                record.renderIdentity = source.renderableIdentity;
+                record.meshIdentity = static_cast<u64>(source.meshSortKey);
+                record.materialIdentity = static_cast<u64>(source.materialSortKey);
+                record.materialIndex = source.material != nullptr
+                    ? frameMaterialSet.IdFor(source.material)
+                    : 0u;
+                record.drawOrder = static_cast<u32>(std::max(source.drawOrder, 0));
+                record.lodLevel = source.lodLevel;
+                record.castShadow = source.castShadow ? 1u : 0u;
+                record.reflectionCaptureVisible = source.reflectionCaptureVisible ? 1u : 0u;
+                record.skinnedBoundsConservative = source.skinnedWorldBoundsConservative;
+                record.bonePaletteReady = source.bonePaletteReady;
+                record.bonePaletteDescriptorReady = source.bonePaletteDescriptorSetReady;
+                record.worldBoundsValid = source.worldBounds.valid ? 1u : 0u;
+                record.boundsMin = glm::vec4(source.worldBounds.min, 0.0f);
+                record.boundsMax = glm::vec4(source.worldBounds.max, 0.0f);
+#if !defined(NDEBUG)
+                record.renderableName = std::string(source.debugRenderableName);
+#else
+                record.renderableName = "submission#" + std::to_string(record.submissionIndex);
+#endif
+                auditCommands.push_back(std::move(record));
+            }
+        };
+        appendQueue(0u, mainCommands);
+        appendQueue(1u, gBufferCommands);
+        appendQueue(2u, shadowCommands);
+        appendQueue(3u, forwardResidualCommands);
+        appendQueue(4u, weightedTranslucencyCommands);
+        appendQueue(5u, overlayCommands);
+        appendQueue(6u, forwardResidualVelocityCommands);
+        appendQueue(7u, weightedTranslucencyVelocityCommands);
+        m_HybridReflectionRayQuery->CaptureFullAuditMetadata(
+            static_cast<u32>(imageIndex),
+            m_TemporalFrameCounter,
+            static_cast<u32>(mainCommands.size()),
+            auditLights,
+            auditProbes,
+            auditCommands
         );
     }
     m_CommandBuffer->Record(
@@ -10582,8 +10839,28 @@ void VulkanRenderer::CreateSwapchainResources() {
                 m_IblSampler,
                 m_IblGenerationInfo.prefilteredMipCount,
                 std::string(SE_SHADER_DIR) +
-                    "/hybrid_reflection_ray_query.hlsl.spv"
+                    (HybridReflectionFullAuditRequested()
+                        ? "/hybrid_reflection_ray_query_audit.hlsl.spv"
+                        : "/hybrid_reflection_ray_query.hlsl.spv")
             );
+        if (m_HybridReflectionRayQuery->FullAuditResourcesAllocated()) {
+            SE_ASSERT(
+                m_DescriptorSets != nullptr &&
+                    m_DescriptorSets->Count() == m_Swapchain->Images().size(),
+                "Full reflection audit requires frame descriptor sets"
+            );
+            for (u32 frameIndex = 0u;
+                frameIndex < m_DescriptorSets->Count();
+                ++frameIndex) {
+                m_DescriptorSets->UpdateReflectionFullAuditBuffer(
+                    m_Device,
+                    frameIndex,
+                    m_HybridReflectionRayQuery->FullAuditDescriptorInfo(
+                        frameIndex
+                    )
+                );
+            }
+        }
     } else {
         m_HybridReflectionRayQuery.reset();
     }
@@ -10930,11 +11207,17 @@ void VulkanRenderer::CreateSwapchainResources() {
         const std::string gBufferVertexShaderPath =
             std::string(SE_SHADER_DIR) + "/gbuffer_3d.vert.spv";
         const std::string gBufferFragmentShaderPath =
-            std::string(SE_SHADER_DIR) + "/gbuffer_3d.frag.spv";
+            std::string(SE_SHADER_DIR) +
+            (m_SceneRenderTargets->ReflectionAuditObjectIdEnabled()
+                ? "/gbuffer_3d_audit.frag.spv"
+                : "/gbuffer_3d.frag.spv");
         const PipelineSpec gBufferSpec =
             PipelineSpec::GBuffer3D(
                 gBufferVertexShaderPath,
-                gBufferFragmentShaderPath
+                gBufferFragmentShaderPath,
+                m_SceneRenderTargets->ReflectionAuditObjectIdEnabled()
+                    ? 7u
+                    : 6u
             );
         m_GBufferGraphicsPipeline = std::make_unique<VulkanGraphicsPipeline>(
             m_Device,
@@ -10972,7 +11255,10 @@ void VulkanRenderer::CreateSwapchainResources() {
         )
     );
     const std::string ffxSssrApplyFragmentShaderPath =
-        std::string(SE_SHADER_DIR) + "/ffx_sssr_apply.frag.spv";
+        std::string(SE_SHADER_DIR) +
+        (HybridReflectionFullAuditRequested()
+            ? "/ffx_sssr_apply_audit.frag.spv"
+            : "/ffx_sssr_apply.frag.spv");
     m_FfxSssrApplyPipeline = std::make_unique<VulkanGraphicsPipeline>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -12007,8 +12293,28 @@ void VulkanRenderer::RecreateSwapchain() {
                 m_IblSampler,
                 m_IblGenerationInfo.prefilteredMipCount,
                 std::string(SE_SHADER_DIR) +
-                    "/hybrid_reflection_ray_query.hlsl.spv"
+                    (HybridReflectionFullAuditRequested()
+                        ? "/hybrid_reflection_ray_query_audit.hlsl.spv"
+                        : "/hybrid_reflection_ray_query.hlsl.spv")
             );
+        if (m_HybridReflectionRayQuery->FullAuditResourcesAllocated()) {
+            SE_ASSERT(
+                m_DescriptorSets != nullptr &&
+                    m_DescriptorSets->Count() == m_Swapchain->Images().size(),
+                "Full reflection audit requires frame descriptor sets"
+            );
+            for (u32 frameIndex = 0u;
+                frameIndex < m_DescriptorSets->Count();
+                ++frameIndex) {
+                m_DescriptorSets->UpdateReflectionFullAuditBuffer(
+                    m_Device,
+                    frameIndex,
+                    m_HybridReflectionRayQuery->FullAuditDescriptorInfo(
+                        frameIndex
+                    )
+                );
+            }
+        }
     }
     if (m_GBufferDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&
@@ -12435,11 +12741,19 @@ void VulkanRenderer::RecreateSwapchain() {
         const std::string gBufferVertexShaderPath =
             std::string(SE_SHADER_DIR) + "/gbuffer_3d.vert.spv";
         const std::string gBufferFragmentShaderPath =
-            std::string(SE_SHADER_DIR) + "/gbuffer_3d.frag.spv";
+            std::string(SE_SHADER_DIR) +
+            (m_SceneRenderTargets != nullptr &&
+                m_SceneRenderTargets->ReflectionAuditObjectIdEnabled()
+                ? "/gbuffer_3d_audit.frag.spv"
+                : "/gbuffer_3d.frag.spv");
         const PipelineSpec gBufferSpec =
             PipelineSpec::GBuffer3D(
                 gBufferVertexShaderPath,
-                gBufferFragmentShaderPath
+                gBufferFragmentShaderPath,
+                m_SceneRenderTargets != nullptr &&
+                    m_SceneRenderTargets->ReflectionAuditObjectIdEnabled()
+                    ? 7u
+                    : 6u
             );
         m_GBufferGraphicsPipeline->Recreate(
             m_Device,
@@ -12481,7 +12795,10 @@ void VulkanRenderer::RecreateSwapchain() {
         const std::string deferredLightingVertexShaderPath =
             std::string(SE_SHADER_DIR) + "/deferred_lighting.vert.spv";
         const std::string ffxSssrApplyFragmentShaderPath =
-            std::string(SE_SHADER_DIR) + "/ffx_sssr_apply.frag.spv";
+            std::string(SE_SHADER_DIR) +
+            (HybridReflectionFullAuditRequested()
+                ? "/ffx_sssr_apply_audit.frag.spv"
+                : "/ffx_sssr_apply.frag.spv");
         m_FfxSssrApplyPipeline->Recreate(
             m_Device,
             *m_DescriptorSetLayout,

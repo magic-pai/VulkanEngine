@@ -2270,14 +2270,15 @@ void BuildLightingShowcaseScene(
         metalSphere.SetCastShadow(false);
     }
 
-    se::Renderable3D& ceramicSphere = scene.CreateRenderable(
-        "Showcase Cool Ceramic Sphere",
+    se::Renderable3D& mirrorSphere = scene.CreateRenderable(
+        "Showcase Center Mirror Sphere",
         "Sphere",
-        showcasePlainSpheres ? "ShowcaseWarmStoneMaterial" : "ShowcaseCoolCeramicMaterial"
+        showcasePlainSpheres ? "ShowcaseWarmStoneMaterial" : "ShowcasePerfectMirrorMaterial"
     );
-    place(ceramicSphere, { 0.0f, 0.15f, -0.15f }, { 1.08f, 1.08f, 1.08f });
+    place(mirrorSphere, { 0.0f, 0.15f, -0.15f }, { 1.08f, 1.08f, 1.08f });
+    mirrorSphere.SetReflectionCaptureVisible(false);
     if (showcaseSphereShadowCastersOff) {
-        ceramicSphere.SetCastShadow(false);
+        mirrorSphere.SetCastShadow(false);
     }
 
     se::Renderable3D& lacquerCube = scene.CreateRenderable(
@@ -4284,6 +4285,16 @@ int main() {
         0.0f,
         0.0f
     );
+    se::VulkanMaterial& showcasePerfectMirrorMaterial = createShowcaseReferenceMaterial(
+        "ShowcasePerfectMirrorMaterial",
+        { 242, 244, 248, 255 },
+        { 0.95f, 0.96f, 0.98f, 1.0f },
+        1.0f,
+        0.0f,
+        { 1.0f, 1.0f, 1.0f, 1.0f },
+        0.0f,
+        0.0f
+    );
     se::VulkanMaterial& showcaseReflectionTestSilverMaterial =
         createShowcaseReferenceMaterial(
             "ShowcaseReflectionTestSilverMaterial",
@@ -4696,6 +4707,7 @@ int main() {
     app.RenderResources().RegisterMaterial("ShowcaseGlossBlackMaterial", showcaseGlossBlackMaterial);
     app.RenderResources().RegisterMaterial("ShowcaseCoolCeramicMaterial", showcaseCoolCeramicMaterial);
     app.RenderResources().RegisterMaterial("ShowcaseReferenceChromeMaterial", showcaseReferenceChromeMaterial);
+    app.RenderResources().RegisterMaterial("ShowcasePerfectMirrorMaterial", showcasePerfectMirrorMaterial);
     app.RenderResources().RegisterMaterial("ShowcaseReflectionTestSilverMaterial", showcaseReflectionTestSilverMaterial);
     app.RenderResources().RegisterMaterial("ShowcaseReferenceSatinMetalMaterial", showcaseReferenceSatinMetalMaterial);
     app.RenderResources().RegisterMaterial("ShowcaseReferencePorcelainMaterial", showcaseReferencePorcelainMaterial);

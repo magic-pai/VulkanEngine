@@ -1,9 +1,43 @@
 #include "renderer/vulkan/pipeline_spec.h"
 
+#include "renderer/vulkan/vulkan_common.h"
+
 #include <filesystem>
 #include <utility>
 
 namespace se {
+
+ColorBlendMode FidelityFxSssrApplyBlendMode() {
+#if !defined(NDEBUG)
+    const std::string overrideMode = LowerAscii(
+        ReadVulkanEnvironmentString("SE_HYBRID_REFLECTIONS_APPLY_BLEND_MODE")
+    );
+    if (overrideMode == "additive" || overrideMode == "one-one") {
+        return ColorBlendMode::Additive;
+    }
+    if (overrideMode == "destination-alpha" ||
+        overrideMode == "dst-alpha") {
+        return ColorBlendMode::DestinationAlphaAdditive;
+    }
+#endif
+    return ColorBlendMode::Additive;
+}
+
+const char* ColorBlendModeName(ColorBlendMode mode) {
+    switch (mode) {
+    case ColorBlendMode::Disabled:
+        return "disabled";
+    case ColorBlendMode::Alpha:
+        return "alpha";
+    case ColorBlendMode::Additive:
+        return "additive";
+    case ColorBlendMode::DestinationAlphaAdditive:
+        return "destination_alpha_additive";
+    case ColorBlendMode::ZeroSource:
+        return "zero_source";
+    }
+    return "unknown";
+}
 
 PipelineSpec PipelineSpec::Default2D(
     std::string vertexShaderPath,
@@ -129,7 +163,8 @@ PipelineSpec PipelineSpec::DepthPrefill3D(std::string vertexShaderPath) {
 
 PipelineSpec PipelineSpec::GBuffer3D(
     std::string vertexShaderPath,
-    std::string fragmentShaderPath
+    std::string fragmentShaderPath,
+    u32 colorAttachmentCount
 ) {
     PipelineSpec spec = DefaultForward3D(
         std::move(vertexShaderPath),
@@ -138,7 +173,7 @@ PipelineSpec PipelineSpec::GBuffer3D(
     spec.supportsInstancing = false;
     spec.instancedVertexShaderPath.clear();
     spec.vertexLayout = VertexLayout::Vertex3DSkinned;
-    spec.colorAttachmentCount = 6;
+    spec.colorAttachmentCount = std::clamp(colorAttachmentCount, 6u, 7u);
     spec.colorBlendModes[0] = ColorBlendMode::Disabled;
     spec.dynamicViewportScissor = true;
     return spec;
@@ -172,7 +207,7 @@ PipelineSpec PipelineSpec::FidelityFxSssrApply(
         std::move(fragmentShaderPath)
     );
     spec.alphaBlendEnabled = true;
-    spec.colorBlendModes[0] = ColorBlendMode::DestinationAlphaAdditive;
+    spec.colorBlendModes[0] = FidelityFxSssrApplyBlendMode();
     return spec;
 }
 

@@ -48,7 +48,11 @@ Control test:
 
 Fix:
 - Added an AMD-style fullscreen ApplyReflections pass after ResolveTemporal and before TAA/DLSS.
-- Deferred preserves a weighted IBL baseline in HDR alpha; destination-alpha additive blending replaces that baseline with current-frame FFX radiance and restores alpha to one.
+- The first implementation attempted to preserve a weighted IBL baseline in
+  HDR alpha and use destination-alpha additive blending. The later Full Audit
+  proved that alpha was zero and this RGB write was a no-op; the production
+  correction is standard additive blending with explicit contribution/energy
+  conservation. See "Reflection Apply Must Conserve Real HDR Energy" below.
 - Added an HDR load render pass, explicit compute/transfer-to-fragment synchronization, FrameGraph modeling, CSV counters, source identity/frame age, and a reverse control.
 
 Prevention:
@@ -3073,3 +3077,276 @@ Validation:
 - LightingShowcase recorded `57,957` lighting hits/injections and `57,957 / 57,957 / 57,957,000` radiance/confidence/confidence-sum writes; animated Forward3D recorded `462` injections plus one explicit skinned fallback.
 - Debug Forward3D, Debug LightingShowcase, Release Forward3D, `spirv-val --target-env vulkan1.2`, FidelityFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` passed.
 - The user accepted the real Release LightingShowcase result as natural and stable, with no obvious white blocks, duplicate reflections, motion flicker, or re-entry delay.
+# 2026-07-22 - Ray Query Front-Face Convention Must Match Raster Winding
+
+Symptom:
+- The LightingShowcase center mirror showed block-like reflection discontinuities and omitted the physically visible opposite silver sphere.
+- Analytic camera/sphere intersection predicted about 1.07% mirror coverage, but a material-color marker did not establish where the target was lost.
+
+False leads:
+- Moving the sphere, raising the SSSR acceptance threshold to `1.0`, and identifying the target only from metallic/roughness values.
+- Treating disabled back-face culling as an acceptable production fix.
+
+Cause:
+- SelfEngine raster pipelines and built-in meshes use counter-clockwise front faces, but hybrid-reflection TLAS instances did not set `VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR`.
+- `RAY_FLAG_CULL_BACK_FACING_TRIANGLES` therefore rejected many intended exterior hits and retained the opposite face convention, producing missing geometry and discontinuous reflected regions.
+
+Control test:
+- Preserve the same scene, camera, ray list, and target material while comparing hybrid default, forced Ray Query with face culling, and forced Ray Query without culling.
+- Before the fix, forced culling reached the silver target `2416` times versus `11892` without culling. After correcting the face convention, production culling and no-cull both reached it `11892` times.
+
+Fix:
+- Mark every hybrid-reflection TLAS instance as counter-clockwise-front; preserve cull-disable only for explicitly double-sided materials.
+- Advance the Ray Query consumer contract to v3. The shader keeps a versioned v2 compatibility branch that culls the opposite Vulkan face for already-approved binaries whose instances lack the CCW flag.
+- Add opt-in submission-to-TLAS target attribution, forced-Ray-Query and no-cull controls, target hit/attribute/DNSR counters, and repeatable target-attribution scripts.
+
+Prevention:
+- Treat raster `frontFace`, mesh winding, TLAS instance flags, and Ray Query cull flags as one producer-consumer contract.
+- Validate a closed CCW target with culling on and off; target hit coverage should agree while culling removes only irrelevant back-face work.
+- Do not use a material color marker as proof of instance traversal, and do not promote no-cull diagnostics to production behavior.
+
+Validation:
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed; the generated Ray Query SPIR-V passed Vulkan 1.2 validation.
+- `Invoke-HybridReflectionLegacyDiagnostic.ps1 -Strict` passed with hybrid/forced-cull/no-cull silver hits `11690/11892/11892` and zero invalid rays.
+- `Test-HybridReflectionsCapability.ps1 -Strict` passed `403 / 0` across LightingShowcase, Forward3D FBX, and fallback controls.
+## 2026-07-22 - Reflection Audit Must Use Stable Identity And One Y Convention
+
+Symptom:
+- The center mirror sphere showed a strong reflected split and failed to show
+  the opposite polished silver sphere reliably.
+
+False leads:
+- Assuming the silver sphere was absent from the TLAS or that Ray Query
+  precision was too low.
+- Trusting 100% receiver identity coverage from the first full-audit report.
+
+Cause:
+- GBuffer used the camera-visible RenderQueue submission index while TLAS used
+  the full-scene RenderQueue submission index. Queue filtering and sorting made
+  those indices refer to different renderables.
+- SelfEngine uses a positive Vulkan viewport plus a projection matrix with
+  `projection[1][1]` negated, while the vendored AMD Vulkan sample uses a
+  negative-height viewport. Reusing AMD's shader-side UV Y flip therefore
+  flipped SelfEngine screen reconstruction twice. Before the fix, a center
+  sphere pixel could reconstruct at `y=-0.647` while its CPU bounds started at
+  `y=-0.390`, causing 7,089 false self hits in the audit.
+
+Control test:
+- Run `SE_HYBRID_REFLECTIONS_FULL_AUDIT=1` on the real LightingShowcase and
+  validate `objects.csv`, `instances.csv`, `rays.csv`, and `apply.csv` with
+  `Analyze-HybridReflectionFullAudit.ps1 -Strict`.
+- Require stable-ID resolution, CPU/TLAS agreement, receiver-origin bounds,
+  no self hits, and no production rays below the receiver hemisphere.
+
+Fix:
+- Carry `Renderable3D::RenderIdentity()` through RenderQueue, GBuffer, TLAS
+  metadata, Ray Query audit records, and Apply records. Keep submission index
+  only as local diagnostic context.
+- Add the scene-object audit ID and receiver-origin bounds checks to the
+  offline analyzer. Separate scene identity coverage from TLAS-eligible
+  coverage so skinned fallback objects remain explicit rather than appearing
+  as missing receivers.
+- Add `SELFENGINE_FFX_POSITIVE_VIEWPORT=1` to the FFX shader build and skip
+  the AMD Common.hlsl Y flip for SelfEngine's positive viewport convention.
+- Reject below-hemisphere reflection candidates before Ray Query and count
+  production traces only after this validation.
+- Keep ordinary GBuffer and descriptor pools free of audit-only attachment
+  requirements; compile `gbuffer_3d_audit.frag.spv` only for Full Audit.
+
+Prevention:
+- `submissionIndex` is local to one RenderQueue and must never be used as a
+  cross-pass object identity.
+- Treat camera projection Y sign, viewport height, UV origin, and every inverse
+  reconstruction function as one producer-consumer contract. Validate a known
+  CPU world-space bound before tuning reflection quality.
+- Every opt-in audit descriptor/output must have a separate shader variant or
+  an explicit normal-path resource contract; Debug instrumentation must not
+  create validation errors in ordinary Debug or Release rendering.
+
+Validation:
+- LightingShowcase Full Audit: `627 pass / 0 fail`, 51 objects, 51 TLAS
+  instances, 176,265 ray records, stable-ID coverage 1.0, origin-bounds
+  failures 0, self hits 0, and 420 theoretical hits on the polished sphere
+  (300 production RT hits).
+- Animated Forward3D FBX Full Audit: `65 pass / 0 fail`, 5 objects, 4 TLAS
+  instances, 2,678 ray records, scene identity coverage 1.0, with one explicit
+  skinned fallback object.
+- `Test-HybridReflectionsCapability.ps1 -SkipBuild -UseShowcaseForwardControl -Strict`
+  passed `403 / 0`; `Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict`
+  passed `1115 / 0`; `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict`
+  passed `809 / 0`; Vulkan validation was 0 in the full-audit and regression
+  lanes.
+- Residual quality metrics remain visible as warnings: 1,246/38,890 selected
+  Apply neighbor pairs cross a hit/miss blend boundary, and 9,961/77,464
+  neighboring Ray Query samples switch source. These are the next visual
+  quality target, not object identity or resource-contract failures.
+
+## 2026-07-22 - Reflection Apply Must Conserve Real HDR Energy
+
+Symptom:
+- Full Audit recorded 95,892 nonzero Apply samples and 8,057.55 luminance of
+  shader contribution, but HDR luminance before and after Apply was identical.
+- Earlier counters proved that the shader ran without proving that its output
+  survived fixed-function blending.
+
+False leads:
+- Treating nonzero Apply records as evidence that the visible HDR image changed.
+- Tuning Probe, Ray Query, DNSR, or material parameters while the final write
+  was a fixed-function no-op.
+- Keeping a 348 MB per-frame pixel CSV as the normal strict-analysis input.
+
+Cause:
+- The Apply pipeline used `DST_ALPHA + ONE` RGB blending. All 921,600 HDR
+  pixels had destination alpha zero before Apply, so every source contribution
+  was multiplied by zero. Apply then wrote source alpha one, hiding the broken
+  precondition from later stages.
+- RGB consumed ResolveTemporal `RadianceHistory`, while confidence consumed
+  the pre-temporal Reproject `HitConfidence` image. The inputs did not share
+  temporal ownership.
+
+Control test:
+- Hold the frozen LightingShowcase frame and all SSR/Ray Query inputs constant,
+  changing only the Apply blend mode from destination-alpha additive to
+  standard additive.
+- Destination-alpha shader/blend/actual luminance: `8057.55 / 0 / 0`.
+- Additive shader/blend/actual luminance:
+  `8057.65 / 8057.65 / 8054.75`; the 0.036% difference is bounded half-float
+  accumulation and quantization error.
+
+Fix:
+- Use standard additive RGB blending as the production default; retain
+  destination-alpha only as a Debug control.
+- Bind and synchronize `HitConfidenceHistory` from the same FidelityFX
+  ResolveTemporal stage that owns `RadianceHistory`; advance the confidence
+  contract to v2 and expose source `2` in benchmark data.
+- Record HDR alpha, shader contribution, blend-expected contribution, actual
+  HDR delta, and confidence source in `audit_index.csv`.
+- Replace default per-pixel image CSV expansion with lossless binary snapshots
+  plus a readable manifest. Keep verbose CSV as an explicit deep-dive switch.
+
+Prevention:
+- A fragment counter proves execution, not composition. Every post-lighting
+  pass needs a before/source/fixed-function/after conservation equation.
+- Color, confidence, depth, and history metadata consumed together must come
+  from the same temporal stage or have an explicit conversion contract.
+- Validate render-target alpha before using it as a blend factor.
+- Keep complete raw evidence, but make strict gates consume compact indexes and
+  stream raw row counts so monitoring remains usable.
+
+Validation:
+- LightingShowcase additive control passed 990 data checks with zero failures;
+  FrameGraph initial-frame issues dropped from 3 to 0 and analyzer time dropped
+  from about 490 seconds to 9.5 seconds.
+- FidelityFX v2 confidence-source static integration passes `59 / 0`; Debug
+  Forward3D and LightingShowcase builds and Vulkan 1.2 SPIR-V validation pass.
+- Final cross-scene runtime and visual acceptance remain blocked because WDAC
+  policy `4551` rejects the newly linked executable hash despite a valid local
+  Authenticode signature. Do not claim runtime closure from the pre-v2 control.
+
+## 2026-07-22 - Full Audit Must Correlate Time Domains And Preserve Pair Evidence
+
+Symptom:
+- A valid steady-state capture failed `all audited frames resolve to benchmark
+  rows` because the producer frame was 12 while the delayed GPU readback was
+  processed on renderer frame 15 and reported by the application as frame 16.
+- Apply quality reported 1,111 unstable neighbor pairs on the center mirror,
+  but the summary did not identify the values or pixels behind the count.
+
+False leads:
+- Treating the producer frame number as the Benchmark row identity despite
+  swapchain readback latency and the application's one-based rendered frame.
+- Raising the 2% discontinuity warning threshold without preserving the
+  offending pairs.
+- Requiring the DLSS output snapshot in a TAA capture where that stage is not
+  applicable.
+
+Cause:
+- Producer, GPU-readback, and application-reporting frames are separate time
+  domains. Record counts and capture sequence are the stable correlation.
+- Compact quality summaries conserved counts but discarded pair-level
+  confidence, blend, source luminance, contribution, and spatial evidence.
+- The image-stage mask did not explicitly distinguish an inapplicable DLSS
+  output from a missing required stage.
+
+Fix:
+- Add `benchmark_frame_matches.csv` with producer/readback/Benchmark frames and
+  exact record-count/capture-sequence matching.
+- Add `runtime_apply_discontinuities.csv` and require per-receiver and global
+  conservation against the compact quality summary.
+- Add `image_stage_contract.csv`; contract v3 snapshots nine DNSR carriers and
+  requires mask 12287 for TAA or 16383 for ready DLSS/DLAA. Validate stage
+  identity, extent, image index, and one full object-ID snapshot per capture.
+- Add `benchmark_long.csv` so every Benchmark schema field remains queryable;
+  require rows to equal reporting frames times schema columns.
+
+Prevention:
+- Never join asynchronous renderer evidence on a convenient frame number.
+  Record and validate the producer-to-readback-to-report mapping explicitly.
+- A warning must retain enough compact evidence to localize every offending
+  sample; do not lower a threshold to make strict mode pass.
+- Model optional pipeline stages as conditional contracts, not silent gaps.
+
+Validation:
+- The prior real LightingShowcase capture reanalyzed offline at `1022 pass / 0
+  fail`; 7 Benchmark rows x 1,760 columns produced 12,320 long-form rows.
+- Producer/readback/Benchmark frames resolved to `12/15/16`; TAA expected,
+  recorded, and manifested stage masks were `23/23/23`; the object-ID snapshot
+  covered all 921,600 pixels.
+- All 7,294 Apply discontinuity rows conserved against summaries; all were
+  confidence-attributed and none were unexplained. The center mirror retained
+  one blocking warning: 1,111/38,902 boundaries, including 200 large final
+  contribution jumps.
+- Debug Forward3D/LightingShowcase and Release Forward3D builds, FidelityFX
+  static integration `59/0`, and three Vulkan 1.2 SPIR-V validations passed.
+  New-binary runtime certification remains blocked by Smart App Control 4551.
+
+## 2026-07-22 - External Frame Debuggers Own Generic GPU Truth
+
+Symptom:
+- Full Audit grew toward 200 MB per frame and spent minutes scanning generic
+  GPU image contents in PowerShell before answering a reflection question.
+- RenderDoc and Nsight were installed, but Nsight use had been narrowed to DLSS
+  and the reflection investigation duplicated frame-debugger responsibilities.
+
+Wrong turn:
+- Treating "monitor every value" as a reason to export every pass, pixel, ray,
+  and Benchmark field by default.
+- Building generic pipeline/resource inspection into engine CSV instead of
+  first assigning each question to RenderDoc, Nsight, Validation, or engine
+  semantics.
+
+Cause:
+- The monitoring system had no cost ladder or ownership boundary. Generic GPU
+  truth and SelfEngine scene-semantic truth were mixed into one capture path.
+
+Fix:
+- Use RenderDoc as the default frame-truth layer, injected before Vulkan startup
+  and controlled through the official Debug-only in-application API.
+- Keep Nsight for NVIDIA/DLSS/Ray Query/performance questions and Vulkan
+  Validation for API legality.
+- Keep Full Audit only for stable object identity, RenderQueue/TLAS ownership,
+  expected hit/fallback policy, temporal correlation, and conservation.
+- Default to native compact summaries. Require `-RawEvidence` for per-ray,
+  per-pixel, per-boundary, image-binary, and expanded Benchmark evidence.
+- Allow strict Fast Audit failure to trigger one same-scene/same-frame RenderDoc
+  capture without changing the original failing verdict.
+
+Prevention:
+- Before adding monitoring, name the unanswered question and its first-line
+  owner. Do not add custom GPU readback when a mature tool owns it.
+- A fast gate should run in seconds and preserve warnings. Deep evidence is an
+  explicit escalation, not the default.
+- Validate capture files with official APIs/tools, readable labels/resource
+  names, executable hashes, exact frames, and a structurally different scene.
+
+Validation:
+- Real LightingShowcase Fast Audit: 4,299,010 bytes, about 1.35-second
+  analyzer, `1077 pass / 0 fail / 1 warning`; no raw rows or image binaries.
+  The final run reports 1,112 confidence-attributed unstable boundaries and
+  zero unexplained boundaries.
+- Real Raw Evidence: 205,379,000 bytes, 176,231 ray/apply/GBuffer rows, 7,301
+  boundary rows, 13 image binaries, `1096 pass / 0 fail / 1 warning`.
+- RenderDoc frame 12 captures for LightingShowcase and Forward3D FBX pass
+  `32 / 0` checks, decode to 1024x576 thumbnails, and report API 1.7.0.
+- Debug LightingShowcase, Debug Forward3D, and Release LightingShowcase build.
+  Release contains no RenderDoc API/environment marker strings.

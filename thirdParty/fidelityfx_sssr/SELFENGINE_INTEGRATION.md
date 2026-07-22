@@ -28,6 +28,13 @@ SelfEngine compatibility patches:
   radiance algorithm unchanged while matching the RGBA32F Vulkan storage image
   used by SelfEngine; RGB32F sampled/storage images are not portable on the
   current device.
+- `shaders/Common.hlsl` preserves AMD's UV/NDC Y flip by default, but skips it
+  when `SELFENGINE_FFX_POSITIVE_VIEWPORT=1` is defined. AMD's Vulkan sample
+  uses a negative-height viewport and an unflipped projection; SelfEngine uses
+  a positive-height viewport and flips `projection[1][1]`, so applying AMD's
+  shader-side Y flip again reconstructs the opposite screen row. The build
+  defines this adaptation for every FFX SSSR pass and the hybrid Ray Query
+  consumer.
 
 The patches are semantic-preserving HLSL-to-SPIR-V compatibility changes for
 the Vulkan SDK DXC path used by SelfEngine. The original AMD source targets an
@@ -97,12 +104,14 @@ Current integration state:
   Deferred writes lit HDR plus an attenuated IBL baseline, ResolveTemporal
   writes the current image's `RadianceHistory`, and a fullscreen
   `FidelityFXSSSRApplyReflections` pass composites that current result into HDR
-  before TAA/DLSS. HDR alpha carries the baseline attenuation into a
-  destination-alpha additive blend and is restored to one by the apply pass.
+  before TAA/DLSS. Apply uses a standard additive RGB blend; the previous
+  destination-alpha blend is Debug-only because Full Audit proved that the HDR
+  destination alpha was zero and suppressed every reflection contribution.
   `SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF=1` retains the previous-frame Deferred
   consumer as an explicit diagnostic fallback.
 - The SelfEngine Apply pass does not infer hit provenance from FFX radiance
-  alpha. It consumes the reprojected `HitConfidence` image separately,
+  alpha. It consumes ResolveTemporal `HitConfidenceHistory` from the same stage
+  that owns `RadianceHistory`,
   subtracts the selected local `SceneReflectionProbeCubemap` baseline from
   validated screen-space radiance, and leaves probe/IBL fallback responsible
   for misses. Apply's local-probe priority and box-projection contract matches

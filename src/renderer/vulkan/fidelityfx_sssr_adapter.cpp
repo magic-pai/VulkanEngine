@@ -80,6 +80,73 @@ bool FfxExtentsDiffer(const VkExtent2D& left, const VkExtent2D& right) {
     return left.width != right.width || left.height != right.height;
 }
 
+std::string FfxResourceName(const char* baseName, std::size_t imageIndex) {
+    return std::string("SelfEngine.Reflection.FFX.") + baseName + "[" +
+        std::to_string(imageIndex) + "]";
+}
+
+void NameFfxBuffer(
+    const VulkanDevice& device,
+    const VulkanBuffer& buffer,
+    VkBufferView view,
+    const char* baseName,
+    std::size_t imageIndex
+) {
+#if defined(_DEBUG)
+    const std::string name = FfxResourceName(baseName, imageIndex);
+    SetVulkanDebugObjectName(
+        device.Handle(),
+        VK_OBJECT_TYPE_BUFFER,
+        buffer.Handle(),
+        name.c_str()
+    );
+    if (view != VK_NULL_HANDLE) {
+        const std::string viewName = name + ".View";
+        SetVulkanDebugObjectName(
+            device.Handle(),
+            VK_OBJECT_TYPE_BUFFER_VIEW,
+            view,
+            viewName.c_str()
+        );
+    }
+#else
+    (void)device;
+    (void)buffer;
+    (void)view;
+    (void)baseName;
+    (void)imageIndex;
+#endif
+}
+
+void NameFfxImage(
+    const VulkanDevice& device,
+    const VulkanImage& image,
+    const char* baseName,
+    std::size_t imageIndex
+) {
+#if defined(_DEBUG)
+    const std::string name = FfxResourceName(baseName, imageIndex);
+    SetVulkanDebugObjectName(
+        device.Handle(),
+        VK_OBJECT_TYPE_IMAGE,
+        image.Handle(),
+        name.c_str()
+    );
+    const std::string viewName = name + ".View";
+    SetVulkanDebugObjectName(
+        device.Handle(),
+        VK_OBJECT_TYPE_IMAGE_VIEW,
+        image.View(),
+        viewName.c_str()
+    );
+#else
+    (void)device;
+    (void)image;
+    (void)baseName;
+    (void)imageIndex;
+#endif
+}
+
 } // namespace
 
 VulkanFfxSssrConstantsDescriptorSetLayout::
@@ -515,6 +582,8 @@ void VulkanFfxSssrPrepareIndirectArgsResources::CreateResources(
             vkDestroyBufferView(device.Handle(), rayCounterView, nullptr);
             throw;
         }
+        NameFfxBuffer(device, *rayCounter, rayCounterView, "RayCounter", index);
+        NameFfxBuffer(device, *indirectArgs, indirectArgsView, "IndirectArgs", index);
         m_RayCounterBuffers.push_back(std::move(rayCounter));
         m_IndirectArgsBuffers.push_back(std::move(indirectArgs));
         m_RayCounterBufferViews.push_back(rayCounterView);
@@ -1305,13 +1374,18 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
             throw;
         }
 
+        VkImageUsageFlags classifyImageUsage =
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+#if !defined(NDEBUG)
+        classifyImageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+#endif
         auto intersectionOutput = std::make_unique<VulkanImage>(
             device,
             physicalDevice,
             m_Extent,
             VK_FORMAT_R32G32B32A32_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            classifyImageUsage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT
         );
@@ -1328,7 +1402,7 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
             m_Extent,
             VK_FORMAT_R32_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            classifyImageUsage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT
         );
@@ -1345,7 +1419,7 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
             m_Extent,
             VK_FORMAT_R32_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            classifyImageUsage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT
         );
@@ -1362,7 +1436,7 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
             m_Extent,
             VK_FORMAT_R32_SFLOAT,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            classifyImageUsage,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT
         );
@@ -1371,6 +1445,39 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
             commandPool,
             VK_IMAGE_LAYOUT_UNDEFINED,
             VK_IMAGE_LAYOUT_GENERAL
+        );
+
+        NameFfxBuffer(device, *rayList, rayListView, "RayList", imageIndex);
+        NameFfxBuffer(
+            device,
+            *denoiserTileList,
+            denoiserTileListView,
+            "DenoiserTileList",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *intersectionOutput,
+            "IntersectRadiance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *extractedRoughness,
+            "ExtractedRoughness",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *varianceHistory,
+            "ClassifyVarianceHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *hitConfidence,
+            "IntersectConfidence",
+            imageIndex
         );
 
         m_RayListBuffers.push_back(std::move(rayList));
@@ -2351,6 +2458,66 @@ void VulkanFfxSssrReprojectResources::CreateResources(
             VK_FORMAT_R32_SFLOAT,
             "Failed to initialize FidelityFX SSSR hit-confidence image"
         ));
+        NameFfxImage(
+            device,
+            *m_RadianceHistoryImages.back(),
+            "RadianceHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_AverageRadianceHistoryImages.back(),
+            "AverageRadianceHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_VarianceHistoryImages.back(),
+            "VarianceHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_SampleCountHistoryImages.back(),
+            "SampleCountHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_HitConfidenceHistoryImages.back(),
+            "HitConfidenceHistory",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_ReprojectedRadianceImages.back(),
+            "ReprojectedRadiance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_AverageRadianceImages.back(),
+            "AverageRadiance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_VarianceImages.back(),
+            "ReprojectedVariance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_SampleCountImages.back(),
+            "ReprojectedSampleCount",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_HitConfidenceImages.back(),
+            "ReprojectedConfidence",
+            imageIndex
+        );
     }
 
     std::array<VkDescriptorPoolSize, 4> poolSizes{};
@@ -2818,6 +2985,24 @@ void VulkanFfxSssrPrefilterResources::CreateResources(
             VK_FORMAT_R32_SFLOAT,
             "Failed to initialize FidelityFX SSSR prefilter sample-count image"
         ));
+        NameFfxImage(
+            device,
+            *m_RadianceImages.back(),
+            "PrefilterRadiance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_VarianceImages.back(),
+            "PrefilterVariance",
+            imageIndex
+        );
+        NameFfxImage(
+            device,
+            *m_SampleCountImages.back(),
+            "PrefilterSampleCount",
+            imageIndex
+        );
     }
 
     std::array<VkDescriptorPoolSize, 4> poolSizes{};

@@ -245,6 +245,8 @@ public:
     VkImageView GBufferMaterialView(std::size_t index) const;
     VkImageView GBufferEmissiveView(std::size_t index) const;
     VkImageView GBufferMaterialAuxView(std::size_t index) const;
+    VkImageView ReflectionAuditObjectIdView(std::size_t index) const;
+    VkImage ReflectionAuditObjectIdImage(std::size_t index) const;
     VkFormat HdrSceneColorFormat() const;
     VkFormat TemporalResolvedColorFormat() const;
     VkFormat TemporalUpscaleOutputFormat() const;
@@ -261,6 +263,8 @@ public:
     VkFormat GBufferMaterialFormat() const;
     VkFormat GBufferEmissiveFormat() const;
     VkFormat GBufferMaterialAuxFormat() const;
+    VkFormat ReflectionAuditObjectIdFormat() const;
+    bool ReflectionAuditObjectIdEnabled() const;
     VkExtent2D DisplayExtent() const;
     VkExtent2D Extent() const;
     std::size_t Count() const;
@@ -292,6 +296,8 @@ public:
         VK_FORMAT_R16G16B16A16_SFLOAT;
     static constexpr VkFormat kGBufferMaterialAuxFormat =
         VK_FORMAT_R16G16_SFLOAT;
+    static constexpr VkFormat kReflectionAuditObjectIdFormat =
+        VK_FORMAT_R32_UINT;
 
 private:
     void CreateImageArray(
@@ -339,6 +345,8 @@ private:
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferEmissiveImages;
     std::vector<std::unique_ptr<VulkanImage>> m_GBufferMaterialAuxImages;
+    std::vector<std::unique_ptr<VulkanImage>> m_ReflectionAuditObjectIdImages;
+    bool m_ReflectionAuditObjectIdEnabled = false;
     VkDevice m_Device = VK_NULL_HANDLE;
     VkExtent2D m_DisplayExtent{};
     VkExtent2D m_Extent{};

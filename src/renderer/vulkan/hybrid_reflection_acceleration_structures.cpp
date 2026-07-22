@@ -99,6 +99,8 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         u32 materialCount = 0;
         std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
         std::vector<const VulkanMaterial*> instanceMaterials;
+        std::vector<u32> instanceSubmissionIndices;
+        std::vector<HybridReflectionInstanceAuditRecord> instanceAuditRecords;
         bool built = false;
         bool prepared = false;
     };
@@ -108,6 +110,9 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         const VulkanPhysicalDevice& physicalDevice,
         u32 frameCount
     ) : device(device), physicalDevice(physicalDevice), frames(frameCount) {
+        fullAuditRequested = VulkanEnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_FULL_AUDIT"
+        );
         createAccelerationStructure = reinterpret_cast<
             PFN_vkCreateAccelerationStructureKHR
         >(vkGetDeviceProcAddr(device.Handle(), "vkCreateAccelerationStructureKHR"));
@@ -402,27 +407,120 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         ));
         std::vector<HybridReflectionInstanceMetadata> instanceMetadata;
         instanceMetadata.reserve(instances.capacity());
+        std::vector<u32> instanceSubmissionIndices;
+        instanceSubmissionIndices.reserve(instances.capacity());
+        std::vector<HybridReflectionInstanceAuditRecord> instanceAuditRecords;
+        if (fullAuditRequested) {
+            instanceAuditRecords.reserve(renderCommands.size());
+        }
         std::unordered_map<const VulkanMaterial*, u32> materialIndices;
         std::vector<const VulkanMaterial*> instanceMaterials;
         std::unordered_set<const VulkanMesh*> meshesUsedThisFrame;
         for (const RenderCommand& command : renderCommands) {
+            HybridReflectionInstanceAuditRecord* audit = nullptr;
+            if (fullAuditRequested) {
+                instanceAuditRecords.emplace_back();
+                audit = &instanceAuditRecords.back();
+                audit->submissionIndex = static_cast<u32>(
+                    std::min<std::size_t>(
+                        command.submissionIndex,
+                        std::numeric_limits<u32>::max()
+                    )
+                );
+                audit->reflectionAuditObjectId =
+                    command.reflectionAuditObjectId;
+#if !defined(NDEBUG)
+                audit->renderIdentity = command.renderableIdentity;
+                audit->renderableName = std::string(command.debugRenderableName);
+#else
+                audit->renderIdentity = command.renderableIdentity;
+                audit->renderableName =
+                    "submission#" + std::to_string(audit->submissionIndex);
+#endif
+                audit->meshIdentity = static_cast<u64>(command.meshSortKey);
+                audit->materialIdentity =
+                    static_cast<u64>(command.materialSortKey);
+                for (u32 column = 0u; column < 4u; ++column) {
+                    for (u32 row = 0u; row < 4u; ++row) {
+                        audit->model[column * 4u + row] =
+                            command.model[column][row];
+                    }
+                }
+                if (command.worldBounds.valid) {
+                    for (u32 component = 0u; component < 3u; ++component) {
+                        audit->boundsMin[component] =
+                            command.worldBounds.min[component];
+                        audit->boundsMax[component] =
+                            command.worldBounds.max[component];
+                    }
+                }
+                if (command.mesh != nullptr) {
+                    audit->vertexCount = command.mesh->VertexCount();
+                    audit->indexCount = command.mesh->IndexCount();
+                    audit->vertexStride = command.mesh->VertexStride();
+                }
+                audit->castShadow = command.castShadow ? 1u : 0u;
+                audit->reflectionCaptureVisible =
+                    command.reflectionCaptureVisible ? 1u : 0u;
+                const f32 m00 = command.model[0][0];
+                const f32 m01 = command.model[1][0];
+                const f32 m02 = command.model[2][0];
+                const f32 m10 = command.model[0][1];
+                const f32 m11 = command.model[1][1];
+                const f32 m12 = command.model[2][1];
+                const f32 m20 = command.model[0][2];
+                const f32 m21 = command.model[1][2];
+                const f32 m22 = command.model[2][2];
+                audit->modelDeterminant =
+                    m00 * (m11 * m22 - m12 * m21) -
+                    m01 * (m10 * m22 - m12 * m20) +
+                    m02 * (m10 * m21 - m11 * m20);
+                if (command.material != nullptr) {
+                    const MaterialProperties& properties =
+                        command.material->Properties();
+                    audit->baseColor = properties.baseColorFactor;
+                    audit->emissive = properties.emissiveFactor;
+                    audit->alphaMode = static_cast<u32>(properties.alphaMode);
+                    audit->renderClass =
+                        static_cast<u32>(properties.renderClass);
+                    audit->doubleSided = properties.doubleSided ? 1u : 0u;
+                    audit->metallic = properties.cameraControls[0];
+                    audit->roughness = properties.cameraControls[1];
+                    audit->textureMix = properties.textureMix;
+                }
+            }
             if (command.mesh == nullptr || !command.mesh->Is3D()) {
+                if (audit != nullptr) {
+                    audit->exclusionReason = 1u;
+                }
                 ++stats.invalidGeometryCount;
                 continue;
             }
             if (IsSkinnedCommand(command)) {
+                if (audit != nullptr) {
+                    audit->exclusionReason = 2u;
+                }
                 ++stats.skinnedFallbackCount;
                 continue;
             }
             if (!IsOpaqueCommand(command)) {
+                if (audit != nullptr) {
+                    audit->exclusionReason = 3u;
+                }
                 ++stats.alphaFallbackCount;
                 continue;
             }
             if (!command.mesh->AccelerationStructureInputReady()) {
+                if (audit != nullptr) {
+                    audit->exclusionReason = 4u;
+                }
                 ++stats.invalidGeometryCount;
                 continue;
             }
             if (instances.size() >= kMaxHybridReflectionInstances) {
+                if (audit != nullptr) {
+                    audit->exclusionReason = 5u;
+                }
                 ++stats.instanceOverflowCount;
                 continue;
             }
@@ -430,11 +528,17 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             auto found = blasCache.find(command.mesh);
             if (found == blasCache.end()) {
                 if (blasCache.size() >= kMaxBlasCacheEntries) {
+                    if (audit != nullptr) {
+                        audit->exclusionReason = 6u;
+                    }
                     ++stats.instanceOverflowCount;
                     continue;
                 }
                 std::unique_ptr<BlasEntry> created = CreateBlasEntry(*command.mesh);
                 if (created == nullptr) {
+                    if (audit != nullptr) {
+                        audit->exclusionReason = 7u;
+                    }
                     ++stats.invalidGeometryCount;
                     continue;
                 }
@@ -449,10 +553,13 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             instance.instanceCustomIndex = static_cast<u32>(instances.size()) & 0x00ffffffu;
             instance.mask = 0xffu;
             instance.instanceShaderBindingTableRecordOffset = 0u;
-            instance.flags = command.material != nullptr &&
-                    command.material->Properties().doubleSided
-                ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR
-                : 0u;
+            instance.flags =
+                VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR;
+            if (command.material != nullptr &&
+                command.material->Properties().doubleSided) {
+                instance.flags |=
+                    VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            }
             instance.accelerationStructureReference = blas.address;
             u32 materialIndex = 0u;
             if (command.material != nullptr) {
@@ -476,8 +583,23 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             metadata.indexCount = command.mesh->IndexCount();
             metadata.vertexStride = command.mesh->VertexStride();
             metadata.materialIndex = materialIndex;
+            const u32 submissionIndex = static_cast<u32>(std::min<std::size_t>(
+                command.submissionIndex,
+                std::numeric_limits<u32>::max()
+            ));
+            metadata.submissionIndex = submissionIndex;
+            metadata.reflectionAuditObjectId =
+                command.reflectionAuditObjectId;
+            if (audit != nullptr) {
+                audit->tlasIndex = static_cast<u32>(instances.size());
+                audit->materialIndex = materialIndex;
+                audit->instanceFlags = instance.flags;
+                audit->inTlas = 1u;
+                audit->exclusionReason = 0u;
+            }
             instances.push_back(instance);
             instanceMetadata.push_back(metadata);
+            instanceSubmissionIndices.push_back(submissionIndex);
             meshesUsedThisFrame.insert(command.mesh);
             ++stats.opaqueRigidCommandCount;
         }
@@ -488,6 +610,8 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         frame.materialCount = static_cast<u32>(materialIndices.size());
         frame.instanceMetadata = std::move(instanceMetadata);
         frame.instanceMaterials = std::move(instanceMaterials);
+        frame.instanceSubmissionIndices = std::move(instanceSubmissionIndices);
+        frame.instanceAuditRecords = std::move(instanceAuditRecords);
         if (!instances.empty()) {
             EnsureTlasCapacity(frame, static_cast<u32>(instances.size()));
             frame.instances->Upload(std::as_bytes(std::span(instances)));
@@ -721,6 +845,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         getAccelerationStructureAddress = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR cmdBuildAccelerationStructures = nullptr;
     VkDeviceSize scratchAlignment = 1u;
+    bool fullAuditRequested = false;
     std::unordered_map<const VulkanMesh*, std::unique_ptr<BlasEntry>> blasCache;
     std::vector<FrameTlas> frames;
 };
@@ -783,6 +908,36 @@ VulkanHybridReflectionAccelerationStructures::InstanceMaterials(
         return {};
     }
     return m_Impl->frames[frameIndex].instanceMaterials;
+}
+
+u32 VulkanHybridReflectionAccelerationStructures::
+FindInstanceIndexBySubmissionIndex(
+    u32 frameIndex,
+    u32 submissionIndex
+) const {
+    if (frameIndex >= m_Impl->frames.size()) {
+        return std::numeric_limits<u32>::max();
+    }
+    const std::vector<u32>& submissionIndices =
+        m_Impl->frames[frameIndex].instanceSubmissionIndices;
+    const auto found = std::find(
+        submissionIndices.begin(),
+        submissionIndices.end(),
+        submissionIndex
+    );
+    return found != submissionIndices.end()
+        ? static_cast<u32>(std::distance(submissionIndices.begin(), found))
+        : std::numeric_limits<u32>::max();
+}
+
+std::span<const HybridReflectionInstanceAuditRecord>
+VulkanHybridReflectionAccelerationStructures::InstanceAuditRecords(
+    u32 frameIndex
+) const {
+    if (frameIndex >= m_Impl->frames.size()) {
+        return {};
+    }
+    return m_Impl->frames[frameIndex].instanceAuditRecords;
 }
 
 }

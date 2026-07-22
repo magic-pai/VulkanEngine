@@ -740,6 +740,7 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrHitConfidenceResourcesReady << ','
         << ssr.fidelityFxSssrHitConfidenceHistoryReady << ','
         << ssr.fidelityFxSssrHitConfidenceApplyBound << ','
+        << ssr.fidelityFxSssrApplyConfidenceSource << ','
         << ssr.fidelityFxSssrProbeFallbackConsumer << ','
         << ssr.fidelityFxSssrRuntimeDispatchReady << ','
         << ssr.fidelityFxSssrRuntimeActive << ','
@@ -836,6 +837,19 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryInstanceAddressReadyCount << ','
         << hybridReflections.rayQueryInstanceMetadataUploadCount << ','
         << hybridReflections.rayQueryInstanceMetadataBytes << ','
+        << hybridReflections.rayQueryDiagnosticTargetSubmissionIndex << ','
+        << hybridReflections.rayQueryDiagnosticTargetMatchCount << ','
+        << hybridReflections.rayQueryDiagnosticTargetTlasIndex << ','
+        << hybridReflections.rayQueryDiagnosticTargetMaterialIndex << ','
+        << hybridReflections.rayQueryForceAllRayQueries << ','
+        << hybridReflections.rayQueryCullBackFacingTriangles << ','
+        << hybridReflections.rayQueryFullAuditRequested << ','
+        << hybridReflections.rayQueryFullAuditResourcesReady << ','
+        << hybridReflections.rayQueryFullAuditActive << ','
+        << hybridReflections.rayQueryFullAuditMaxRayRecords << ','
+        << hybridReflections.rayQueryFullAuditRecordedRayCount << ','
+        << hybridReflections.rayQueryFullAuditCapturedFrameCount << ','
+        << hybridReflections.rayQueryFullAuditBufferBytes << ','
         << hybridReflections.rayQueryMaterialTableResourcesReady << ','
         << hybridReflections.rayQueryMaterialTableCount << ','
         << hybridReflections.rayQueryMaterialTableCapacity << ','
@@ -958,6 +972,9 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryDenoiserRadiancePixelWriteCount << ','
         << hybridReflections.rayQueryDenoiserConfidencePixelWriteCount << ','
         << hybridReflections.rayQueryDenoiserConfidenceSumPermille << ','
+        << hybridReflections.rayQueryDiagnosticTargetCommittedHitCount << ','
+        << hybridReflections.rayQueryDiagnosticTargetAttributeResolvedCount << ','
+        << hybridReflections.rayQueryDiagnosticTargetDenoiserWriteCount << ','
         << hybridReflections.active << ','
         << hybridReflections.fallbackReason << ','
         << ibl.quality << ','
@@ -2401,6 +2418,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_hit_confidence_resources_ready,"
         << "ssr_ffx_sssr_hit_confidence_history_ready,"
         << "ssr_ffx_sssr_hit_confidence_apply_bound,"
+        << "ssr_ffx_sssr_apply_confidence_source,"
         << "ssr_ffx_sssr_probe_fallback_consumer,"
         << "ssr_ffx_sssr_runtime_dispatch_ready,"
         << "ssr_ffx_sssr_runtime_active,"
@@ -2491,6 +2509,19 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_instance_address_ready_count,"
         << "hybrid_reflections_ray_query_instance_metadata_upload_count,"
         << "hybrid_reflections_ray_query_instance_metadata_bytes,"
+        << "hybrid_reflections_ray_query_diagnostic_target_submission_index,"
+        << "hybrid_reflections_ray_query_diagnostic_target_match_count,"
+        << "hybrid_reflections_ray_query_diagnostic_target_tlas_index,"
+        << "hybrid_reflections_ray_query_diagnostic_target_material_index,"
+        << "hybrid_reflections_ray_query_force_all_ray_queries,"
+        << "hybrid_reflections_ray_query_cull_back_facing_triangles,"
+        << "hybrid_reflections_ray_query_full_audit_requested,"
+        << "hybrid_reflections_ray_query_full_audit_resources_ready,"
+        << "hybrid_reflections_ray_query_full_audit_active,"
+        << "hybrid_reflections_ray_query_full_audit_max_ray_records,"
+        << "hybrid_reflections_ray_query_full_audit_recorded_ray_count,"
+        << "hybrid_reflections_ray_query_full_audit_captured_frame_count,"
+        << "hybrid_reflections_ray_query_full_audit_buffer_bytes,"
         << "hybrid_reflections_ray_query_material_table_resources_ready,"
         << "hybrid_reflections_ray_query_material_table_count,"
         << "hybrid_reflections_ray_query_material_table_capacity,"
@@ -2613,6 +2644,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_denoiser_radiance_pixel_write_count,"
         << "hybrid_reflections_ray_query_denoiser_confidence_pixel_write_count,"
         << "hybrid_reflections_ray_query_denoiser_confidence_sum_permille,"
+        << "hybrid_reflections_ray_query_diagnostic_target_committed_hit_count,"
+        << "hybrid_reflections_ray_query_diagnostic_target_attribute_resolved_count,"
+        << "hybrid_reflections_ray_query_diagnostic_target_denoiser_write_count,"
         << "hybrid_reflections_active,hybrid_reflections_fallback_reason,"
         << "ibl_quality,ibl_requested_source,ibl_actual_source,"
         << "ibl_source_fallback_reason,ibl_cache_policy,"

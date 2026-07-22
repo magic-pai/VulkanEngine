@@ -382,14 +382,23 @@ void VulkanGBufferRenderPass::CreateRenderPass(
     const VulkanDevice& device,
     const VulkanSceneRenderTargets& renderTargets
 ) {
-    std::array<VkAttachmentDescription, 7> attachments{};
+    const bool objectIdEnabled =
+        renderTargets.ReflectionAuditObjectIdEnabled();
+    const u32 colorAttachmentCount = objectIdEnabled ? 7u : 6u;
+    const u32 depthAttachmentIndex = colorAttachmentCount;
+    std::vector<VkAttachmentDescription> attachments(
+        static_cast<std::size_t>(colorAttachmentCount) + 1u
+    );
     attachments[0].format = renderTargets.GBufferAlbedoFormat();
     attachments[1].format = renderTargets.GBufferNormalRoughnessFormat();
     attachments[2].format = renderTargets.GBufferMaterialFormat();
     attachments[3].format = renderTargets.GBufferEmissiveFormat();
     attachments[4].format = renderTargets.VelocityFormat();
     attachments[5].format = renderTargets.GBufferMaterialAuxFormat();
-    for (std::size_t index = 0; index < 6; ++index) {
+    if (objectIdEnabled) {
+        attachments[6].format = renderTargets.ReflectionAuditObjectIdFormat();
+    }
+    for (u32 index = 0u; index < colorAttachmentCount; ++index) {
         attachments[index].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[index].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachments[index].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -398,23 +407,32 @@ void VulkanGBufferRenderPass::CreateRenderPass(
         attachments[index].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         attachments[index].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
-    attachments[6].format = renderTargets.SceneDepthFormat();
-    attachments[6].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[6].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[6].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[6].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[6].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[6].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[6].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    if (objectIdEnabled) {
+        attachments[6].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+    }
+    attachments[depthAttachmentIndex].format = renderTargets.SceneDepthFormat();
+    attachments[depthAttachmentIndex].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[depthAttachmentIndex].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[depthAttachmentIndex].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[depthAttachmentIndex].stencilLoadOp =
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[depthAttachmentIndex].stencilStoreOp =
+        VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[depthAttachmentIndex].initialLayout =
+        VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[depthAttachmentIndex].finalLayout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
-    std::array<VkAttachmentReference, 6> colorAttachmentReferences{};
+    std::vector<VkAttachmentReference> colorAttachmentReferences(
+        colorAttachmentCount
+    );
     for (std::size_t index = 0; index < colorAttachmentReferences.size(); ++index) {
         colorAttachmentReferences[index].attachment = static_cast<u32>(index);
         colorAttachmentReferences[index].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
     VkAttachmentReference depthAttachmentReference{};
-    depthAttachmentReference.attachment = 6;
+    depthAttachmentReference.attachment = depthAttachmentIndex;
     depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     VkSubpassDescription subpass{};
@@ -1020,6 +1038,28 @@ VkImageView VulkanSceneRenderTargets::GBufferMaterialAuxView(std::size_t index) 
     return m_GBufferMaterialAuxImages[index]->View();
 }
 
+VkImageView VulkanSceneRenderTargets::ReflectionAuditObjectIdView(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        m_ReflectionAuditObjectIdEnabled &&
+            index < m_ReflectionAuditObjectIdImages.size(),
+        "Reflection-audit object ID index is out of range"
+    );
+    return m_ReflectionAuditObjectIdImages[index]->View();
+}
+
+VkImage VulkanSceneRenderTargets::ReflectionAuditObjectIdImage(
+    std::size_t index
+) const {
+    SE_ASSERT(
+        m_ReflectionAuditObjectIdEnabled &&
+            index < m_ReflectionAuditObjectIdImages.size(),
+        "Reflection-audit object ID image index is out of range"
+    );
+    return m_ReflectionAuditObjectIdImages[index]->Handle();
+}
+
 VkFormat VulkanSceneRenderTargets::HdrSceneColorFormat() const {
     return kHdrSceneColorFormat;
 }
@@ -1084,6 +1124,14 @@ VkFormat VulkanSceneRenderTargets::GBufferMaterialAuxFormat() const {
     return kGBufferMaterialAuxFormat;
 }
 
+VkFormat VulkanSceneRenderTargets::ReflectionAuditObjectIdFormat() const {
+    return kReflectionAuditObjectIdFormat;
+}
+
+bool VulkanSceneRenderTargets::ReflectionAuditObjectIdEnabled() const {
+    return m_ReflectionAuditObjectIdEnabled;
+}
+
 VkExtent2D VulkanSceneRenderTargets::DisplayExtent() const {
     return m_DisplayExtent;
 }
@@ -1107,6 +1155,9 @@ void VulkanSceneRenderTargets::Recreate(
     m_DisplayExtent = swapchain.Extent();
     m_Extent =
         extent.width > 0u && extent.height > 0u ? extent : swapchain.Extent();
+    m_ReflectionAuditObjectIdEnabled = VulkanEnvironmentFlagEnabled(
+        "SE_HYBRID_REFLECTIONS_FULL_AUDIT"
+    );
     const std::size_t count = swapchain.Images().size();
     const u32 hdrSceneColorMipLevels =
         physicalDevice.SupportsLinearBlit(kHdrSceneColorFormat)
@@ -1362,6 +1413,21 @@ void VulkanSceneRenderTargets::Recreate(
         VK_IMAGE_ASPECT_COLOR_BIT,
         m_GBufferMaterialAuxImages
     );
+    if (m_ReflectionAuditObjectIdEnabled) {
+        CreateImageArray(
+            device,
+            physicalDevice,
+            count,
+            kReflectionAuditObjectIdFormat,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT |
+                VK_IMAGE_USAGE_STORAGE_BIT |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            m_ReflectionAuditObjectIdImages,
+            "SelfEngine.ReflectionAudit.ObjectId"
+        );
+    }
 }
 
 void VulkanSceneRenderTargets::Release() {
@@ -1392,6 +1458,8 @@ void VulkanSceneRenderTargets::Release() {
     m_GBufferMaterialImages.clear();
     m_GBufferEmissiveImages.clear();
     m_GBufferMaterialAuxImages.clear();
+    m_ReflectionAuditObjectIdImages.clear();
+    m_ReflectionAuditObjectIdEnabled = false;
     m_Device = VK_NULL_HANDLE;
     m_DisplayExtent = {};
     m_Extent = {};
@@ -2121,15 +2189,20 @@ void VulkanGBufferFramebuffer::CreateFramebuffers(
     m_Framebuffers.resize(renderTargets.Count());
 
     for (std::size_t index = 0; index < renderTargets.Count(); ++index) {
-        const std::array<VkImageView, 7> attachments = {
+        std::vector<VkImageView> attachments{
             renderTargets.GBufferAlbedoView(index),
             renderTargets.GBufferNormalRoughnessView(index),
             renderTargets.GBufferMaterialView(index),
             renderTargets.GBufferEmissiveView(index),
             renderTargets.VelocityView(index),
-            renderTargets.GBufferMaterialAuxView(index),
-            renderTargets.SceneDepthView(index)
+            renderTargets.GBufferMaterialAuxView(index)
         };
+        if (renderTargets.ReflectionAuditObjectIdEnabled()) {
+            attachments.push_back(
+                renderTargets.ReflectionAuditObjectIdView(index)
+            );
+        }
+        attachments.push_back(renderTargets.SceneDepthView(index));
 
         VkFramebufferCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;

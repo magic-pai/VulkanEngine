@@ -59,6 +59,23 @@ std::size_t VulkanDescriptorSets::Count() const {
     return m_DescriptorSets.size();
 }
 
+void VulkanDescriptorSets::UpdateReflectionFullAuditBuffer(
+    const VulkanDevice& device,
+    std::size_t index,
+    const VkDescriptorBufferInfo& bufferInfo
+) {
+    SE_ASSERT(index < m_DescriptorSets.size(), "Frame descriptor index is out of range");
+    SE_ASSERT(bufferInfo.buffer != VK_NULL_HANDLE, "Reflection audit buffer is null");
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_DescriptorSets[index];
+    write.dstBinding = 14u;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.descriptorCount = 1u;
+    write.pBufferInfo = &bufferInfo;
+    vkUpdateDescriptorSets(device.Handle(), 1u, &write, 0u, nullptr);
+}
+
 void VulkanDescriptorSets::Recreate(
     const VulkanDevice& device,
     const VulkanDescriptorSetLayout& descriptorSetLayout,
@@ -113,7 +130,7 @@ void VulkanDescriptorSets::CreateDescriptorPool(
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<u32>(count);
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[1].descriptorCount = static_cast<u32>(count * 8); // 8 storage bindings
+    poolSizes[1].descriptorCount = static_cast<u32>(count * 9); // 9 storage bindings
     poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[2].descriptorCount = static_cast<u32>(
         count * kFrameDescriptorCombinedImageSamplerCount
@@ -358,11 +375,13 @@ void VulkanMaterialDescriptorSets::CreateDescriptorPool(
 ) {
     SE_ASSERT(count > 0, "Material descriptor set count must be greater than zero");
 
-    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount = static_cast<u32>(
         count * kMaterialDescriptorCombinedImageSamplerCount
     );
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(count);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -516,7 +535,10 @@ void VulkanMaterialDescriptorSets::CreateDescriptorSets(
                 localShadowRawDepthImageInfo = shadowRawDepthImageInfo;
             }
 
-            std::array<VkWriteDescriptorSet, 19> descriptorWrites{};
+            std::array<
+                VkWriteDescriptorSet,
+                kMaterialDescriptorCombinedImageSamplerCount
+            > descriptorWrites{};
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = m_DescriptorSets[descriptorIndex];
             descriptorWrites[0].dstBinding = 0;
@@ -814,11 +836,13 @@ void VulkanGBufferDescriptorSets::CreateDescriptorPool(
 ) {
     SE_ASSERT(count > 0, "GBuffer descriptor set count must be greater than zero");
 
-    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount = static_cast<u32>(
         count * kMaterialDescriptorCombinedImageSamplerCount
     );
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(count);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -939,7 +963,6 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
         imageInfos[18].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         imageInfos[18].imageView = renderTargets.SsrHistoryMetadataView(index);
         imageInfos[18].sampler = sampler.Handle();
-
         std::array<
             VkWriteDescriptorSet,
             kMaterialDescriptorCombinedImageSamplerCount
@@ -961,6 +984,27 @@ void VulkanGBufferDescriptorSets::CreateDescriptorSets(
             0,
             nullptr
         );
+        if (renderTargets.ReflectionAuditObjectIdEnabled()) {
+            const VkDescriptorImageInfo objectIdInfo{
+                VK_NULL_HANDLE,
+                renderTargets.ReflectionAuditObjectIdView(index),
+                VK_IMAGE_LAYOUT_GENERAL
+            };
+            VkWriteDescriptorSet objectIdWrite{};
+            objectIdWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            objectIdWrite.dstSet = m_DescriptorSets[index];
+            objectIdWrite.dstBinding = 19u;
+            objectIdWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            objectIdWrite.descriptorCount = 1u;
+            objectIdWrite.pImageInfo = &objectIdInfo;
+            vkUpdateDescriptorSets(
+                device.Handle(),
+                1u,
+                &objectIdWrite,
+                0u,
+                nullptr
+            );
+        }
     }
 }
 
@@ -1379,11 +1423,13 @@ void VulkanHdrDescriptorSets::CreateDescriptorPool(
 ) {
     SE_ASSERT(count > 0, "HDR descriptor set count must be greater than zero");
 
-    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount = static_cast<u32>(
         count * kMaterialDescriptorCombinedImageSamplerCount
     );
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(count);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1605,11 +1651,13 @@ void VulkanBloomDescriptorSets::CreateDescriptorPool(
     SE_ASSERT(mipCount > 0, "Bloom descriptor mip count must be greater than zero");
 
     const std::size_t setCount = swapchainCount * mipCount * 2;
-    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount = static_cast<u32>(
         setCount * kMaterialDescriptorCombinedImageSamplerCount
     );
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(setCount);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1815,11 +1863,13 @@ void VulkanWeightedTranslucencyDescriptorSets::CreateDescriptorPool(
 ) {
     SE_ASSERT(count > 0, "Weighted translucency descriptor set count must be greater than zero");
 
-    std::array<VkDescriptorPoolSize, 1> poolSizes{};
+    std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSizes[0].descriptorCount = static_cast<u32>(
         count * kMaterialDescriptorCombinedImageSamplerCount
     );
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[1].descriptorCount = static_cast<u32>(count);
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

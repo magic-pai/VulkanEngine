@@ -96,6 +96,14 @@ VulkanDevice::VulkanDevice(const VulkanPhysicalDevice& physicalDevice) {
     deviceFeatures.samplerAnisotropy = physicalDevice.Features().samplerAnisotropy;
     deviceFeatures.independentBlend = physicalDevice.Features().independentBlend;
     deviceFeatures.depthBiasClamp = physicalDevice.Features().depthBiasClamp;
+    if (VulkanEnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_FULL_AUDIT")) {
+        if (physicalDevice.Features().fragmentStoresAndAtomics != VK_TRUE) {
+            throw std::runtime_error(
+                "Full reflection audit requires fragmentStoresAndAtomics"
+            );
+        }
+        deviceFeatures.fragmentStoresAndAtomics = VK_TRUE;
+    }
 
     const std::vector<const char*> enabledExtensions =
         EnabledVulkanDeviceExtensionsForPhysicalDevice(physicalDevice.Handle());

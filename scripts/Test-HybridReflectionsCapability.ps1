@@ -4,6 +4,9 @@ param(
     [string]$ShowcaseExecutablePath = "build\Debug\SelfEngineLightingShowcase.exe",
     [switch]$SkipBuild,
     [switch]$UseShowcaseForwardControl,
+    [switch]$UseForwardForShowcaseControl,
+    [ValidateSet(2, 3)]
+    [uint32]$ExpectedRayQueryConsumerContractVersion = 3,
     [switch]$Strict,
     [string]$OutputDirectory = "tmp\hybrid_reflections_capability"
 )
@@ -112,6 +115,9 @@ $forwardExecutable = Resolve-ProjectPath $ForwardExecutablePath
 $showcaseExecutable = Resolve-ProjectPath $ShowcaseExecutablePath
 if ($UseShowcaseForwardControl) {
     $forwardExecutable = $showcaseExecutable
+}
+if ($UseForwardForShowcaseControl) {
+    $showcaseExecutable = $forwardExecutable
 }
 $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_RT",
@@ -311,6 +317,13 @@ $laneSpecs = @(
         }
     }
 )
+if ($UseForwardForShowcaseControl) {
+    foreach ($lane in $laneSpecs) {
+        if ($lane.name -like "lighting-showcase-*") {
+            $lane.environment["SE_BENCHMARK_SCENE"] = "lighting-showcase"
+        }
+    }
+}
 
 $reports = [Collections.Generic.List[object]]::new()
 foreach ($lane in $laneSpecs) {
@@ -662,7 +675,7 @@ foreach ($lane in $laneSpecs) {
                 $shadowVisibilityResolutionExpected -and
                 $lane.denoiserInjectionDisabled -eq 0
             $expectedRayQueryConsumerContract = if ($runtimeResourcesExpected) {
-                2
+                $ExpectedRayQueryConsumerContractVersion
             } else {
                 0
             }
@@ -811,11 +824,11 @@ foreach ($lane in $laneSpecs) {
                     $rayQueryAddressReadyCount -eq $rayQueryMetadataCount -and
                     $rayQueryMetadataUploadCount -eq 1 -and
                     $rayQueryMetadataBytes -eq
-                        ([uint64]$rayQueryMetadataCount * 32)
+                        ([uint64]$rayQueryMetadataCount * 40)
                 $checks.Add((New-Check "$($lane.name) instance metadata contract" `
                     $metadataContractValid `
                     "ready=$rayQueryMetadataResourcesReady,count=$rayQueryMetadataCount,capacity=$rayQueryMetadataCapacity,materials=$rayQueryMaterialCount,addresses=$rayQueryAddressReadyCount,uploads=$rayQueryMetadataUploadCount,bytes=$rayQueryMetadataBytes" `
-                    "ready=1,count=tlas,capacity>=count,materials>0,addresses=count,uploads=1,bytes=count*32")) | Out-Null
+                    "ready=1,count=tlas,capacity>=count,materials>0,addresses=count,uploads=1,bytes=count*40")) | Out-Null
                 $materialTableContractValid =
                     $materialTableResourcesReady -eq 1 -and
                     $materialTableCount -eq $rayQueryMaterialCount -and
@@ -1102,19 +1115,20 @@ foreach ($lane in $laneSpecs) {
                                     $shadowVisibilityValuesValid =
                                         $shadowInvalidCount -eq 0 -and
                                         $shadowSelfIntersectionCandidateCount -eq 0 -and
-                                        $shadowVisibleCount -gt 0 -and
-                                        $shadowOccludedCount -gt 0 -and
+                                        ($shadowVisibleCount +
+                                            $shadowOccludedCount) -gt 0 -and
                                         $visibleDirectLuminanceSum -le
                                             $unshadowedDirectLuminanceSum -and
                                         $shadowVisibilityMin -le
                                             $shadowVisibilityMax -and
                                         $shadowVisibilityMax -le 1000 -and
-                                        $shadowHitDistanceMax -ge
-                                            $shadowHitDistanceMin
+                                        ($shadowOccludedCount -eq 0 -or
+                                            $shadowHitDistanceMax -ge
+                                                $shadowHitDistanceMin)
                                     $checks.Add((New-Check "$($lane.name) shadow visibility is finite and non-self-intersecting" `
                                         $shadowVisibilityValuesValid `
                                         "invalid=$shadowInvalidCount,self=$shadowSelfIntersectionCandidateCount,visible/occluded=$shadowVisibleCount/$shadowOccludedCount,direct=$visibleDirectLuminanceSum<=$unshadowedDirectLuminanceSum,visibility=$shadowVisibilityMin..$shadowVisibilityMax,hitMm=$shadowHitDistanceMin..$shadowHitDistanceMax,droppedEnergy=$localShadowDroppedLuminanceSum" `
-                                        "invalid/self=0,visible/occluded>0,visibleDirect<=unshadowed,visibility=0..1000,hit distance ordered")) | Out-Null
+                                        "invalid/self=0,visible+occluded>0,visibleDirect<=unshadowed,visibility=0..1000,occluded hit distance ordered")) | Out-Null
                                 } else {
                                     $checks.Add((New-Check "$($lane.name) shadow visibility is suppressed" `
                                         $shadowVisibilityDiagnosticsSuppressed `

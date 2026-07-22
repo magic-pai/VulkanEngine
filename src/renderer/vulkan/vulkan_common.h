@@ -336,4 +336,62 @@ inline void EndVulkanDebugLabel(
     endLabel(commandBuffer);
 }
 
+class VulkanDebugLabelScope {
+public:
+    VulkanDebugLabelScope(
+        VkDevice device,
+        VkCommandBuffer commandBuffer,
+        const char* name,
+        float red = 0.2f,
+        float green = 0.45f,
+        float blue = 1.0f,
+        float alpha = 1.0f
+    ) {
+#if defined(_DEBUG)
+        m_Device = device;
+        m_CommandBuffer = commandBuffer;
+        m_Active = device != VK_NULL_HANDLE &&
+            commandBuffer != VK_NULL_HANDLE &&
+            name != nullptr && name[0] != '\0';
+        if (m_Active) {
+            BeginVulkanDebugLabel(
+                device,
+                commandBuffer,
+                name,
+                red,
+                green,
+                blue,
+                alpha
+            );
+        }
+#else
+        (void)device;
+        (void)commandBuffer;
+        (void)name;
+        (void)red;
+        (void)green;
+        (void)blue;
+        (void)alpha;
+#endif
+    }
+
+    ~VulkanDebugLabelScope() {
+#if defined(_DEBUG)
+        if (m_Active) {
+            EndVulkanDebugLabel(m_Device, m_CommandBuffer);
+        }
+#endif
+    }
+
+    VulkanDebugLabelScope(const VulkanDebugLabelScope&) = delete;
+    VulkanDebugLabelScope& operator=(const VulkanDebugLabelScope&) = delete;
+
+private:
+#if defined(_DEBUG)
+    VkDevice m_Device = VK_NULL_HANDLE;
+    VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
+    bool m_Active = false;
+#endif
+};
+
 }

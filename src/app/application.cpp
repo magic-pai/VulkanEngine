@@ -1,6 +1,9 @@
 #include "app/application.h"
 
 #include "app/benchmark_recorder.h"
+#if defined(_DEBUG)
+#include "app/renderdoc_capture.h"
+#endif
 
 #include <cstdlib>
 #include <iostream>
@@ -147,6 +150,9 @@ void Application::Run(UpdateCallback update) {
     const int autoExitFrameCount = ReadAutoExitFrameCount();
     const bool traceShutdown = ReadShutdownTraceEnabled();
     BenchmarkRecorder benchmark(BenchmarkRecorder::ConfigFromEnvironment());
+#if defined(_DEBUG)
+    RenderDocCaptureController renderDocCapture;
+#endif
     int renderedFrameCount = 0;
     const auto startTime = std::chrono::steady_clock::now();
     auto previousFrameTime = startTime;
@@ -167,7 +173,14 @@ void Application::Run(UpdateCallback update) {
             update(deltaSeconds, ElapsedSeconds(startTime));
         }
 
+#if defined(_DEBUG)
+        const u32 nextRenderedFrame = static_cast<u32>(renderedFrameCount + 1);
+        renderDocCapture.BeginFrame(nextRenderedFrame);
+#endif
         m_Renderer->DrawFrame();
+#if defined(_DEBUG)
+        renderDocCapture.EndFrame(nextRenderedFrame);
+#endif
         ++renderedFrameCount;
         benchmark.RecordFrame(
             static_cast<u32>(renderedFrameCount),

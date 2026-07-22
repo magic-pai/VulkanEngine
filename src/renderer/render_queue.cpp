@@ -296,8 +296,14 @@ RenderCommand CommandForRenderable(
     command.castShadow = renderable.CastShadow();
     command.reflectionCaptureVisible = renderable.ReflectionCaptureVisible();
     command.bonePaletteResourceId = std::string(renderable.BonePaletteResourceId());
+    command.renderableIdentity = renderable.RenderIdentity();
+    const u64 foldedIdentity = command.renderableIdentity ^
+        (command.renderableIdentity >> 32u);
+    command.reflectionAuditObjectId = static_cast<u32>(foldedIdentity);
+    if (command.reflectionAuditObjectId == 0u) {
+        command.reflectionAuditObjectId = 1u;
+    }
 #if !defined(NDEBUG)
-    command.debugRenderableIdentity = renderable.RenderIdentity();
     command.debugRenderableName = renderable.Name();
 #endif
     RefreshBonePaletteCommandState(renderResources, command);

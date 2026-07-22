@@ -85,6 +85,80 @@ layout(set = 1, binding = 5) uniform sampler2D gBufferEmissive;
 layout(set = 1, binding = 7) uniform sampler2D gBufferMaterialAux;
 layout(set = 1, binding = 17) uniform sampler2D ffxSssrCurrentRadiance;
 layout(set = 1, binding = 18) uniform sampler2D ffxSssrHitConfidence;
+#if defined(SE_REFLECTION_FULL_AUDIT)
+layout(std430, set = 0, binding = 14) buffer ReflectionFullAuditData {
+    uint reflectionAudit[];
+};
+layout(r32ui, set = 1, binding = 19) readonly uniform uimage2D gBufferObjectId;
+
+const uint FULL_AUDIT_APPLY_COUNT_INDEX = 86u;
+const uint FULL_AUDIT_HEADER_WORD_COUNT = 128u;
+const uint FULL_AUDIT_INSTANCE_COUNTER_COUNT = 8u;
+const uint FULL_AUDIT_MAX_INSTANCES = 4096u;
+const uint FULL_AUDIT_RAY_RECORD_WORD_COUNT = 24u;
+const uint FULL_AUDIT_MAX_RAY_RECORDS = 1048576u;
+const uint FULL_AUDIT_APPLY_RECORD_WORD_COUNT = 16u;
+const uint FULL_AUDIT_MAX_APPLY_RECORDS = 1048576u;
+const uint FULL_AUDIT_RAY_RECORD_BASE =
+    FULL_AUDIT_HEADER_WORD_COUNT +
+    FULL_AUDIT_MAX_INSTANCES * FULL_AUDIT_INSTANCE_COUNTER_COUNT;
+const uint FULL_AUDIT_APPLY_RECORD_BASE =
+    FULL_AUDIT_RAY_RECORD_BASE +
+    FULL_AUDIT_MAX_RAY_RECORDS * FULL_AUDIT_RAY_RECORD_WORD_COUNT;
+
+bool AuditFinite(vec3 value) {
+    return all(not(isnan(value))) && all(not(isinf(value)));
+}
+
+void WriteReflectionApplyAudit(
+    vec4 resolved,
+    vec3 probeFallback,
+    float confidence,
+    float blendWeight,
+    vec3 contribution,
+    float roughness,
+    float metallic,
+    bool provenanceEnabled
+) {
+    uint recordIndex = atomicAdd(
+        reflectionAudit[FULL_AUDIT_APPLY_COUNT_INDEX],
+        1u
+    );
+    if (recordIndex >= FULL_AUDIT_MAX_APPLY_RECORDS) {
+        return;
+    }
+    uint base = FULL_AUDIT_APPLY_RECORD_BASE +
+        recordIndex * FULL_AUDIT_APPLY_RECORD_WORD_COUNT;
+    uvec2 coordinates = uvec2(gl_FragCoord.xy);
+    uint objectId = imageLoad(
+        gBufferObjectId,
+        ivec2(coordinates)
+    ).r;
+    uint flags = 1u;
+    if (provenanceEnabled) flags |= 1u << 1u;
+    if (blendWeight > 0.0001) flags |= 1u << 2u;
+    if (AuditFinite(resolved.rgb)) flags |= 1u << 3u;
+    if (AuditFinite(probeFallback)) flags |= 1u << 4u;
+    if (AuditFinite(contribution)) flags |= 1u << 5u;
+    reflectionAudit[base + 0u] =
+        (coordinates.x & 0xffffu) | (coordinates.y << 16u);
+    reflectionAudit[base + 1u] = objectId;
+    reflectionAudit[base + 2u] = floatBitsToUint(resolved.r);
+    reflectionAudit[base + 3u] = floatBitsToUint(resolved.g);
+    reflectionAudit[base + 4u] = floatBitsToUint(resolved.b);
+    reflectionAudit[base + 5u] = floatBitsToUint(confidence);
+    reflectionAudit[base + 6u] = floatBitsToUint(probeFallback.r);
+    reflectionAudit[base + 7u] = floatBitsToUint(probeFallback.g);
+    reflectionAudit[base + 8u] = floatBitsToUint(probeFallback.b);
+    reflectionAudit[base + 9u] = floatBitsToUint(blendWeight);
+    reflectionAudit[base + 10u] = floatBitsToUint(contribution.r);
+    reflectionAudit[base + 11u] = floatBitsToUint(contribution.g);
+    reflectionAudit[base + 12u] = floatBitsToUint(contribution.b);
+    reflectionAudit[base + 13u] = floatBitsToUint(roughness);
+    reflectionAudit[base + 14u] = floatBitsToUint(metallic);
+    reflectionAudit[base + 15u] = flags;
+}
+#endif
 
 const int MAX_FRAME_MATERIALS = 256;
 const float FFX_SSSR_ROUGHNESS_THRESHOLD = 0.6;
@@ -448,5 +522,17 @@ void main() {
         IblSpecularStability(roughness) *
         occlusion *
         blendWeight;
+#if defined(SE_REFLECTION_FULL_AUDIT)
+    WriteReflectionApplyAudit(
+        resolved,
+        probeFallback,
+        provenanceConfidence,
+        blendWeight,
+        contribution,
+        roughness,
+        metallic,
+        FfxSssrHitProvenanceEnabled()
+    );
+#endif
     outColor = vec4(contribution, 1.0);
 }

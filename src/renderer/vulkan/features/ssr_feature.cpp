@@ -248,6 +248,9 @@ void VulkanSsrFeature::AppendFrameGraph(
     }
     if (context.stats.ssr.backendRequestedProvider == 1u) {
         AppendFfxSssrFrameGraphResources(context.plan);
+        const bool applyReadsSceneProbeCubemap =
+            context.renderer.sceneReflectionProbeCubemapSamplingEnabled &&
+            context.stats.reflectionProbe.selectedCubemapSamplingCount > 0u;
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,
@@ -340,7 +343,9 @@ void VulkanSsrFeature::AppendFrameGraph(
                 : RenderFramePassStatus::Roadmap,
             RenderFramePassQueue::Graphics,
             "FidelityFXSSSRApplyReflections",
-            "HDRSceneColor, FFX RadianceHistory, FFX HitConfidence, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap, SceneReflectionProbeCubemap",
+            applyReadsSceneProbeCubemap
+                ? "HDRSceneColor, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap, SceneReflectionProbeCubemap"
+                : "HDRSceneColor, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "HDRSceneColor",
             "Same-frame composition blends validated screen-space radiance against the selected local Probe/IBL baseline before temporal upscaling."
         );

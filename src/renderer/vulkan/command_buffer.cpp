@@ -30,6 +30,7 @@
 #include "renderer/vulkan/vulkan_common.h"
 #include "renderer/render_queue.h"
 
+#include <bit>
 #include <cstddef>
 
 namespace se {
@@ -431,7 +432,8 @@ void DrawRenderCommand(
     u32& pushConstantUpdateCount,
     u64& pushConstantByteCount,
     f32 hdrOutputFlag = 0.0f,
-    u32* bonePaletteDescriptorBindCount = nullptr
+    u32* bonePaletteDescriptorBindCount = nullptr,
+    bool pushViewportZPerDraw = false
 ) {
     SE_ASSERT(renderCommand.mesh != nullptr, "RenderCommand must reference a mesh");
     SE_ASSERT(renderCommand.material != nullptr, "RenderCommand must reference a material");
@@ -464,6 +466,18 @@ void DrawRenderCommand(
         pushConstantUpdateCount,
         pushConstantByteCount
     );
+    if (pushViewportZPerDraw) {
+        PushConstants(
+            commandBuffer,
+            graphicsPipeline,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            offsetof(ObjectPushConstants, viewport) + sizeof(f32) * 2u,
+            sizeof(f32),
+            &hdrOutputFlag,
+            pushConstantUpdateCount,
+            pushConstantByteCount
+        );
+    }
 
     if (BindMeshIfNeeded(commandBuffer, renderCommand, state)) {
         ++meshBindCount;
@@ -3060,14 +3074,23 @@ void VulkanCommandBuffer::Record(
     }
 
     if (gBufferRenderPass != nullptr && gBufferFramebuffer != nullptr) {
-        std::array<VkClearValue, 7> gBufferClearValues{};
+        const bool reflectionAuditObjectIdEnabled =
+            sceneRenderTargets != nullptr &&
+            sceneRenderTargets->ReflectionAuditObjectIdEnabled();
+        std::vector<VkClearValue> gBufferClearValues(
+            reflectionAuditObjectIdEnabled ? 8u : 7u
+        );
         gBufferClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
         gBufferClearValues[1].color = { { 0.5f, 0.5f, 1.0f, 1.0f } };
         gBufferClearValues[2].color = { { 0.0f, 1.0f, 0.0f, 1.0f } };
         gBufferClearValues[3].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
         gBufferClearValues[4].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
         gBufferClearValues[5].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        gBufferClearValues[6].depthStencil = { 1.0f, 0 };
+        if (reflectionAuditObjectIdEnabled) {
+            gBufferClearValues[6].color.uint32[0] = 0u;
+        }
+        gBufferClearValues[reflectionAuditObjectIdEnabled ? 7u : 6u]
+            .depthStencil = { 1.0f, 0 };
 
         VkRenderPassBeginInfo gBufferPassInfo{};
         gBufferPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -3147,6 +3170,12 @@ void VulkanCommandBuffer::Record(
                     ++gBufferBonePaletteFallbackDescriptorBinds;
                 }
 
+                const f32 reflectionAuditObjectId =
+                    reflectionAuditObjectIdEnabled
+                    ? std::bit_cast<f32>(
+                        renderCommand.reflectionAuditObjectId
+                    )
+                    : 0.0f;
                 DrawRenderCommand(
                     commandBuffer,
                     activeGBufferPipeline,
@@ -3160,8 +3189,9 @@ void VulkanCommandBuffer::Record(
                     gBufferMeshBinds,
                     gBufferPushConstantUpdates,
                     gBufferPushConstantBytes,
-                    0.0f,
-                    &gBufferBonePaletteDescriptorBinds
+                    reflectionAuditObjectId,
+                    &gBufferBonePaletteDescriptorBinds,
+                    reflectionAuditObjectIdEnabled
                 );
             }
 
@@ -3458,7 +3488,31 @@ void VulkanCommandBuffer::Record(
         ffxSssrResolveTemporalResources != nullptr &&
         ffxSssrResolveTemporalResources->Count() > imageIndex;
     bool ffxSssrResolveTemporalDispatched = false;
+    const auto recordFullAuditSnapshot = [&, imageIndex](
+        HybridReflectionFullAuditImageStage stage,
+        VkImage image,
+        VkFormat format,
+        VkExtent2D snapshotExtent
+    ) {
+        if (hybridReflectionRayQuery == nullptr) {
+            return;
+        }
+        hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+            commandBuffer,
+            static_cast<u32>(imageIndex),
+            stage,
+            image,
+            format,
+            snapshotExtent,
+            VK_IMAGE_LAYOUT_GENERAL
+        );
+    };
     if (ffxSssrPrepareIndirectArgsReady) {
+        const VulkanDebugLabelScope prepareLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.FFX.Prepare"
+        );
         const VkBuffer rayCounterBuffer =
             ffxSssrPrepareIndirectArgsResources->RayCounterBuffer(imageIndex);
         const VkBuffer indirectArgsBuffer =
@@ -3544,6 +3598,14 @@ void VulkanCommandBuffer::Record(
         );
 
         if (ffxSssrClassifyTilesReady) {
+            const VulkanDebugLabelScope classifyLabel(
+                m_Device,
+                commandBuffer,
+                "SelfEngine.Reflection.FFX.ClassifyTiles",
+                0.15f,
+                0.65f,
+                0.95f
+            );
             BarrierSsrComputeImage(
                 commandBuffer,
                 ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex),
@@ -4149,6 +4211,14 @@ void VulkanCommandBuffer::Record(
     }
 
     if (ffxSssrIntersectReady) {
+        const VulkanDebugLabelScope intersectLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.FFX.Intersect",
+            0.2f,
+            0.8f,
+            0.55f
+        );
         const VkDescriptorSet ffxConstantsDescriptorSet =
             ffxSssrConstantsResources->Handle(imageIndex);
 
@@ -4344,8 +4414,28 @@ void VulkanCommandBuffer::Record(
                 *hybridReflectionStats
             );
         }
+        recordFullAuditSnapshot(
+            HybridReflectionFullAuditImageStage::IntersectRadiance,
+            ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex),
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            ffxSssrClassifyTilesResources->Extent()
+        );
+        recordFullAuditSnapshot(
+            HybridReflectionFullAuditImageStage::IntersectConfidence,
+            ffxSssrClassifyTilesResources->HitConfidenceImage(imageIndex),
+            VK_FORMAT_R32_SFLOAT,
+            ffxSssrClassifyTilesResources->Extent()
+        );
 
         if (ffxSssrReprojectReady) {
+            const VulkanDebugLabelScope reprojectLabel(
+                m_Device,
+                commandBuffer,
+                "SelfEngine.Reflection.DNSR.Reproject",
+                0.9f,
+                0.65f,
+                0.2f
+            );
             std::array<VkImageMemoryBarrier, 7> reprojectImageBarriers{};
             auto setReprojectImageBarrier = [&](
                 std::size_t barrierIndex,
@@ -4487,8 +4577,28 @@ void VulkanCommandBuffer::Record(
                 ++bindStats->ffxSssrReprojectDispatches;
                 bindStats->ffxSssrReprojectDescriptorBinds += 2u;
             }
+            recordFullAuditSnapshot(
+                HybridReflectionFullAuditImageStage::ReprojectRadiance,
+                ffxSssrReprojectResources->ReprojectedRadianceImage(imageIndex),
+                VK_FORMAT_R32G32B32A32_SFLOAT,
+                ffxSssrReprojectResources->Extent()
+            );
+            recordFullAuditSnapshot(
+                HybridReflectionFullAuditImageStage::ReprojectConfidence,
+                ffxSssrReprojectResources->HitConfidenceImage(imageIndex),
+                VK_FORMAT_R32_SFLOAT,
+                ffxSssrReprojectResources->Extent()
+            );
 
             if (ffxSssrPrefilterReady) {
+                const VulkanDebugLabelScope prefilterLabel(
+                    m_Device,
+                    commandBuffer,
+                    "SelfEngine.Reflection.DNSR.Prefilter",
+                    0.85f,
+                    0.4f,
+                    0.2f
+                );
                 std::array<VkImageMemoryBarrier, 6> prefilterImageBarriers{};
                 auto setPrefilterImageBarrier = [&](
                     std::size_t barrierIndex,
@@ -4604,8 +4714,34 @@ void VulkanCommandBuffer::Record(
                     ++bindStats->ffxSssrPrefilterDispatches;
                     bindStats->ffxSssrPrefilterDescriptorBinds += 2u;
                 }
+                recordFullAuditSnapshot(
+                    HybridReflectionFullAuditImageStage::PrefilterRadiance,
+                    ffxSssrPrefilterResources->RadianceImage(imageIndex),
+                    VK_FORMAT_R32G32B32A32_SFLOAT,
+                    ffxSssrPrefilterResources->Extent()
+                );
+                recordFullAuditSnapshot(
+                    HybridReflectionFullAuditImageStage::PrefilterVariance,
+                    ffxSssrPrefilterResources->VarianceImage(imageIndex),
+                    VK_FORMAT_R32_SFLOAT,
+                    ffxSssrPrefilterResources->Extent()
+                );
+                recordFullAuditSnapshot(
+                    HybridReflectionFullAuditImageStage::PrefilterSampleCount,
+                    ffxSssrPrefilterResources->SampleCountImage(imageIndex),
+                    VK_FORMAT_R32_SFLOAT,
+                    ffxSssrPrefilterResources->Extent()
+                );
 
                 if (ffxSssrResolveTemporalReady) {
+                    const VulkanDebugLabelScope resolveLabel(
+                        m_Device,
+                        commandBuffer,
+                        "SelfEngine.Reflection.DNSR.ResolveTemporal",
+                        0.75f,
+                        0.3f,
+                        0.85f
+                    );
                     if (ffxSssrVisibleOutputClearEnabled) {
                         ClearFfxSssrVisibleOutput(
                             commandBuffer,
@@ -4779,6 +4915,22 @@ void VulkanCommandBuffer::Record(
                         *ffxSssrReprojectResources,
                         imageIndex
                     );
+                    recordFullAuditSnapshot(
+                        HybridReflectionFullAuditImageStage::ResolveRadiance,
+                        ffxSssrReprojectResources->RadianceHistoryImage(
+                            imageIndex
+                        ),
+                        VK_FORMAT_R32G32B32A32_SFLOAT,
+                        ffxSssrReprojectResources->Extent()
+                    );
+                    recordFullAuditSnapshot(
+                        HybridReflectionFullAuditImageStage::ResolveConfidence,
+                        ffxSssrReprojectResources->HitConfidenceHistoryImage(
+                            imageIndex
+                        ),
+                        VK_FORMAT_R32_SFLOAT,
+                        ffxSssrReprojectResources->Extent()
+                    );
 
                     if (bindStats != nullptr) {
                         ++bindStats->ffxSssrResolveTemporalDispatches;
@@ -4804,6 +4956,14 @@ void VulkanCommandBuffer::Record(
         hdrRenderPass != nullptr &&
         hdrFramebuffer != nullptr;
     if (ffxSssrSameFrameApplyReady) {
+        const VulkanDebugLabelScope applyLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.Apply",
+            0.9f,
+            0.25f,
+            0.35f
+        );
         VkImageMemoryBarrier radianceForApply{};
         radianceForApply.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         radianceForApply.srcAccessMask =
@@ -4836,11 +4996,11 @@ void VulkanCommandBuffer::Record(
         );
         VkImageMemoryBarrier hitConfidenceForApply = radianceForApply;
         hitConfidenceForApply.image =
-            ffxSssrReprojectResources->HitConfidenceImage(imageIndex);
-        hitConfidenceForApply.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            ffxSssrReprojectResources->HitConfidenceHistoryImage(imageIndex);
         vkCmdPipelineBarrier(
             commandBuffer,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0,
             0,
@@ -4850,6 +5010,27 @@ void VulkanCommandBuffer::Record(
             1u,
             &hitConfidenceForApply
         );
+        if (hybridReflectionRayQuery != nullptr) {
+            if (ssrTargets != nullptr) {
+                hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+                    commandBuffer,
+                    static_cast<u32>(imageIndex),
+                    HybridReflectionFullAuditImageStage::DeferredHdrBeforeApply,
+                    ssrTargets->HdrSceneColorImage(imageIndex),
+                    ssrTargets->HdrSceneColorFormat(),
+                    ssrTargets->Extent(),
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    ssrTargets->ReflectionAuditObjectIdEnabled()
+                        ? ssrTargets->ReflectionAuditObjectIdImage(imageIndex)
+                        : VK_NULL_HANDLE,
+                    VK_IMAGE_LAYOUT_GENERAL
+                );
+            }
+            hybridReflectionRayQuery->RecordFullAuditApplyBeginBarrier(
+                commandBuffer,
+                static_cast<u32>(imageIndex)
+            );
+        }
 
         VkRenderPassBeginInfo applyPassInfo{};
         applyPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -4898,6 +5079,23 @@ void VulkanCommandBuffer::Record(
         );
         vkCmdDraw(commandBuffer, 3, 1, 0, 0);
         vkCmdEndRenderPass(commandBuffer);
+        if (hybridReflectionRayQuery != nullptr) {
+            hybridReflectionRayQuery->RecordFullAuditApplyEndBarrier(
+                commandBuffer,
+                static_cast<u32>(imageIndex)
+            );
+            if (ssrTargets != nullptr) {
+                hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+                    commandBuffer,
+                    static_cast<u32>(imageIndex),
+                    HybridReflectionFullAuditImageStage::HdrAfterApply,
+                    ssrTargets->HdrSceneColorImage(imageIndex),
+                    ssrTargets->HdrSceneColorFormat(),
+                    ssrTargets->Extent(),
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                );
+            }
+        }
 
         if (bindStats != nullptr) {
             ++bindStats->ffxSssrApplyDraws;
@@ -5214,6 +5412,17 @@ void VulkanCommandBuffer::Record(
         temporalState != nullptr &&
         temporalUpscaleState != nullptr &&
         temporalUpscalerEvaluateStatus != nullptr) {
+        if (hybridReflectionRayQuery != nullptr) {
+            hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+                commandBuffer,
+                static_cast<u32>(imageIndex),
+                HybridReflectionFullAuditImageStage::TemporalInput,
+                sceneRenderTargets->HdrSceneColorImage(imageIndex),
+                sceneRenderTargets->HdrSceneColorFormat(),
+                sceneRenderTargets->Extent(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+        }
         RecordTemporalUpscalerEvaluate(
             commandBuffer,
             m_Device,
@@ -5226,6 +5435,18 @@ void VulkanCommandBuffer::Record(
             dlssMaskInputsPreparedForEvaluate,
             *temporalUpscalerEvaluateStatus
         );
+        if (hybridReflectionRayQuery != nullptr &&
+            temporalUpscalerEvaluateStatus->outputReady > 0u) {
+            hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+                commandBuffer,
+                static_cast<u32>(imageIndex),
+                HybridReflectionFullAuditImageStage::TemporalUpscaleOutput,
+                sceneRenderTargets->TemporalUpscaleOutputImage(imageIndex),
+                sceneRenderTargets->TemporalUpscaleOutputFormat(),
+                sceneRenderTargets->DisplayExtent(),
+                VK_IMAGE_LAYOUT_GENERAL
+            );
+        }
     } else if (temporalUpscalerEvaluateStatus != nullptr) {
         *temporalUpscalerEvaluateStatus = TemporalUpscalerEvaluateStatus{};
     }
@@ -5848,6 +6069,20 @@ void VulkanCommandBuffer::Record(
     }
 
     vkCmdEndRenderPass(commandBuffer);
+
+    if (hybridReflectionRayQuery != nullptr &&
+        imageIndex < swapchain.Images().size() &&
+        swapchain.TransferSourceSupported()) {
+        hybridReflectionRayQuery->RecordFullAuditImageSnapshot(
+            commandBuffer,
+            static_cast<u32>(imageIndex),
+            HybridReflectionFullAuditImageStage::FinalOutputBeforePresent,
+            swapchain.Images()[imageIndex],
+            swapchain.ImageFormat(),
+            swapchain.Extent(),
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+        );
+    }
 
     const bool recordResolvedTemporalHistoryColor =
         recordTemporalHistoryColorCopy &&

@@ -49,6 +49,11 @@ public:
 
     VkDescriptorSet Handle(std::size_t index) const;
     std::size_t Count() const;
+    void UpdateReflectionFullAuditBuffer(
+        const VulkanDevice& device,
+        std::size_t index,
+        const VkDescriptorBufferInfo& bufferInfo
+    );
     void Recreate(
         const VulkanDevice& device,
         const VulkanDescriptorSetLayout& descriptorSetLayout,

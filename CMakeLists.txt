@@ -166,6 +166,36 @@ foreach(SHADER_SOURCE ${SHADER_SOURCES})
     list(APPEND SHADER_OUTPUTS ${SHADER_OUTPUT})
 endforeach()
 
+set(FFX_SSSR_APPLY_AUDIT_OUTPUT
+    ${SHADER_OUTPUT_DIR}/ffx_sssr_apply_audit.frag.spv
+)
+add_custom_command(
+    OUTPUT ${FFX_SSSR_APPLY_AUDIT_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${GLSLC_EXECUTABLE}
+        -DSE_REFLECTION_FULL_AUDIT=1
+        ${SHADER_SOURCE_DIR}/ffx_sssr_apply.frag
+        -o ${FFX_SSSR_APPLY_AUDIT_OUTPUT}
+    DEPENDS ${SHADER_SOURCE_DIR}/ffx_sssr_apply.frag
+    VERBATIM
+)
+list(APPEND SHADER_OUTPUTS ${FFX_SSSR_APPLY_AUDIT_OUTPUT})
+
+set(GBUFFER_3D_AUDIT_OUTPUT
+    ${SHADER_OUTPUT_DIR}/gbuffer_3d_audit.frag.spv
+)
+add_custom_command(
+    OUTPUT ${GBUFFER_3D_AUDIT_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${GLSLC_EXECUTABLE}
+        -DSE_REFLECTION_FULL_AUDIT=1
+        ${SHADER_SOURCE_DIR}/gbuffer_3d.frag
+        -o ${GBUFFER_3D_AUDIT_OUTPUT}
+    DEPENDS ${SHADER_SOURCE_DIR}/gbuffer_3d.frag
+    VERBATIM
+)
+list(APPEND SHADER_OUTPUTS ${GBUFFER_3D_AUDIT_OUTPUT})
+
 foreach(FFX_SSSR_SHADER_SOURCE ${FFX_SSSR_HLSL_SHADERS})
     get_filename_component(FFX_SSSR_SHADER_FILE_NAME ${FFX_SSSR_SHADER_SOURCE} NAME)
     set(FFX_SSSR_SHADER_OUTPUT
@@ -184,11 +214,13 @@ foreach(FFX_SSSR_SHADER_SOURCE ${FFX_SSSR_HLSL_SHADERS})
             "-fspv-target-env=vulkan1.2"
             -T cs_6_6
             -E main
+            -DSELFENGINE_FFX_POSITIVE_VIEWPORT=1
             ${FFX_SSSR_INCLUDE_ARGS}
             ${FFX_SSSR_SHADER_SOURCE}
             -Fo ${FFX_SSSR_SHADER_OUTPUT}
         DEPENDS
             ${FFX_SSSR_SHADER_SOURCE}
+            ${FFX_SSSR_SHADER_SOURCE_DIR}/Common.hlsl
             ${FFX_SSSR_SOURCE_DIR}/include/ffx-sssr/ffx_sssr.h
             ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_common.h
             ${FFX_SSSR_SOURCE_DIR}/include/ffx-dnsr/ffx_denoiser_reflections_config.h
@@ -208,6 +240,9 @@ set(HYBRID_REFLECTION_RAY_QUERY_SHADER
 set(HYBRID_REFLECTION_RAY_QUERY_OUTPUT
     ${SHADER_OUTPUT_DIR}/hybrid_reflection_ray_query.hlsl.spv
 )
+set(HYBRID_REFLECTION_RAY_QUERY_AUDIT_OUTPUT
+    ${SHADER_OUTPUT_DIR}/hybrid_reflection_ray_query_audit.hlsl.spv
+)
 set(HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS)
 foreach(FFX_SSSR_INCLUDE_DIR ${FFX_SSSR_INCLUDE_DIRS})
     list(APPEND HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS
@@ -222,6 +257,7 @@ add_custom_command(
         "-fspv-target-env=vulkan1.2"
         -T cs_6_6
         -E main
+        -DSELFENGINE_FFX_POSITIVE_VIEWPORT=1
         ${HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS}
         ${HYBRID_REFLECTION_RAY_QUERY_SHADER}
         -Fo ${HYBRID_REFLECTION_RAY_QUERY_OUTPUT}
@@ -232,6 +268,26 @@ add_custom_command(
     VERBATIM
 )
 list(APPEND SHADER_OUTPUTS ${HYBRID_REFLECTION_RAY_QUERY_OUTPUT})
+add_custom_command(
+    OUTPUT ${HYBRID_REFLECTION_RAY_QUERY_AUDIT_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${DXC_EXECUTABLE}
+        -spirv
+        "-fspv-target-env=vulkan1.2"
+        -T cs_6_6
+        -E main
+        -DSELFENGINE_FFX_POSITIVE_VIEWPORT=1
+        -DSE_HYBRID_REFLECTION_FULL_AUDIT=1
+        ${HYBRID_REFLECTION_RAY_QUERY_INCLUDE_ARGS}
+        ${HYBRID_REFLECTION_RAY_QUERY_SHADER}
+        -Fo ${HYBRID_REFLECTION_RAY_QUERY_AUDIT_OUTPUT}
+    DEPENDS
+        ${HYBRID_REFLECTION_RAY_QUERY_SHADER}
+        ${FFX_SSSR_SHADER_SOURCE_DIR}/Common.hlsl
+        ${FFX_SSSR_SOURCE_DIR}/include/ffx-sssr/ffx_sssr.h
+    VERBATIM
+)
+list(APPEND SHADER_OUTPUTS ${HYBRID_REFLECTION_RAY_QUERY_AUDIT_OUTPUT})
 
 add_custom_target(SelfEngineShaders DEPENDS ${SHADER_OUTPUTS})
 
@@ -239,6 +295,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/app/application.cpp
     src/app/application_2d.cpp
     src/app/benchmark_recorder.cpp
+    src/app/renderdoc_capture.cpp
     src/assets/model_importer.cpp
     src/assets/unreal_project_bridge.cpp
     src/renderer/render_queue.cpp
@@ -393,6 +450,7 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D Sel
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/imgui
         ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/renderdoc
         $ENV{VULKAN_SDK}/Include
     )
 

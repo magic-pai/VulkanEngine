@@ -17,6 +17,8 @@ struct InstanceMetadata {
     uint indexCount;
     uint vertexStride;
     uint materialIndex;
+    uint submissionIndex;
+    uint reflectionAuditObjectId;
 };
 
 struct HybridMaterialRecord {
@@ -60,8 +62,8 @@ struct HybridMaterialRecord {
     uint g_rectangle_shadow_sample_count;
     uint g_denoiser_injection_enabled;
     uint g_denoiser_bridge_contract_version;
-    uint g_denoiser_reserved0;
-    uint g_denoiser_reserved1;
+    uint g_diagnostic_target_instance_index;
+    uint g_ray_query_runtime_flags;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -83,6 +85,9 @@ RWTexture2D<float4> g_hit_surface_payload;
 [[vk::binding(20, 1)]] SamplerState g_ibl_sampler;
 [[vk::binding(21, 1)]] RWTexture2D<float4> g_denoiser_radiance;
 [[vk::binding(22, 1)]] RWTexture2D<float> g_denoiser_hit_confidence;
+#if defined(SE_HYBRID_REFLECTION_FULL_AUDIT)
+[[vk::binding(23, 1)]] Texture2D<uint> g_reflection_audit_object_id;
+#endif
 
 static const uint kDiagnosticCandidateRayCount = 0u;
 static const uint kDiagnosticScreenHitAcceptedCount = 1u;
@@ -167,6 +172,40 @@ static const uint kDiagnosticDenoiserInjectionResolvedCount = 79u;
 static const uint kDiagnosticDenoiserRadiancePixelWriteCount = 80u;
 static const uint kDiagnosticDenoiserConfidencePixelWriteCount = 81u;
 static const uint kDiagnosticDenoiserConfidenceSumPermille = 82u;
+static const uint kDiagnosticTargetCommittedHitCount = 83u;
+static const uint kDiagnosticTargetAttributeResolvedCount = 84u;
+static const uint kDiagnosticTargetDenoiserWriteCount = 85u;
+
+static const uint kRayQueryRuntimeForceAllRaysBit = 1u << 0u;
+static const uint kRayQueryRuntimeDisableBackFaceCullBit = 1u << 1u;
+static const uint kRayQueryRuntimeTargetAttributionBit = 1u << 2u;
+static const uint kRayQueryRuntimeFullAuditBit = 1u << 3u;
+
+static const uint kFullAuditHeaderWordCount = 128u;
+static const uint kFullAuditInstanceCounterCount = 8u;
+static const uint kFullAuditRayRecordWordCount = 24u;
+static const uint kFullAuditMaxRayRecords = 1048576u;
+static const uint kFullAuditInstanceCounterBase =
+    kFullAuditHeaderWordCount;
+static const uint kFullAuditRayRecordBase =
+    kFullAuditInstanceCounterBase + 4096u *
+        kFullAuditInstanceCounterCount;
+static const uint kFullAuditFlagCoordinatesValid = 1u << 0u;
+static const uint kFullAuditFlagGBufferValid = 1u << 1u;
+static const uint kFullAuditFlagScreenAccepted = 1u << 2u;
+static const uint kFullAuditFlagProductionTrace = 1u << 3u;
+static const uint kFullAuditFlagCommittedHit = 1u << 4u;
+static const uint kFullAuditFlagAttributesResolved = 1u << 5u;
+static const uint kFullAuditFlagMaterialResolved = 1u << 6u;
+static const uint kFullAuditFlagLightingResolved = 1u << 7u;
+static const uint kFullAuditFlagDenoiserWrite = 1u << 8u;
+static const uint kFullAuditFlagReceiverResolved = 1u << 9u;
+static const uint kFullAuditFlagAuditOnlyTrace = 1u << 10u;
+static const uint kFullAuditFlagObjectIdValid = 1u << 11u;
+static const uint kFullAuditFlagObjectIdMappedToTlas = 1u << 12u;
+static const uint kFullAuditFlagSelfHit = 1u << 13u;
+static const uint kFullAuditFlagNegativeHemisphere = 1u << 14u;
+static const uint kFullAuditInvalidIndex = 0xffffffffu;
 
 static const float kPi = 3.14159265359;
 static const uint kMaxLocalLights = 64u;
@@ -193,6 +232,114 @@ void DiagnosticMax(uint index, uint value) {
     if (g_ray_query_diagnostics_enabled != 0u) {
         InterlockedMax(g_ray_query_diagnostics[index], value);
     }
+}
+
+bool FullAuditEnabled() {
+    return g_ray_query_diagnostics_enabled != 0u &&
+        (g_ray_query_runtime_flags & kRayQueryRuntimeFullAuditBit) != 0u;
+}
+
+uint FullAuditRecordBase(uint rayIndex) {
+    return kFullAuditRayRecordBase +
+        rayIndex * kFullAuditRayRecordWordCount;
+}
+
+void FullAuditStore(uint rayIndex, uint wordOffset, uint value) {
+    if (FullAuditEnabled() && rayIndex < kFullAuditMaxRayRecords) {
+        g_ray_query_diagnostics[
+            FullAuditRecordBase(rayIndex) + wordOffset
+        ] = value;
+    }
+}
+
+void FullAuditStoreFloat(uint rayIndex, uint wordOffset, float value) {
+    FullAuditStore(rayIndex, wordOffset, asuint(value));
+}
+
+void FullAuditAddFlags(uint rayIndex, uint flags) {
+    if (FullAuditEnabled() && rayIndex < kFullAuditMaxRayRecords) {
+        InterlockedOr(
+            g_ray_query_diagnostics[FullAuditRecordBase(rayIndex) + 1u],
+            flags
+        );
+    }
+}
+
+void FullAuditInstanceAdd(uint instanceId, uint counter, uint value) {
+    if (FullAuditEnabled() && instanceId < g_instance_metadata_count &&
+        instanceId < 4096u && counter < kFullAuditInstanceCounterCount) {
+        InterlockedAdd(
+            g_ray_query_diagnostics[
+                kFullAuditInstanceCounterBase +
+                instanceId * kFullAuditInstanceCounterCount + counter
+            ],
+            value
+        );
+    }
+}
+
+void FullAuditInitialize(
+    uint rayIndex,
+    uint2 coordinates,
+    bool copyHorizontal,
+    bool copyVertical,
+    bool copyDiagonal
+) {
+    if (!FullAuditEnabled() || rayIndex >= kFullAuditMaxRayRecords) {
+        return;
+    }
+    uint copyFlags =
+        (copyHorizontal ? 1u << 16u : 0u) |
+        (copyVertical ? 1u << 17u : 0u) |
+        (copyDiagonal ? 1u << 18u : 0u);
+    FullAuditStore(
+        rayIndex,
+        0u,
+        (coordinates.x & 0xffffu) | (coordinates.y << 16u)
+    );
+    FullAuditStore(rayIndex, 1u, copyFlags);
+    FullAuditStore(rayIndex, 2u, kFullAuditInvalidIndex);
+    FullAuditStore(rayIndex, 4u, kFullAuditInvalidIndex);
+    FullAuditStore(rayIndex, 5u, kFullAuditInvalidIndex);
+    FullAuditStore(rayIndex, 7u, 0u);
+    FullAuditStore(rayIndex, 20u, 0u);
+    FullAuditStoreFloat(rayIndex, 23u, -1.0);
+}
+
+uint ReflectionTraversalFlags() {
+    bool disableBackFaceCull =
+        (g_ray_query_runtime_flags &
+            kRayQueryRuntimeDisableBackFaceCullBit) != 0u;
+    uint traversalFlags = disableBackFaceCull
+        ? RAY_FLAG_NONE
+        : g_ray_query_contract_version >= 3u
+            ? RAY_FLAG_CULL_BACK_FACING_TRIANGLES
+            : RAY_FLAG_CULL_FRONT_FACING_TRIANGLES;
+#if defined(SE_HYBRID_REFLECTION_DIAGNOSTIC_DISABLE_BACK_FACE_CULL)
+    traversalFlags = RAY_FLAG_NONE;
+#endif
+    return traversalFlags;
+}
+
+uint ResolveFullAuditReceiver(uint2 coordinates, out uint rawObjectId) {
+    rawObjectId = 0u;
+#if defined(SE_HYBRID_REFLECTION_FULL_AUDIT)
+    if (!FullAuditEnabled()) {
+        return kFullAuditInvalidIndex;
+    }
+    rawObjectId = g_reflection_audit_object_id.Load(int3(coordinates, 0));
+    if (rawObjectId == 0u) {
+        return kFullAuditInvalidIndex;
+    }
+    for (uint instanceId = 0u; instanceId < g_instance_metadata_count;
+        ++instanceId) {
+        if (g_instance_metadata[instanceId].reflectionAuditObjectId ==
+            rawObjectId) {
+            return instanceId;
+        }
+    }
+#endif
+    return kFullAuditInvalidIndex;
 }
 
 uint HashDiagnosticIdentity(uint value) {
@@ -378,7 +525,10 @@ float TraceShadowVisibility(
         : -worldNormal;
     RayDesc shadowRay;
     shadowRay.Origin = OffsetRayOrigin(worldPosition, offsetNormal);
-    shadowRay.TMin = 0.0;
+    float originOffsetDistance = length(
+        shadowRay.Origin - worldPosition
+    );
+    shadowRay.TMin = max(originOffsetDistance * 2.0, 1.0e-6);
     shadowRay.Direction = lightDirection;
     shadowRay.TMax = maximumDistance;
     RayQuery<
@@ -406,15 +556,8 @@ float TraceShadowVisibility(
             kDiagnosticShadowHitDistanceMaxMillimeters,
             hitDistanceMillimeters
         );
-        float originOffsetDistance = length(
-            shadowRay.Origin - worldPosition
-        );
-        float selfIntersectionThreshold = max(
-            originOffsetDistance * 2.0,
-            1.0e-6
-        );
         if (shadowQuery.CommittedInstanceID() == sourceInstanceId &&
-            hitDistance <= selfIntersectionThreshold) {
+            hitDistance <= shadowRay.TMin) {
             DiagnosticAdd(
                 kDiagnosticShadowSelfIntersectionCandidateCount,
                 1u
@@ -1159,17 +1302,37 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
         copyVertical,
         copyDiagonal
     );
+    FullAuditInitialize(
+        rayIndex,
+        coordinates,
+        copyHorizontal,
+        copyVertical,
+        copyDiagonal
+    );
 
     if (any(coordinates >= g_buffer_dimensions)) {
         DiagnosticAdd(kDiagnosticInvalidRayCount, 1u);
         return;
     }
+    FullAuditAddFlags(rayIndex, kFullAuditFlagCoordinatesValid);
 
     float screenConfidence = g_sssr_hit_confidence.Load(int3(coordinates, 0));
-    if (screenConfidence >= g_screen_hit_confidence_threshold) {
+    FullAuditStoreFloat(rayIndex, 3u, screenConfidence);
+    bool forceAllRayQueries =
+        (g_ray_query_runtime_flags & kRayQueryRuntimeForceAllRaysBit) != 0u;
+#if defined(SE_HYBRID_REFLECTION_DIAGNOSTIC_FORCE_ALL)
+    forceAllRayQueries = true;
+#endif
+    bool screenAccepted = !forceAllRayQueries &&
+        screenConfidence >= g_screen_hit_confidence_threshold;
+    if (screenAccepted) {
         DiagnosticAdd(kDiagnosticScreenHitAcceptedCount, 1u);
-        return;
+        FullAuditAddFlags(rayIndex, kFullAuditFlagScreenAccepted);
+        if (!FullAuditEnabled()) {
+            return;
+        }
     }
+    bool productionTrace = !screenAccepted;
 
     float depth = g_depth_buffer.Load(int3(coordinates, 0));
     float3 worldNormal = normalize(
@@ -1186,6 +1349,7 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
         );
         return;
     }
+    FullAuditAddFlags(rayIndex, kFullAuditFlagGBufferValid);
 
     float2 uv = (float2(coordinates) + 0.5) * g_inv_buffer_dimensions;
     float3 screenOrigin = float3(uv, depth);
@@ -1193,6 +1357,7 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
     float3 viewDirection = normalize(viewOrigin);
     float3 viewNormal = normalize(mul(g_view, float4(worldNormal, 0.0)).xyz);
     float roughness = max(0.001, g_roughness.Load(int3(coordinates, 0)));
+    FullAuditStoreFloat(rayIndex, 8u, roughness);
     float3 viewReflection = ReflectionDirection(
         viewDirection,
         viewNormal,
@@ -1202,7 +1367,11 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
     float3 worldDirection = normalize(
         mul(g_inv_view, float4(viewReflection, 0.0)).xyz
     );
-    float3 worldOrigin = InvProjectPosition(screenOrigin, g_inv_view_proj);
+    float3 receiverWorldPosition = InvProjectPosition(
+        screenOrigin,
+        g_inv_view_proj
+    );
+    float3 worldOrigin = receiverWorldPosition;
     if (!all(isfinite(worldOrigin)) || !all(isfinite(worldDirection)) ||
         dot(worldDirection, worldDirection) < 0.99) {
         DiagnosticAdd(kDiagnosticInvalidRayCount, 1u);
@@ -1218,11 +1387,60 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
     );
     worldOrigin += worldNormal * originBias;
 
-    DiagnosticAdd(kDiagnosticTraceCount, 1u);
-    RayQuery<
-        RAY_FLAG_FORCE_OPAQUE |
-        RAY_FLAG_CULL_BACK_FACING_TRIANGLES
-    > rayQuery;
+    uint traversalFlags = ReflectionTraversalFlags();
+    uint rawReceiverObjectId = 0u;
+    uint receiverInstanceId = ResolveFullAuditReceiver(
+        coordinates,
+        rawReceiverObjectId
+    );
+    FullAuditStore(rayIndex, 20u, rawReceiverObjectId);
+    if (rawReceiverObjectId != 0u) {
+        FullAuditAddFlags(rayIndex, kFullAuditFlagObjectIdValid);
+    }
+    if (receiverInstanceId != kFullAuditInvalidIndex) {
+        FullAuditStore(rayIndex, 2u, receiverInstanceId);
+        FullAuditAddFlags(
+            rayIndex,
+            kFullAuditFlagReceiverResolved |
+                kFullAuditFlagObjectIdMappedToTlas
+        );
+        FullAuditInstanceAdd(receiverInstanceId, 0u, 1u);
+        if (screenAccepted) {
+            FullAuditInstanceAdd(receiverInstanceId, 1u, 1u);
+        }
+    }
+    FullAuditStoreFloat(rayIndex, 9u, worldOrigin.x);
+    FullAuditStoreFloat(rayIndex, 10u, worldOrigin.y);
+    FullAuditStoreFloat(rayIndex, 11u, worldOrigin.z);
+    FullAuditStoreFloat(rayIndex, 12u, worldDirection.x);
+    FullAuditStoreFloat(rayIndex, 13u, worldDirection.y);
+    FullAuditStoreFloat(rayIndex, 14u, worldDirection.z);
+    FullAuditStoreFloat(rayIndex, 16u, worldNormal.x);
+    FullAuditStoreFloat(rayIndex, 17u, worldNormal.y);
+    FullAuditStoreFloat(rayIndex, 18u, worldNormal.z);
+    float normalDotReflection = dot(worldNormal, worldDirection);
+    FullAuditStoreFloat(rayIndex, 19u, normalDotReflection);
+    FullAuditStoreFloat(rayIndex, 21u, originBias);
+    FullAuditStoreFloat(rayIndex, 22u, 1.0);
+    if (normalDotReflection < 0.0) {
+        FullAuditAddFlags(rayIndex, kFullAuditFlagNegativeHemisphere);
+        DiagnosticAdd(kDiagnosticInvalidRayCount, 1u);
+        return;
+    }
+    if (receiverInstanceId != kFullAuditInvalidIndex && productionTrace) {
+        FullAuditInstanceAdd(receiverInstanceId, 2u, 1u);
+    }
+    FullAuditAddFlags(
+        rayIndex,
+        productionTrace
+            ? kFullAuditFlagProductionTrace
+            : kFullAuditFlagAuditOnlyTrace
+    );
+
+    if (productionTrace) {
+        DiagnosticAdd(kDiagnosticTraceCount, 1u);
+    }
+    RayQuery<RAY_FLAG_FORCE_OPAQUE> rayQuery;
     RayDesc rayDescription;
     rayDescription.Origin = worldOrigin;
     rayDescription.TMin = max(originBias * 0.25, 1.0e-4);
@@ -1230,14 +1448,38 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
     rayDescription.TMax = max(g_max_ray_distance, 0.01);
     rayQuery.TraceRayInline(
         g_scene_acceleration_structure,
-        RAY_FLAG_NONE,
+        traversalFlags,
         0xffu,
         rayDescription
     );
     while (rayQuery.Proceed()) {
     }
 
-    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
+    bool committedTriangle =
+        rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    if (committedTriangle) {
+        FullAuditAddFlags(rayIndex, kFullAuditFlagCommittedHit);
+        FullAuditStore(rayIndex, 4u, rayQuery.CommittedInstanceID());
+        FullAuditStore(rayIndex, 5u, rayQuery.CommittedPrimitiveIndex());
+        FullAuditStoreFloat(rayIndex, 6u, rayQuery.CommittedRayT());
+        if (receiverInstanceId != kFullAuditInvalidIndex &&
+            rayQuery.CommittedInstanceID() == receiverInstanceId) {
+            FullAuditAddFlags(rayIndex, kFullAuditFlagSelfHit);
+            FullAuditStoreFloat(rayIndex, 23u, rayQuery.CommittedRayT());
+        }
+        FullAuditInstanceAdd(rayQuery.CommittedInstanceID(), 4u, 1u);
+        if (productionTrace && receiverInstanceId != kFullAuditInvalidIndex) {
+            FullAuditInstanceAdd(receiverInstanceId, 3u, 1u);
+        }
+    } else if (productionTrace &&
+        receiverInstanceId != kFullAuditInvalidIndex) {
+        FullAuditInstanceAdd(receiverInstanceId, 7u, 1u);
+    }
+    if (!productionTrace) {
+        return;
+    }
+
+    if (committedTriangle) {
         float hitDistance = rayQuery.CommittedRayT();
         uint instanceId = rayQuery.CommittedInstanceID();
         uint instanceIndex = rayQuery.CommittedInstanceIndex();
@@ -1259,6 +1501,15 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
             kDiagnosticHitDistanceMaxMillimeters,
             distanceMillimeters
         );
+
+        bool diagnosticTargetHit =
+            (g_ray_query_runtime_flags &
+                kRayQueryRuntimeTargetAttributionBit) != 0u &&
+            instanceId < g_instance_metadata_count &&
+            instanceId == g_diagnostic_target_instance_index;
+        if (diagnosticTargetHit) {
+            DiagnosticAdd(kDiagnosticTargetCommittedHitCount, 1u);
+        }
 
         if (g_hit_attributes_enabled != 0u) {
             if (instanceId >= g_instance_metadata_count ||
@@ -1483,6 +1734,17 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                     kDiagnosticHitAttributeResolvedCount,
                                     1u
                                 );
+                                FullAuditAddFlags(
+                                    rayIndex,
+                                    kFullAuditFlagAttributesResolved
+                                );
+                                FullAuditInstanceAdd(instanceId, 5u, 1u);
+                                if (diagnosticTargetHit) {
+                                    DiagnosticAdd(
+                                        kDiagnosticTargetAttributeResolvedCount,
+                                        1u
+                                    );
+                                }
                                 if (metadata.materialIndex > 0u &&
                                     metadata.materialIndex <=
                                         g_instance_material_count) {
@@ -1573,6 +1835,15 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 kDiagnosticMaterialRecordResolvedCount,
                                                 1u
                                             );
+                                            FullAuditStore(
+                                                rayIndex,
+                                                7u,
+                                                metadata.materialIndex
+                                            );
+                                            FullAuditAddFlags(
+                                                rayIndex,
+                                                kFullAuditFlagMaterialResolved
+                                            );
                                             surfaceMetallic = saturate(
                                                 material.surfaceControls.y
                                             );
@@ -1581,6 +1852,19 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 0.04,
                                                 1.0
                                             );
+#if defined(SE_HYBRID_REFLECTION_DIAGNOSTIC_SILVER_TARGET)
+                                            if (
+                                                abs(surfaceMetallic - 0.68) <
+                                                    0.001 &&
+                                                abs(surfaceRoughness - 0.24) <
+                                                    0.001
+                                            ) {
+                                                DiagnosticAdd(
+                                                    kDiagnosticPositionMismatchCount,
+                                                    1u
+                                                );
+                                            }
+#endif
                                             surfaceEmissive = max(
                                                 material.emissiveFactor.rgb,
                                                 0.0
@@ -1757,6 +2041,22 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 copyDiagonal,
                                                 payload
                                             );
+                                            FullAuditAddFlags(
+                                                rayIndex,
+                                                kFullAuditFlagLightingResolved |
+                                                    kFullAuditFlagDenoiserWrite
+                                            );
+                                            FullAuditInstanceAdd(
+                                                instanceId,
+                                                6u,
+                                                1u
+                                            );
+                                            if (diagnosticTargetHit) {
+                                                DiagnosticAdd(
+                                                    kDiagnosticTargetDenoiserWriteCount,
+                                                    1u
+                                                );
+                                            }
                                             uint directLuminance =
                                                 BoundedLuminanceMetric(
                                                     directRadiance
@@ -1773,6 +2073,11 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                                                 BoundedLuminanceMetric(
                                                     finalRadiance
                                                 );
+                                            FullAuditStoreFloat(
+                                                rayIndex,
+                                                15u,
+                                                float(finalLuminance) * 0.001
+                                            );
                                             uint radianceHash =
                                                 HashDiagnosticIdentity(
                                                     asuint(payload.x) ^

@@ -140,6 +140,10 @@ VkExtent2D VulkanSwapchain::Extent() const {
     return m_Extent;
 }
 
+bool VulkanSwapchain::TransferSourceSupported() const {
+    return m_TransferSourceSupported;
+}
+
 const std::vector<VkImage>& VulkanSwapchain::Images() const {
     return m_Images;
 }
@@ -186,6 +190,12 @@ void VulkanSwapchain::CreateSwapchain(
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    m_TransferSourceSupported =
+        (swapchainSupport.capabilities.supportedUsageFlags &
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0u;
+    if (m_TransferSourceSupported) {
+        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
 
     const QueueFamilyIndices& indices = physicalDevice.QueueFamilies();
     const u32 queueFamilyIndices[] = {
@@ -263,6 +273,7 @@ void VulkanSwapchain::Release() {
 
     m_ImageFormat = VK_FORMAT_UNDEFINED;
     m_Extent = {};
+    m_TransferSourceSupported = false;
 }
 
 }

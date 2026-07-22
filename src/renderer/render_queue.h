@@ -98,6 +98,8 @@ struct RenderCommand {
     std::uintptr_t materialSortKey = 0;
     std::uintptr_t meshSortKey = 0;
     std::size_t submissionIndex = 0;
+    u64 renderableIdentity = 0u;
+    u32 reflectionAuditObjectId = 0u;
     std::string bonePaletteResourceId;
     u32 bonePaletteCurrentEntryCount = 0;
     u32 bonePalettePreviousEntryCount = 0;
@@ -110,7 +112,6 @@ struct RenderCommand {
     u32 bonePaletteDescriptorRangeBytes = 0;
     u32 skinnedWorldBoundsConservative = 0;
 #if !defined(NDEBUG)
-    u64 debugRenderableIdentity = 0;
     std::string_view debugRenderableName;
 #endif
 };

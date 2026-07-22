@@ -20,6 +20,9 @@ enum class ColorBlendMode {
     ZeroSource
 };
 
+ColorBlendMode FidelityFxSssrApplyBlendMode();
+const char* ColorBlendModeName(ColorBlendMode mode);
+
 struct PipelineSpec {
     std::string vertexShaderPath;
     std::string fragmentShaderPath;
@@ -68,7 +71,8 @@ struct PipelineSpec {
     static PipelineSpec DepthPrefill3D(std::string vertexShaderPath);
     static PipelineSpec GBuffer3D(
         std::string vertexShaderPath,
-        std::string fragmentShaderPath
+        std::string fragmentShaderPath,
+        u32 colorAttachmentCount = 6u
     );
     static PipelineSpec DeferredLighting(
         std::string vertexShaderPath,

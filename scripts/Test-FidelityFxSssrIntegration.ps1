@@ -616,7 +616,7 @@ function Invoke-StaticChecks {
             $reprojectShader -match "g_hit_confidence_history" -and
             $reprojectShader -match "SelfEngine_FfxSssrHitConfidence" -and
             $adapterSource -match "HitConfidenceHistoryView" -and
-            $commandBufferSource -match "HitConfidenceImage" -and
+            $commandBufferSource -match "HitConfidenceHistoryImage" -and
             $deferredLightingShader -match "SsrFidelityFxHitProvenanceEnabled" -and
             $ffxApplyShader -match "SelectedLocalProbeRadiance" -and
             $ffxApplyShader -match "bestPriority" -and
@@ -624,7 +624,7 @@ function Invoke-StaticChecks {
             $ffxApplyShader -match "ffxSssrHitConfidence" -and
             $rendererSource -match "m_FfxSssrRadianceHistoryValid" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_hit_confidence_contract_version") `
-        "classify=$($classifyShader -match 'g_hit_confidence_output'),intersect=$($intersectShader -match 'g_hit_confidence_output'),history=$($reprojectShader -match 'g_hit_confidence_history'),temporal=$($reprojectShader -match 'SelfEngine_FfxSssrHitConfidence'),adapter=$($adapterSource -match 'HitConfidenceHistoryView'),barrier=$($commandBufferSource -match 'HitConfidenceImage'),deferred=$($deferredLightingShader -match 'SsrFidelityFxHitProvenanceEnabled'),probe=$($ffxApplyShader -match 'SelectedLocalProbeRadiance'),priority=$($ffxApplyShader -match 'bestPriority'),boxGuard=$($ffxApplyShader -match 'safeDirection\.x ='),apply=$($ffxApplyShader -match 'ffxSssrHitConfidence'),historyGuard=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_hit_confidence_contract_version')" `
+        "classify=$($classifyShader -match 'g_hit_confidence_output'),intersect=$($intersectShader -match 'g_hit_confidence_output'),history=$($reprojectShader -match 'g_hit_confidence_history'),temporal=$($reprojectShader -match 'SelfEngine_FfxSssrHitConfidence'),adapter=$($adapterSource -match 'HitConfidenceHistoryView'),barrier=$($commandBufferSource -match 'HitConfidenceHistoryImage'),deferred=$($deferredLightingShader -match 'SsrFidelityFxHitProvenanceEnabled'),probe=$($ffxApplyShader -match 'SelectedLocalProbeRadiance'),priority=$($ffxApplyShader -match 'bestPriority'),boxGuard=$($ffxApplyShader -match 'safeDirection\.x ='),apply=$($ffxApplyShader -match 'ffxSssrHitConfidence'),historyGuard=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_hit_confidence_contract_version')" `
         "true/true/true/true/true/true/true/true/true/true/true/true/true"
     $contractVersionThirteen =
         $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*13u'
@@ -826,6 +826,7 @@ function Invoke-RuntimeLane {
     $hitConfidenceResourcesReady = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_resources_ready"
     $hitConfidenceHistoryReady = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_history_ready"
     $hitConfidenceApplyBound = Get-UIntMetric $last "ssr_ffx_sssr_hit_confidence_apply_bound"
+    $applyConfidenceSource = Get-UIntMetric $last "ssr_ffx_sssr_apply_confidence_source"
     $probeFallbackConsumer = Get-UIntMetric $last "ssr_ffx_sssr_probe_fallback_consumer"
     $classifyBindDispatches = Get-UIntMetric $last "ffx_sssr_classify_tiles_dispatches"
     $classifyBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_classify_tiles_descriptor_binds"
@@ -1307,19 +1308,21 @@ function Invoke-RuntimeLane {
         }
     if ($ExpectedActiveProvider -eq 1) {
         $hitConfidenceContractMatches =
-            $hitConfidenceContractVersion -eq 1 -and
+            $hitConfidenceContractVersion -eq 2 -and
             $hitConfidenceResourcesReady -eq 1 -and
             $hitConfidenceHistoryReady -eq 1 -and
             $hitConfidenceApplyBound -eq $sameFrameCompositeDescriptorBound -and
+            $applyConfidenceSource -eq 2 -and
             $probeFallbackConsumer -eq $sameFrameCompositeActive
         $hitConfidenceExpectedLabel =
-            "active=1,resources/history=1,apply/probeFallback==sameFrame"
+            "version=2,resources/history=1,apply/probeFallback==sameFrame,source=2"
     } else {
         $hitConfidenceContractMatches =
-            $hitConfidenceContractVersion -eq 1 -and
+            $hitConfidenceContractVersion -eq 2 -and
             $hitConfidenceResourcesReady -eq 1 -and
             $hitConfidenceHistoryReady -eq 0 -and
             $hitConfidenceApplyBound -eq 0 -and
+            $applyConfidenceSource -eq 0 -and
             $probeFallbackConsumer -eq 0
         $hitConfidenceExpectedLabel =
             "active=0,resources=1,history/apply/probeFallback=0"
@@ -1432,7 +1435,7 @@ function Invoke-RuntimeLane {
             $hitAttributionExpectedLabel),
         (New-Check "$Name hit-confidence/probe fallback contract" `
             $hitConfidenceContractMatches `
-            "version=$hitConfidenceContractVersion,resources=$hitConfidenceResourcesReady,history=$hitConfidenceHistoryReady,apply=$hitConfidenceApplyBound,probeFallback=$probeFallbackConsumer,sameFrame=$sameFrameCompositeDescriptorBound/$sameFrameCompositeActive" `
+            "version=$hitConfidenceContractVersion,resources=$hitConfidenceResourcesReady,history=$hitConfidenceHistoryReady,apply=$hitConfidenceApplyBound,source=$applyConfidenceSource,probeFallback=$probeFallbackConsumer,sameFrame=$sameFrameCompositeDescriptorBound/$sameFrameCompositeActive" `
             $hitConfidenceExpectedLabel),
         (New-Check "$Name blue-noise resource contract" `
             $blueNoiseResourceContractMatches `

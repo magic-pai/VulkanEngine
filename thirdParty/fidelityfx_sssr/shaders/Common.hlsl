@@ -89,7 +89,9 @@ float3 ProjectPosition(float3 origin, float4x4 mat) {
     float4 projected = mul(mat, float4(origin, 1));
     projected.xyz /= projected.w;
     projected.xy = 0.5 * projected.xy + 0.5;
+#if !defined(SELFENGINE_FFX_POSITIVE_VIEWPORT)
     projected.y = (1 - projected.y);
+#endif
     return projected.xyz;
 }
 
@@ -101,7 +103,9 @@ float3 ProjectDirection(float3 origin, float3 direction, float3 screen_space_ori
 
 // Mat must be able to transform origin from texture space to a linear space.
 float3 InvProjectPosition(float3 coord, float4x4 mat) {
+#if !defined(SELFENGINE_FFX_POSITIVE_VIEWPORT)
     coord.y = (1 - coord.y);
+#endif
     coord.xy = 2 * coord.xy - 1;
     float4 projected = mul(mat, float4(coord, 1));
     projected.xyz /= projected.w;

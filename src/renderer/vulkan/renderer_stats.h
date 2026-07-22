@@ -521,6 +521,7 @@ struct RendererSsrStats {
     u32 fidelityFxSssrHitConfidenceResourcesReady = 0;
     u32 fidelityFxSssrHitConfidenceHistoryReady = 0;
     u32 fidelityFxSssrHitConfidenceApplyBound = 0;
+    u32 fidelityFxSssrApplyConfidenceSource = 0;
     u32 fidelityFxSssrProbeFallbackConsumer = 0;
     u32 fidelityFxSssrRuntimeDispatchReady = 0;
     u32 fidelityFxSssrRuntimeActive = 0;
@@ -623,6 +624,20 @@ struct RendererHybridReflectionStats {
     u32 rayQueryInstanceAddressReadyCount = 0;
     u32 rayQueryInstanceMetadataUploadCount = 0;
     u64 rayQueryInstanceMetadataBytes = 0;
+    u32 rayQueryDiagnosticTargetSubmissionIndex =
+        std::numeric_limits<u32>::max();
+    u32 rayQueryDiagnosticTargetMatchCount = 0;
+    u32 rayQueryDiagnosticTargetTlasIndex = std::numeric_limits<u32>::max();
+    u32 rayQueryDiagnosticTargetMaterialIndex = 0;
+    u32 rayQueryForceAllRayQueries = 0;
+    u32 rayQueryCullBackFacingTriangles = 1;
+    u32 rayQueryFullAuditRequested = 0;
+    u32 rayQueryFullAuditResourcesReady = 0;
+    u32 rayQueryFullAuditActive = 0;
+    u32 rayQueryFullAuditMaxRayRecords = 0;
+    u32 rayQueryFullAuditRecordedRayCount = 0;
+    u32 rayQueryFullAuditCapturedFrameCount = 0;
+    u64 rayQueryFullAuditBufferBytes = 0;
     u32 rayQueryMaterialTableResourcesReady = 0;
     u32 rayQueryMaterialTableCount = 0;
     u32 rayQueryMaterialTableCapacity = 0;
@@ -745,6 +760,9 @@ struct RendererHybridReflectionStats {
     u32 rayQueryDenoiserRadiancePixelWriteCount = 0;
     u32 rayQueryDenoiserConfidencePixelWriteCount = 0;
     u32 rayQueryDenoiserConfidenceSumPermille = 0;
+    u32 rayQueryDiagnosticTargetCommittedHitCount = 0;
+    u32 rayQueryDiagnosticTargetAttributeResolvedCount = 0;
+    u32 rayQueryDiagnosticTargetDenoiserWriteCount = 0;
     u32 active = 0;
     // 0 = active, 1 = not requested, 2 = control disabled, 3 = extension
     // unavailable, 4 = feature unavailable, 5 = device not enabled,
