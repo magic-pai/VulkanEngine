@@ -1357,6 +1357,17 @@ void ApplyBenchmarkCameraMotion(se::Camera3D& camera, se::f32 elapsedSeconds) {
     );
 }
 
+bool MeshLodEnabledFromEnvironment() {
+    const std::string value = ReadEnvironmentString("SE_MESH_LOD");
+    if (value.empty()) {
+        return true;
+    }
+    return value != "0" &&
+        value != "false" && value != "FALSE" &&
+        value != "off" && value != "OFF" &&
+        value != "no" && value != "NO";
+}
+
 void ApplyBenchmarkObjectMotion(
     se::Renderable3D& renderable,
     const glm::vec3& basePosition,
@@ -5395,6 +5406,12 @@ int main() {
         );
     };
     refreshRuntimeAnimationDiagnostics();
+    const bool meshLodEnabled = MeshLodEnabledFromEnvironment();
+    const se::f32 meshLodTargetPixelError = std::clamp(
+        ReadEnvironmentF32("SE_MESH_LOD_TARGET_PIXEL_ERROR", 1.0f),
+        0.25f,
+        4.0f
+    );
     app.Renderer()->SetFrameMatricesProvider([&](se::f32 aspectRatio) {
         return se::FrameMatrices{
             camera.ViewMatrix(),
@@ -5409,6 +5426,17 @@ int main() {
         buildOptions.frustum = context.frustum;
         buildOptions.cullingStats = context.cullingStats;
         buildOptions.cacheStats = context.cacheStats;
+        buildOptions.lodStats = context.lodStats;
+        if (context.allowMeshLod) {
+            buildOptions.lodOptions.enabled = meshLodEnabled;
+            buildOptions.lodOptions.cameraPosition = camera.Position();
+            buildOptions.lodOptions.screenHeight = static_cast<se::f32>(
+                std::max(app.WindowHandle().GetHeight(), 1)
+            );
+            buildOptions.lodOptions.fovYRadians =
+                2.0f * std::atan(camera.FovScale() * 0.5f);
+            buildOptions.lodOptions.targetPixelError = meshLodTargetPixelError;
+        }
         buildOptions.sceneIdentity = &scene;
         buildOptions.sceneMembershipRevision = scene.MembershipRevision();
         buildOptions.sceneRenderRevision = scene.RenderRevision();

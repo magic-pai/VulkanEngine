@@ -3,6 +3,7 @@
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -197,18 +198,80 @@ bool VulkanRenderResources2D::RecreateMaterialSamplers(
     return recreated;
 }
 
-void VulkanRenderResources2D::RegisterMeshLodChain(std::string_view id, const MeshLodChain& chain) {
-    m_LodChains[std::string(id)] = chain;
+void VulkanRenderResources2D::RegisterMeshLodChain(
+    std::string id,
+    MeshLodChain chain
+) {
+    SE_ASSERT(!id.empty(), "LOD mesh resource id must not be empty");
+    SE_ASSERT(chain.Count() > 1u, "LOD chain must contain a base and lower level");
+    SE_ASSERT(!HasLodChain(id), "LOD mesh resource id already exists");
+
+    const MeshLodLevel& base = chain.levels.front();
+    ++m_LodResidencyStats.chainCount;
+    m_LodResidencyStats.levelCount += static_cast<u32>(chain.Count());
+    m_LodResidencyStats.sourceVertexBytes +=
+        static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
+    m_LodResidencyStats.sourceIndexBytes +=
+        static_cast<u64>(base.indexCount) * sizeof(u32);
+    m_LodResidencyStats.residentVertexBytes += chain.residentVertexBytes;
+    m_LodResidencyStats.residentIndexBytes += chain.residentIndexBytes;
+    const u64 baseVertexBytes =
+        static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
+    const u64 baseIndexBytes =
+        static_cast<u64>(base.indexCount) * sizeof(u32);
+    m_LodResidencyStats.extraVertexBytes +=
+        chain.residentVertexBytes >= baseVertexBytes
+            ? chain.residentVertexBytes - baseVertexBytes
+            : 0u;
+    m_LodResidencyStats.extraIndexBytes +=
+        chain.residentIndexBytes >= baseIndexBytes
+            ? chain.residentIndexBytes - baseIndexBytes
+            : 0u;
+    for (const MeshLodLevel& level : chain.levels) {
+        m_LodResidencyStats.maxSimplificationError = std::max(
+            m_LodResidencyStats.maxSimplificationError,
+            level.simplificationError
+        );
+    }
+
+    m_LodChains.emplace(std::move(id), std::move(chain));
 }
 
-u32 VulkanRenderResources2D::SelectLod(std::string_view id, f32 sf, u32 prev) const {
-    auto it = m_LodChains.find(id);
-    if (it == m_LodChains.end()) return 0;
-    return MeshLodGenerator::SelectLod(sf, it->second, prev);
+MeshLodSelection VulkanRenderResources2D::SelectLod(
+    std::string_view id,
+    f32 projectedDiameterPixels,
+    u32 previousLod,
+    bool previousLodValid,
+    f32 targetPixelError,
+    f32 hysteresisRatio
+) const {
+    const MeshLodChain* chain = LodChain(id);
+    if (chain == nullptr) {
+        return MeshLodSelection{};
+    }
+    return MeshLodGenerator::SelectLod(
+        projectedDiameterPixels,
+        *chain,
+        previousLod,
+        previousLodValid,
+        targetPixelError,
+        hysteresisRatio
+    );
+}
+
+const MeshLodChain* VulkanRenderResources2D::LodChain(
+    std::string_view id
+) const {
+    const auto found = m_LodChains.find(id);
+    return found != m_LodChains.end() ? &found->second : nullptr;
 }
 
 bool VulkanRenderResources2D::HasLodChain(std::string_view id) const {
     return m_LodChains.find(id) != m_LodChains.end();
+}
+
+const MeshLodResidencyStats& VulkanRenderResources2D::LodResidencyStats() const {
+    return m_LodResidencyStats;
 }
 
 }

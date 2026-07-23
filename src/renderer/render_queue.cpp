@@ -409,6 +409,7 @@ void RenderQueue::BuildFromScene3D(
     if (renderables.empty()) {
         Clear();
         m_3DCommandCache.clear();
+        m_PreviousLodByRenderable.clear();
         m_3DSceneCache.valid = false;
         if (options.cullingStats != nullptr) {
             *options.cullingStats = RenderQueueCullingStats{};
@@ -416,9 +417,13 @@ void RenderQueue::BuildFromScene3D(
         if (options.cacheStats != nullptr) {
             *options.cacheStats = RenderQueueCacheStats{};
         }
+        if (options.lodStats != nullptr) {
+            *options.lodStats = RenderQueueLodStats{};
+        }
         return;
     } else if (m_3DCommandCache.size() > renderables.size() * 4) {
         m_3DCommandCache.clear();
+        m_PreviousLodByRenderable.clear();
         m_3DSceneCache.valid = false;
     }
     if (options.cullingStats != nullptr) {
@@ -429,6 +434,20 @@ void RenderQueue::BuildFromScene3D(
     }
 
     RenderQueueCullingStats cullingStats{};
+    RenderQueueLodStats lodStats{};
+    const bool evaluateMeshLod =
+        options.lodOptions.enabled || options.lodStats != nullptr;
+    lodStats.enabled = options.lodOptions.enabled ? 1u : 0u;
+    lodStats.targetPixelError = options.lodOptions.targetPixelError;
+    const MeshLodResidencyStats& residency = renderResources.LodResidencyStats();
+    lodStats.residentChainCount = residency.chainCount;
+    lodStats.residentLevelCount = residency.levelCount;
+    lodStats.sourceVertexBytes = residency.sourceVertexBytes;
+    lodStats.sourceIndexBytes = residency.sourceIndexBytes;
+    lodStats.residentVertexBytes = residency.residentVertexBytes;
+    lodStats.residentIndexBytes = residency.residentIndexBytes;
+    lodStats.extraVertexBytes = residency.extraVertexBytes;
+    lodStats.extraIndexBytes = residency.extraIndexBytes;
     const u64 frustumSignature = FrustumSignature(options.frustum);
     const u64 sceneQueueSignature = Scene3DQueueSignature(
         renderables,
@@ -487,16 +506,114 @@ void RenderQueue::BuildFromScene3D(
 
         if (visible) {
             command.materialPushConstants = MaterialPushConstantsFor(*command.material);
-            // LOD selection based on screen-space size
-            if (options.lodOptions.enabled && command.worldBounds.valid) {
-                glm::vec3 extent = command.worldBounds.max - command.worldBounds.min;
-                f32 radius = glm::length(extent) * 0.5f;
-                glm::vec3 center = (command.worldBounds.min + command.worldBounds.max) * 0.5f;
-                f32 dist = glm::distance(center, options.lodOptions.cameraPosition);
-                command.lodScreenFraction = MeshLodGenerator::ComputeScreenFraction(
-                    radius, dist, options.lodOptions.screenHeight, options.lodOptions.fovYRadians);
-                command.lodLevel = renderResources.SelectLod(
-                    renderable->MeshId(), command.lodScreenFraction, 0);
+            const MeshLodChain* lodChain = evaluateMeshLod
+                ? renderResources.LodChain(renderable->MeshId())
+                : nullptr;
+            const bool skinned = !command.bonePaletteResourceId.empty();
+            if (options.lodOptions.enabled && skinned) {
+                ++lodStats.skinnedExcludedCommands;
+            }
+            if (lodChain != nullptr && lodChain->Count() > 1u &&
+                !skinned && command.worldBounds.valid) {
+                ++lodStats.eligibleCommands;
+                const MeshLodLevel& sourceLevel = lodChain->levels.front();
+                lodStats.sourceTriangles += sourceLevel.indexCount / 3u;
+
+                const glm::vec3 extent = glm::max(
+                    command.worldBounds.max - command.worldBounds.min,
+                    glm::vec3(0.0f)
+                );
+                const f32 radius = glm::length(extent) * 0.5f;
+                const glm::vec3 center =
+                    (command.worldBounds.min + command.worldBounds.max) * 0.5f;
+                const f32 distance = glm::distance(
+                    center,
+                    options.lodOptions.cameraPosition
+                );
+                const f32 projectedDiameterPixels =
+                    MeshLodGenerator::ComputeProjectedDiameterPixels(
+                        radius,
+                        distance,
+                        options.lodOptions.screenHeight,
+                        options.lodOptions.fovYRadians
+                    );
+                command.lodScreenFraction = projectedDiameterPixels /
+                    std::max(options.lodOptions.screenHeight, 1.0f);
+                if (lodStats.eligibleCommands == 1u) {
+                    lodStats.minScreenFraction = command.lodScreenFraction;
+                    lodStats.maxScreenFraction = command.lodScreenFraction;
+                } else {
+                    lodStats.minScreenFraction = std::min(
+                        lodStats.minScreenFraction,
+                        command.lodScreenFraction
+                    );
+                    lodStats.maxScreenFraction = std::max(
+                        lodStats.maxScreenFraction,
+                        command.lodScreenFraction
+                    );
+                }
+
+                const auto previous = m_PreviousLodByRenderable.find(
+                    command.renderableIdentity
+                );
+                const bool previousValid =
+                    previous != m_PreviousLodByRenderable.end();
+                const u32 previousLevel = previousValid ? previous->second : 0u;
+                MeshLodSelection selection{};
+                if (options.lodOptions.enabled) {
+                    ++lodStats.selectedCommands;
+                    const f32 lod0Threshold = std::clamp(
+                        options.lodOptions.lod0ScreenFraction,
+                        0.0f,
+                        1.0f
+                    );
+                    const f32 lod0Hysteresis = std::clamp(
+                        options.lodOptions.hysteresisRatio,
+                        0.0f,
+                        0.45f
+                    );
+                    const bool forceLod0 = !previousValid
+                        ? command.lodScreenFraction >= lod0Threshold
+                        : previousLevel == 0u
+                            ? command.lodScreenFraction >=
+                                lod0Threshold * (1.0f - lod0Hysteresis)
+                            : command.lodScreenFraction >=
+                                lod0Threshold * (1.0f + lod0Hysteresis);
+                    if (!forceLod0) {
+                        selection = renderResources.SelectLod(
+                            renderable->MeshId(),
+                            projectedDiameterPixels,
+                            previousLevel,
+                            previousValid,
+                            options.lodOptions.targetPixelError,
+                            options.lodOptions.hysteresisRatio
+                        );
+                    } else {
+                        selection.mesh = sourceLevel.mesh;
+                    }
+                } else {
+                    selection.mesh = sourceLevel.mesh;
+                }
+                if (selection.mesh == nullptr) {
+                    selection.mesh = sourceLevel.mesh;
+                    selection.level = 0u;
+                    selection.projectedErrorPixels = 0.0f;
+                }
+                command.mesh = selection.mesh;
+                command.lodLevel = selection.level;
+                if (previousValid && previousLevel != selection.level) {
+                    ++lodStats.transitionCount;
+                }
+                m_PreviousLodByRenderable[command.renderableIdentity] =
+                    selection.level;
+                const u32 statsLevel = std::min<u32>(selection.level, 3u);
+                ++lodStats.levelCounts[statsLevel];
+                lodStats.reducedCommands += selection.level > 0u ? 1u : 0u;
+                lodStats.renderedTriangles += command.mesh->IndexCount() / 3u;
+                lodStats.maxSelectedErrorPixels = std::max(
+                    lodStats.maxSelectedErrorPixels,
+                    selection.projectedErrorPixels
+                );
             }
             Submit(command);
             ++cullingStats.visible;
@@ -509,9 +626,16 @@ void RenderQueue::BuildFromScene3D(
     if (options.cullingStats != nullptr) {
         *options.cullingStats = cullingStats;
     }
+    lodStats.savedTriangles = lodStats.sourceTriangles >= lodStats.renderedTriangles
+        ? lodStats.sourceTriangles - lodStats.renderedTriangles
+        : 0u;
+    if (options.lodStats != nullptr) {
+        *options.lodStats = lodStats;
+    }
     StoreScene3DQueue(
         sceneQueueSignature,
         cullingStats,
+        lodStats,
         static_cast<u32>(renderables.size()),
         visibilityCandidates
     );
@@ -711,6 +835,15 @@ u64 RenderQueue::Scene3DQueueSignature(
     u64 signature = 0x97e4935cc6f0b3d1ull;
     signature = HashCombine(signature, FrustumSignature(options.frustum));
     signature = HashCombine(signature, options.shadowCastersOnly ? 1ull : 0ull);
+    signature = HashCombine(signature, options.lodOptions.enabled ? 1ull : 0ull);
+    signature = HashCombine(signature, FloatBits(options.lodOptions.cameraPosition.x));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.cameraPosition.y));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.cameraPosition.z));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.screenHeight));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.fovYRadians));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.targetPixelError));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.hysteresisRatio));
+    signature = HashCombine(signature, FloatBits(options.lodOptions.lod0ScreenFraction));
 
     if (options.useSceneRevisions && options.sceneIdentity != nullptr) {
         signature = HashCombine(
@@ -768,6 +901,10 @@ bool RenderQueue::TryReuseScene3DQueue(
         options.cacheStats->boundsCacheHits += m_3DSceneCache.scannedRenderables;
         options.cacheStats->visibilityCacheHits += m_3DSceneCache.visibilityCandidates;
     }
+    if (options.lodStats != nullptr) {
+        *options.lodStats = m_3DSceneCache.lodStats;
+        options.lodStats->transitionCount = 0u;
+    }
 
     return true;
 }
@@ -775,12 +912,14 @@ bool RenderQueue::TryReuseScene3DQueue(
 void RenderQueue::StoreScene3DQueue(
     u64 signature,
     const RenderQueueCullingStats& cullingStats,
+    const RenderQueueLodStats& lodStats,
     u32 scannedRenderables,
     u32 visibilityCandidates
 ) {
     m_3DSceneCache.signature = signature;
     m_3DSceneCache.commands = m_Commands;
     m_3DSceneCache.cullingStats = cullingStats;
+    m_3DSceneCache.lodStats = lodStats;
     m_3DSceneCache.scannedRenderables = scannedRenderables;
     m_3DSceneCache.visibilityCandidates = visibilityCandidates;
     m_3DSceneCache.valid = true;

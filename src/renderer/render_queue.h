@@ -50,13 +50,44 @@ struct RenderQueueCacheStats {
 
 struct RenderQueueLodOptions {
     bool enabled = false;
-    glm::vec3 cameraPosition{0.0f}; f32 screenHeight=1080.0f; f32 fovYRadians=1.0472f;
+    glm::vec3 cameraPosition{ 0.0f };
+    f32 screenHeight = 1080.0f;
+    f32 fovYRadians = 1.0472f;
+    f32 targetPixelError = 1.0f;
+    f32 hysteresisRatio = 0.15f;
+    f32 lod0ScreenFraction = 0.65f;
+};
+
+struct RenderQueueLodStats {
+    u32 enabled = 0;
+    u32 eligibleCommands = 0;
+    u32 selectedCommands = 0;
+    u32 reducedCommands = 0;
+    u32 transitionCount = 0;
+    u32 skinnedExcludedCommands = 0;
+    std::array<u32, 4> levelCounts{};
+    u64 sourceTriangles = 0;
+    u64 renderedTriangles = 0;
+    u64 savedTriangles = 0;
+    u32 residentChainCount = 0;
+    u32 residentLevelCount = 0;
+    u64 sourceVertexBytes = 0;
+    u64 sourceIndexBytes = 0;
+    u64 residentVertexBytes = 0;
+    u64 residentIndexBytes = 0;
+    u64 extraVertexBytes = 0;
+    u64 extraIndexBytes = 0;
+    f32 minScreenFraction = 0.0f;
+    f32 maxScreenFraction = 0.0f;
+    f32 maxSelectedErrorPixels = 0.0f;
+    f32 targetPixelError = 1.0f;
 };
 
 struct RenderQueueBuildOptions {
     const Frustum* frustum = nullptr;
     RenderQueueCullingStats* cullingStats = nullptr;
     RenderQueueCacheStats* cacheStats = nullptr;
+    RenderQueueLodStats* lodStats = nullptr;
     RenderQueueLodOptions lodOptions{};
     bool shadowCastersOnly = false;
     const void* sceneIdentity = nullptr;
@@ -173,6 +204,7 @@ private:
         u64 signature = 0;
         std::vector<RenderCommand> commands;
         RenderQueueCullingStats cullingStats{};
+        RenderQueueLodStats lodStats{};
         u32 scannedRenderables = 0;
         u32 visibilityCandidates = 0;
         bool valid = false;
@@ -210,6 +242,7 @@ private:
     void StoreScene3DQueue(
         u64 signature,
         const RenderQueueCullingStats& cullingStats,
+        const RenderQueueLodStats& lodStats,
         u32 scannedRenderables,
         u32 visibilityCandidates
     );
@@ -217,6 +250,7 @@ private:
 
     std::vector<RenderCommand> m_Commands;
     std::unordered_map<const Renderable3D*, CachedRenderable3DCommand> m_3DCommandCache;
+    std::unordered_map<u64, u32> m_PreviousLodByRenderable;
     CachedScene3DQueue m_3DSceneCache;
     std::size_t m_NextSubmissionIndex = 0;
 };

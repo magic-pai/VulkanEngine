@@ -1048,22 +1048,81 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         VulkanUploadBatch uploadBatch(m_Device, m_CommandPool);
 
         loadedModel->meshes.reserve(importedModelData.meshes.size());
+        loadedModel->lodMeshes.reserve(importedModelData.meshes.size());
         loadedModel->meshIds.reserve(importedModelData.meshes.size());
-        loadedModel->lodChains.reserve(importedModelData.meshes.size());
+        std::vector<MeshLodChain> runtimeLodChains;
+        runtimeLodChains.reserve(importedModelData.meshes.size());
         for (ImportedMesh3D& importedMeshData : importedModelData.meshes) {
-            // Save a copy of vertex/index data for LOD generation before move
-            std::vector<Vertex3D> vCopy = importedMeshData.mesh.vertices;
-            std::vector<u32> iCopy = importedMeshData.mesh.indices;
+            const bool skinnedMesh = !importedMeshData.bones.empty();
+            GeneratedMeshLodChain generatedLods{};
+            if (!skinnedMesh) {
+                generatedLods = MeshLodGenerator::Generate(
+                    std::move(importedMeshData.mesh.vertices),
+                    std::move(importedMeshData.mesh.indices)
+                );
+            }
+
+            if (generatedLods.Empty()) {
+                GeneratedMeshLodLevel base{};
+                base.vertices = std::move(importedMeshData.mesh.vertices);
+                base.indices = std::move(importedMeshData.mesh.indices);
+                generatedLods.levels.push_back(std::move(base));
+            }
+
+            GeneratedMeshLodLevel& generatedBase = generatedLods.levels.front();
             loadedModel->meshes.push_back(std::make_unique<VulkanMesh>(
                 m_Device,
                 m_PhysicalDevice,
                 m_CommandPool,
-                std::move(importedMeshData.mesh.vertices),
-                std::move(importedMeshData.mesh.indices),
+                std::move(generatedBase.vertices),
+                std::move(generatedBase.indices),
                 &uploadBatch
             ));
-            // Generate LOD chain
-            loadedModel->lodChains.push_back(MeshLodGenerator::Generate(vCopy, iCopy));
+
+            MeshLodChain runtimeChain{};
+            const VulkanMesh* baseMesh = loadedModel->meshes.back().get();
+            runtimeChain.levels.push_back(MeshLodLevel{
+                baseMesh,
+                baseMesh->VertexCount(),
+                baseMesh->IndexCount(),
+                1.0f,
+                0.0f
+            });
+            runtimeChain.residentVertexBytes =
+                static_cast<u64>(baseMesh->VertexCount()) * sizeof(Vertex3D);
+            runtimeChain.residentIndexBytes =
+                static_cast<u64>(baseMesh->IndexCount()) * sizeof(u32);
+
+            loadedModel->lodMeshes.emplace_back();
+            std::vector<std::unique_ptr<VulkanMesh>>& lodMeshes =
+                loadedModel->lodMeshes.back();
+            lodMeshes.reserve(generatedLods.Count() - 1u);
+            for (std::size_t lodIndex = 1u;
+                 lodIndex < generatedLods.Count();
+                 ++lodIndex) {
+                GeneratedMeshLodLevel& generatedLevel = generatedLods.levels[lodIndex];
+                lodMeshes.push_back(std::make_unique<VulkanMesh>(
+                    m_Device,
+                    m_PhysicalDevice,
+                    m_CommandPool,
+                    std::move(generatedLevel.vertices),
+                    std::move(generatedLevel.indices),
+                    &uploadBatch
+                ));
+                const VulkanMesh* lodMesh = lodMeshes.back().get();
+                runtimeChain.levels.push_back(MeshLodLevel{
+                    lodMesh,
+                    lodMesh->VertexCount(),
+                    lodMesh->IndexCount(),
+                    generatedLevel.targetRatio,
+                    generatedLevel.simplificationError
+                });
+                runtimeChain.residentVertexBytes +=
+                    static_cast<u64>(lodMesh->VertexCount()) * sizeof(Vertex3D);
+                runtimeChain.residentIndexBytes +=
+                    static_cast<u64>(lodMesh->IndexCount()) * sizeof(u32);
+            }
+            runtimeLodChains.push_back(std::move(runtimeChain));
         }
 
         loadedModel->materialIds.reserve(importedModelData.materials.size());
@@ -1574,9 +1633,12 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             const std::string meshId = idPrefix + "_Mesh" + std::to_string(meshIndex);
             loadedModel->meshIds.push_back(meshId);
             m_RenderResources.RegisterMesh(meshId, *loadedModel->meshes[meshIndex]);
-            // Register LOD chain if generated
-            if (meshIndex < loadedModel->lodChains.size() && !loadedModel->lodChains[meshIndex].Empty()) {
-                m_RenderResources.RegisterMeshLodChain(meshId, loadedModel->lodChains[meshIndex]);
+            if (meshIndex < runtimeLodChains.size() &&
+                runtimeLodChains[meshIndex].Count() > 1u) {
+                m_RenderResources.RegisterMeshLodChain(
+                    meshId,
+                    std::move(runtimeLodChains[meshIndex])
+                );
             }
         }
 

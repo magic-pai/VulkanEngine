@@ -3809,3 +3809,64 @@ Sources:
 - https://github.com/assimp/assimp
 - https://github.com/KhronosGroup/glTF-Validator
 - https://www.khronos.org/gltf/
+
+## 2026-07-24 - An LOD Number Is Not An LOD Draw
+
+Symptom:
+- SelfEngine generated CPU LOD index lists and reported a selected level, but
+  the high-poly PBR model always submitted the original `VulkanMesh`.
+- Lower levels copied the complete 92-byte `Vertex3D` array, so the dormant
+  path consumed CPU memory without reducing GPU vertex fetch or draw cost.
+
+False leads:
+- Tuning screen-size thresholds before proving that the selected level changed
+  the bound vertex/index buffers.
+- Treating a lower `lodLevel` counter as evidence that fewer triangles reached
+  `vkCmdDrawIndexed`.
+- Applying the first static LOD implementation to skinned, shadow, capture, and
+  Ray Query consumers before their geometry identities could remain coherent.
+
+Cause:
+- `RenderQueue` called `SelectLod` with `previousLod=0` every frame, stored only
+  the returned integer, and never replaced `RenderCommand::mesh`.
+- `VulkanRenderResources2D` retained copied CPU chains but owned no lower-level
+  GPU meshes.
+
+Control test:
+- At camera distance 24, `SE_MESH_LOD=1` must reduce the PBR main/GBuffer path
+  from `499,719` to `49,971` triangles. `SE_MESH_LOD=0` must restore source
+  geometry while shadow triangles remain identical in both lanes.
+
+Fix:
+- Use meshoptimizer v1.2 attribute-aware simplification for normals/UVs,
+  accumulate returned error, optimize the vertex cache, compact every level
+  with `meshopt_optimizeVertexFetch`, and upload a real `VulkanMesh` per level.
+- Select by projected pixel error, preserve per-renderable history, include all
+  camera/viewport/quality inputs in the queue cache signature, and bind the
+  selected mesh before sorting/batching.
+- Protect full-screen inspection with a hysteretic LOD0 band. Keep skinned,
+  shadow, capture, and Ray Query geometry on LOD0 until each paired consumer has
+  an explicit shared-LOD contract.
+
+Prevention:
+- An LOD feature is not active until draw-time index counts and bound GPU mesh
+  identities change under a control variable.
+- Record source/rendered/saved triangles, level distribution, transitions,
+  projected error, and resident bytes; do not accept only a selected integer.
+- Any screen-space guard needs hysteresis. Any queue cache using LOD must hash
+  camera position, FOV, framebuffer height, and quality policy.
+- Use mature simplification libraries rather than implementing custom QEM, and
+  keep offline bake/cache work separate from runtime selection correctness.
+
+Validation:
+- `Test-PbrModelLodHealth.ps1 -Strict`: `38 pass / 0 fail` across near, far,
+  disabled, animated Forward3D, and procedural LightingShowcase lanes.
+- Near/far PBR triangles are `499,719 / 49,971`; far saves `449,748` triangles
+  at `0.712 px` estimated error, with zero steady-state transitions.
+- Debug PBR/Forward3D/LightingShowcase and Release PBR builds pass. The user
+  accepted the fullscreen PBR result with no visible defect.
+
+Sources:
+- https://github.com/zeux/meshoptimizer/releases/tag/v1.2
+- https://github.com/zeux/meshoptimizer#simplification
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/static-mesh-automatic-lod-generation-in-unreal-engine

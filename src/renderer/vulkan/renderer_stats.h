@@ -82,6 +82,31 @@ struct RendererDrawStats {
     u32 shadowSkinnedConservativeBounds = 0;
 };
 
+struct RendererMeshLodStats {
+    u32 enabled = 0;
+    u32 eligibleCommands = 0;
+    u32 selectedCommands = 0;
+    u32 reducedCommands = 0;
+    u32 transitionCount = 0;
+    u32 skinnedExcludedCommands = 0;
+    std::array<u32, 4> levelCounts{};
+    u64 sourceTriangles = 0;
+    u64 renderedTriangles = 0;
+    u64 savedTriangles = 0;
+    u32 residentChainCount = 0;
+    u32 residentLevelCount = 0;
+    u64 sourceVertexBytes = 0;
+    u64 sourceIndexBytes = 0;
+    u64 residentVertexBytes = 0;
+    u64 residentIndexBytes = 0;
+    u64 extraVertexBytes = 0;
+    u64 extraIndexBytes = 0;
+    f32 minScreenFraction = 0.0f;
+    f32 maxScreenFraction = 0.0f;
+    f32 maxSelectedErrorPixels = 0.0f;
+    f32 targetPixelError = 1.0f;
+};
+
 struct RendererShadowCascadeStats {
     u32 budgetContractVersion = 0;
     u32 budgetResourceContractValid = 0;
@@ -1752,6 +1777,7 @@ struct RendererStats {
     RendererCpuStats cpu;
     RendererRenderDebugStats renderDebug;
     RendererDrawStats draw;
+    RendererMeshLodStats meshLod;
     RendererShadowCascadeStats shadowCascades;
     RendererLocalShadowAtlasStats localShadowAtlas;
     RendererWeightedTranslucencyStats weightedTranslucency;

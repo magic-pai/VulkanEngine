@@ -525,6 +525,8 @@ struct RenderQueueContext {
     RenderQueueCacheStats* cacheStats = nullptr;
     RenderQueue* shadowRenderQueue = nullptr;
     RenderQueueCullingStats* shadowCullingStats = nullptr;
+    RenderQueueLodStats* lodStats = nullptr;
+    bool allowMeshLod = false;
 };
 
 class VulkanRenderer {

@@ -500,6 +500,35 @@ RendererDrawStats DrawStatsForQueues(
     return stats;
 }
 
+RendererMeshLodStats RendererMeshLodStatsFor(
+    const RenderQueueLodStats& source
+) {
+    RendererMeshLodStats stats{};
+    stats.enabled = source.enabled;
+    stats.eligibleCommands = source.eligibleCommands;
+    stats.selectedCommands = source.selectedCommands;
+    stats.reducedCommands = source.reducedCommands;
+    stats.transitionCount = source.transitionCount;
+    stats.skinnedExcludedCommands = source.skinnedExcludedCommands;
+    stats.levelCounts = source.levelCounts;
+    stats.sourceTriangles = source.sourceTriangles;
+    stats.renderedTriangles = source.renderedTriangles;
+    stats.savedTriangles = source.savedTriangles;
+    stats.residentChainCount = source.residentChainCount;
+    stats.residentLevelCount = source.residentLevelCount;
+    stats.sourceVertexBytes = source.sourceVertexBytes;
+    stats.sourceIndexBytes = source.sourceIndexBytes;
+    stats.residentVertexBytes = source.residentVertexBytes;
+    stats.residentIndexBytes = source.residentIndexBytes;
+    stats.extraVertexBytes = source.extraVertexBytes;
+    stats.extraIndexBytes = source.extraIndexBytes;
+    stats.minScreenFraction = source.minScreenFraction;
+    stats.maxScreenFraction = source.maxScreenFraction;
+    stats.maxSelectedErrorPixels = source.maxSelectedErrorPixels;
+    stats.targetPixelError = source.targetPixelError;
+    return stats;
+}
+
 RendererBonePaletteDrawStats BonePaletteDrawStatsFor(
     std::span<const RenderCommand> mainCommands,
     bool fallbackDescriptorReady
@@ -6311,6 +6340,7 @@ void VulkanRenderer::DrawFrame() {
     RenderQueueCullingStats shadowCullingStats{};
     RenderQueueCacheStats mainCacheStats{};
     RenderQueueCacheStats overlayCacheStats{};
+    RenderQueueLodStats mainLodStats{};
     const bool shadowPassEnabled = m_ShadowSettings.enabled &&
         m_ShadowSettings.strength > 0.001f;
     m_ShadowRenderQueue.Clear();
@@ -6322,7 +6352,9 @@ void VulkanRenderer::DrawFrame() {
                 &mainCullingStats,
                 &mainCacheStats,
                 shadowPassEnabled ? &m_ShadowRenderQueue : nullptr,
-                shadowPassEnabled ? &shadowCullingStats : nullptr
+                shadowPassEnabled ? &shadowCullingStats : nullptr,
+                &mainLodStats,
+                true
             }
         );
     } else {
@@ -8628,6 +8660,7 @@ void VulkanRenderer::DrawFrame() {
                 : residualDraws - weightedDraws;
     }
     frameStats.draw.mainVisible = mainCullingStats.visible;
+    frameStats.meshLod = RendererMeshLodStatsFor(mainLodStats);
     frameStats.draw.mainCulled = mainCullingStats.culled;
     frameStats.draw.overlayVisible = overlayCullingStats.visible;
     frameStats.draw.overlayCulled = overlayCullingStats.culled;

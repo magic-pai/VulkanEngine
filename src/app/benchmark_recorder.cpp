@@ -186,6 +186,7 @@ void BenchmarkRecorder::RecordFrame(
 
     const RendererCpuStats& cpu = stats.cpu;
     const RendererDrawStats& draw = stats.draw;
+    const RendererMeshLodStats& meshLod = stats.meshLod;
     const RendererShadowCascadeStats& shadowCascades = stats.shadowCascades;
     const RendererLocalShadowAtlasStats& localShadowAtlas = stats.localShadowAtlas;
     const RendererWeightedTranslucencyStats& weightedTranslucency =
@@ -2050,6 +2051,31 @@ void BenchmarkRecorder::RecordFrame(
         << binds.frameMaterialOpacityTextureCount << ','
         << binds.frameMaterialTexturedCount << ','
         << binds.frameMaterialTextureMipLodBias << ','
+        << meshLod.enabled << ','
+        << meshLod.eligibleCommands << ','
+        << meshLod.selectedCommands << ','
+        << meshLod.reducedCommands << ','
+        << meshLod.transitionCount << ','
+        << meshLod.skinnedExcludedCommands << ','
+        << meshLod.levelCounts[0] << ','
+        << meshLod.levelCounts[1] << ','
+        << meshLod.levelCounts[2] << ','
+        << meshLod.levelCounts[3] << ','
+        << meshLod.sourceTriangles << ','
+        << meshLod.renderedTriangles << ','
+        << meshLod.savedTriangles << ','
+        << meshLod.residentChainCount << ','
+        << meshLod.residentLevelCount << ','
+        << meshLod.sourceVertexBytes << ','
+        << meshLod.sourceIndexBytes << ','
+        << meshLod.residentVertexBytes << ','
+        << meshLod.residentIndexBytes << ','
+        << meshLod.extraVertexBytes << ','
+        << meshLod.extraIndexBytes << ','
+        << meshLod.minScreenFraction << ','
+        << meshLod.maxScreenFraction << ','
+        << meshLod.maxSelectedErrorPixels << ','
+        << meshLod.targetPixelError << ','
         << binds.mainInstanceBufferUploads << ','
         << binds.mainInstanceBufferUploadSkips << ','
         << binds.pushConstantUpdates << ','
@@ -3609,6 +3635,19 @@ void BenchmarkRecorder::WriteHeader() {
         << "frame_material_volume_count,"
         << "frame_material_opacity_texture_count,"
         << "frame_material_textured_count,frame_material_texture_mip_lod_bias,"
+        << "mesh_lod_enabled,mesh_lod_eligible_commands,"
+        << "mesh_lod_selected_commands,mesh_lod_reduced_commands,"
+        << "mesh_lod_transition_count,mesh_lod_skinned_excluded_commands,"
+        << "mesh_lod_level_0_commands,mesh_lod_level_1_commands,"
+        << "mesh_lod_level_2_commands,mesh_lod_level_3_commands,"
+        << "mesh_lod_source_triangles,mesh_lod_rendered_triangles,"
+        << "mesh_lod_saved_triangles,mesh_lod_resident_chain_count,"
+        << "mesh_lod_resident_level_count,mesh_lod_source_vertex_bytes,"
+        << "mesh_lod_source_index_bytes,mesh_lod_resident_vertex_bytes,"
+        << "mesh_lod_resident_index_bytes,mesh_lod_extra_vertex_bytes,"
+        << "mesh_lod_extra_index_bytes,mesh_lod_min_screen_fraction,"
+        << "mesh_lod_max_screen_fraction,mesh_lod_max_selected_error_pixels,"
+        << "mesh_lod_target_pixel_error,"
         << "main_instance_buffer_uploads,main_instance_buffer_upload_skips,"
         << "push_constant_updates,push_constant_bytes\n";
 }

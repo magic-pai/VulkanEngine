@@ -13,6 +13,18 @@ class VulkanMesh;
 class VulkanDevice;
 class VulkanPhysicalDevice;
 
+struct MeshLodResidencyStats {
+    u32 chainCount = 0;
+    u32 levelCount = 0;
+    u64 sourceVertexBytes = 0;
+    u64 sourceIndexBytes = 0;
+    u64 residentVertexBytes = 0;
+    u64 residentIndexBytes = 0;
+    u64 extraVertexBytes = 0;
+    u64 extraIndexBytes = 0;
+    f32 maxSimplificationError = 0.0f;
+};
+
 class VulkanRenderResources2D {
 public:
     struct BonePaletteResource {
@@ -61,10 +73,18 @@ public:
         f32 mipLodBias
     ) const;
 
-    // LOD support
-    void RegisterMeshLodChain(std::string_view baseMeshId, const MeshLodChain& chain);
-    u32 SelectLod(std::string_view meshId, f32 screenFraction, u32 prevLod) const;
+    void RegisterMeshLodChain(std::string baseMeshId, MeshLodChain chain);
+    MeshLodSelection SelectLod(
+        std::string_view meshId,
+        f32 projectedDiameterPixels,
+        u32 previousLod,
+        bool previousLodValid,
+        f32 targetPixelError,
+        f32 hysteresisRatio
+    ) const;
+    const MeshLodChain* LodChain(std::string_view baseMeshId) const;
     bool HasLodChain(std::string_view baseMeshId) const;
+    const MeshLodResidencyStats& LodResidencyStats() const;
 
 private:
     struct StringViewHash {
@@ -97,6 +117,7 @@ private:
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_MaterialIndexById;
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_BonePaletteIndexById;
     std::unordered_map<std::string, MeshLodChain, StringViewHash, std::equal_to<>> m_LodChains;
+    MeshLodResidencyStats m_LodResidencyStats{};
 };
 
 }

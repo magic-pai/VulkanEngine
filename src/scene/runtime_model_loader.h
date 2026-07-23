@@ -137,10 +137,10 @@ private:
         ~LoadedRuntimeModel();
 
         std::vector<std::unique_ptr<VulkanMesh>> meshes;
+        std::vector<std::vector<std::unique_ptr<VulkanMesh>>> lodMeshes;
         std::vector<VulkanMaterial*> materials;
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
-        std::vector<MeshLodChain> lodChains;
         u32 sourceNodeCount = 0;
         u32 sourceBoneNodeCount = 0;
         u32 sourceAnimationChannelBoundCount = 0;
