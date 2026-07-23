@@ -133,7 +133,15 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_DIAGNOSTICS",
     "SE_SSR",
     "SE_SSR_BACKEND",
+    "SE_SSR_FFX",
+    "SE_SSR_FFX_OFF",
     "SE_FORWARD3D_AA_MODE",
+    "SE_DLSS_QUALITY",
+    "SE_DLSS_PRESET",
+    "SE_DLSS_PRESENT",
+    "SE_RENDER_SCALE",
+    "SE_UPSCALER_PLUGIN",
+    "SE_VK_SUPPRESS_KNOWN_NGX_INTERNAL_DLSS_LAYOUT",
     "SE_BENCHMARK_SCENE",
     "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
     "SE_LIGHTING_SHOWCASE_FORCE_OFF",
@@ -159,6 +167,28 @@ $commonEnvironment = @{
     SE_AUTO_EXIT_FRAMES = "14"
 }
 $laneSpecs = @(
+    [pscustomobject]@{
+        name = "lighting-showcase-default-presentation"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
+        defaultPresentationProfile = "lighting-showcase"
+        removeCommonKeys = @(
+            "SE_FORWARD3D_AA_MODE",
+            "SE_SSR",
+            "SE_SSR_BACKEND",
+            "SE_HYBRID_REFLECTIONS_RT"
+        )
+        environment = @{
+            SE_VK_SUPPRESS_KNOWN_NGX_INTERNAL_DLSS_LAYOUT = "1"
+        }
+    },
     [pscustomobject]@{
         name = "lighting-showcase-requested"
         executable = $showcaseExecutable
@@ -320,6 +350,30 @@ $laneSpecs = @(
         }
     },
     [pscustomobject]@{
+        name = "forward3d-default-presentation-control"
+        executable = $forwardExecutable
+        requested = 0
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
+        defaultPresentationProfile = "forward3d-control"
+        removeCommonKeys = @(
+            "SE_FORWARD3D_AA_MODE",
+            "SE_SSR",
+            "SE_SSR_BACKEND",
+            "SE_HYBRID_REFLECTIONS_RT"
+        )
+        environment = @{
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
+            SE_LIGHTING_SHOWCASE_FORCE_OFF = "1"
+            SE_VK_SUPPRESS_KNOWN_NGX_INTERNAL_DLSS_LAYOUT = "1"
+        }
+    },
+    [pscustomobject]@{
         name = "forward3d-not-requested-control"
         executable = $forwardExecutable
         requested = 0
@@ -354,6 +408,11 @@ foreach ($lane in $laneSpecs) {
     Remove-Item -LiteralPath $csvPath, $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 
     $environment = $commonEnvironment.Clone()
+    if ($lane.PSObject.Properties.Name -contains "removeCommonKeys") {
+        foreach ($key in $lane.removeCommonKeys) {
+            $environment.Remove($key)
+        }
+    }
     foreach ($entry in $lane.environment.GetEnumerator()) {
         $environment[$entry.Key] = $entry.Value
     }
@@ -535,6 +594,20 @@ foreach ($lane in $laneSpecs) {
                 "ssr_ffx_sssr_mirror_dnsr_roughness_threshold_milliunits"
             $ffxMirrorDnsrConfidenceThreshold = Get-UIntValue $last `
                 "ssr_ffx_sssr_mirror_dnsr_confidence_threshold_permille"
+            $ssrEnabled = Get-UIntValue $last "ssr_enabled"
+            $ssrBackendRequestedProvider = Get-UIntValue $last `
+                "ssr_backend_requested_provider"
+            $ssrBackendActiveProvider = Get-UIntValue $last `
+                "ssr_backend_active_provider"
+            $antialiasingMode = Get-UIntValue $last "temporal_antialiasing_mode"
+            $dlssOutputReady = Get-UIntValue $last `
+                "temporal_upscaler_dlss_output_ready"
+            $temporalPostSourceRequested = Get-UIntValue $last `
+                "temporal_upscale_post_source_requested"
+            $temporalPostSourceActive = Get-UIntValue $last `
+                "temporal_upscale_post_source_active"
+            $temporalPostSourceFallback = Get-UIntValue $last `
+                "temporal_upscale_post_source_fallback_reason"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
             $rayQueryReadbackRows = @(
@@ -815,6 +888,44 @@ foreach ($lane in $laneSpecs) {
                 $fallback -eq 7
             } else {
                 $fallback -in @(3, 4, 5)
+            }
+            $defaultPresentationProfile = if (
+                $lane.PSObject.Properties.Name -contains
+                    "defaultPresentationProfile"
+            ) {
+                [string]$lane.defaultPresentationProfile
+            } else {
+                ""
+            }
+
+            if ($defaultPresentationProfile -eq "lighting-showcase") {
+                $showcasePresentationDefaultsActive =
+                    $antialiasingMode -eq 5 -and
+                    $dlssOutputReady -eq 1 -and
+                    $temporalPostSourceRequested -eq 1 -and
+                    $temporalPostSourceActive -eq 1 -and
+                    $temporalPostSourceFallback -eq 0 -and
+                    $ssrEnabled -eq 1 -and
+                    $ssrBackendRequestedProvider -eq 1 -and
+                    $ssrBackendActiveProvider -eq 1 -and
+                    $active -eq 1 -and
+                    $fallback -eq 0
+                $checks.Add((New-Check "$($lane.name) resolves the accepted presentation defaults" `
+                    $showcasePresentationDefaultsActive `
+                    "aa=$antialiasingMode,dlss=$dlssOutputReady,post=$temporalPostSourceRequested/$temporalPostSourceActive/$temporalPostSourceFallback,ssr=$ssrEnabled/$ssrBackendRequestedProvider/$ssrBackendActiveProvider,hybrid=$active/$fallback" `
+                    "aa=5,dlss=1,post=1/1/0,ssr=1/1/1,hybrid=1/0")) | Out-Null
+            } elseif ($defaultPresentationProfile -eq "forward3d-control") {
+                $forward3dReflectionDefaultsUnchanged =
+                    $ssrBackendRequestedProvider -eq 0 -and
+                    $ssrBackendActiveProvider -eq 0 -and
+                    $requested -eq 0 -and
+                    $active -eq 0 -and
+                    $ffxSameFrameActive -eq 0 -and
+                    $ffxApplyDraws -eq 0
+                $checks.Add((New-Check "$($lane.name) keeps non-showcase reflection defaults" `
+                    $forward3dReflectionDefaultsUnchanged `
+                    "ssrBackend=$ssrBackendRequestedProvider/$ssrBackendActiveProvider,hybrid=$requested/$active,ffxApply=$ffxSameFrameActive/$ffxApplyDraws" `
+                    "ssrBackend=0/0,hybrid=0/0,ffxApply=0/0")) | Out-Null
             }
 
             $checks.Add((New-Check "$($lane.name) contract version" `
@@ -1102,7 +1213,10 @@ foreach ($lane in $laneSpecs) {
                             $directMirrorAccounting `
                             "$directMirrorCandidateCount=$directMirrorHitCount+$directMirrorFallbackCount" `
                             "candidate=hit+fallback")) | Out-Null
-                        if ($lane.name -eq "lighting-showcase-requested") {
+                        if ($lane.name -in @(
+                            "lighting-showcase-default-presentation",
+                            "lighting-showcase-requested"
+                        )) {
                             $checks.Add((New-Check "$($lane.name) direct mirror Ray Query is exercised" `
                                 ($directMirrorCandidateCount -gt 0 -and `
                                     $directMirrorHitCount -gt 0) `
@@ -1551,6 +1665,11 @@ foreach ($lane in $laneSpecs) {
                 denoiserBridge = "$denoiserResourcesReady/$denoiserRadianceDescriptorReady/$denoiserConfidenceDescriptorReady/$denoiserInjectionEnabled"
                 denoiserChain = "$ffxReprojectDispatches/$ffxPrefilterDispatches/$ffxResolveDispatches/$ffxSameFrameActive/$ffxApplyDraws/$ffxHitConfidenceApplyBound"
                 mirrorDnsrFusion = "$ffxMirrorDnsrPassthroughRequested/$ffxMirrorDnsrPassthroughResourcesReady/$ffxMirrorDnsrPassthroughActive/$ffxMirrorDnsrRoughnessThreshold/$ffxMirrorDnsrConfidenceThreshold"
+                presentationProfile = $defaultPresentationProfile
+                antialiasingMode = $antialiasingMode
+                dlssOutputReady = $dlssOutputReady
+                temporalPostSource = "$temporalPostSourceRequested/$temporalPostSourceActive/$temporalPostSourceFallback"
+                ssrBackend = "$ssrEnabled/$ssrBackendRequestedProvider/$ssrBackendActiveProvider"
                 rayQueryDispatchReady = $rayQueryDispatchReady
                 rayQueryDispatchCount = $rayQueryDispatchCount
                 rayQueryReadbackValid = $rayQueryReadbackValid

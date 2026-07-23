@@ -1091,6 +1091,13 @@ void ApplyLightingShowcaseIblEnvironmentDefaults() {
     );
 }
 
+void ApplyLightingShowcasePresentationEnvironmentDefaults() {
+    SetEnvironmentDefault("SE_FORWARD3D_AA_MODE", "sr-performance");
+    SetEnvironmentDefault("SE_SSR", "1");
+    SetEnvironmentDefault("SE_SSR_BACKEND", "ffx-sssr");
+    SetEnvironmentDefault("SE_HYBRID_REFLECTIONS_RT", "1");
+}
+
 bool DefaultSceneSkinnedFbxProductionRequested() {
     if (EnvironmentFlagDisabled("SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION") ||
         EnvironmentFlagDisabled("SE_DEFAULT_SCENE_SKINNED_FBX") ||
@@ -4127,6 +4134,9 @@ int main() {
         );
     const int windowWidth = ForwardWindowWidth();
     const int windowHeight = ForwardWindowHeight();
+    if (lightingShowcaseSceneRequested) {
+        ApplyLightingShowcasePresentationEnvironmentDefaults();
+    }
     const se::RendererTemporalAntialiasingMode startupAntialiasingMode =
         ForwardTemporalAntialiasingModeFromEnvironment();
     ApplyForwardTemporalAntialiasingEnvironmentDefaults(startupAntialiasingMode);
