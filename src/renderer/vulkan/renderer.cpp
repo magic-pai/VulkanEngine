@@ -19,6 +19,7 @@
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/frame_graph.h"
 #include "renderer/vulkan/gpu_timer.h"
+#include "renderer/vulkan/gpu_occlusion_culling.h"
 #include "renderer/vulkan/graphics_pipeline.h"
 #include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/hybrid_reflection_ray_query.h"
@@ -2348,6 +2349,48 @@ bool EnvironmentFlagEnabled(const char* name) {
         value == "ON" ||
         value == "yes" ||
         value == "YES";
+}
+
+std::optional<f32> EnvironmentFloatOverride(const char* name);
+
+bool GpuOcclusionRequestedFromEnvironment() {
+    return EnvironmentFlagEnabled("SE_GPU_OCCLUSION");
+}
+
+bool GpuOcclusionDiagnosticsRequestedFromEnvironment() {
+#if !defined(NDEBUG)
+    return GpuOcclusionRequestedFromEnvironment() &&
+        !EnvironmentFlagEnabled("SE_GPU_OCCLUSION_DIAGNOSTICS_OFF");
+#else
+    return false;
+#endif
+}
+
+bool GpuOcclusionResourcesRequestedFromEnvironment() {
+#if !defined(NDEBUG)
+    return GpuOcclusionDiagnosticsRequestedFromEnvironment();
+#else
+    return false;
+#endif
+}
+
+f32 GpuOcclusionDepthEpsilonFromEnvironment() {
+    const std::optional<f32> value =
+        EnvironmentFloatOverride("SE_GPU_OCCLUSION_DEPTH_EPSILON");
+    return std::clamp(value.value_or(0.0002f), 0.0f, 0.01f);
+}
+
+u64 DepthPyramidMemoryBytes(const VulkanDepthPyramid* pyramid) {
+    if (pyramid == nullptr) {
+        return 0u;
+    }
+
+    u64 texelCount = 0u;
+    for (u32 mipIndex = 0u; mipIndex < pyramid->MipCount(); ++mipIndex) {
+        const VkExtent2D mipExtent = pyramid->MipExtent(mipIndex);
+        texelCount += static_cast<u64>(mipExtent.width) * mipExtent.height;
+    }
+    return texelCount * sizeof(f32) * pyramid->Count();
 }
 
 bool HybridReflectionFullAuditRequested() {
@@ -5759,6 +5802,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_LightClusterCullComputePipeline.reset();
     m_AutoExposureComputePipeline.reset();
     m_HiZBuildComputePipeline.reset();
+    m_OcclusionHiZBuildComputePipeline.reset();
+    m_GpuOcclusionAudit.reset();
     m_SsrTraceComputePipeline.reset();
     m_SsrTemporalComputePipeline.reset();
     m_SsrSpatialComputePipeline.reset();
@@ -5835,6 +5880,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_FfxSssrConstantsResources.reset();
     m_SsrReconstructionDescriptorSets.reset();
     m_HiZDescriptorSets.reset();
+    m_OcclusionHiZDescriptorSets.reset();
     m_FfxSssrApplyGBufferDescriptorSets.reset();
     m_GBufferDescriptorSets.reset();
     m_SsrDepthPyramidSampler.reset();
@@ -5845,6 +5891,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_ColorGradingLut.reset();
     m_BloomPyramid.reset();
     m_SsrDepthPyramid.reset();
+    m_OcclusionDepthPyramid.reset();
     m_SceneRenderTargets.reset();
     m_SsrReconstructionImagesInitialized = false;
     traceStep("render_targets_reset");
@@ -5882,6 +5929,7 @@ VulkanRenderer::~VulkanRenderer() {
     m_FfxSssrPrepareIndirectArgsDescriptorSetLayout.reset();
     m_FfxSssrConstantsDescriptorSetLayout.reset();
     m_SsrReconstructionDescriptorSetLayout.reset();
+    m_OcclusionCullDescriptorSetLayout.reset();
     m_HiZDescriptorSetLayout.reset();
     m_MaterialDescriptorSetLayout.reset();
     m_DescriptorSetLayout.reset();
@@ -5894,6 +5942,22 @@ VulkanRenderer::~VulkanRenderer() {
 
 void VulkanRenderer::DrawFrame() {
     RendererStats frameStats{};
+    RendererGpuOcclusionStats& gpuOcclusion = frameStats.gpuOcclusion;
+    gpuOcclusion.contractVersion = VulkanGpuOcclusionAudit::kContractVersion;
+    gpuOcclusion.requested =
+        GpuOcclusionRequestedFromEnvironment() ? 1u : 0u;
+    gpuOcclusion.diagnosticsRequested =
+        GpuOcclusionDiagnosticsRequestedFromEnvironment() ? 1u : 0u;
+    gpuOcclusion.capacity = VulkanGpuOcclusionAudit::kMaxCandidates;
+    gpuOcclusion.fallbackReason = static_cast<u32>(
+        gpuOcclusion.requested == 0u
+            ? RendererGpuOcclusionFallbackReason::Disabled
+#if defined(NDEBUG)
+            : RendererGpuOcclusionFallbackReason::DebugBuildRequired
+#else
+            : RendererGpuOcclusionFallbackReason::ResourcesUnavailable
+#endif
+    );
     const VulkanRayTracingCapabilities& rayTracingCapabilities =
         m_Device.RayTracingCapabilities();
     RendererHybridReflectionStats& hybridReflections =
@@ -6039,6 +6103,10 @@ void VulkanRenderer::DrawFrame() {
         ReadPreviousSsrGpuDiagnostics(imageIndex);
     const FrameFfxSssrGpuReadbackStats ffxSssrGpuReadback =
         ReadPreviousFfxSssrGpuReadback(imageIndex);
+    const GpuOcclusionReadbackResult gpuOcclusionReadback =
+        m_GpuOcclusionAudit != nullptr
+            ? m_GpuOcclusionAudit->Readback(imageIndex)
+            : GpuOcclusionReadbackResult{};
     const HybridReflectionRayQueryDiagnostics hybridRayQueryDiagnostics =
         m_HybridReflectionRayQuery != nullptr
             ? m_HybridReflectionRayQuery->ReadDiagnostics(imageIndex)
@@ -6497,6 +6565,138 @@ void VulkanRenderer::DrawFrame() {
         temporalJitterApplyRequested,
         suppressNativeTaaResolveForUpscaler
     );
+    gpuOcclusion.actualDrawCount = static_cast<u32>(std::min<std::size_t>(
+        mainCommands.size(),
+        std::numeric_limits<u32>::max()
+    ));
+    gpuOcclusion.depthPyramidAllocated =
+        m_OcclusionDepthPyramid != nullptr ? 1u : 0u;
+    gpuOcclusion.depthPyramidWidth = m_OcclusionDepthPyramid != nullptr
+        ? m_OcclusionDepthPyramid->Extent().width
+        : 0u;
+    gpuOcclusion.depthPyramidHeight = m_OcclusionDepthPyramid != nullptr
+        ? m_OcclusionDepthPyramid->Extent().height
+        : 0u;
+    gpuOcclusion.depthPyramidMipCount = m_OcclusionDepthPyramid != nullptr
+        ? m_OcclusionDepthPyramid->MipCount()
+        : 0u;
+    gpuOcclusion.depthPyramidImageCount = m_OcclusionDepthPyramid != nullptr
+        ? static_cast<u32>(m_OcclusionDepthPyramid->Count())
+        : 0u;
+    gpuOcclusion.depthPyramidFormat = m_OcclusionDepthPyramid != nullptr
+        ? m_OcclusionDepthPyramid->Format()
+        : VK_FORMAT_UNDEFINED;
+    gpuOcclusion.depthPyramidMemoryBytes =
+        DepthPyramidMemoryBytes(m_OcclusionDepthPyramid.get());
+    gpuOcclusion.auditBufferMemoryBytes = m_GpuOcclusionAudit != nullptr
+        ? m_GpuOcclusionAudit->BufferMemoryBytes()
+        : 0u;
+
+    if (gpuOcclusion.requested > 0u && !has3DMainPass) {
+        gpuOcclusion.fallbackReason = static_cast<u32>(
+            RendererGpuOcclusionFallbackReason::Non3DRenderer
+        );
+    } else if (m_GpuOcclusionAudit != nullptr &&
+        m_GpuOcclusionAudit->Ready() &&
+        m_OcclusionDepthPyramid != nullptr &&
+        m_OcclusionHiZDescriptorSets != nullptr &&
+        m_OcclusionHiZBuildComputePipeline != nullptr &&
+        mainFrameMatrices.has_value()) {
+        glm::mat4 occlusionProjection = mainFrameMatrices->proj;
+        if (temporalState.jitterApplied) {
+            ApplyProjectionJitter(occlusionProjection, temporalState.jitterUv);
+        }
+        const glm::mat4 inverseView = glm::inverse(mainFrameMatrices->view);
+        const GpuOcclusionPrepareResult prepared =
+            m_GpuOcclusionAudit->PrepareFrame(
+                imageIndex,
+                mainCommands,
+                occlusionProjection * mainFrameMatrices->view,
+                glm::vec3(inverseView[3]),
+                m_OcclusionDepthPyramid->Extent(),
+                m_OcclusionDepthPyramid->MipCount(),
+                GpuOcclusionDepthEpsilonFromEnvironment()
+            );
+        gpuOcclusion.commandCount = prepared.commandCount;
+        gpuOcclusion.validBoundsCount = prepared.validBoundsCount;
+        gpuOcclusion.invalidBoundsCount = prepared.invalidBoundsCount;
+        gpuOcclusion.zeroIdentityCount = prepared.zeroIdentityCount;
+        gpuOcclusion.capacityDroppedCount = prepared.capacityDroppedCount;
+        gpuOcclusion.uploadedCandidateCount = prepared.uploadedCandidateCount;
+        gpuOcclusion.uploadedCandidateBytes = prepared.uploadedCandidateBytes;
+        gpuOcclusion.candidateIdentityHash = prepared.candidateIdentityHash;
+        gpuOcclusion.actualTriangleCount = prepared.actualTriangleCount;
+        gpuOcclusion.active = prepared.uploadedCandidateCount > 0u ? 1u : 0u;
+        gpuOcclusion.actualDrawsUnchanged = gpuOcclusion.active;
+        gpuOcclusion.fallbackReason = static_cast<u32>(
+            gpuOcclusion.active > 0u
+                ? RendererGpuOcclusionFallbackReason::None
+                : RendererGpuOcclusionFallbackReason::NoCandidates
+        );
+    }
+
+    gpuOcclusion.readbackReady = gpuOcclusionReadback.ready ? 1u : 0u;
+    gpuOcclusion.readbackValid = gpuOcclusionReadback.valid ? 1u : 0u;
+    gpuOcclusion.readbackInvalidCount =
+        gpuOcclusionReadback.invalidResultCount;
+    gpuOcclusion.readbackCandidateCount = gpuOcclusionReadback.candidateCount;
+    gpuOcclusion.classifiedVisibleCount = gpuOcclusionReadback.visibleCount;
+    gpuOcclusion.classifiedOccludedCount = gpuOcclusionReadback.occludedCount;
+    gpuOcclusion.classifiedUncertainCount = gpuOcclusionReadback.uncertainCount;
+    gpuOcclusion.cameraInsideExcludedCount =
+        gpuOcclusionReadback.cameraInsideExcludedCount;
+    gpuOcclusion.nearPlaneExcludedCount =
+        gpuOcclusionReadback.nearPlaneExcludedCount;
+    gpuOcclusion.invalidProjectionCount =
+        gpuOcclusionReadback.invalidProjectionCount;
+    gpuOcclusion.invalidRectCount = gpuOcclusionReadback.invalidRectCount;
+    gpuOcclusion.invalidMipCount = gpuOcclusionReadback.invalidMipCount;
+    gpuOcclusion.maxSelectedMip = gpuOcclusionReadback.maxSelectedMip;
+    gpuOcclusion.sampledTexelCount = gpuOcclusionReadback.sampledTexelCount;
+    gpuOcclusion.readbackExpectedIdentityHash =
+        gpuOcclusionReadback.expectedIdentityHash;
+    gpuOcclusion.readbackResultIdentityHash =
+        gpuOcclusionReadback.resultIdentityHash;
+    gpuOcclusion.classificationConserved =
+        gpuOcclusionReadback.valid &&
+        gpuOcclusionReadback.visibleCount + gpuOcclusionReadback.occludedCount +
+            gpuOcclusionReadback.uncertainCount ==
+            gpuOcclusionReadback.candidateCount
+            ? 1u
+            : 0u;
+    gpuOcclusion.wouldCullDrawCount = gpuOcclusionReadback.occludedCount;
+    gpuOcclusion.wouldCullTriangleCount =
+        gpuOcclusionReadback.wouldCullTriangleCount;
+    const bool occlusionIdentityMatchesCurrent =
+        gpuOcclusionReadback.valid &&
+        gpuOcclusionReadback.expectedIdentityHash ==
+            gpuOcclusion.candidateIdentityHash;
+    gpuOcclusion.readbackStale =
+        gpuOcclusionReadback.valid && !occlusionIdentityMatchesCurrent
+            ? 1u
+            : 0u;
+    gpuOcclusion.historyValid =
+        occlusionIdentityMatchesCurrent && !temporalState.historyReset
+            ? 1u
+            : 0u;
+    gpuOcclusion.historyReset = gpuOcclusion.historyValid == 0u ? 1u : 0u;
+    if (!gpuOcclusionReadback.ready) {
+        gpuOcclusion.historyResetReason = static_cast<u32>(
+            RendererGpuOcclusionHistoryResetReason::FirstReadback
+        );
+    } else if (temporalState.historyReset) {
+        gpuOcclusion.historyResetReason = static_cast<u32>(
+            RendererGpuOcclusionHistoryResetReason::TemporalReset
+        );
+    } else if (!occlusionIdentityMatchesCurrent) {
+        gpuOcclusion.historyResetReason = static_cast<u32>(
+            RendererGpuOcclusionHistoryResetReason::CandidateIdentityChanged
+        );
+    } else {
+        gpuOcclusion.historyResetReason = static_cast<u32>(
+            RendererGpuOcclusionHistoryResetReason::None
+        );
+    }
     const bool ssrSceneColorHistorySourceValid =
         m_PreviousTemporalHistoryImageIndex.has_value() &&
         *m_PreviousTemporalHistoryImageIndex <
@@ -9775,9 +9975,23 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.hierarchicalActive > 0
             ? m_SsrDepthPyramid.get()
             : nullptr,
-        frameStats.ssr.hierarchicalActive > 0
+        frameStats.ssr.hierarchicalActive > 0 ||
+            frameStats.gpuOcclusion.active > 0u
             ? m_SceneRenderTargets.get()
             : nullptr,
+        frameStats.gpuOcclusion.active > 0u
+            ? m_OcclusionHiZBuildComputePipeline.get()
+            : nullptr,
+        frameStats.gpuOcclusion.active > 0u
+            ? m_OcclusionHiZDescriptorSets.get()
+            : nullptr,
+        frameStats.gpuOcclusion.active > 0u
+            ? m_OcclusionDepthPyramid.get()
+            : nullptr,
+        frameStats.gpuOcclusion.active > 0u
+            ? m_GpuOcclusionAudit.get()
+            : nullptr,
+        &frameStats.gpuOcclusion,
         frameStats.ssr.reconstructionActive > 0
             ? m_SsrTraceComputePipeline.get()
             : nullptr,
@@ -10694,6 +10908,10 @@ void VulkanRenderer::ValidateSceneResources() const {
 
 void VulkanRenderer::CreateSwapchainResources() {
     m_Swapchain = std::make_unique<VulkanSwapchain>(m_Window, m_PhysicalDevice, m_Device, m_Surface);
+    const bool createGpuOcclusionResources =
+        GpuOcclusionResourcesRequestedFromEnvironment() &&
+        (m_PipelineSpec.vertexLayout == VertexLayout::Vertex3D ||
+            m_PipelineSpec.vertexLayout == VertexLayout::Vertex3DInstanced);
     if (
         HybridReflectionsRayQueryRequestedFromEnvironment() &&
         m_Device.RayTracingCapabilities().RayQueryHardwareReady()
@@ -10714,6 +10932,10 @@ void VulkanRenderer::CreateSwapchainResources() {
     m_DescriptorSetLayout = std::make_unique<VulkanDescriptorSetLayout>(m_Device);
     m_MaterialDescriptorSetLayout = std::make_unique<VulkanMaterialDescriptorSetLayout>(m_Device);
     m_HiZDescriptorSetLayout = std::make_unique<VulkanHiZDescriptorSetLayout>(m_Device);
+    if (createGpuOcclusionResources) {
+        m_OcclusionCullDescriptorSetLayout =
+            std::make_unique<VulkanOcclusionCullDescriptorSetLayout>(m_Device);
+    }
     m_SsrReconstructionDescriptorSetLayout =
         std::make_unique<VulkanSsrReconstructionDescriptorSetLayout>(m_Device);
     m_FfxSssrConstantsDescriptorSetLayout =
@@ -10845,6 +11067,16 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_Swapchain,
         sceneExtent
     );
+    if (createGpuOcclusionResources) {
+        m_OcclusionDepthPyramid = std::make_unique<VulkanDepthPyramid>(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_Swapchain,
+            sceneExtent,
+            "SelfEngine.Occlusion.DepthPyramid"
+        );
+    }
     m_TemporalUpscaleOutputInitialized.assign(
         m_Swapchain->Images().size(),
         false
@@ -11070,6 +11302,25 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_SsrDepthPyramid,
         *m_SsrDepthPyramidSampler
     );
+    if (m_OcclusionDepthPyramid != nullptr &&
+        m_OcclusionCullDescriptorSetLayout != nullptr) {
+        m_OcclusionHiZDescriptorSets =
+            std::make_unique<VulkanHiZDescriptorSets>(
+                m_Device,
+                *m_HiZDescriptorSetLayout,
+                *m_SceneRenderTargets,
+                *m_OcclusionDepthPyramid,
+                *m_SsrDepthPyramidSampler
+            );
+        m_GpuOcclusionAudit = std::make_unique<VulkanGpuOcclusionAudit>(
+            m_Device,
+            m_PhysicalDevice,
+            *m_OcclusionCullDescriptorSetLayout,
+            *m_OcclusionDepthPyramid,
+            *m_SsrDepthPyramidSampler,
+            std::string(SE_SHADER_DIR) + "/gpu_occlusion_audit.comp.spv"
+        );
+    }
     m_SsrReconstructionDescriptorSets =
         std::make_unique<VulkanSsrReconstructionDescriptorSets>(
             m_Device,
@@ -11625,6 +11876,15 @@ void VulkanRenderer::CreateSwapchainResources() {
         *m_HiZDescriptorSetLayout,
         std::string(SE_SHADER_DIR) + "/ssr_depth_pyramid.comp.spv"
     );
+    if (m_OcclusionDepthPyramid != nullptr) {
+        m_OcclusionHiZBuildComputePipeline =
+            std::make_unique<VulkanComputePipeline>(
+                m_Device,
+                *m_HiZDescriptorSetLayout,
+                std::string(SE_SHADER_DIR) +
+                    "/occlusion_depth_pyramid.comp.spv"
+            );
+    }
     m_SsrTraceComputePipeline = std::make_unique<VulkanComputePipeline>(
         m_Device,
         *m_DescriptorSetLayout,
@@ -12201,6 +12461,15 @@ void VulkanRenderer::RecreateSwapchain() {
             ActiveInternalExtentForDisplay(m_Swapchain->Extent())
         );
     }
+    if (m_OcclusionDepthPyramid != nullptr) {
+        m_OcclusionDepthPyramid->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_Swapchain,
+            ActiveInternalExtentForDisplay(m_Swapchain->Extent())
+        );
+    }
     if (m_SsrDepthPyramidSampler != nullptr && m_SsrDepthPyramid != nullptr) {
         m_SsrDepthPyramidSampler->Recreate(
             m_Device,
@@ -12461,6 +12730,31 @@ void VulkanRenderer::RecreateSwapchain() {
             *m_HiZDescriptorSetLayout,
             *m_SceneRenderTargets,
             *m_SsrDepthPyramid,
+            *m_SsrDepthPyramidSampler
+        );
+    }
+    if (m_OcclusionHiZDescriptorSets != nullptr &&
+        m_HiZDescriptorSetLayout != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_OcclusionDepthPyramid != nullptr &&
+        m_SsrDepthPyramidSampler != nullptr) {
+        m_OcclusionHiZDescriptorSets->Recreate(
+            m_Device,
+            *m_HiZDescriptorSetLayout,
+            *m_SceneRenderTargets,
+            *m_OcclusionDepthPyramid,
+            *m_SsrDepthPyramidSampler
+        );
+    }
+    if (m_GpuOcclusionAudit != nullptr &&
+        m_OcclusionCullDescriptorSetLayout != nullptr &&
+        m_OcclusionDepthPyramid != nullptr &&
+        m_SsrDepthPyramidSampler != nullptr) {
+        m_GpuOcclusionAudit->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            *m_OcclusionCullDescriptorSetLayout,
+            *m_OcclusionDepthPyramid,
             *m_SsrDepthPyramidSampler
         );
     }

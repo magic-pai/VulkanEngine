@@ -47,6 +47,7 @@ class VulkanRenderPass;
 class VulkanRenderResources2D;
 class VulkanSceneRenderTargets;
 class VulkanDepthPyramid;
+class VulkanGpuOcclusionAudit;
 class VulkanShadowFramebuffer;
 class VulkanShadowRenderPass;
 class VulkanSwapchain;
@@ -56,6 +57,7 @@ class VulkanWeightedTranslucencyRenderPass;
 struct RenderCommand;
 struct RenderInstanceBatch;
 struct RendererBindStats;
+struct RendererGpuOcclusionStats;
 struct RendererHybridReflectionStats;
 struct RenderFrameGraphPlan;
 struct FrameMaterialSet;
@@ -318,6 +320,11 @@ public:
         const VulkanHiZDescriptorSets* hizDescriptorSets = nullptr,
         const VulkanDepthPyramid* hizDepthPyramid = nullptr,
         const VulkanSceneRenderTargets* hizSourceTargets = nullptr,
+        const VulkanComputePipeline* occlusionHizBuildPipeline = nullptr,
+        const VulkanHiZDescriptorSets* occlusionHizDescriptorSets = nullptr,
+        const VulkanDepthPyramid* occlusionHizDepthPyramid = nullptr,
+        VulkanGpuOcclusionAudit* gpuOcclusionAudit = nullptr,
+        RendererGpuOcclusionStats* gpuOcclusionStats = nullptr,
         const VulkanComputePipeline* ssrTracePipeline = nullptr,
         const VulkanComputePipeline* ssrTemporalPipeline = nullptr,
         const VulkanComputePipeline* ssrSpatialPipeline = nullptr,

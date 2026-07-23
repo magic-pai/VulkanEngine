@@ -361,7 +361,8 @@ public:
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanCommandPool& commandPool,
         const VulkanSwapchain& swapchain,
-        VkExtent2D extent
+        VkExtent2D extent,
+        std::string debugNamePrefix = "SelfEngine.SSR.DepthPyramid"
     );
     ~VulkanDepthPyramid();
 
@@ -403,6 +404,7 @@ private:
     std::vector<std::vector<VkImageView>> m_MipViews;
     VkExtent2D m_Extent{};
     u32 m_MipCount = 0;
+    std::string m_DebugNamePrefix;
 };
 
 inline constexpr u32 kBloomPyramidMipCount = 4;

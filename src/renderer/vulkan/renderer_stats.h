@@ -107,6 +107,77 @@ struct RendererMeshLodStats {
     f32 targetPixelError = 1.0f;
 };
 
+enum class RendererGpuOcclusionFallbackReason : u32 {
+    None = 0,
+    Disabled = 1,
+    DebugBuildRequired = 2,
+    Non3DRenderer = 3,
+    ResourcesUnavailable = 4,
+    NoCandidates = 5,
+    DepthPyramidUnavailable = 6
+};
+
+enum class RendererGpuOcclusionHistoryResetReason : u32 {
+    None = 0,
+    FirstReadback = 1,
+    TemporalReset = 2,
+    CandidateIdentityChanged = 3
+};
+
+struct RendererGpuOcclusionStats {
+    u32 contractVersion = 0;
+    u32 requested = 0;
+    u32 diagnosticsRequested = 0;
+    u32 active = 0;
+    u32 fallbackReason = 0;
+    u32 actualDrawsUnchanged = 0;
+    u32 commandCount = 0;
+    u32 validBoundsCount = 0;
+    u32 invalidBoundsCount = 0;
+    u32 zeroIdentityCount = 0;
+    u32 capacity = 0;
+    u32 capacityDroppedCount = 0;
+    u32 uploadedCandidateCount = 0;
+    u64 uploadedCandidateBytes = 0;
+    u64 candidateIdentityHash = 0;
+    u32 depthPyramidAllocated = 0;
+    u32 depthPyramidWidth = 0;
+    u32 depthPyramidHeight = 0;
+    u32 depthPyramidMipCount = 0;
+    u32 depthPyramidImageCount = 0;
+    VkFormat depthPyramidFormat = VK_FORMAT_UNDEFINED;
+    u64 depthPyramidMemoryBytes = 0;
+    u32 depthPyramidBuildDispatchCount = 0;
+    u32 classificationDispatchCount = 0;
+    u32 classificationGroupCount = 0;
+    u32 readbackReady = 0;
+    u32 readbackValid = 0;
+    u32 readbackStale = 0;
+    u32 readbackInvalidCount = 0;
+    u32 readbackCandidateCount = 0;
+    u32 classifiedVisibleCount = 0;
+    u32 classifiedOccludedCount = 0;
+    u32 classifiedUncertainCount = 0;
+    u32 cameraInsideExcludedCount = 0;
+    u32 nearPlaneExcludedCount = 0;
+    u32 invalidProjectionCount = 0;
+    u32 invalidRectCount = 0;
+    u32 invalidMipCount = 0;
+    u32 maxSelectedMip = 0;
+    u64 sampledTexelCount = 0;
+    u32 classificationConserved = 0;
+    u64 readbackExpectedIdentityHash = 0;
+    u64 readbackResultIdentityHash = 0;
+    u32 historyValid = 0;
+    u32 historyReset = 0;
+    u32 historyResetReason = 0;
+    u32 wouldCullDrawCount = 0;
+    u64 wouldCullTriangleCount = 0;
+    u32 actualDrawCount = 0;
+    u64 actualTriangleCount = 0;
+    u64 auditBufferMemoryBytes = 0;
+};
+
 struct RendererShadowCascadeStats {
     u32 budgetContractVersion = 0;
     u32 budgetResourceContractValid = 0;
@@ -1778,6 +1849,7 @@ struct RendererStats {
     RendererRenderDebugStats renderDebug;
     RendererDrawStats draw;
     RendererMeshLodStats meshLod;
+    RendererGpuOcclusionStats gpuOcclusion;
     RendererShadowCascadeStats shadowCascades;
     RendererLocalShadowAtlasStats localShadowAtlas;
     RendererWeightedTranslucencyStats weightedTranslucency;

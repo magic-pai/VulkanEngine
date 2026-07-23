@@ -187,6 +187,7 @@ void BenchmarkRecorder::RecordFrame(
     const RendererCpuStats& cpu = stats.cpu;
     const RendererDrawStats& draw = stats.draw;
     const RendererMeshLodStats& meshLod = stats.meshLod;
+    const RendererGpuOcclusionStats& gpuOcclusion = stats.gpuOcclusion;
     const RendererShadowCascadeStats& shadowCascades = stats.shadowCascades;
     const RendererLocalShadowAtlasStats& localShadowAtlas = stats.localShadowAtlas;
     const RendererWeightedTranslucencyStats& weightedTranslucency =
@@ -2099,6 +2100,57 @@ void BenchmarkRecorder::RecordFrame(
         << meshLod.maxScreenFraction << ','
         << meshLod.maxSelectedErrorPixels << ','
         << meshLod.targetPixelError << ','
+        << gpuOcclusion.contractVersion << ','
+        << gpuOcclusion.requested << ','
+        << gpuOcclusion.diagnosticsRequested << ','
+        << gpuOcclusion.active << ','
+        << gpuOcclusion.fallbackReason << ','
+        << gpuOcclusion.actualDrawsUnchanged << ','
+        << gpuOcclusion.commandCount << ','
+        << gpuOcclusion.validBoundsCount << ','
+        << gpuOcclusion.invalidBoundsCount << ','
+        << gpuOcclusion.zeroIdentityCount << ','
+        << gpuOcclusion.capacity << ','
+        << gpuOcclusion.capacityDroppedCount << ','
+        << gpuOcclusion.uploadedCandidateCount << ','
+        << gpuOcclusion.uploadedCandidateBytes << ','
+        << gpuOcclusion.candidateIdentityHash << ','
+        << gpuOcclusion.depthPyramidAllocated << ','
+        << gpuOcclusion.depthPyramidWidth << ','
+        << gpuOcclusion.depthPyramidHeight << ','
+        << gpuOcclusion.depthPyramidMipCount << ','
+        << gpuOcclusion.depthPyramidImageCount << ','
+        << static_cast<u32>(gpuOcclusion.depthPyramidFormat) << ','
+        << gpuOcclusion.depthPyramidMemoryBytes << ','
+        << gpuOcclusion.depthPyramidBuildDispatchCount << ','
+        << gpuOcclusion.classificationDispatchCount << ','
+        << gpuOcclusion.classificationGroupCount << ','
+        << gpuOcclusion.readbackReady << ','
+        << gpuOcclusion.readbackValid << ','
+        << gpuOcclusion.readbackStale << ','
+        << gpuOcclusion.readbackInvalidCount << ','
+        << gpuOcclusion.readbackCandidateCount << ','
+        << gpuOcclusion.classifiedVisibleCount << ','
+        << gpuOcclusion.classifiedOccludedCount << ','
+        << gpuOcclusion.classifiedUncertainCount << ','
+        << gpuOcclusion.cameraInsideExcludedCount << ','
+        << gpuOcclusion.nearPlaneExcludedCount << ','
+        << gpuOcclusion.invalidProjectionCount << ','
+        << gpuOcclusion.invalidRectCount << ','
+        << gpuOcclusion.invalidMipCount << ','
+        << gpuOcclusion.maxSelectedMip << ','
+        << gpuOcclusion.sampledTexelCount << ','
+        << gpuOcclusion.classificationConserved << ','
+        << gpuOcclusion.readbackExpectedIdentityHash << ','
+        << gpuOcclusion.readbackResultIdentityHash << ','
+        << gpuOcclusion.historyValid << ','
+        << gpuOcclusion.historyReset << ','
+        << gpuOcclusion.historyResetReason << ','
+        << gpuOcclusion.wouldCullDrawCount << ','
+        << gpuOcclusion.wouldCullTriangleCount << ','
+        << gpuOcclusion.actualDrawCount << ','
+        << gpuOcclusion.actualTriangleCount << ','
+        << gpuOcclusion.auditBufferMemoryBytes << ','
         << binds.mainInstanceBufferUploads << ','
         << binds.mainInstanceBufferUploadSkips << ','
         << binds.pushConstantUpdates << ','
@@ -3692,6 +3744,42 @@ void BenchmarkRecorder::WriteHeader() {
         << "mesh_lod_extra_index_bytes,mesh_lod_min_screen_fraction,"
         << "mesh_lod_max_screen_fraction,mesh_lod_max_selected_error_pixels,"
         << "mesh_lod_target_pixel_error,"
+        << "gpu_occlusion_contract_version,gpu_occlusion_requested,"
+        << "gpu_occlusion_diagnostics_requested,gpu_occlusion_active,"
+        << "gpu_occlusion_fallback_reason,gpu_occlusion_actual_draws_unchanged,"
+        << "gpu_occlusion_command_count,gpu_occlusion_valid_bounds_count,"
+        << "gpu_occlusion_invalid_bounds_count,gpu_occlusion_zero_identity_count,"
+        << "gpu_occlusion_capacity,gpu_occlusion_capacity_dropped_count,"
+        << "gpu_occlusion_uploaded_candidate_count,"
+        << "gpu_occlusion_uploaded_candidate_bytes,"
+        << "gpu_occlusion_candidate_identity_hash,"
+        << "gpu_occlusion_depth_pyramid_allocated,"
+        << "gpu_occlusion_depth_pyramid_width,gpu_occlusion_depth_pyramid_height,"
+        << "gpu_occlusion_depth_pyramid_mip_count,"
+        << "gpu_occlusion_depth_pyramid_image_count,"
+        << "gpu_occlusion_depth_pyramid_format,"
+        << "gpu_occlusion_depth_pyramid_memory_bytes,"
+        << "gpu_occlusion_depth_pyramid_build_dispatch_count,"
+        << "gpu_occlusion_classification_dispatch_count,"
+        << "gpu_occlusion_classification_group_count,"
+        << "gpu_occlusion_readback_ready,gpu_occlusion_readback_valid,"
+        << "gpu_occlusion_readback_stale,gpu_occlusion_readback_invalid_count,"
+        << "gpu_occlusion_readback_candidate_count,"
+        << "gpu_occlusion_classified_visible_count,"
+        << "gpu_occlusion_classified_occluded_count,"
+        << "gpu_occlusion_classified_uncertain_count,"
+        << "gpu_occlusion_camera_inside_excluded_count,"
+        << "gpu_occlusion_near_plane_excluded_count,"
+        << "gpu_occlusion_invalid_projection_count,"
+        << "gpu_occlusion_invalid_rect_count,gpu_occlusion_invalid_mip_count,"
+        << "gpu_occlusion_max_selected_mip,gpu_occlusion_sampled_texel_count,"
+        << "gpu_occlusion_classification_conserved,"
+        << "gpu_occlusion_readback_expected_identity_hash,"
+        << "gpu_occlusion_readback_result_identity_hash,"
+        << "gpu_occlusion_history_valid,gpu_occlusion_history_reset,"
+        << "gpu_occlusion_history_reset_reason,gpu_occlusion_would_cull_draw_count,"
+        << "gpu_occlusion_would_cull_triangle_count,gpu_occlusion_actual_draw_count,"
+        << "gpu_occlusion_actual_triangle_count,gpu_occlusion_audit_buffer_memory_bytes,"
         << "main_instance_buffer_uploads,main_instance_buffer_upload_skips,"
         << "push_constant_updates,push_constant_bytes\n";
 }

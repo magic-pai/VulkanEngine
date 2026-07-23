@@ -3937,3 +3937,59 @@ Sources:
 - https://github.com/zeux/meshoptimizer/releases/tag/v1.2
 - https://github.com/zeux/meshoptimizer#vertex-buffer-compression
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/using-derived-data-cache-in-unreal-engine
+
+## 2026-07-24 - GPU Occlusion Health Must Isolate Scene Defaults
+
+Symptom:
+- The first strict GPU occlusion health run reported `61 pass / 6 fail` even
+  though the Forward3D FBX lane was fully green.
+- LightingShowcase reported two unrelated FidelityFX SSSR FrameGraph issues,
+  its static camera produced no occluded candidates, and an orbiting camera
+  retained valid occlusion history instead of the expected reset.
+
+False leads:
+- Treating any camera motion as an automatic temporal-history reset.
+- Requiring a specific static showcase composition to contain occluded draws.
+- Debugging the Hi-Z producer before isolating the scene's default SSR backend.
+
+Cause:
+- `SE_SSR=0` did not override LightingShowcase's default `ffx-sssr` backend,
+  so the Hi-Z health lane inherited an unrelated FFX FrameGraph combination.
+- Occlusion history is invalidated by explicit temporal reset or candidate
+  identity change, not normal camera motion. Orbit motion correctly preserved
+  history while changing the projected classification.
+- Occluded count is scene/view dependent; conservation and conservative
+  classification are the invariant, not a positive count in every static lane.
+
+Control test:
+- Pin `SE_SSR_BACKEND=selfengine`, compare static Showcase and Forward3D FBX,
+  then orbit the Showcase camera while holding scene animation frozen.
+- The static lanes must preserve coherent identities and history even with zero
+  occluded candidates. The orbit lane must keep history `1/0/0`, move the
+  camera, and exercise at least one occluded candidate.
+
+Fix:
+- Add a dedicated five-lane `Test-GpuOcclusionHealth.ps1` gate with target and
+  control scenes, camera motion, disabled mode, and Release request handling.
+- Isolate the SSR backend, scope positive occlusion coverage to the orbit lane,
+  and assert current readback identity plus history coherence on every row.
+- Add a RenderDoc inspection wrapper that verifies physical HZB mip coverage,
+  dispatch ordering, dimensions, and non-aliased classification resources.
+
+Prevention:
+- A renderer subsystem gate must pin unrelated scene defaults before treating
+  FrameGraph findings as feature failures.
+- Assert scene-independent invariants and use a dedicated dynamic lane for
+  positive classification coverage; do not encode one camera composition as
+  an engine contract.
+- Keep synchronous classification readback in Debug only. Production
+  compaction must remain GPU-resident and consume previous-frame visibility.
+
+Validation:
+- Debug and Release shaders, Forward3D, and LightingShowcase builds pass.
+- `Test-GpuOcclusionHealth.ps1 -SkipBuild -Strict`: `67 pass / 0 fail` with
+  zero FrameGraph/Vulkan issues. The orbit lane records
+  `38 = 16 visible + 21 occluded + 1 uncertain` and `258,216` potentially
+  removed triangles while real draws remain unchanged.
+- RenderDoc 1.44 frame 12 inspection passes `10 / 0`; the standard RenderDoc
+  integration gate passes `33 / 0`.

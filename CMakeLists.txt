@@ -96,6 +96,8 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/light_tile_cull.comp
     ${SHADER_SOURCE_DIR}/light_cluster_cull.comp
       ${SHADER_SOURCE_DIR}/ssr_depth_pyramid.comp
+      ${SHADER_SOURCE_DIR}/occlusion_depth_pyramid.comp
+      ${SHADER_SOURCE_DIR}/gpu_occlusion_audit.comp
       ${SHADER_SOURCE_DIR}/ssr_trace.comp
       ${SHADER_SOURCE_DIR}/ssr_temporal.comp
       ${SHADER_SOURCE_DIR}/ssr_spatial.comp
@@ -397,6 +399,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/renderer/vulkan/features/ssao_feature.cpp
     src/renderer/vulkan/features/ssr_feature.cpp
     src/renderer/vulkan/gpu_timer.cpp
+    src/renderer/vulkan/gpu_occlusion_culling.cpp
     src/renderer/vulkan/command_pool.cpp
     src/renderer/vulkan/upload_batch.cpp
     src/renderer/vulkan/command_buffer.cpp

@@ -12,6 +12,7 @@
 #include "renderer/vulkan/framebuffer.h"
 #include "renderer/vulkan/frame_materials.h"
 #include "renderer/vulkan/gpu_timer.h"
+#include "renderer/vulkan/gpu_occlusion_culling.h"
 #include "renderer/vulkan/graphics_pipeline.h"
 #include "renderer/vulkan/hybrid_reflection_acceleration_structures.h"
 #include "renderer/vulkan/hybrid_reflection_ray_query.h"
@@ -2692,6 +2693,11 @@ void VulkanCommandBuffer::Record(
     const VulkanHiZDescriptorSets* hizDescriptorSets,
     const VulkanDepthPyramid* hizDepthPyramid,
     const VulkanSceneRenderTargets* hizSourceTargets,
+    const VulkanComputePipeline* occlusionHizBuildPipeline,
+    const VulkanHiZDescriptorSets* occlusionHizDescriptorSets,
+    const VulkanDepthPyramid* occlusionHizDepthPyramid,
+    VulkanGpuOcclusionAudit* gpuOcclusionAudit,
+    RendererGpuOcclusionStats* gpuOcclusionStats,
     const VulkanComputePipeline* ssrTracePipeline,
     const VulkanComputePipeline* ssrTemporalPipeline,
     const VulkanComputePipeline* ssrSpatialPipeline,
@@ -3347,12 +3353,19 @@ void VulkanCommandBuffer::Record(
         temporalHistoryColorInitialized = true;
     }
 
-    bool hizDepthPyramidBuilt = false;
-    if (hizBuildPipeline != nullptr &&
-        hizDescriptorSets != nullptr &&
-        hizDepthPyramid != nullptr &&
-        hizSourceTargets != nullptr &&
-        hizDepthPyramid->MipCount() > 0) {
+    auto recordDepthPyramid = [&](const VulkanComputePipeline* buildPipeline,
+                                  const VulkanHiZDescriptorSets* descriptorSets,
+                                  const VulkanDepthPyramid* depthPyramid,
+                                  bool countSsrDispatches,
+                                  bool countOcclusionDispatches) {
+        if (buildPipeline == nullptr ||
+            descriptorSets == nullptr ||
+            depthPyramid == nullptr ||
+            hizSourceTargets == nullptr ||
+            depthPyramid->MipCount() == 0u) {
+            return false;
+        }
+
         VkImageMemoryBarrier sourceDepthBarrier{};
         sourceDepthBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         sourceDepthBarrier.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -3388,10 +3401,10 @@ void VulkanCommandBuffer::Record(
         initializeBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         initializeBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         initializeBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        initializeBarrier.image = hizDepthPyramid->Image(imageIndex);
+        initializeBarrier.image = depthPyramid->Image(imageIndex);
         initializeBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         initializeBarrier.subresourceRange.baseMipLevel = 0;
-        initializeBarrier.subresourceRange.levelCount = hizDepthPyramid->MipCount();
+        initializeBarrier.subresourceRange.levelCount = depthPyramid->MipCount();
         initializeBarrier.subresourceRange.baseArrayLayer = 0;
         initializeBarrier.subresourceRange.layerCount = 1;
         vkCmdPipelineBarrier(
@@ -3410,31 +3423,34 @@ void VulkanCommandBuffer::Record(
         vkCmdBindPipeline(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_COMPUTE,
-            hizBuildPipeline->Handle()
+            buildPipeline->Handle()
         );
-        for (u32 mipIndex = 0; mipIndex < hizDepthPyramid->MipCount(); ++mipIndex) {
+        for (u32 mipIndex = 0; mipIndex < depthPyramid->MipCount(); ++mipIndex) {
             const VkDescriptorSet descriptorSet =
-                hizDescriptorSets->Handle(imageIndex, mipIndex);
+                descriptorSets->Handle(imageIndex, mipIndex);
             vkCmdBindDescriptorSets(
                 commandBuffer,
                 VK_PIPELINE_BIND_POINT_COMPUTE,
-                hizBuildPipeline->Layout(),
+                buildPipeline->Layout(),
                 0,
                 1,
                 &descriptorSet,
                 0,
                 nullptr
             );
-            const VkExtent2D mipExtent = hizDepthPyramid->MipExtent(mipIndex);
+            const VkExtent2D mipExtent = depthPyramid->MipExtent(mipIndex);
             vkCmdDispatch(
                 commandBuffer,
                 (mipExtent.width + 7u) / 8u,
                 (mipExtent.height + 7u) / 8u,
                 1
             );
-            if (bindStats != nullptr) {
+            if (countSsrDispatches && bindStats != nullptr) {
                 ++bindStats->ssrHiZBuildDispatches;
                 ++bindStats->ssrHiZBuildDescriptorBinds;
+            }
+            if (countOcclusionDispatches && gpuOcclusionStats != nullptr) {
+                ++gpuOcclusionStats->depthPyramidBuildDispatchCount;
             }
 
             VkImageMemoryBarrier mipBarrier{};
@@ -3445,7 +3461,7 @@ void VulkanCommandBuffer::Record(
             mipBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
             mipBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             mipBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            mipBarrier.image = hizDepthPyramid->Image(imageIndex);
+            mipBarrier.image = depthPyramid->Image(imageIndex);
             mipBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
             mipBarrier.subresourceRange.baseMipLevel = mipIndex;
             mipBarrier.subresourceRange.levelCount = 1;
@@ -3465,7 +3481,29 @@ void VulkanCommandBuffer::Record(
                 &mipBarrier
             );
         }
-        hizDepthPyramidBuilt = true;
+        return true;
+    };
+
+    const bool hizDepthPyramidBuilt = recordDepthPyramid(
+        hizBuildPipeline,
+        hizDescriptorSets,
+        hizDepthPyramid,
+        true,
+        false
+    );
+    const bool occlusionDepthPyramidBuilt = recordDepthPyramid(
+        occlusionHizBuildPipeline,
+        occlusionHizDescriptorSets,
+        occlusionHizDepthPyramid,
+        false,
+        true
+    );
+    if (occlusionDepthPyramidBuilt && gpuOcclusionAudit != nullptr) {
+        gpuOcclusionAudit->RecordDispatch(
+            commandBuffer,
+            imageIndex,
+            gpuOcclusionStats
+        );
     }
 
     if (ssrTargets != nullptr &&

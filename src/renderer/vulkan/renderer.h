@@ -49,6 +49,7 @@ class VulkanFfxSssrResolveTemporalDescriptorSetLayout;
 class VulkanFfxSssrResolveTemporalResources;
 class VulkanDescriptorSets;
 class VulkanHiZDescriptorSetLayout;
+class VulkanOcclusionCullDescriptorSetLayout;
 class VulkanSsrReconstructionDescriptorSetLayout;
 class VulkanHiZDescriptorSets;
 class VulkanSsrReconstructionDescriptorSets;
@@ -59,6 +60,7 @@ class VulkanForwardResidualVelocityRenderPass;
 class VulkanDlssMaskFramebuffer;
 class VulkanDlssMaskRenderPass;
 class VulkanGpuTimer;
+class VulkanGpuOcclusionAudit;
 class VulkanGBufferDescriptorSets;
 class VulkanGraphicsPipeline;
 class VulkanHybridReflectionAccelerationStructures;
@@ -909,6 +911,8 @@ private:
     std::unique_ptr<VulkanDescriptorSetLayout> m_DescriptorSetLayout;
     std::unique_ptr<VulkanMaterialDescriptorSetLayout> m_MaterialDescriptorSetLayout;
     std::unique_ptr<VulkanHiZDescriptorSetLayout> m_HiZDescriptorSetLayout;
+    std::unique_ptr<VulkanOcclusionCullDescriptorSetLayout>
+        m_OcclusionCullDescriptorSetLayout;
     std::unique_ptr<VulkanSsrReconstructionDescriptorSetLayout>
         m_SsrReconstructionDescriptorSetLayout;
     std::unique_ptr<VulkanFfxSssrConstantsDescriptorSetLayout>
@@ -938,6 +942,7 @@ private:
     std::unique_ptr<VulkanGBufferDescriptorSets>
         m_FfxSssrApplyGBufferDescriptorSets;
     std::unique_ptr<VulkanHiZDescriptorSets> m_HiZDescriptorSets;
+    std::unique_ptr<VulkanHiZDescriptorSets> m_OcclusionHiZDescriptorSets;
     std::unique_ptr<VulkanSsrReconstructionDescriptorSets>
         m_SsrReconstructionDescriptorSets;
     std::unique_ptr<VulkanFfxSssrConstantsResources>
@@ -971,6 +976,7 @@ private:
     std::unique_ptr<VulkanBonePaletteFallbackDescriptorSet> m_BonePaletteFallbackDescriptorSet;
     std::unique_ptr<VulkanSceneRenderTargets> m_SceneRenderTargets;
     std::unique_ptr<VulkanDepthPyramid> m_SsrDepthPyramid;
+    std::unique_ptr<VulkanDepthPyramid> m_OcclusionDepthPyramid;
     std::unique_ptr<VulkanBloomPyramid> m_BloomPyramid;
     std::unique_ptr<VulkanColorGradingLut> m_ColorGradingLut;
     std::unique_ptr<VulkanSampler> m_SceneTargetSampler;
@@ -1026,6 +1032,8 @@ private:
     std::unique_ptr<VulkanComputePipeline> m_LightClusterCullComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_AutoExposureComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_HiZBuildComputePipeline;
+    std::unique_ptr<VulkanComputePipeline> m_OcclusionHiZBuildComputePipeline;
+    std::unique_ptr<VulkanGpuOcclusionAudit> m_GpuOcclusionAudit;
     std::unique_ptr<VulkanComputePipeline> m_SsrTraceComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_SsrTemporalComputePipeline;
     std::unique_ptr<VulkanComputePipeline> m_SsrSpatialComputePipeline;

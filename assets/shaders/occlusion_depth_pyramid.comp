@@ -1,0 +1,43 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D sourceDepth;
+layout(r32f, set = 0, binding = 1) writeonly uniform image2D destinationDepth;
+
+void main() {
+    ivec2 destinationSize = imageSize(destinationDepth);
+    ivec2 destinationPixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(destinationPixel, destinationSize))) {
+        return;
+    }
+
+    ivec2 sourceSize = textureSize(sourceDepth, 0);
+    if (all(equal(sourceSize, destinationSize))) {
+        imageStore(
+            destinationDepth,
+            destinationPixel,
+            vec4(texelFetch(sourceDepth, destinationPixel, 0).r)
+        );
+        return;
+    }
+
+    ivec2 sourceBegin = destinationPixel * sourceSize / destinationSize;
+    ivec2 sourceEnd = (
+        (destinationPixel + ivec2(1)) * sourceSize + destinationSize - ivec2(1)
+    ) / destinationSize;
+    sourceEnd = clamp(sourceEnd, sourceBegin + ivec2(1), sourceSize);
+
+    // Regular-Z conservative occlusion needs the farthest covered sample.
+    // Clear-depth pixels stay at 1.0 and therefore prevent false occlusion.
+    float farthestDepth = 0.0;
+    for (int y = sourceBegin.y; y < sourceEnd.y; ++y) {
+        for (int x = sourceBegin.x; x < sourceEnd.x; ++x) {
+            farthestDepth = max(
+                farthestDepth,
+                texelFetch(sourceDepth, ivec2(x, y), 0).r
+            );
+        }
+    }
+    imageStore(destinationDepth, destinationPixel, vec4(farthestDepth));
+}

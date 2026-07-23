@@ -1541,8 +1541,9 @@ VulkanDepthPyramid::VulkanDepthPyramid(
     const VulkanPhysicalDevice& physicalDevice,
     const VulkanCommandPool& commandPool,
     const VulkanSwapchain& swapchain,
-    VkExtent2D extent
-) {
+    VkExtent2D extent,
+    std::string debugNamePrefix
+) : m_DebugNamePrefix(std::move(debugNamePrefix)) {
     Recreate(device, physicalDevice, commandPool, swapchain, extent);
 }
 
@@ -1667,7 +1668,7 @@ void VulkanDepthPyramid::CreateImages(
         NameImageForCapture(
             device.Handle(),
             *m_Images.back(),
-            "SelfEngine.SSR.DepthPyramid",
+            m_DebugNamePrefix.c_str(),
             imageIndex
         );
         m_Images.back()->TransitionLayout(

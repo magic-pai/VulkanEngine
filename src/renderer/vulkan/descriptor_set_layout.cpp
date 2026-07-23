@@ -501,5 +501,58 @@ void VulkanSsrReconstructionDescriptorSetLayout::CreateDescriptorSetLayout(
     }
 }
 
+VulkanOcclusionCullDescriptorSetLayout::
+VulkanOcclusionCullDescriptorSetLayout(const VulkanDevice& device)
+    : m_Device(device.Handle()) {
+    CreateDescriptorSetLayout(device);
+}
+
+VulkanOcclusionCullDescriptorSetLayout::
+~VulkanOcclusionCullDescriptorSetLayout() {
+    Release();
+}
+
+VkDescriptorSetLayout VulkanOcclusionCullDescriptorSetLayout::Handle() const {
+    return m_DescriptorSetLayout;
+}
+
+void VulkanOcclusionCullDescriptorSetLayout::Release() {
+    if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+        m_DescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanOcclusionCullDescriptorSetLayout::CreateDescriptorSetLayout(
+    const VulkanDevice& device
+) {
+    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    bindings[0].binding = 0u;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1u;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    for (u32 binding = 1u; binding <= 2u; ++binding) {
+        bindings[binding].binding = binding;
+        bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[binding].descriptorCount = 1u;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = static_cast<u32>(bindings.size());
+    createInfo.pBindings = bindings.data();
+    if (vkCreateDescriptorSetLayout(
+            device.Handle(),
+            &createInfo,
+            nullptr,
+            &m_DescriptorSetLayout
+        ) != VK_SUCCESS) {
+        throw std::runtime_error(
+            "Failed to create Vulkan GPU occlusion descriptor set layout"
+        );
+    }
+}
+
 }
 

@@ -1,0 +1,209 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint CLASS_VISIBLE = 1u;
+const uint CLASS_OCCLUDED = 2u;
+const uint CLASS_UNCERTAIN = 3u;
+
+const uint REASON_NONE = 0u;
+const uint REASON_CAMERA_INSIDE = 1u;
+const uint REASON_NEAR_PLANE = 2u;
+const uint REASON_INVALID_PROJECTION = 3u;
+const uint REASON_INVALID_RECT = 4u;
+const uint REASON_INVALID_MIP = 5u;
+
+struct Candidate {
+    vec4 boundsMin;
+    vec4 boundsMax;
+    uvec4 metadata;
+};
+
+struct Result {
+    uvec4 classification;
+    uvec4 metadata;
+};
+
+layout(set = 0, binding = 0) uniform sampler2D depthPyramid;
+layout(std430, set = 0, binding = 1) readonly buffer InputBuffer {
+    mat4 viewProjection;
+    vec4 cameraPositionEpsilon;
+    uvec4 info;
+    Candidate candidates[];
+} inputs;
+layout(std430, set = 0, binding = 2) writeonly buffer ResultBuffer {
+    Result results[];
+} outputs;
+
+void WriteResult(
+    uint index,
+    Candidate candidate,
+    uint classification,
+    uint reason,
+    uint mip,
+    uint sampledTexels
+) {
+    outputs.results[index].classification = uvec4(
+        classification,
+        reason,
+        mip,
+        sampledTexels
+    );
+    outputs.results[index].metadata = candidate.metadata;
+}
+
+bool InvalidVec4(vec4 value) {
+    return any(isnan(value)) || any(isinf(value));
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= inputs.info.x) {
+        return;
+    }
+
+    Candidate candidate = inputs.candidates[index];
+    vec3 cameraPosition = inputs.cameraPositionEpsilon.xyz;
+    if (all(greaterThanEqual(cameraPosition, candidate.boundsMin.xyz)) &&
+        all(lessThanEqual(cameraPosition, candidate.boundsMax.xyz))) {
+        WriteResult(
+            index,
+            candidate,
+            CLASS_UNCERTAIN,
+            REASON_CAMERA_INSIDE,
+            0u,
+            0u
+        );
+        return;
+    }
+
+    vec2 ndcMin = vec2(1.0);
+    vec2 ndcMax = vec2(-1.0);
+    float nearestDepth = 1.0;
+    for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex) {
+        vec3 corner = mix(
+            candidate.boundsMin.xyz,
+            candidate.boundsMax.xyz,
+            vec3(
+                float((cornerIndex >> 0u) & 1u),
+                float((cornerIndex >> 1u) & 1u),
+                float((cornerIndex >> 2u) & 1u)
+            )
+        );
+        vec4 clip = inputs.viewProjection * vec4(corner, 1.0);
+        if (InvalidVec4(clip)) {
+            WriteResult(
+                index,
+                candidate,
+                CLASS_UNCERTAIN,
+                REASON_INVALID_PROJECTION,
+                0u,
+                0u
+            );
+            return;
+        }
+        if (clip.w <= 0.000001 || clip.z < 0.0) {
+            WriteResult(
+                index,
+                candidate,
+                CLASS_UNCERTAIN,
+                REASON_NEAR_PLANE,
+                0u,
+                0u
+            );
+            return;
+        }
+        vec3 ndc = clip.xyz / clip.w;
+        ndcMin = min(ndcMin, ndc.xy);
+        ndcMax = max(ndcMax, ndc.xy);
+        nearestDepth = min(nearestDepth, ndc.z);
+    }
+
+    vec2 framebufferSize = vec2(inputs.info.yz);
+    if (any(lessThanEqual(framebufferSize, vec2(0.0))) || inputs.info.w == 0u) {
+        WriteResult(
+            index,
+            candidate,
+            CLASS_UNCERTAIN,
+            REASON_INVALID_RECT,
+            0u,
+            0u
+        );
+        return;
+    }
+
+    vec2 rectMin = (clamp(ndcMin, vec2(-1.0), vec2(1.0)) * 0.5 + 0.5) *
+        framebufferSize;
+    vec2 rectMax = (clamp(ndcMax, vec2(-1.0), vec2(1.0)) * 0.5 + 0.5) *
+        framebufferSize;
+    // Expand by one raster pixel so a subpixel projection or jitter delta can
+    // only reduce culling efficiency, never create a false occlusion.
+    ivec2 pixelMin = clamp(
+        ivec2(floor(rectMin)) - ivec2(1),
+        ivec2(0),
+        ivec2(inputs.info.yz) - ivec2(1)
+    );
+    ivec2 pixelMax = clamp(
+        ivec2(ceil(rectMax)) + ivec2(1),
+        ivec2(0),
+        ivec2(inputs.info.yz) - ivec2(1)
+    );
+    if (any(greaterThan(pixelMin, pixelMax))) {
+        WriteResult(
+            index,
+            candidate,
+            CLASS_UNCERTAIN,
+            REASON_INVALID_RECT,
+            0u,
+            0u
+        );
+        return;
+    }
+
+    ivec2 rectExtent = pixelMax - pixelMin + ivec2(1);
+    int largestExtent = max(rectExtent.x, rectExtent.y);
+    uint mip = uint(max(floor(log2(float(max(largestExtent, 1)))), 0.0));
+    mip = min(mip, inputs.info.w - 1u);
+    int mipScale = 1 << int(mip);
+    ivec2 mipMin = pixelMin / mipScale;
+    ivec2 mipMax = pixelMax / mipScale;
+    ivec2 mipSize = textureSize(depthPyramid, int(mip));
+    mipMin = clamp(mipMin, ivec2(0), mipSize - ivec2(1));
+    mipMax = clamp(mipMax, ivec2(0), mipSize - ivec2(1));
+    ivec2 mipSpan = mipMax - mipMin + ivec2(1);
+    if (any(lessThanEqual(mipSpan, ivec2(0))) ||
+        any(greaterThan(mipSpan, ivec2(4)))) {
+        WriteResult(
+            index,
+            candidate,
+            CLASS_UNCERTAIN,
+            REASON_INVALID_MIP,
+            mip,
+            0u
+        );
+        return;
+    }
+
+    float farthestOccluderDepth = 0.0;
+    uint sampledTexels = 0u;
+    for (int y = mipMin.y; y <= mipMax.y; ++y) {
+        for (int x = mipMin.x; x <= mipMax.x; ++x) {
+            farthestOccluderDepth = max(
+                farthestOccluderDepth,
+                texelFetch(depthPyramid, ivec2(x, y), int(mip)).r
+            );
+            ++sampledTexels;
+        }
+    }
+
+    float epsilon = inputs.cameraPositionEpsilon.w;
+    bool occluded = nearestDepth > farthestOccluderDepth + epsilon;
+    WriteResult(
+        index,
+        candidate,
+        occluded ? CLASS_OCCLUDED : CLASS_VISIBLE,
+        REASON_NONE,
+        mip,
+        sampledTexels
+    );
+}
