@@ -462,12 +462,18 @@ add_executable(SelfEngineLightingShowcase
     ${SELFENGINE_COMMON_SOURCES}
 )
 
+add_executable(SelfEnginePbrModelShowcase
+    src/forward_3d.cpp
+    ${SELFENGINE_COMMON_SOURCES}
+)
+
 add_dependencies(SelfEngine SelfEngineShaders)
 add_dependencies(SelfEngineBlackHole SelfEngineShaders)
 add_dependencies(SelfEngineForward3D SelfEngineShaders)
 add_dependencies(SelfEngineLightingShowcase SelfEngineShaders)
+add_dependencies(SelfEnginePbrModelShowcase SelfEngineShaders)
 
-foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D SelfEngineLightingShowcase)
+foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D SelfEngineLightingShowcase SelfEnginePbrModelShowcase)
     if (WIN32)
         set_target_properties(${SELFENGINE_TARGET} PROPERTIES
             WIN32_EXECUTABLE TRUE
@@ -532,8 +538,13 @@ if (MSVC)
     target_compile_options(SelfEngineBlackHole PRIVATE /W4 /permissive- /FS)
     target_compile_options(SelfEngineForward3D PRIVATE /W4 /permissive- /FS)
     target_compile_options(SelfEngineLightingShowcase PRIVATE /W4 /permissive- /FS)
+    target_compile_options(SelfEnginePbrModelShowcase PRIVATE /W4 /permissive- /FS)
 endif()
 
 target_compile_definitions(SelfEngineLightingShowcase PRIVATE
     SE_FORCE_LIGHTING_SHOWCASE=1
+)
+
+target_compile_definitions(SelfEnginePbrModelShowcase PRIVATE
+    SE_FORCE_PBR_MODEL_SHOWCASE=1
 )

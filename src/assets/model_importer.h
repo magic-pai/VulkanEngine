@@ -99,6 +99,7 @@ struct ImportedMesh3D {
     std::string name;
     MeshData3D mesh;
     u32 materialIndex = 0;
+    u32 tangentVertexCount = 0;
     struct Bone {
         std::string name;
         glm::mat4 offsetMatrix{ 1.0f };
@@ -209,11 +210,13 @@ struct ImportedModel3D {
     bool Empty() const;
     std::size_t VertexCount() const;
     std::size_t TriangleCount() const;
+    std::size_t TangentVertexCount() const;
 };
 
 struct ModelImportOptions {
     bool rebuildNormals = false;
     bool fastImport = false;
+    bool generateTangents = true;
     bool readSkinningMetadata = false;
     bool validateScene = true;
     bool optimizeMeshes = true;

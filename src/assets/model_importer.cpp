@@ -1357,6 +1357,10 @@ ImportedMesh3D ConvertMeshInstance(
         static_cast<u32>(model.materials.empty() ? 0 : model.materials.size() - 1)
     );
 
+    mesh.tangentVertexCount = source->HasTangentsAndBitangents()
+        ? source->mNumVertices
+        : 0u;
+
     const ImportedMaterial3D& material = model.materials[mesh.materialIndex];
     const u32 uvChannel = PrimaryUvChannel(material);
     const glm::mat3 normalMatrix = glm::inverseTranspose(glm::mat3(transform));
@@ -1474,7 +1478,7 @@ unsigned int ImportFlags(const ModelImportOptions& options) {
         aiProcess_Triangulate |
         aiProcess_SortByPType;
 
-    if (!options.fastImport) {
+    if (options.generateTangents) {
         flags |= aiProcess_CalcTangentSpace;
     }
 
@@ -1560,6 +1564,15 @@ std::size_t ImportedModel3D::TriangleCount() const {
     std::size_t count = 0;
     for (const ImportedMesh3D& mesh : meshes) {
         count += mesh.mesh.indices.size() / 3;
+    }
+
+    return count;
+}
+
+std::size_t ImportedModel3D::TangentVertexCount() const {
+    std::size_t count = 0;
+    for (const ImportedMesh3D& mesh : meshes) {
+        count += mesh.tangentVertexCount;
     }
 
     return count;

@@ -46,6 +46,10 @@
 #define SE_FORCE_LIGHTING_SHOWCASE 0
 #endif
 
+#ifndef SE_FORCE_PBR_MODEL_SHOWCASE
+#define SE_FORCE_PBR_MODEL_SHOWCASE 0
+#endif
+
 namespace {
 
 bool ImGuiWantsMouse() {
@@ -482,6 +486,14 @@ std::string ReadEnvironmentString(const char* name) {
 std::filesystem::path ImportedModelPath() {
     const std::string overridePath = ReadEnvironmentString("SELFENGINE_MODEL_PATH");
     return overridePath.empty() ? std::filesystem::path{} : std::filesystem::path(overridePath);
+}
+
+std::filesystem::path PbrModelShowcasePath() {
+    const std::string overridePath =
+        ReadEnvironmentString("SE_PBR_MODEL_SHOWCASE_PATH");
+    return overridePath.empty()
+        ? std::filesystem::path(SE_ASSET_DIR) / "models" / "lvjuren.glb"
+        : std::filesystem::path(overridePath);
 }
 
 std::filesystem::path ExplicitUnrealBridgeManifestPath() {
@@ -2900,6 +2912,93 @@ void BuildLightingShowcaseScene(
         << std::endl;
 }
 
+void BuildPbrModelShowcaseEnvironment(se::Scene3D& scene) {
+    auto place = [](
+        se::Renderable3D& renderable,
+        glm::vec3 position,
+        glm::vec3 scale,
+        glm::vec3 rotationDegrees = glm::vec3(0.0f),
+        se::i32 drawOrder = 0
+    ) {
+        renderable.Transform().SetPosition(position);
+        renderable.Transform().SetScale(scale);
+        renderable.Transform().SetRotationDegrees(rotationDegrees);
+        renderable.Transform().SetAnimateRotation(false);
+        renderable.SetDrawOrder(drawOrder);
+        renderable.SetPickable(false);
+    };
+
+    se::Renderable3D& floor = scene.CreateRenderable(
+        "PBR Model Studio Floor",
+        "Plane",
+        "ShowcaseCharcoalMaterial"
+    );
+    place(floor, { 0.0f, -1.08f, 0.0f }, { 6.4f, 1.0f, 5.2f }, {}, -30);
+    floor.SetCastShadow(false);
+
+    se::Renderable3D& backdrop = scene.CreateRenderable(
+        "PBR Model Studio Backdrop",
+        "Cube",
+        "ShowcaseBackdropMaterial"
+    );
+    place(backdrop, { 0.0f, 1.0f, -2.45f }, { 6.4f, 4.2f, 0.12f }, {}, -29);
+    backdrop.SetCastShadow(false);
+
+    scene.SetPrimaryDirectionalLight(
+        "PBR Model Neutral Directional",
+        glm::normalize(glm::vec3{ -0.42f, -0.78f, -0.46f }),
+        0.72f,
+        0.14f,
+        0.30f,
+        glm::radians(0.45f)
+    );
+    scene.CreateRectLight(
+        "PBR Model Soft Key",
+        { -2.5f, 2.35f, 2.0f },
+        glm::normalize(glm::vec3{ 2.5f, -2.15f, -2.0f }),
+        1.8f,
+        1.1f,
+        5.6f,
+        { 1.0f, 0.91f, 0.80f },
+        5.2f,
+        1.0f
+    );
+    scene.CreateRectLight(
+        "PBR Model Cool Fill",
+        { 2.4f, 1.25f, 1.65f },
+        glm::normalize(glm::vec3{ -2.4f, -1.05f, -1.65f }),
+        1.5f,
+        0.9f,
+        5.0f,
+        { 0.62f, 0.78f, 1.0f },
+        2.8f,
+        0.75f
+    );
+    scene.CreateSpotLight(
+        "PBR Model Rim Spot",
+        { 0.4f, 2.1f, -1.75f },
+        glm::normalize(glm::vec3{ -0.4f, -1.65f, 1.75f }),
+        4.6f,
+        { 0.78f, 0.88f, 1.0f },
+        3.4f,
+        18.0f,
+        34.0f,
+        0.12f
+    );
+    scene.CreateReflectionProbe(
+        "PBR Model Studio Probe",
+        { 0.0f, 0.15f, 0.0f },
+        4.6f,
+        { 3.8f, 2.5f, 3.2f },
+        { 0.92f, 0.94f, 1.0f },
+        1.0f,
+        0.58f,
+        2.0f
+    );
+
+    std::cout << "PBR model showcase environment enabled" << std::endl;
+}
+
 void BuildShadowRegressionScene(
     se::Scene3D& scene,
     se::Scene3D* lightGizmoOverlayScene = nullptr
@@ -3950,7 +4049,9 @@ int main() {
     constexpr int kDisplay1 = 1;
     constexpr bool kForceLightingShowcase =
         SE_FORCE_LIGHTING_SHOWCASE != 0;
-    if (kForceLightingShowcase) {
+    constexpr bool kForcePbrModelShowcase =
+        SE_FORCE_PBR_MODEL_SHOWCASE != 0;
+    if constexpr (kForceLightingShowcase || kForcePbrModelShowcase) {
         SetEnvironmentDefault("SE_HIDE_IMGUI", "1");
     }
 #if !SE_FORCE_LIGHTING_SHOWCASE
@@ -3970,10 +4071,14 @@ int main() {
     const std::string fragmentShaderPath = std::string(SE_SHADER_DIR) + "/forward_3d.frag.spv";
     const std::string checkerTexturePath = std::string(SE_ASSET_DIR) + "/textures/checker.ppm";
     const StartupBridgeScene startupBridgeScene =
-        kForceLightingShowcase ? StartupBridgeScene{} : ResolveStartupBridgeScene();
+        kForceLightingShowcase || kForcePbrModelShowcase
+            ? StartupBridgeScene{}
+            : ResolveStartupBridgeScene();
     PrintStartupBridgeScene(startupBridgeScene);
     const std::filesystem::path importedModelPath =
-        kForceLightingShowcase ? std::filesystem::path{} : ImportedModelPath();
+        kForceLightingShowcase
+            ? std::filesystem::path{}
+            : (kForcePbrModelShowcase ? PbrModelShowcasePath() : ImportedModelPath());
     const std::filesystem::path bridgeModelPath =
         startupBridgeScene.exportedSceneReady ? startupBridgeScene.exportedScenePath : std::filesystem::path{};
     const std::filesystem::path startupModelPath =
@@ -4014,7 +4119,7 @@ int main() {
     const se::RendererTemporalAntialiasingMode startupAntialiasingMode =
         ForwardTemporalAntialiasingModeFromEnvironment();
     ApplyForwardTemporalAntialiasingEnvironmentDefaults(startupAntialiasingMode);
-    if (lightingShowcaseSceneRequested) {
+    if (lightingShowcaseSceneRequested || kForcePbrModelShowcase) {
         ApplyLightingShowcaseIblEnvironmentDefaults();
     }
     se::Application app(
@@ -4022,7 +4127,9 @@ int main() {
         windowHeight,
         kForceLightingShowcase
             ? "SelfEngine Lighting Showcase"
-            : "SelfEngine Forward 3D",
+            : (kForcePbrModelShowcase
+                ? "SelfEngine PBR Model Showcase"
+                : "SelfEngine Forward 3D"),
         kDisplay1,
         se::PipelineSpec::DefaultForward3D(vertexShaderPath, fragmentShaderPath)
     );
@@ -4890,17 +4997,21 @@ int main() {
                 startupModelFirstRenderableIndex
             );
             if (previewStartupModelLighting) {
-                se::Renderable3D& previewGround = scene.CreateRenderable(
-                    "Imported Preview Ground",
-                    "Plane",
-                    "DefaultGroundMaterial"
-                );
-                previewGround.Transform().SetPosition({ 0.0f, -1.12f, 0.0f });
-                previewGround.Transform().SetScale({ 7.0f, 1.0f, 7.0f });
-                previewGround.Transform().SetAnimateRotation(false);
-                previewGround.SetDrawOrder(-20);
-                previewGround.SetPickable(false);
-                previewGround.SetCastShadow(false);
+                if (kForcePbrModelShowcase) {
+                    BuildPbrModelShowcaseEnvironment(scene);
+                } else {
+                    se::Renderable3D& previewGround = scene.CreateRenderable(
+                        "Imported Preview Ground",
+                        "Plane",
+                        "DefaultGroundMaterial"
+                    );
+                    previewGround.Transform().SetPosition({ 0.0f, -1.12f, 0.0f });
+                    previewGround.Transform().SetScale({ 7.0f, 1.0f, 7.0f });
+                    previewGround.Transform().SetAnimateRotation(false);
+                    previewGround.SetDrawOrder(-20);
+                    previewGround.SetPickable(false);
+                    previewGround.SetCastShadow(false);
+                }
             }
         } else {
             std::cout << "[warning] Startup model load failed: "
@@ -4928,6 +5039,13 @@ int main() {
         );
         camera.SetFovScale(0.72f);
         camera.SetMoveSpeed(3.0f);
+    } else if (kForcePbrModelShowcase) {
+        camera.SetPose(
+            { 0.1f, 0.28f, 4.15f },
+            { -0.02f, -0.06f, -1.0f }
+        );
+        camera.SetFovScale(0.72f);
+        camera.SetMoveSpeed(2.4f);
     } else if (shadowRegressionSceneRequested) {
         camera.SetPose(
             { 0.25f, 1.55f, 6.45f },
@@ -4956,6 +5074,7 @@ int main() {
     if (
         !lightingShowcaseSceneRequested &&
         !shadowRegressionSceneRequested &&
+        !kForcePbrModelShowcase &&
         !bridgeLights.anyApplied
     ) {
         ApplySceneDirectionalLight(scene, camera, previewStartupModelLighting);
@@ -5044,6 +5163,22 @@ int main() {
     sceneDiagnostics.runtimeImportCacheHit = defaultModelLoad.cacheHit ? 1u : 0u;
     sceneDiagnostics.runtimeImportMeshCount = defaultModelLoad.meshCount;
     sceneDiagnostics.runtimeImportMaterialCount = defaultModelLoad.materialCount;
+    sceneDiagnostics.runtimeImportSourceVertexCount =
+        defaultModelLoad.sourceVertexCount;
+    sceneDiagnostics.runtimeImportSourceTriangleCount =
+        defaultModelLoad.sourceTriangleCount;
+    sceneDiagnostics.runtimeImportSourceTangentVertexCount =
+        defaultModelLoad.sourceTangentVertexCount;
+    sceneDiagnostics.runtimeImportSourceTangentGenerationEnabled =
+        defaultModelLoad.sourceTangentGenerationEnabled;
+    sceneDiagnostics.runtimeImportSourceTexturedMaterialCount =
+        defaultModelLoad.sourceTexturedMaterialCount;
+    sceneDiagnostics.runtimeImportSourceBaseColorTextureMaterialCount =
+        defaultModelLoad.sourceBaseColorTextureMaterialCount;
+    sceneDiagnostics.runtimeImportSourceNormalTextureMaterialCount =
+        defaultModelLoad.sourceNormalTextureMaterialCount;
+    sceneDiagnostics.runtimeImportSourceMetallicRoughnessTextureMaterialCount =
+        defaultModelLoad.sourceMetallicRoughnessTextureMaterialCount;
     sceneDiagnostics.runtimeImportNodeCount = defaultModelLoad.sourceNodeCount;
     sceneDiagnostics.runtimeImportBoneNodeCount = defaultModelLoad.sourceBoneNodeCount;
     sceneDiagnostics.runtimeImportAnimationChannelBoundCount =
@@ -5344,6 +5479,7 @@ int main() {
             if (
                 !lightingShowcaseSceneRequested &&
                 !shadowRegressionSceneRequested &&
+                !kForcePbrModelShowcase &&
                 !bridgeLights.anyApplied &&
                 !reflectionCaptureCameraInvariantControl
             ) {

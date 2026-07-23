@@ -968,11 +968,26 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.runtimeSkinnedAnimationSpaceReady,
                 cached.runtimeSkinnedAnimationSpaceBlockerMask,
                 cached.runtimeSkinnedAnimationRenderableBound,
-                cached.skinnedAnimationUnsupported};
+                cached.skinnedAnimationUnsupported,
+                cached.sourceVertexCount,
+                cached.sourceTriangleCount,
+                cached.sourceTangentVertexCount,
+                cached.sourceTangentGenerationEnabled,
+                cached.sourceTexturedMaterialCount,
+                cached.sourceBaseColorTextureMaterialCount,
+                cached.sourceNormalTextureMaterialCount,
+                cached.sourceMetallicRoughnessTextureMaterialCount};
         }
 
         ModelImportOptions importOptions{};
         importOptions.fastImport = true;
+        importOptions.generateTangents = true;
+#if !defined(NDEBUG)
+        if (EnvironmentFlagEnabled("SE_RUNTIME_IMPORT_TANGENTS_OFF") ||
+            EnvironmentFlagEnabled("SE_MODEL_IMPORT_TANGENTS_OFF")) {
+            importOptions.generateTangents = false;
+        }
+#endif
         importOptions.readSkinningMetadata = true;
         importOptions.validateScene = false;
         importOptions.optimizeMeshes = false;
@@ -980,7 +995,54 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             ModelImporter::LoadModel3D(modelPath, importOptions);
         NormalizeImportedModel(importedModelData, targetMaxExtent);
 
+        const auto saturatedCount = [](std::size_t count) {
+            return count > std::numeric_limits<u32>::max()
+                ? std::numeric_limits<u32>::max()
+                : static_cast<u32>(count);
+        };
+        const u32 sourceVertexCount = saturatedCount(importedModelData.VertexCount());
+        const u32 sourceTriangleCount = saturatedCount(importedModelData.TriangleCount());
+        const u32 sourceTangentVertexCount =
+            saturatedCount(importedModelData.TangentVertexCount());
+        u32 sourceTexturedMaterialCount = 0;
+        u32 sourceBaseColorTextureMaterialCount = 0;
+        u32 sourceNormalTextureMaterialCount = 0;
+        u32 sourceMetallicRoughnessTextureMaterialCount = 0;
+        for (const ImportedMaterial3D& material : importedModelData.materials) {
+            const bool textured = std::any_of(
+                material.textures.begin(),
+                material.textures.end(),
+                [](const ImportedTexture3D& texture) { return texture.HasAnyTexture(); }
+            );
+            sourceTexturedMaterialCount += textured ? 1u : 0u;
+            sourceBaseColorTextureMaterialCount +=
+                material.FindTexture(ImportedTextureKind::BaseColor) != nullptr ||
+                material.FindTexture(ImportedTextureKind::Diffuse) != nullptr
+                    ? 1u
+                    : 0u;
+            sourceNormalTextureMaterialCount +=
+                material.FindTexture(ImportedTextureKind::Normal) != nullptr ? 1u : 0u;
+            sourceMetallicRoughnessTextureMaterialCount +=
+                material.FindTexture(ImportedTextureKind::MetallicRoughness) != nullptr ||
+                material.FindTexture(ImportedTextureKind::Metallic) != nullptr ||
+                material.FindTexture(ImportedTextureKind::Roughness) != nullptr
+                    ? 1u
+                    : 0u;
+        }
+
         auto loadedModel = std::make_unique<LoadedRuntimeModel>();
+        loadedModel->sourceVertexCount = sourceVertexCount;
+        loadedModel->sourceTriangleCount = sourceTriangleCount;
+        loadedModel->sourceTangentVertexCount = sourceTangentVertexCount;
+        loadedModel->sourceTangentGenerationEnabled =
+            importOptions.generateTangents ? 1u : 0u;
+        loadedModel->sourceTexturedMaterialCount = sourceTexturedMaterialCount;
+        loadedModel->sourceBaseColorTextureMaterialCount =
+            sourceBaseColorTextureMaterialCount;
+        loadedModel->sourceNormalTextureMaterialCount =
+            sourceNormalTextureMaterialCount;
+        loadedModel->sourceMetallicRoughnessTextureMaterialCount =
+            sourceMetallicRoughnessTextureMaterialCount;
         const u32 modelId = m_NextModelId++;
         const std::string idPrefix = "RuntimeModel" + std::to_string(modelId);
         VulkanUploadBatch uploadBatch(m_Device, m_CommandPool);
@@ -1807,7 +1869,15 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             skinnedAnimationSpace.ready,
             skinnedAnimationSpace.blockerMask,
             runtimeSkinnedAnimationRenderableBound,
-            importedModelData.skinnedAnimationUnsupported ? 1u : 0u
+            importedModelData.skinnedAnimationUnsupported ? 1u : 0u,
+            sourceVertexCount,
+            sourceTriangleCount,
+            sourceTangentVertexCount,
+            importOptions.generateTangents ? 1u : 0u,
+            sourceTexturedMaterialCount,
+            sourceBaseColorTextureMaterialCount,
+            sourceNormalTextureMaterialCount,
+            sourceMetallicRoughnessTextureMaterialCount
         };
     } catch (const std::exception& error) {
         return RuntimeModelLoadResult{

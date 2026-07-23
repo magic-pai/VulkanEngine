@@ -47,6 +47,14 @@ struct BenchmarkSceneDiagnostics {
     u32 runtimeImportCacheHit = 0;
     u32 runtimeImportMeshCount = 0;
     u32 runtimeImportMaterialCount = 0;
+    u32 runtimeImportSourceVertexCount = 0;
+    u32 runtimeImportSourceTriangleCount = 0;
+    u32 runtimeImportSourceTangentVertexCount = 0;
+    u32 runtimeImportSourceTangentGenerationEnabled = 0;
+    u32 runtimeImportSourceTexturedMaterialCount = 0;
+    u32 runtimeImportSourceBaseColorTextureMaterialCount = 0;
+    u32 runtimeImportSourceNormalTextureMaterialCount = 0;
+    u32 runtimeImportSourceMetallicRoughnessTextureMaterialCount = 0;
     u32 runtimeImportNodeCount = 0;
     u32 runtimeImportBoneNodeCount = 0;
     u32 runtimeImportAnimationChannelBoundCount = 0;

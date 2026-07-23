@@ -300,6 +300,14 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportCacheHit << ','
         << sceneDiagnostics.runtimeImportMeshCount << ','
         << sceneDiagnostics.runtimeImportMaterialCount << ','
+        << sceneDiagnostics.runtimeImportSourceVertexCount << ','
+        << sceneDiagnostics.runtimeImportSourceTriangleCount << ','
+        << sceneDiagnostics.runtimeImportSourceTangentVertexCount << ','
+        << sceneDiagnostics.runtimeImportSourceTangentGenerationEnabled << ','
+        << sceneDiagnostics.runtimeImportSourceTexturedMaterialCount << ','
+        << sceneDiagnostics.runtimeImportSourceBaseColorTextureMaterialCount << ','
+        << sceneDiagnostics.runtimeImportSourceNormalTextureMaterialCount << ','
+        << sceneDiagnostics.runtimeImportSourceMetallicRoughnessTextureMaterialCount << ','
         << sceneDiagnostics.runtimeImportNodeCount << ','
         << sceneDiagnostics.runtimeImportBoneNodeCount << ','
         << sceneDiagnostics.runtimeImportAnimationChannelBoundCount << ','
@@ -2122,7 +2130,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "ue_bridge_blocked_lights,ue_bridge_blocked_reference_capture,"
         << "runtime_import_model_requested,runtime_import_model_loaded,"
         << "runtime_import_cache_hit,runtime_import_mesh_count,"
-        << "runtime_import_material_count,runtime_import_node_count,"
+        << "runtime_import_material_count,"
+        << "runtime_import_source_vertex_count,"
+        << "runtime_import_source_triangle_count,"
+        << "runtime_import_source_tangent_vertex_count,"
+        << "runtime_import_source_tangent_generation_enabled,"
+        << "runtime_import_source_textured_material_count,"
+        << "runtime_import_source_base_color_texture_material_count,"
+        << "runtime_import_source_normal_texture_material_count,"
+        << "runtime_import_source_metallic_roughness_texture_material_count,"
+        << "runtime_import_node_count,"
         << "runtime_import_bone_node_count,"
         << "runtime_import_animation_channel_bound_count,"
         << "runtime_import_animation_channel_unbound_count,"

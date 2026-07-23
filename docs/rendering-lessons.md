@@ -3761,3 +3761,51 @@ Validation:
   `32 / 0` checks, decode to 1024x576 thumbnails, and report API 1.7.0.
 - Debug LightingShowcase, Debug Forward3D, and Release LightingShowcase build.
   Release contains no RenderDoc API/environment marker strings.
+
+## 2026-07-24 - Imported PBR Assets Need Production Tangent Coverage
+
+Symptom:
+- The user supplied `lvjuren.glb` as a production PBR reference asset. The GLB
+  contains a normal map but no authored tangent attribute, so a fast importer
+  that skips tangent generation would silently use arbitrary fallback tangents.
+
+False leads:
+- Treating the Khronos validator warning as an asset failure or adding a model-
+  specific tangent patch in the renderer.
+- Using a screenshot as proof that base color, normal, and metallic-roughness
+  textures reached the same material consumer.
+
+Cause:
+- `ModelImportOptions::fastImport` previously disabled Assimp's tangent-space
+  generation even when the imported material required a tangent frame.
+
+Control test:
+- `SE_RUNTIME_IMPORT_TANGENTS_OFF=1` disables only tangent generation in Debug.
+  The normal-map material remains present while imported tangent coverage falls
+  from `342,139` to `0`, making the quality dependency explicit.
+
+Fix:
+- Keep Assimp `aiProcess_CalcTangentSpace` enabled independently of the fast
+  import optimization. Add generic source vertex/triangle/tangent and PBR
+  texture-coverage counters to the runtime import result and benchmark CSV.
+- Add `SelfEnginePbrModelShowcase` and a reusable Khronos Validator launcher;
+  no asset-specific renderer path was added.
+
+Prevention:
+- A PBR asset with a normal texture must prove a complete tangent frame before
+  visual acceptance. Import optimization may skip mesh optimization, but may
+  not skip required material input generation.
+
+Validation:
+- Khronos glTF Validator `2.0.0-dev.3.10`: `0` errors, `1` generated-tangent
+  warning, `342,139` vertices, `499,719` triangles, three embedded textures.
+- `Test-PbrModelShowcase.ps1 -SkipBuild -Strict`: `18 pass / 0 fail` across
+  normal and tangent-off Debug lanes with clean runtime logs.
+- Debug and Release showcase builds pass; Release preserves
+  `342,139 / 342,139` tangent coverage with zero validation diagnostics.
+- The user accepted the fullscreen 2560x1440 PBR showcase result.
+
+Sources:
+- https://github.com/assimp/assimp
+- https://github.com/KhronosGroup/glTF-Validator
+- https://www.khronos.org/gltf/

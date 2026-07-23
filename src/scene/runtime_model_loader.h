@@ -80,6 +80,14 @@ struct RuntimeModelLoadResult {
     u32 runtimeSkinnedAnimationSpaceBlockerMask = 0;
     u32 runtimeSkinnedAnimationRenderableBound = 0;
     u32 skinnedAnimationUnsupported = 0;
+    u32 sourceVertexCount = 0;
+    u32 sourceTriangleCount = 0;
+    u32 sourceTangentVertexCount = 0;
+    u32 sourceTangentGenerationEnabled = 0;
+    u32 sourceTexturedMaterialCount = 0;
+    u32 sourceBaseColorTextureMaterialCount = 0;
+    u32 sourceNormalTextureMaterialCount = 0;
+    u32 sourceMetallicRoughnessTextureMaterialCount = 0;
 };
 
 struct RuntimeModelAnimationPlaybackDiagnostics {
@@ -185,6 +193,14 @@ private:
         u32 runtimeSkinnedAnimationSpaceBlockerMask = 0;
         u32 runtimeSkinnedAnimationRenderableBound = 0;
         u32 skinnedAnimationUnsupported = 0;
+        u32 sourceVertexCount = 0;
+        u32 sourceTriangleCount = 0;
+        u32 sourceTangentVertexCount = 0;
+        u32 sourceTangentGenerationEnabled = 0;
+        u32 sourceTexturedMaterialCount = 0;
+        u32 sourceBaseColorTextureMaterialCount = 0;
+        u32 sourceNormalTextureMaterialCount = 0;
+        u32 sourceMetallicRoughnessTextureMaterialCount = 0;
         ImportedModel3D animationSource;
         u32 animationPlaybackCandidate = 0;
         u32 animationPlaybackClipIndex = 0;
