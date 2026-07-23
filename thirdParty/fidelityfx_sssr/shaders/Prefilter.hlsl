@@ -66,7 +66,10 @@ void FFX_DNSR_Reflections_LoadNeighborhood(
 }
 
 void FFX_DNSR_Reflections_StorePrefilteredReflections(int2 pixel_coordinate, min16float3 radiance, min16float variance) {
-    g_out_radiance[pixel_coordinate] = radiance.xyzz;
+    float3 sanitized_radiance = SelfEngine_FfxSssrSanitizeRadiance(
+        (float3)radiance
+    );
+    g_out_radiance[pixel_coordinate] = sanitized_radiance.xyzz;
     g_out_variance[pixel_coordinate] = variance.x;
     g_out_sample_count[pixel_coordinate] = g_in_sample_count.Load(int3(pixel_coordinate, 0)).x;
 }

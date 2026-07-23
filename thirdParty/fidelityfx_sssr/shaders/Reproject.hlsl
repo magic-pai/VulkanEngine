@@ -94,11 +94,21 @@ float2 FFX_DNSR_Reflections_LoadMotionVector(int2 pixel_coordinate) { return g_m
 min16float3 FFX_DNSR_Reflections_SamplePreviousAverageRadiance(float2 uv) { return (min16float3)g_average_radiance_history.SampleLevel(g_linear_sampler, uv, 0.0f).xyz; }
 min16float FFX_DNSR_Reflections_SampleVarianceHistory(float2 uv) { return (min16float)g_variance_history.SampleLevel(g_linear_sampler, uv, 0.0f).x; }
 min16float FFX_DNSR_Reflections_LoadRayLength(int2 pixel_coordinate) { return (min16float)g_in_radiance.Load(int3(pixel_coordinate, 0)).w; }
+bool SelfEngine_FfxSssrZeroConfidenceHistoryRejectionEnabled() {
+    return (g_environment_fallback_control & 0x00800000u) == 0u;
+}
+bool SelfEngine_FfxSssrReprojectBypassEnabled() {
+    return (g_environment_fallback_control & 0x00200000u) != 0u;
+}
 float SelfEngine_FfxSssrHitConfidence(int2 pixel_coordinate) {
     if (any(pixel_coordinate < 0) || any(uint2(pixel_coordinate) >= g_buffer_dimensions)) {
         return 0.0;
     }
     float current = saturate(g_hit_confidence.Load(int3(pixel_coordinate, 0)));
+    if (SelfEngine_FfxSssrZeroConfidenceHistoryRejectionEnabled() &&
+        current <= 0.0001) {
+        return 0.0;
+    }
     if (g_reprojection_contract_ready == 0u || g_hit_reprojection_enabled == 0u) {
         return current;
     }
@@ -138,8 +148,14 @@ float SelfEngine_FfxSssrHitConfidence(int2 pixel_coordinate) {
     float historyWeight = clamp(g_temporal_stability_factor, 0.0, 0.98);
     return saturate(max(current, history * historyValidity * historyWeight));
 }
-void FFX_DNSR_Reflections_StoreRadianceReprojected(int2 pixel_coordinate, min16float3 value) { g_out_reprojected_radiance[pixel_coordinate] = value.xyzz; }
-void FFX_DNSR_Reflections_StoreAverageRadiance(int2 pixel_coordinate, min16float3 value) { g_out_average_radiance[pixel_coordinate] = value.xyzz; }
+void FFX_DNSR_Reflections_StoreRadianceReprojected(int2 pixel_coordinate, min16float3 value) {
+    float3 radiance = SelfEngine_FfxSssrSanitizeRadiance((float3)value);
+    g_out_reprojected_radiance[pixel_coordinate] = radiance.xyzz;
+}
+void FFX_DNSR_Reflections_StoreAverageRadiance(int2 pixel_coordinate, min16float3 value) {
+    float3 radiance = SelfEngine_FfxSssrSanitizeRadiance((float3)value);
+    g_out_average_radiance[pixel_coordinate] = radiance.xyzz;
+}
 void FFX_DNSR_Reflections_StoreVariance(int2 pixel_coordinate, min16float value) { g_out_variance[pixel_coordinate] = value; }
 void FFX_DNSR_Reflections_StoreNumSamples(int2 pixel_coordinate, min16float value) { g_out_sample_count[pixel_coordinate] = value; }
 #include "ffx_denoiser_reflections_reproject.h"
@@ -153,6 +169,22 @@ void main(int2 group_thread_id      : SV_GroupThreadID,
     int2  dispatch_group_id           = dispatch_thread_id / 8;
     uint2 remapped_group_thread_id    = FFX_DNSR_Reflections_RemapLane8x8(group_index);
     uint2 remapped_dispatch_thread_id = dispatch_group_id * 8 + remapped_group_thread_id;
+
+    if (SelfEngine_FfxSssrReprojectBypassEnabled()) {
+        if (all(remapped_dispatch_thread_id < g_buffer_dimensions)) {
+            float3 current_radiance = SelfEngine_FfxSssrSanitizeRadiance(
+                g_in_radiance.Load(int3(remapped_dispatch_thread_id, 0)).xyz
+            );
+            g_out_reprojected_radiance[remapped_dispatch_thread_id] =
+                current_radiance.xyzz;
+            g_out_variance[remapped_dispatch_thread_id] = 0.0;
+            g_out_sample_count[remapped_dispatch_thread_id] = 1.0;
+            g_out_hit_confidence[remapped_dispatch_thread_id] = saturate(
+                g_hit_confidence.Load(int3(remapped_dispatch_thread_id, 0))
+            );
+        }
+        return;
+    }
 
     FFX_DNSR_Reflections_Reproject(remapped_dispatch_thread_id, remapped_group_thread_id, g_buffer_dimensions, g_temporal_stability_factor, 32);
     if (all(remapped_dispatch_thread_id < g_buffer_dimensions)) {

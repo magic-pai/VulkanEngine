@@ -471,6 +471,48 @@ bool ReflectionProbeIndependentIblEnergyEnabled() {
     return floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5;
 }
 
+bool ReflectionProbeDominantMirrorEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 4.0), 2.0) > 0.5;
+}
+
+bool ReflectionProbeDominantMirrorHardSwitchEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 8.0), 2.0) > 0.5;
+}
+
+bool ReflectionProbeObjectStableEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 16.0), 2.0) > 0.5;
+}
+
+float ReflectionProbeMirrorFactor(float roughness) {
+    return 1.0 - smoothstep(0.30, 0.60, clamp(roughness, 0.0, 1.0));
+}
+
+int ObjectProbeAssignmentCode() {
+    uint packedObjectMetadata = uint(max(objectData.viewport.w, 0.0) + 0.5);
+    return int(packedObjectMetadata % 8u);
+}
+
+float ReflectionProbeDominantMirrorFactor(
+    float roughness,
+    float dominantWeight,
+    float runnerUpWeight,
+    float totalWeight
+) {
+    float roughnessFactor = ReflectionProbeMirrorFactor(roughness);
+    if (ReflectionProbeDominantMirrorHardSwitchEnabled()) {
+        return roughnessFactor;
+    }
+    float dominanceMargin = clamp(
+        (dominantWeight - runnerUpWeight) / max(totalWeight, 0.000001),
+        0.0,
+        1.0
+    );
+    return roughnessFactor * smoothstep(0.02, 0.18, dominanceMargin);
+}
+
 float LocalReflectionProbeShapeCoordinateAt(
     int probeIndex,
     vec3 worldPosition
@@ -639,7 +681,8 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
     vec3 direction,
     vec3 sunDirection,
     float roughness,
-    vec3 worldPosition
+    vec3 worldPosition,
+    int objectProbeAssignmentCode
 ) {
     EnvironmentRadianceResult result;
     result.globalRadiance = GlobalEnvironmentRadiance(
@@ -696,16 +739,66 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
             ? max(result.localCoverage, coverages[probeIndex])
             : clamp(totalWeight, 0.0, 1.0);
     }
-    if (totalWeight <= 0.0001) {
+    int assignedProbeIndex = objectProbeAssignmentCode - 1;
+    bool assignedProbeValid = assignedProbeIndex >= 0 &&
+        assignedProbeIndex < probeCount;
+    float objectStableFactor = productionBlend &&
+        ReflectionProbeDominantMirrorEnabled() &&
+        ReflectionProbeObjectStableEnabled()
+        ? ReflectionProbeMirrorFactor(roughness)
+        : 0.0;
+    if (totalWeight <= 0.0001 &&
+        !(assignedProbeValid && objectStableFactor > 0.0001)) {
         return result;
     }
+
+    int dominantProbeIndex = -1;
+    float dominantRawWeight = 0.0;
+    float runnerUpRawWeight = 0.0;
+    for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
+        if (probeIndex < probeCount && weights[probeIndex] > dominantRawWeight) {
+            runnerUpRawWeight = dominantRawWeight;
+            dominantRawWeight = weights[probeIndex];
+            dominantProbeIndex = probeIndex;
+        } else if (probeIndex < probeCount) {
+            runnerUpRawWeight = max(runnerUpRawWeight, weights[probeIndex]);
+        }
+    }
+    float dominantMirrorFactor = productionBlend &&
+        ReflectionProbeDominantMirrorEnabled() &&
+        !ReflectionProbeObjectStableEnabled() &&
+        dominantProbeIndex >= 0
+        ? ReflectionProbeDominantMirrorFactor(
+            roughness,
+            dominantRawWeight,
+            runnerUpRawWeight,
+            totalWeight
+        )
+        : 0.0;
+    int resolvedMirrorProbeIndex = ReflectionProbeObjectStableEnabled()
+        ? assignedProbeIndex
+        : dominantProbeIndex;
+    float resolvedMirrorFactor = ReflectionProbeObjectStableEnabled()
+        ? objectStableFactor
+        : dominantMirrorFactor;
+    float localWeightDenominator = totalWeight > 0.0001
+        ? totalWeight
+        : 1.0;
+    result.localCoverage = mix(
+        result.localCoverage,
+        assignedProbeValid ? 1.0 : 0.0,
+        objectStableFactor
+    );
 
     vec3 localBlend = vec3(0.0);
     float roughnessClamped = clamp(roughness, 0.0, 1.0);
     float glossBoost = IblSpecularStability(roughnessClamped);
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
         float rawWeight = weights[probeIndex];
-        if (probeIndex >= probeCount || rawWeight <= 0.0001) {
+        bool stableAssignedProbe = objectStableFactor > 0.0001 &&
+            assignedProbeValid && probeIndex == assignedProbeIndex;
+        if (probeIndex >= probeCount ||
+            (rawWeight <= 0.0001 && !stableAssignedProbe)) {
             continue;
         }
 
@@ -749,7 +842,18 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
             ) *
             localIntensity *
             glossBoost;
-        localBlend += localRadiance * (rawWeight / totalWeight);
+        float effectiveWeight = mix(
+            rawWeight,
+            probeIndex == resolvedMirrorProbeIndex
+                ? localWeightDenominator
+                : 0.0,
+            resolvedMirrorFactor
+        );
+        if (effectiveWeight <= 0.0001) {
+            continue;
+        }
+        localBlend += localRadiance *
+            (effectiveWeight / localWeightDenominator);
     }
 
     result.localRadiance = localBlend;
@@ -771,7 +875,8 @@ vec3 EnvironmentRadiance(
         direction,
         sunDirection,
         roughness,
-        worldPosition
+        worldPosition,
+        ObjectProbeAssignmentCode()
     ).resolvedRadiance;
 }
 
@@ -1658,6 +1763,8 @@ void AccumulateLocalLight(
             localLightDir
         );
     vec3 localSpecular = vec3(0.0);
+    float localSpecularStrength =
+        specularStrength * clamp(parameters.w, 0.0, 1.0);
     vec3 localDirect = DirectPbrContribution(
         baseColor,
         roughness,
@@ -1666,7 +1773,7 @@ void AccumulateLocalLight(
         viewDir,
         localLightDir,
         radiance,
-        specularStrength,
+        localSpecularStrength,
         specularColorFactor,
         clearcoat,
         clearcoatRoughness,

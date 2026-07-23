@@ -51,6 +51,39 @@ static const float g_depth_sigma = 0.02f;
     uint g_environment_fallback_control;
 };
 
+bool SelfEngine_FfxSssrStableEnvironmentFallbackEnabled() {
+    return (g_environment_fallback_control & 0x80000000u) != 0u;
+}
+
+bool SelfEngine_FfxSssrConstantEnvironmentFallbackEnabled() {
+    return (g_environment_fallback_control & 0x40000000u) != 0u;
+}
+
+bool SelfEngine_FfxSssrRadianceSanitizationEnabled() {
+    return (g_environment_fallback_control & 0x00400000u) == 0u;
+}
+
+float SelfEngine_FfxSssrEnvironmentMipCount() {
+    return max(1.0, float(g_environment_fallback_control & 0xffffu));
+}
+
+float SelfEngine_FfxSssrEnvironmentMip(float roughness) {
+    if (!SelfEngine_FfxSssrStableEnvironmentFallbackEnabled()) {
+        return 0.0;
+    }
+    return saturate(roughness) *
+        max(0.0, SelfEngine_FfxSssrEnvironmentMipCount() - 1.0);
+}
+
+float3 SelfEngine_FfxSssrSanitizeRadiance(float3 radiance) {
+    if (!SelfEngine_FfxSssrRadianceSanitizationEnabled()) {
+        return radiance;
+    }
+    return all(isfinite(radiance))
+        ? max(radiance, float3(0.0, 0.0, 0.0))
+        : float3(0.0, 0.0, 0.0);
+}
+
 //=== Common functions of the SssrSample ===
 
 uint PackFloat16(min16float2 v) {

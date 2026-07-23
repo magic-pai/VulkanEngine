@@ -3,8 +3,8 @@ param(
     [string]$AuditDirectory = "tmp\hybrid_reflection_full_audit",
     [string]$ReceiverNamePattern = "Center Mirror Sphere",
     [string]$ExpectedHitNamePattern = "Polished Metal Sphere",
-    [ValidateSet(2, 3)]
-    [uint32]$ExpectedAuditContractVersion = 3,
+    [ValidateSet(2, 3, 4, 5, 6, 7, 8)]
+    [uint32]$ExpectedAuditContractVersion = 8,
     [switch]$ExtendedReport,
     [switch]$Strict
 )
@@ -247,6 +247,8 @@ $requiredBenchmarkColumns = @(
     "ssr_ffx_sssr_hit_confidence_contract_version",
     "ssr_ffx_sssr_hit_confidence_apply_bound",
     "ssr_ffx_sssr_apply_confidence_source",
+    "ssr_ffx_sssr_zero_confidence_history_rejection_enabled",
+    "ssr_ffx_sssr_radiance_sanitization_enabled",
     "temporal_upscaler_dlss_output_ready",
     "hybrid_reflections_ray_query_full_audit_requested",
     "hybrid_reflections_ray_query_full_audit_resources_ready",
@@ -269,6 +271,10 @@ if (@($requiredBenchmarkColumns | Where-Object {
     $maxAuditCaptured = 0
     $badConfidenceContractRows = 0
     $badApplyConfidenceSourceRows = 0
+    $badZeroConfidenceHistoryRejectionRows = 0
+    $badRadianceSanitizationRows = 0
+    $zeroConfidenceHistoryRejectionStates = [Collections.Generic.HashSet[uint32]]::new()
+    $radianceSanitizationStates = [Collections.Generic.HashSet[uint32]]::new()
     foreach ($row in $benchmark) {
         $maxAuditRequested = [Math]::Max($maxAuditRequested,
             (UInt $row.hybrid_reflections_ray_query_full_audit_requested))
@@ -287,6 +293,20 @@ if (@($requiredBenchmarkColumns | Where-Object {
             (UInt $row.ssr_ffx_sssr_apply_confidence_source) -ne 2) {
             ++$badApplyConfidenceSourceRows
         }
+        $zeroConfidenceHistoryRejectionState =
+            UInt $row.ssr_ffx_sssr_zero_confidence_history_rejection_enabled
+        if ($zeroConfidenceHistoryRejectionState -gt 1) {
+            ++$badZeroConfidenceHistoryRejectionRows
+        }
+        [void]$zeroConfidenceHistoryRejectionStates.Add(
+            $zeroConfidenceHistoryRejectionState
+        )
+        $radianceSanitizationState =
+            UInt $row.ssr_ffx_sssr_radiance_sanitization_enabled
+        if ($radianceSanitizationState -gt 1) {
+            ++$badRadianceSanitizationRows
+        }
+        [void]$radianceSanitizationStates.Add($radianceSanitizationState)
     }
     $checks.Add((New-Check "benchmark Full Audit requested/resources/active" `
         ($maxAuditRequested -eq 1 -and $maxAuditResources -eq 1 -and
@@ -301,6 +321,18 @@ if (@($requiredBenchmarkColumns | Where-Object {
         ([uint64]$badConfidenceContractRows)
     Add-ZeroCheck $checks "benchmark Apply confidence source rows" `
         ([uint64]$badApplyConfidenceSourceRows)
+    Add-ZeroCheck $checks "benchmark zero-confidence history rejection rows" `
+        ([uint64]$badZeroConfidenceHistoryRejectionRows)
+    $checks.Add((New-Check `
+        "benchmark zero-confidence history rejection state is capture-consistent" `
+        ($zeroConfidenceHistoryRejectionStates.Count -eq 1) `
+        $zeroConfidenceHistoryRejectionStates.Count 1)) | Out-Null
+    Add-ZeroCheck $checks "benchmark radiance sanitization rows" `
+        ([uint64]$badRadianceSanitizationRows)
+    $checks.Add((New-Check `
+        "benchmark radiance sanitization state is capture-consistent" `
+        ($radianceSanitizationStates.Count -eq 1) `
+        $radianceSanitizationStates.Count 1)) | Out-Null
 }
 
 $objectByAuditKey = @{}
@@ -397,14 +429,61 @@ foreach ($index in $auditIndex) {
         (ULong $index.receiver_origin_outside_bounds_count)
     Add-ZeroCheck $checks "reflection self hits frame $capture" `
         (ULong $index.self_hit_count)
+    $selfHitRejectedProperty =
+        $index.PSObject.Properties["self_hit_rejected_count"]
+    $checks.Add((New-Check "self-hit rejection telemetry present frame $capture" `
+        ($null -ne $selfHitRejectedProperty) `
+        ($null -ne $selfHitRejectedProperty) $true)) | Out-Null
     Add-ZeroCheck $checks "active below-hemisphere rays frame $capture" `
         (ULong $index.negative_hemisphere_count)
+    Add-ZeroCheck $checks "single-sided hits resolve the nearest front side frame $capture" `
+        (ULong $index.single_sided_back_side_hit_count)
     Add-ZeroCheck $checks "Apply object IDs present frame $capture" `
         (ULong $index.apply_missing_object_id_count)
     Add-ZeroCheck $checks "Apply object IDs resolve frame $capture" `
         (ULong $index.apply_unknown_object_id_count)
     Add-ZeroCheck $checks "Apply values finite frame $capture" `
         (ULong $index.apply_non_finite_count)
+    Add-ZeroCheck $checks "mirror pixels use one Probe source frame $capture" `
+        (ULong $index.apply_mirror_mixed_source_pixel_count)
+    Add-ZeroCheck $checks "mirror pixels match object Probe assignment frame $capture" `
+        (ULong $index.apply_mirror_assignment_mismatch_count)
+    Add-ZeroCheck $checks "GBuffer Probe assignment matches CPU metadata frame $capture" `
+        (ULong $index.apply_mirror_metadata_mismatch_count)
+    Add-ZeroCheck $checks "mirror object Probe code is frame-stable frame $capture" `
+        (ULong $index.apply_mirror_probe_code_inconsistent_count)
+    Add-ZeroCheck $checks "mirror objects use one Probe source frame $capture" `
+        (ULong $index.apply_mirror_multi_source_object_count)
+    Add-ZeroCheck $checks "high-confidence mirror hits fully replace Probe frame $capture" `
+        (ULong $index.apply_mirror_high_confidence_partial_blend_count)
+    $zeroVisibilityProperty = $index.PSObject.Properties[
+        "apply_mirror_high_confidence_zero_visibility_count"
+    ]
+    $checks.Add((New-Check "mirror visibility telemetry present frame $capture" `
+        ($null -ne $zeroVisibilityProperty) `
+        ($null -ne $zeroVisibilityProperty) $true)) | Out-Null
+    if ($null -ne $zeroVisibilityProperty) {
+        $zeroVisibilityCount = ULong $zeroVisibilityProperty.Value
+        $checks.Add((New-Check "zero-visibility mirror pixels are bounded frame $capture" `
+            ($zeroVisibilityCount -le
+                (ULong $index.apply_mirror_sample_count)) `
+            "$zeroVisibilityCount/$($index.apply_mirror_sample_count)" `
+            "zero visibility<=mirror samples")) | Out-Null
+    }
+    $mirrorDnsrPassthroughProperty =
+        $index.PSObject.Properties["apply_mirror_dnsr_passthrough_count"]
+    $checks.Add((New-Check "mirror DNSR passthrough telemetry present frame $capture" `
+        ($null -ne $mirrorDnsrPassthroughProperty) `
+        ($null -ne $mirrorDnsrPassthroughProperty) $true)) | Out-Null
+    if ($null -ne $mirrorDnsrPassthroughProperty) {
+        $mirrorDnsrPassthroughCount =
+            ULong $mirrorDnsrPassthroughProperty.Value
+        $checks.Add((New-Check "mirror DNSR passthrough is bounded frame $capture" `
+            ($mirrorDnsrPassthroughCount -le
+                (ULong $index.apply_mirror_sample_count)) `
+            "$mirrorDnsrPassthroughCount/$($index.apply_mirror_sample_count)" `
+            "passthrough<=mirror samples")) | Out-Null
+    }
     Add-ZeroCheck $checks "GBuffer audit values finite frame $capture" `
         (ULong $index.gbuffer_non_finite_count)
     Add-ZeroCheck $checks "GBuffer reflection sources non-negative frame $capture" `
@@ -432,28 +511,84 @@ foreach ($row in $compositionSummary) {
     $finite = ULong $row.finite_count
     $nonFinite = ULong $row.non_finite_count
     $negative = ULong $row.negative_count
+    $consumerPixelProperty = $row.PSObject.Properties["consumer_pixel_count"]
+    $consumerFiniteProperty = $row.PSObject.Properties["consumer_finite_count"]
+    $consumerNonFiniteProperty =
+        $row.PSObject.Properties["consumer_non_finite_count"]
+    $consumerNegativeProperty =
+        $row.PSObject.Properties["consumer_negative_count"]
+    $hasConsumerScope = $null -ne $consumerPixelProperty -and
+        $null -ne $consumerFiniteProperty -and
+        $null -ne $consumerNonFiniteProperty -and
+        $null -ne $consumerNegativeProperty
+    $consumerPixels = if ($hasConsumerScope) {
+        ULong $consumerPixelProperty.Value
+    } else { [uint64]0 }
+    $consumerFinite = if ($hasConsumerScope) {
+        ULong $consumerFiniteProperty.Value
+    } else { [uint64]0 }
+    $consumerNonFinite = if ($hasConsumerScope) {
+        ULong $consumerNonFiniteProperty.Value
+    } else { [uint64]0 }
+    $consumerNegative = if ($hasConsumerScope) {
+        ULong $consumerNegativeProperty.Value
+    } else { [uint64]0 }
+    $consumerScopedRadiance = $row.stage -in @(
+        "dnsr_intersect_radiance",
+        "dnsr_reproject_radiance",
+        "dnsr_prefilter_radiance",
+        "dnsr_resolve_radiance"
+    ) -and $hasConsumerScope
+    $signedHdrCorrectionStage = $row.stage -in @(
+        "hdr_after_apply",
+        "taa_or_dlss_input"
+    )
+    $contractNonFinite = if ($consumerScopedRadiance) {
+        $consumerNonFinite
+    } else { $nonFinite }
+    $contractNegative = if ($signedHdrCorrectionStage) {
+        [uint64]0
+    } elseif ($consumerScopedRadiance) {
+        $consumerNegative
+    } else { $negative }
     $pixels = ULong $row.pixel_count
     $compositionExpectedRows += $pixels
-    $compositionNonFiniteCount += $nonFinite
-    $compositionNegativeCount += $negative
+    $compositionNonFiniteCount += $contractNonFinite
+    $compositionNegativeCount += $contractNegative
     $checks.Add((New-Check "composition finite $key" `
-        ($nonFinite -eq 0) $nonFinite 0)) | Out-Null
+        ($contractNonFinite -eq 0) $contractNonFinite 0)) | Out-Null
     $checks.Add((New-Check "composition non-negative $key" `
-        ($negative -eq 0) $negative 0)) | Out-Null
+        ($contractNegative -eq 0) $contractNegative 0)) | Out-Null
+    if ($signedHdrCorrectionStage) {
+        $checks.Add((New-Check "composition signed correction semantic $key" `
+            $true $negative "signed HDR correction; finite and conserved")) |
+            Out-Null
+    }
+    if ($consumerScopedRadiance) {
+        $checks.Add((New-Check "composition consumer accounting $key" `
+            (($consumerFinite + $consumerNonFinite) -eq $consumerPixels) `
+            ($consumerFinite + $consumerNonFinite) $consumerPixels)) |
+            Out-Null
+    }
     $checks.Add((New-Check "composition pixel accounting $key" `
         (($finite + $nonFinite) -eq $pixels) ($finite + $nonFinite) $pixels)) |
         Out-Null
-    $unboundedHitDistanceAlpha = $row.stage -in @(
-        "dnsr_intersect_radiance",
+    $unboundedHitDistanceAlpha =
+        $row.stage -eq "dnsr_intersect_radiance"
+    $radianceBlueAliasAlpha = $row.stage -in @(
         "dnsr_reproject_radiance",
         "dnsr_prefilter_radiance"
     )
     $alphaRangeValid = (Number $row.alpha_min) -ge -0.000001 -and
-        ($unboundedHitDistanceAlpha -or
+        ($unboundedHitDistanceAlpha -or $radianceBlueAliasAlpha -or
          (Number $row.alpha_max) -le 1.000001)
     $checks.Add((New-Check "composition alpha semantic range $key" `
         $alphaRangeValid "$($row.alpha_min)..$($row.alpha_max)" `
-        $(if ($unboundedHitDistanceAlpha) { "hit-distance>=0" } else { "0..1" }))) |
+        $(if ($unboundedHitDistanceAlpha) {
+            "hit-distance>=0"
+        } elseif ($radianceBlueAliasAlpha) {
+            "radiance-blue-alias>=0"
+        } else { "0..1" }))) |
         Out-Null
     if ($row.stage -in @(
         "dnsr_intersect_confidence",
@@ -639,9 +774,19 @@ foreach ($queue in $queueCommands) {
     $capture = UInt $queue.capture_index
     $auditId = UInt $queue.reflection_audit_object_id
     $key = Key $capture $auditId
+    $queueKind = UInt $queue.queue_kind
     $resolved = $auditId -ne 0 -and $objectByAuditKey.ContainsKey($key)
-    $checks.Add((New-Check "queue command identity resolves $capture`:$($queue.queue_kind):$($queue.command_index)" `
-        $resolved $auditId "scene object")) | Out-Null
+    $auxiliaryOverlay = $queueKind -eq 5 -and !$resolved
+    if ($auxiliaryOverlay) {
+        $auxiliaryIdentityValid = $auditId -ne 0 -and
+            (ULong $queue.render_identity) -ne 0
+        $checks.Add((New-Check "queue auxiliary identity valid $capture`:$($queue.queue_kind):$($queue.command_index)" `
+            $auxiliaryIdentityValid "$auditId/$($queue.render_identity)" `
+            "nonzero audit/render identity")) | Out-Null
+    } else {
+        $checks.Add((New-Check "queue command identity resolves $capture`:$($queue.queue_kind):$($queue.command_index)" `
+            $resolved $auditId "scene object")) | Out-Null
+    }
     if ($resolved) {
         $checks.Add((New-Check "queue render identity agrees $capture`:$($queue.queue_kind):$($queue.command_index)" `
             ((ULong $queue.render_identity) -eq
@@ -675,12 +820,15 @@ foreach ($light in $lights) {
 }
 foreach ($probe in $probes) {
     $key = "$($probe.capture_index):$($probe.probe_index)"
+    $aggregate = (UInt $probe.probe_index) -eq [uint32]::MaxValue
     $ready = (UInt $probe.capture_resource_ready) -eq 0 -or
         ((UInt $probe.capture_descriptor_bound) -ne 0 -and
-         (UInt $probe.capture_mip_count) -gt 0)
+         ($aggregate -or (UInt $probe.capture_mip_count) -gt 0))
     $checks.Add((New-Check "probe ready state is consumable $key" `
         $ready "$($probe.capture_resource_ready)/$($probe.capture_descriptor_bound)/$($probe.capture_mip_count)" `
-        "ready implies bound and mipped")) | Out-Null
+        $(if ($aggregate) {
+            "aggregate ready implies bound"
+        } else { "ready implies bound and mipped" }))) | Out-Null
 }
 
 $benchmarkFrameMatches = [Collections.Generic.List[object]]::new()
@@ -1177,6 +1325,21 @@ $checks.Add((New-Check "FrameGraph validation issues" `
 [uint64]$qualityConfidenceDiscontinuityCount = 0
 [uint64]$qualityUnexplainedDiscontinuityCount = 0
 [uint64]$qualityBlendContributionJumpCount = 0
+$applyDiscontinuityClassNames = @(
+    "source_transition",
+    "same_source_different_hit",
+    "same_source_same_hit",
+    "same_source_miss",
+    "unclassified"
+)
+$qualityDiscontinuityClassTotals = @{}
+$qualityContributionJumpClassTotals = @{}
+foreach ($classification in $applyDiscontinuityClassNames) {
+    $qualityDiscontinuityClassTotals[$classification] = [uint64]0
+    $qualityContributionJumpClassTotals[$classification] = [uint64]0
+}
+[uint64]$qualityDiscontinuityClassConservationErrors = 0
+[uint64]$qualityContributionJumpClassConservationErrors = 0
 $qualityByKey = @{}
 foreach ($quality in $runtimeQuality) {
     $key = Key (UInt $quality.capture_index) (UInt $quality.receiver_object_id)
@@ -1189,6 +1352,32 @@ foreach ($quality in $runtimeQuality) {
         ULong $quality.apply_unexplained_blend_discontinuity_count
     $qualityBlendContributionJumpCount +=
         ULong $quality.apply_blend_contribution_jump_count
+    [uint64]$classifiedDiscontinuities = 0
+    [uint64]$classifiedContributionJumps = 0
+    foreach ($classification in $applyDiscontinuityClassNames) {
+        $discontinuityProperty =
+            "apply_${classification}_discontinuity_count"
+        $jumpProperty =
+            "apply_${classification}_contribution_jump_count"
+        $discontinuityCount = ULong $quality.$discontinuityProperty
+        $jumpCount = ULong $quality.$jumpProperty
+        $classifiedDiscontinuities += $discontinuityCount
+        $classifiedContributionJumps += $jumpCount
+        $qualityDiscontinuityClassTotals[$classification] =
+            [uint64]$qualityDiscontinuityClassTotals[$classification] +
+                $discontinuityCount
+        $qualityContributionJumpClassTotals[$classification] =
+            [uint64]$qualityContributionJumpClassTotals[$classification] +
+                $jumpCount
+    }
+    if ($classifiedDiscontinuities -ne
+        (ULong $quality.apply_blend_discontinuity_count)) {
+        ++$qualityDiscontinuityClassConservationErrors
+    }
+    if ($classifiedContributionJumps -ne
+        (ULong $quality.apply_blend_contribution_jump_count)) {
+        ++$qualityContributionJumpClassConservationErrors
+    }
 }
 [uint64]$badDiscontinuityIdentityCount = 0
 [uint64]$badDiscontinuityAdjacencyCount = 0
@@ -1197,6 +1386,8 @@ foreach ($quality in $runtimeQuality) {
 [uint64]$evidenceConfidenceDiscontinuityCount = 0
 [uint64]$evidenceBlendContributionJumpCount = 0
 $discontinuityEvidenceByKey = @{}
+$discontinuityClassEvidenceByKey = @{}
+$contributionJumpClassEvidenceByKey = @{}
 foreach ($row in $runtimeApplyDiscontinuities) {
     $capture = UInt $row.capture_index
     $objectId = UInt $row.receiver_object_id
@@ -1212,6 +1403,18 @@ foreach ($row in $runtimeApplyDiscontinuities) {
     }
     $discontinuityEvidenceByKey[$key] =
         [uint64]$discontinuityEvidenceByKey[$key] + 1
+    $classification = [string]$row.classification
+    if ($classification -notin $applyDiscontinuityClassNames) {
+        $classification = "unclassified"
+        ++$badDiscontinuityValueCount
+    }
+    $classificationKey = "$key`:$classification"
+    if (!$discontinuityClassEvidenceByKey.ContainsKey($classificationKey)) {
+        $discontinuityClassEvidenceByKey[$classificationKey] = [uint64]0
+        $contributionJumpClassEvidenceByKey[$classificationKey] = [uint64]0
+    }
+    $discontinuityClassEvidenceByKey[$classificationKey] =
+        [uint64]$discontinuityClassEvidenceByKey[$classificationKey] + 1
     $x = UInt $row.pixel_x
     $y = UInt $row.pixel_y
     $neighborX = UInt $row.neighbor_x
@@ -1267,9 +1470,13 @@ foreach ($row in $runtimeApplyDiscontinuities) {
     }
     if ($contributionDelta -gt 0.25) {
         ++$evidenceBlendContributionJumpCount
+        $contributionJumpClassEvidenceByKey[$classificationKey] =
+            [uint64]$contributionJumpClassEvidenceByKey[$classificationKey] + 1
     }
 }
 [uint64]$badDiscontinuityPerReceiverCount = 0
+[uint64]$badDiscontinuityClassEvidenceCount = 0
+[uint64]$badContributionJumpClassEvidenceCount = 0
 if ($rawEvidenceEnabledForLoad) {
     foreach ($quality in $runtimeQuality) {
         $key = Key (UInt $quality.capture_index) (UInt $quality.receiver_object_id)
@@ -1279,6 +1486,30 @@ if ($rawEvidenceEnabledForLoad) {
         if ($evidenceCount -ne
             (ULong $quality.apply_blend_discontinuity_count)) {
             ++$badDiscontinuityPerReceiverCount
+        }
+        foreach ($classification in $applyDiscontinuityClassNames) {
+            $classificationKey = "$key`:$classification"
+            $expectedDiscontinuityProperty =
+                "apply_${classification}_discontinuity_count"
+            $expectedJumpProperty =
+                "apply_${classification}_contribution_jump_count"
+            $evidenceDiscontinuities = if (
+                $discontinuityClassEvidenceByKey.ContainsKey($classificationKey)
+            ) {
+                ULong $discontinuityClassEvidenceByKey[$classificationKey]
+            } else { [uint64]0 }
+            $evidenceJumps = if (
+                $contributionJumpClassEvidenceByKey.ContainsKey($classificationKey)
+            ) {
+                ULong $contributionJumpClassEvidenceByKey[$classificationKey]
+            } else { [uint64]0 }
+            if ($evidenceDiscontinuities -ne
+                (ULong $quality.$expectedDiscontinuityProperty)) {
+                ++$badDiscontinuityClassEvidenceCount
+            }
+            if ($evidenceJumps -ne (ULong $quality.$expectedJumpProperty)) {
+                ++$badContributionJumpClassEvidenceCount
+            }
         }
     }
     $checks.Add((New-Check "Apply discontinuity evidence row conservation" `
@@ -1297,6 +1528,10 @@ if ($rawEvidenceEnabledForLoad) {
             $qualityBlendContributionJumpCount) `
         $evidenceBlendContributionJumpCount `
         $qualityBlendContributionJumpCount)) | Out-Null
+    Add-ZeroCheck $checks "Apply discontinuity class evidence errors" `
+        $badDiscontinuityClassEvidenceCount
+    Add-ZeroCheck $checks "Apply contribution-jump class evidence errors" `
+        $badContributionJumpClassEvidenceCount
 } else {
     $compactDiscontinuityRows = Get-CsvDataRowCount `
         $paths.runtimeApplyDiscontinuities
@@ -1314,6 +1549,10 @@ Add-ZeroCheck $checks "Apply discontinuity threshold errors" `
     $badDiscontinuityThresholdCount
 Add-ZeroCheck $checks "Apply discontinuity non-finite/range errors" `
     $badDiscontinuityValueCount
+Add-ZeroCheck $checks "Apply discontinuity class conservation errors" `
+    $qualityDiscontinuityClassConservationErrors
+Add-ZeroCheck $checks "Apply contribution-jump class conservation errors" `
+    $qualityContributionJumpClassConservationErrors
 
 $selectedReport = [Collections.Generic.List[object]]::new()
 $selectedQuality = @($runtimeQuality | Where-Object {
@@ -1415,6 +1654,26 @@ foreach ($quality in $selectedQuality) {
             ULong $quality.apply_unexplained_blend_discontinuity_count
         apply_blend_contribution_jump_count =
             ULong $quality.apply_blend_contribution_jump_count
+        apply_source_transition_discontinuity_count =
+            ULong $quality.apply_source_transition_discontinuity_count
+        apply_same_source_different_hit_discontinuity_count =
+            ULong $quality.apply_same_source_different_hit_discontinuity_count
+        apply_same_source_same_hit_discontinuity_count =
+            ULong $quality.apply_same_source_same_hit_discontinuity_count
+        apply_same_source_miss_discontinuity_count =
+            ULong $quality.apply_same_source_miss_discontinuity_count
+        apply_unclassified_discontinuity_count =
+            ULong $quality.apply_unclassified_discontinuity_count
+        apply_source_transition_contribution_jump_count =
+            ULong $quality.apply_source_transition_contribution_jump_count
+        apply_same_source_different_hit_contribution_jump_count =
+            ULong $quality.apply_same_source_different_hit_contribution_jump_count
+        apply_same_source_same_hit_contribution_jump_count =
+            ULong $quality.apply_same_source_same_hit_contribution_jump_count
+        apply_same_source_miss_contribution_jump_count =
+            ULong $quality.apply_same_source_miss_contribution_jump_count
+        apply_unclassified_contribution_jump_count =
+            ULong $quality.apply_unclassified_contribution_jump_count
         dnsr_intersect_spatial_discontinuity_count = $intersectSpatialJumps
         dnsr_reproject_spatial_discontinuity_count = $reprojectSpatialJumps
         dnsr_resolve_spatial_discontinuity_count = $resolveSpatialJumps
@@ -1453,13 +1712,20 @@ foreach ($quality in $selectedQuality) {
             detail = "No Apply records matched the selected receiver."
         }) | Out-Null
     }
-    if ($applyBlendRatio -gt 0.02) {
+    $sameSourceMissDiscontinuities =
+        ULong $quality.apply_same_source_miss_discontinuity_count
+    $sameSourceMissContributionJumps =
+        ULong $quality.apply_same_source_miss_contribution_jump_count
+    $sameSourceSameHitContributionJumps =
+        ULong $quality.apply_same_source_same_hit_contribution_jump_count
+    if ($sameSourceMissContributionJumps -gt 0 -or
+        $sameSourceSameHitContributionJumps -gt 0) {
         $findings.Add([pscustomobject]@{
             severity = "warning"
-            code = "apply_blend_boundary_discontinuity"
+            code = "unphysical_reflection_provenance_discontinuity"
             capture_index = $capture
             object = $quality.receiver_name
-            detail = "$($quality.apply_blend_discontinuity_count) of $applyAdjacent neighboring Apply samples cross an unstable blend boundary; confidence-attributed=$($quality.apply_confidence_discontinuity_count), unexplained=$($quality.apply_unexplained_blend_discontinuity_count), large-contribution-jumps=$($quality.apply_blend_contribution_jump_count), DNSR spatial Intersect/Reproject/Resolve=$intersectSpatialJumps/$reprojectSpatialJumps/$resolveSpatialJumps, stage large transitions=$intersectToReprojectLargeChanges/$reprojectToResolveLargeChanges."
+            detail = "Unstable Apply provenance has same-source miss boundaries/jumps=$sameSourceMissDiscontinuities/$sameSourceMissContributionJumps and same-source/same-hit large contribution jumps=$sameSourceSameHitContributionJumps. Classified source-transition/different-hit/same-hit/miss/unclassified=$($quality.apply_source_transition_discontinuity_count)/$($quality.apply_same_source_different_hit_discontinuity_count)/$($quality.apply_same_source_same_hit_discontinuity_count)/$($quality.apply_same_source_miss_discontinuity_count)/$($quality.apply_unclassified_discontinuity_count); DNSR stage transitions=$intersectToReprojectLargeChanges/$reprojectToResolveLargeChanges."
         }) | Out-Null
     }
     if ($sourceTransitionRatio -gt 0.10 -and
@@ -1631,6 +1897,20 @@ $summary = [pscustomobject]@{
         $qualityConfidenceDiscontinuityCount
     applyUnexplainedDiscontinuityRows =
         $qualityUnexplainedDiscontinuityCount
+    applyDiscontinuityClasses = [ordered]@{
+        sourceTransition = $qualityDiscontinuityClassTotals["source_transition"]
+        sameSourceDifferentHit = $qualityDiscontinuityClassTotals["same_source_different_hit"]
+        sameSourceSameHit = $qualityDiscontinuityClassTotals["same_source_same_hit"]
+        sameSourceMiss = $qualityDiscontinuityClassTotals["same_source_miss"]
+        unclassified = $qualityDiscontinuityClassTotals["unclassified"]
+    }
+    applyContributionJumpClasses = [ordered]@{
+        sourceTransition = $qualityContributionJumpClassTotals["source_transition"]
+        sameSourceDifferentHit = $qualityContributionJumpClassTotals["same_source_different_hit"]
+        sameSourceSameHit = $qualityContributionJumpClassTotals["same_source_same_hit"]
+        sameSourceMiss = $qualityContributionJumpClassTotals["same_source_miss"]
+        unclassified = $qualityContributionJumpClassTotals["unclassified"]
+    }
     benchmarkRows = $benchmark.Count
     benchmarkColumnCount = $benchmarkColumnCount
     extendedReport = [bool]$ExtendedReport

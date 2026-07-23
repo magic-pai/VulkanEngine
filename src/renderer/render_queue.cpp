@@ -579,6 +579,10 @@ std::span<const RenderCommand> RenderQueue::Commands() const {
     return std::span<const RenderCommand>(m_Commands.data(), m_Commands.size());
 }
 
+std::span<RenderCommand> RenderQueue::MutableCommands() {
+    return std::span<RenderCommand>(m_Commands.data(), m_Commands.size());
+}
+
 bool RenderQueue::Empty() const {
     return m_Commands.empty();
 }

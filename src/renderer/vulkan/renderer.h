@@ -21,6 +21,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace se {
 
@@ -661,7 +662,8 @@ private:
         const FrameTemporalState* temporalState,
         bool ssrFidelityFxDeferredCompositeActive = false,
         bool ssrFidelityFxSameFrameCompositeActive = false,
-        bool ssrFidelityFxHitConfidenceActive = false
+        bool ssrFidelityFxHitConfidenceActive = false,
+        bool ssrFidelityFxConfidenceSpatialFilterActive = false
     ) const;
     void UpdateFfxSssrConstants(
         std::size_t imageIndex,
@@ -672,11 +674,14 @@ private:
         bool stableEnvironmentFallbackEnabled,
         bool constantEnvironmentFallbackEnabled,
         bool perfectReflectionDirectionsEnabled,
+        bool reprojectBypassEnabled,
         bool prefilterBypassEnabled,
         bool resolveTemporalBypassEnabled,
         bool classifySurfaceSeedEnabled,
         bool intersectCoverageMarkerEnabled,
         bool hitAttributionEnabled,
+        bool zeroConfidenceHistoryRejectionEnabled,
+        bool radianceSanitizationEnabled,
         u32 environmentMipCount,
         u32 compositeConfidenceMode
     ) const;
@@ -746,6 +751,10 @@ private:
     FrameReflectionProbeSet BuildFrameReflectionProbeSet(
         const FrameMatrices* matrices
     ) const;
+    bool AssignObjectReflectionProbes(
+        std::span<RenderCommand> renderCommands,
+        const FrameReflectionProbeSet& reflectionProbes
+    );
     FrameMaterialSet BuildFrameMaterialSet(std::span<const RenderCommand> renderCommands) const;
     void BuildGBufferCommandList(
         std::span<const RenderCommand> renderCommands,
@@ -802,6 +811,12 @@ private:
     bool UploadMainInstancesIfNeeded(std::size_t imageIndex);
 
 private:
+    struct ObjectReflectionProbeAssignment {
+        i32 sceneIndex = -1;
+        f32 weight = 0.0f;
+        u32 assignmentCode = 0u;
+    };
+
     struct ReflectionCaptureShadowSnapshot {
         i32 probeSceneIndex = -1;
         u32 inputSignature = 0;
@@ -1032,6 +1047,8 @@ private:
     VulkanIblGenerationSettings m_IblGenerationSettings{};
     VulkanIblGenerationInfo m_IblGenerationInfo{};
     VulkanReflectionProbeResources m_ReflectionProbeResources;
+    std::unordered_map<u64, ObjectReflectionProbeAssignment>
+        m_ObjectReflectionProbeAssignments;
     i32 m_ReflectionCaptureRoundRobinSceneIndex = -1;
     i32 m_ReflectionCaptureActiveSceneIndex = -1;
     u64 m_ReflectionCaptureSchedulerFrame = 0;

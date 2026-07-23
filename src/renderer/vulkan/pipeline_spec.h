@@ -15,6 +15,7 @@ enum class VertexLayout {
 enum class ColorBlendMode {
     Disabled,
     Alpha,
+    AlphaPreserveDestinationAlpha,
     Additive,
     DestinationAlphaAdditive,
     ZeroSource

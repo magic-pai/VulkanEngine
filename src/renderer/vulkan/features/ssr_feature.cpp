@@ -344,8 +344,8 @@ void VulkanSsrFeature::AppendFrameGraph(
             RenderFramePassQueue::Graphics,
             "FidelityFXSSSRApplyReflections",
             applyReadsSceneProbeCubemap
-                ? "HDRSceneColor, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap, SceneReflectionProbeCubemap"
-                : "HDRSceneColor, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
+                ? "HDRSceneColor, FFX IntersectOutput, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap, SceneReflectionProbeCubemap"
+                : "HDRSceneColor, FFX IntersectOutput, FFX RadianceHistory, FFX HitConfidenceHistory, GBufferAlbedo, GBufferNormalRoughness, GBufferMaterial, SceneDepth, BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap",
             "HDRSceneColor",
             "Same-frame composition blends validated screen-space radiance against the selected local Probe/IBL baseline before temporal upscaling."
         );
@@ -572,7 +572,7 @@ void VulkanSsrFeature::WriteStats(
         settings.ssrFidelityFxBackendRequested ? 1u : 0u;
     ssr.backendActiveProvider = 0u;
 #if defined(SE_ENABLE_FIDELITYFX_SSSR) && SE_ENABLE_FIDELITYFX_SSSR
-    ssr.fidelityFxSssrContractVersion = 13u;
+    ssr.fidelityFxSssrContractVersion = 16u;
     ssr.fidelityFxSssrSourceReady = 1u;
     ssr.fidelityFxSssrShaderBuildIntegrated = 1u;
     ssr.fidelityFxSssrShaderCount = SE_FIDELITYFX_SSSR_SHADER_COUNT;
@@ -600,16 +600,30 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrConstantEnvironmentFallbackEnabled ? 1u : 0u;
     ssr.fidelityFxSssrPerfectReflectionDirectionsEnabled =
         context.renderer.ffxSssrPerfectReflectionDirectionsEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrReprojectBypassEnabled =
+        context.renderer.ffxSssrReprojectBypassEnabled ? 1u : 0u;
     ssr.fidelityFxSssrPrefilterBypassEnabled =
         context.renderer.ffxSssrPrefilterBypassEnabled ? 1u : 0u;
     ssr.fidelityFxSssrResolveTemporalBypassEnabled =
         context.renderer.ffxSssrResolveTemporalBypassEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrMirrorDnsrPassthroughRequested =
+        context.renderer.ffxSssrMirrorDnsrPassthroughRequested ? 1u : 0u;
+    ssr.fidelityFxSssrMirrorDnsrPassthroughResourcesReady =
+        context.renderer.ffxSssrMirrorDnsrPassthroughResourcesReady ? 1u : 0u;
+    ssr.fidelityFxSssrMirrorDnsrPassthroughActive =
+        context.renderer.ffxSssrMirrorDnsrPassthroughActive ? 1u : 0u;
+    ssr.fidelityFxSssrMirrorDnsrRoughnessThresholdMilliunits =
+        context.renderer.ffxSssrMirrorDnsrRoughnessThresholdMilliunits;
+    ssr.fidelityFxSssrMirrorDnsrConfidenceThresholdPermille =
+        context.renderer.ffxSssrMirrorDnsrConfidenceThresholdPermille;
     ssr.fidelityFxSssrClassifySurfaceSeedEnabled =
         context.renderer.ffxSssrClassifySurfaceSeedEnabled ? 1u : 0u;
     ssr.fidelityFxSssrIntersectCoverageMarkerEnabled =
         context.renderer.ffxSssrIntersectCoverageMarkerEnabled ? 1u : 0u;
     ssr.fidelityFxSssrEnvironmentMipCount =
         context.renderer.ffxSssrEnvironmentMipCount;
+    ssr.fidelityFxSssrRadianceSanitizationEnabled =
+        context.renderer.ffxSssrRadianceSanitizationEnabled ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady =
         context.renderer.ffxSssrPrepareIndirectArgsResourcesReady ? 1u : 0u;
     ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady =
@@ -712,6 +726,8 @@ void VulkanSsrFeature::WriteStats(
         context.renderer.ffxSssrReprojectMotionVectorContractReady ? 1u : 0u;
     ssr.fidelityFxSssrReprojectHitReprojectionEnabled =
         context.renderer.ffxSssrReprojectHitReprojectionEnabled ? 1u : 0u;
+    ssr.fidelityFxSssrZeroConfidenceHistoryRejectionEnabled =
+        context.renderer.ffxSssrZeroConfidenceHistoryRejectionEnabled ? 1u : 0u;
     ssr.fidelityFxSssrReprojectReprojectionContractReady =
         context.renderer.ffxSssrReprojectReprojectionContractReady ? 1u : 0u;
     ssr.fidelityFxSssrPrefilterResourcesReady =

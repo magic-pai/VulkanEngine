@@ -83,6 +83,7 @@ layout(set = 1, binding = 2) uniform sampler2D gBufferMaterial;
 layout(set = 1, binding = 4) uniform sampler2D sceneDepth;
 layout(set = 1, binding = 5) uniform sampler2D gBufferEmissive;
 layout(set = 1, binding = 7) uniform sampler2D gBufferMaterialAux;
+layout(set = 1, binding = 16) uniform sampler2D ffxSssrCurrentIntersectionRadiance;
 layout(set = 1, binding = 17) uniform sampler2D ffxSssrCurrentRadiance;
 layout(set = 1, binding = 18) uniform sampler2D ffxSssrHitConfidence;
 #if defined(SE_REFLECTION_FULL_AUDIT)
@@ -118,7 +119,11 @@ void WriteReflectionApplyAudit(
     vec3 contribution,
     float roughness,
     float metallic,
-    bool provenanceEnabled
+    bool provenanceEnabled,
+    int objectProbeAssignmentCode,
+    uint activeProbeMask,
+    bool objectStableEnabled,
+    bool mirrorDnsrPassthrough
 ) {
     uint recordIndex = atomicAdd(
         reflectionAudit[FULL_AUDIT_APPLY_COUNT_INDEX],
@@ -140,6 +145,10 @@ void WriteReflectionApplyAudit(
     if (AuditFinite(resolved.rgb)) flags |= 1u << 3u;
     if (AuditFinite(probeFallback)) flags |= 1u << 4u;
     if (AuditFinite(contribution)) flags |= 1u << 5u;
+    if (mirrorDnsrPassthrough) flags |= 1u << 6u;
+    flags |= (uint(clamp(objectProbeAssignmentCode, 0, 7)) & 0x7u) << 8u;
+    flags |= (activeProbeMask & 0xFu) << 11u;
+    if (objectStableEnabled) flags |= 1u << 15u;
     reflectionAudit[base + 0u] =
         (coordinates.x & 0xffffu) | (coordinates.y << 16u);
     reflectionAudit[base + 1u] = objectId;
@@ -162,6 +171,9 @@ void WriteReflectionApplyAudit(
 
 const int MAX_FRAME_MATERIALS = 256;
 const float FFX_SSSR_ROUGHNESS_THRESHOLD = 0.6;
+const float FFX_SSSR_MIRROR_DNSR_ROUGHNESS_THRESHOLD = 0.08;
+const float FFX_SSSR_MIRROR_DNSR_CONFIDENCE_THRESHOLD = 0.995;
+const int GBUFFER_MATERIAL_PROBE_STRIDE = 6;
 
 bool HasTextureFlag(float flags, float bit) {
     return mod(floor(flags / bit), 2.0) > 0.5;
@@ -193,6 +205,16 @@ bool TryGetMaterialRecord(float materialIdFloat, out MaterialRecord materialReco
     return true;
 }
 
+int GBufferMaterialId(float packedMaterialProbe) {
+    return int(floor(max(packedMaterialProbe, 0.0) /
+        float(GBUFFER_MATERIAL_PROBE_STRIDE) + 0.0001));
+}
+
+int GBufferObjectProbeAssignmentCode(float packedMaterialProbe) {
+    int packed = int(max(packedMaterialProbe, 0.0) + 0.5);
+    return packed % GBUFFER_MATERIAL_PROBE_STRIDE;
+}
+
 vec3 ReconstructWorldPosition(vec2 uv, float depth) {
     vec4 clipPosition = vec4(uv * 2.0 - 1.0, depth, 1.0);
     vec4 viewPosition = frame.invProj * clipPosition;
@@ -209,6 +231,66 @@ bool SsrProbeFallbackBlendEnabled() {
 
 bool FfxSssrHitProvenanceEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 524288.0), 2.0) > 0.5;
+}
+
+bool FfxSssrConfidenceSpatialFilterEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 1048576.0), 2.0) > 0.5;
+}
+
+float FfxSssrFilteredHitConfidence(vec2 uv) {
+    float center = clamp(texture(ffxSssrHitConfidence, uv).r, 0.0, 1.0);
+    if (!FfxSssrConfidenceSpatialFilterEnabled() || center >= 0.995) {
+        return center;
+    }
+    vec2 texel = 1.0 / vec2(max(textureSize(
+        ffxSssrHitConfidence,
+        0
+    ), ivec2(1)));
+    vec4 centerSurface = texture(gBufferNormalRoughness, uv);
+    vec3 centerNormal = normalize(centerSurface.xyz * 2.0 - 1.0);
+    float centerDepth = texture(sceneDepth, uv).r;
+    const vec2 offsets[4] = vec2[](
+        vec2(-1.0, 0.0),
+        vec2(1.0, 0.0),
+        vec2(0.0, -1.0),
+        vec2(0.0, 1.0)
+    );
+    float weightedConfidence = center * 2.0;
+    float totalWeight = 2.0;
+    for (int index = 0; index < 4; ++index) {
+        vec2 tapUv = clamp(
+            uv + offsets[index] * texel,
+            texel * 0.5,
+            vec2(1.0) - texel * 0.5
+        );
+        vec4 tapSurface = texture(gBufferNormalRoughness, tapUv);
+        vec3 tapNormal = normalize(tapSurface.xyz * 2.0 - 1.0);
+        float tapDepth = texture(sceneDepth, tapUv).r;
+        float depthWeight = 1.0 - smoothstep(
+            0.00025,
+            0.003,
+            abs(tapDepth - centerDepth)
+        );
+        float normalWeight = smoothstep(
+            0.85,
+            0.98,
+            dot(centerNormal, tapNormal)
+        );
+        float roughnessWeight = 1.0 - smoothstep(
+            0.02,
+            0.12,
+            abs(tapSurface.w - centerSurface.w)
+        );
+        float weight = depthWeight * normalWeight * roughnessWeight;
+        float tapConfidence = clamp(
+            texture(ffxSssrHitConfidence, tapUv).r,
+            0.0,
+            1.0
+        );
+        weightedConfidence += tapConfidence * weight;
+        totalWeight += weight;
+    }
+    return clamp(weightedConfidence / max(totalWeight, 0.0001), 0.0, 1.0);
 }
 
 float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
@@ -236,8 +318,41 @@ bool ReflectionProbeDominantMirrorEnabled() {
     ) > 0.5;
 }
 
-float ReflectionProbeDominantMirrorFactor(float roughness) {
+bool ReflectionProbeDominantMirrorHardSwitchEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 8.0), 2.0) > 0.5;
+}
+
+bool ReflectionProbeObjectStableEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 16.0), 2.0) > 0.5;
+}
+
+bool MirrorSourceSelectionIndependentEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 32.0), 2.0) > 0.5;
+}
+
+float ReflectionProbeMirrorFactor(float roughness) {
     return 1.0 - smoothstep(0.30, 0.60, clamp(roughness, 0.0, 1.0));
+}
+
+float ReflectionProbeDominantMirrorFactor(
+    float roughness,
+    float dominantWeight,
+    float runnerUpWeight,
+    float totalWeight
+) {
+    float roughnessFactor = ReflectionProbeMirrorFactor(roughness);
+    if (ReflectionProbeDominantMirrorHardSwitchEnabled()) {
+        return roughnessFactor;
+    }
+    float dominanceMargin = clamp(
+        (dominantWeight - runnerUpWeight) / max(totalWeight, 0.000001),
+        0.0,
+        1.0
+    );
+    return roughnessFactor * smoothstep(0.02, 0.18, dominanceMargin);
 }
 
 float IblSpecularStability(float roughness) {
@@ -331,7 +446,15 @@ vec3 SampleLocalProbe(int slotIndex, vec3 direction, float lod) {
     return textureLod(localReflectionProbeMaps[3], direction, lod).rgb;
 }
 
-vec3 SelectedLocalProbeRadiance(vec3 direction, float roughness, vec3 worldPosition, vec3 globalRadiance) {
+vec3 SelectedLocalProbeRadiance(
+    vec3 direction,
+    float roughness,
+    vec3 worldPosition,
+    vec3 globalRadiance,
+    int objectProbeAssignmentCode,
+    out uint activeProbeMask
+) {
+    activeProbeMask = 0u;
     int probeCount = clamp(int(frame.reflectionProbeBlendControls.x + 0.5), 0, 4);
     if (frame.reflectionProbeBlendControls.y <= 0.5 || probeCount <= 0) {
         return globalRadiance;
@@ -381,26 +504,62 @@ vec3 SelectedLocalProbeRadiance(vec3 direction, float roughness, vec3 worldPosit
             ? max(maxCoverage, coverages[index])
             : clamp(totalWeight, 0.0, 1.0);
     }
-    if (totalWeight <= 0.0001) {
+    int assignedProbeIndex = objectProbeAssignmentCode - 1;
+    bool assignedProbeValid = assignedProbeIndex >= 0 &&
+        assignedProbeIndex < probeCount;
+    float objectStableFactor = productionBlend &&
+        ReflectionProbeDominantMirrorEnabled() &&
+        ReflectionProbeObjectStableEnabled()
+        ? ReflectionProbeMirrorFactor(roughness)
+        : 0.0;
+    if (totalWeight <= 0.0001 &&
+        !(assignedProbeValid && objectStableFactor > 0.0001)) {
         return globalRadiance;
     }
     int dominantProbeIndex = -1;
     float dominantRawWeight = 0.0;
+    float runnerUpRawWeight = 0.0;
     for (int index = 0; index < 4; ++index) {
         if (index < probeCount && weights[index] > dominantRawWeight) {
+            runnerUpRawWeight = dominantRawWeight;
             dominantRawWeight = weights[index];
             dominantProbeIndex = index;
+        } else if (index < probeCount) {
+            runnerUpRawWeight = max(runnerUpRawWeight, weights[index]);
         }
     }
     float dominantMirrorFactor = productionBlend &&
         ReflectionProbeDominantMirrorEnabled() &&
+        !ReflectionProbeObjectStableEnabled() &&
         dominantProbeIndex >= 0
-        ? ReflectionProbeDominantMirrorFactor(roughness)
+        ? ReflectionProbeDominantMirrorFactor(
+            roughness,
+            dominantRawWeight,
+            runnerUpRawWeight,
+            totalWeight
+        )
         : 0.0;
+    int resolvedMirrorProbeIndex = ReflectionProbeObjectStableEnabled()
+        ? assignedProbeIndex
+        : dominantProbeIndex;
+    float resolvedMirrorFactor = ReflectionProbeObjectStableEnabled()
+        ? objectStableFactor
+        : dominantMirrorFactor;
+    float localWeightDenominator = totalWeight > 0.0001
+        ? totalWeight
+        : 1.0;
+    maxCoverage = mix(
+        maxCoverage,
+        assignedProbeValid ? 1.0 : 0.0,
+        objectStableFactor
+    );
     vec3 localBlend = vec3(0.0);
     float roughnessClamped = clamp(roughness, 0.0, 1.0);
     for (int index = 0; index < 4; ++index) {
-        if (index >= probeCount || weights[index] <= 0.0001) continue;
+        bool stableAssignedProbe = objectStableFactor > 0.0001 &&
+            assignedProbeValid && index == assignedProbeIndex;
+        if (index >= probeCount ||
+            (weights[index] <= 0.0001 && !stableAssignedProbe)) continue;
         vec4 color = frame.reflectionProbeColorArray[index];
         vec4 controls = frame.reflectionProbeControlsArray[index];
         vec3 sampled = globalRadiance * max(color.rgb, vec3(0.0));
@@ -412,11 +571,16 @@ vec3 SelectedLocalProbeRadiance(vec3 direction, float roughness, vec3 worldPosit
         }
         float effectiveWeight = mix(
             weights[index],
-            index == dominantProbeIndex ? totalWeight : 0.0,
-            dominantMirrorFactor
+            index == resolvedMirrorProbeIndex
+                ? localWeightDenominator
+                : 0.0,
+            resolvedMirrorFactor
         );
         if (effectiveWeight <= 0.0001) continue;
-        localBlend += sampled * clamp(controls.y, 0.0, 4.0) * IblSpecularStability(roughnessClamped) * (effectiveWeight / totalWeight);
+        activeProbeMask |= 1u << uint(index);
+        localBlend += sampled * clamp(controls.y, 0.0, 4.0) *
+            IblSpecularStability(roughnessClamped) *
+            (effectiveWeight / localWeightDenominator);
     }
     return mix(globalRadiance, localBlend, maxCoverage);
 }
@@ -435,8 +599,13 @@ void main() {
     float metallic = clamp(material.r, 0.0, 1.0);
     float occlusion = clamp(material.g, 0.0, 1.0);
     float specularTextureFactor = clamp(material.b, 0.0, 1.0);
+    int objectProbeAssignmentCode =
+        GBufferObjectProbeAssignmentCode(material.a);
     MaterialRecord materialRecord;
-    bool hasMaterialRecord = TryGetMaterialRecord(material.a, materialRecord);
+    bool hasMaterialRecord = TryGetMaterialRecord(
+        float(GBufferMaterialId(material.a)),
+        materialRecord
+    );
     if (hasMaterialRecord) {
         roughness = clamp(
             mix(
@@ -488,7 +657,7 @@ void main() {
     ).rg, vec2(0.0));
     vec3 envSpecularBrdf = max(f0 * envBrdf.x + envBrdf.y, vec3(0.0));
 
-    vec4 resolved = texture(ffxSssrCurrentRadiance, fragUv);
+    vec4 denoisedResolved = texture(ffxSssrCurrentRadiance, fragUv);
     vec3 lightDirection = lights.directionalLight.xyz;
     if (dot(lightDirection, lightDirection) < 0.0001) {
         lightDirection = vec3(-0.45, -0.82, -0.35);
@@ -496,19 +665,49 @@ void main() {
     vec3 lightDir = normalize(-lightDirection);
     vec3 reflection = reflect(-viewDirection, normal);
     vec3 globalFallback = GlobalEnvironmentRadiance(reflection, lightDir, roughness);
+    uint activeProbeMask = 0u;
     vec3 probeFallback = SelectedLocalProbeRadiance(
         reflection,
         roughness,
         worldPosition,
-        globalFallback
+        globalFallback,
+        objectProbeAssignmentCode,
+        activeProbeMask
     );
     float provenanceConfidence = FfxSssrHitProvenanceEnabled()
-        ? clamp(texture(ffxSssrHitConfidence, fragUv).r, 0.0, 1.0)
-        : clamp(resolved.a, 0.0, 1.0);
-    float blendWeight = SsrProbeFallbackBlendWeight(
-        provenanceConfidence * clamp(frame.ssrControls.x, 0.0, 1.0),
-        roughness
+        ? FfxSssrFilteredHitConfidence(fragUv)
+        : clamp(denoisedResolved.a, 0.0, 1.0);
+    bool mirrorDnsrPassthrough = FfxSssrHitProvenanceEnabled() &&
+        roughness <= FFX_SSSR_MIRROR_DNSR_ROUGHNESS_THRESHOLD &&
+        provenanceConfidence >= FFX_SSSR_MIRROR_DNSR_CONFIDENCE_THRESHOLD;
+    vec4 resolved = denoisedResolved;
+    if (mirrorDnsrPassthrough) {
+        vec3 currentRadiance = texture(
+            ffxSssrCurrentIntersectionRadiance,
+            fragUv
+        ).rgb;
+        bool finiteCurrent = all(not(isnan(currentRadiance))) &&
+            all(not(isinf(currentRadiance)));
+        if (finiteCurrent) {
+            resolved.rgb = max(currentRadiance, vec3(0.0));
+        } else {
+            mirrorDnsrPassthrough = false;
+        }
+    }
+    float mirrorSourceFactor = MirrorSourceSelectionIndependentEnabled()
+        ? ReflectionProbeMirrorFactor(roughness)
+        : 0.0;
+    float sourceSelectionConfidence = provenanceConfidence * mix(
+        clamp(frame.ssrControls.x, 0.0, 1.0),
+        1.0,
+        mirrorSourceFactor
     );
+    float blendWeight = mirrorDnsrPassthrough
+        ? 1.0
+        : SsrProbeFallbackBlendWeight(
+            sourceSelectionConfidence,
+            roughness
+        );
     float ambientStrength = max(lights.ambientLight.x, 0.08);
     float specularScale = floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5
         ? 1.0
@@ -531,7 +730,11 @@ void main() {
         contribution,
         roughness,
         metallic,
-        FfxSssrHitProvenanceEnabled()
+        FfxSssrHitProvenanceEnabled(),
+        objectProbeAssignmentCode,
+        activeProbeMask,
+        ReflectionProbeObjectStableEnabled(),
+        mirrorDnsrPassthrough
     );
 #endif
     outColor = vec4(contribution, 1.0);

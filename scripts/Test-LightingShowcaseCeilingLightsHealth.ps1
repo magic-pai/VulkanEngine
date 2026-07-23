@@ -4,6 +4,7 @@ param(
     [int]$WarmupFrames = 8,
     [int]$CaptureFrames = 12,
     [int]$AutoExitFrames = 24,
+    [switch]$DisablePointSpotDirectSpecular,
     [switch]$SkipBuild,
     [switch]$Strict
 )
@@ -107,6 +108,7 @@ $environment = @{
     SE_BENCHMARK_FRAMES = [string]$CaptureFrames
     SE_AUTO_EXIT_FRAMES = [string]$AutoExitFrames
     SE_BENCHMARK_CSV = $csvPath
+    SE_POINT_SPOT_DIRECT_SPECULAR_OFF = if ($DisablePointSpotDirectSpecular) { "1" } else { "" }
 }
 $previous = @{}
 foreach ($name in $environment.Keys) {
@@ -149,6 +151,10 @@ $columns = @(
     "local_shadow_rect_enabled",
     "local_shadow_rect_extra_sample_tiles",
     "local_shadow_rect_budget_limited_sample_tiles"
+    "frame_point_light_count"
+    "frame_spot_light_count"
+    "frame_point_spot_direct_specular_enabled_count"
+    "frame_point_spot_direct_specular_disabled_count"
 )
 $metrics = @{}
 foreach ($column in $columns) {
@@ -187,6 +193,17 @@ Add-Check -Checks $checks -Name "all local light kinds retain shadow sampling" `
     ) `
     -Actual "point=$($metrics['local_shadow_point_enabled'].min),spot=$($metrics['local_shadow_spot_enabled'].min),rect=$($metrics['local_shadow_rect_enabled'].min)" `
     -Expected "1/1/1"
+$expectedPointSpotSpecularEnabled = if ($DisablePointSpotDirectSpecular) { 0 } else { 3 }
+$expectedPointSpotSpecularDisabled = if ($DisablePointSpotDirectSpecular) { 3 } else { 0 }
+Add-Check -Checks $checks -Name "point and spot direct-specular control reaches the frame light contract" `
+    -Passed (
+        $metrics["frame_point_light_count"].min -eq 1 -and
+        $metrics["frame_spot_light_count"].min -eq 2 -and
+        $metrics["frame_point_spot_direct_specular_enabled_count"].min -eq $expectedPointSpotSpecularEnabled -and
+        $metrics["frame_point_spot_direct_specular_disabled_count"].min -eq $expectedPointSpotSpecularDisabled
+    ) `
+    -Actual "point=$($metrics['frame_point_light_count'].min),spot=$($metrics['frame_spot_light_count'].min),specularEnabled=$($metrics['frame_point_spot_direct_specular_enabled_count'].min),specularDisabled=$($metrics['frame_point_spot_direct_specular_disabled_count'].min)" `
+    -Expected "point=1,spot=2,specularEnabled=$expectedPointSpotSpecularEnabled,specularDisabled=$expectedPointSpotSpecularDisabled"
 Add-Check -Checks $checks -Name "combined shadow atlas stays within its budget" `
     -Passed (
         $metrics["local_shadow_requested_tiles"].max -eq 32 -and

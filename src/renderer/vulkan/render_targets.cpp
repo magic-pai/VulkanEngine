@@ -1155,9 +1155,13 @@ void VulkanSceneRenderTargets::Recreate(
     m_DisplayExtent = swapchain.Extent();
     m_Extent =
         extent.width > 0u && extent.height > 0u ? extent : swapchain.Extent();
+#if !defined(NDEBUG)
     m_ReflectionAuditObjectIdEnabled = VulkanEnvironmentFlagEnabled(
         "SE_HYBRID_REFLECTIONS_FULL_AUDIT"
     );
+#else
+    m_ReflectionAuditObjectIdEnabled = false;
+#endif
     const std::size_t count = swapchain.Images().size();
     const u32 hdrSceneColorMipLevels =
         physicalDevice.SupportsLinearBlit(kHdrSceneColorFormat)

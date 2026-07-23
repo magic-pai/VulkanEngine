@@ -80,6 +80,10 @@ bool IsBaseRay(uint2 dispatch_thread_id, uint samples_per_quad) {
 groupshared uint g_TileCount;
 
 float3 SampleEnvironmentMap(uint2 dispatch_thread_id, float roughness) {
+    if (SelfEngine_FfxSssrConstantEnvironmentFallbackEnabled()) {
+        return float3(0.6, 0.6, 0.6);
+    }
+
     float2 uv = (dispatch_thread_id + 0.5) * g_inv_buffer_dimensions;
     float3 world_space_normal = normalize(2.0 * g_normal.Load(int3(dispatch_thread_id, 0)).xyz - 1.0);
     float  z = g_depth_buffer.Load(int3(dispatch_thread_id, 0));
@@ -87,11 +91,18 @@ float3 SampleEnvironmentMap(uint2 dispatch_thread_id, float roughness) {
     float3 view_space_ray = FFX_DNSR_Reflections_ScreenSpaceToViewSpace(screen_uv_space_ray_origin);
     float3 view_space_ray_direction = normalize(view_space_ray);
     float3 view_space_surface_normal = mul(g_view, float4(world_space_normal, 0)).xyz;
+    if (dot(-view_space_ray_direction, view_space_surface_normal) < 0.0) {
+        view_space_surface_normal = -view_space_surface_normal;
+    }
     float3 view_space_reflected_direction = reflect(view_space_ray_direction, view_space_surface_normal);
     float3 world_space_reflected_direction = mul(g_inv_view, float4(view_space_reflected_direction, 0)).xyz;
 
-    const float mip_count = 10;
-    return g_environment_map.SampleLevel(g_environment_map_sampler, world_space_reflected_direction, roughness * (mip_count - 1)).xyz;
+    float3 radiance = g_environment_map.SampleLevel(
+        g_environment_map_sampler,
+        normalize(world_space_reflected_direction),
+        SelfEngine_FfxSssrEnvironmentMip(roughness)
+    ).xyz;
+    return SelfEngine_FfxSssrSanitizeRadiance(radiance);
 }
 
 void ClassifyTiles(uint2 dispatch_thread_id, uint2 group_thread_id, float roughness) {

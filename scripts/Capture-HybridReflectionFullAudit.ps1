@@ -18,6 +18,18 @@ param(
     [switch]$VerbosePixelCsv,
     [switch]$ExtendedReport,
     [switch]$CaptureRenderDocOnFailure,
+    [switch]$DisableZeroConfidenceHistoryRejection,
+    [switch]$DisableRadianceSanitization,
+    [switch]$DisableBackFaceCull,
+    [switch]$ForceAllRayQueries,
+    [switch]$DisableRayQueryHitIbl,
+    [switch]$DisableDirectMirrorRayQuery,
+    [switch]$DisableHdrAlphaPreservation,
+    [switch]$DisablePointSpotDirectSpecular,
+    [switch]$BypassReproject,
+    [switch]$DisableObjectStableProbeSelection,
+    [switch]$EnableHardPixelProbeSwitch,
+    [switch]$CoupleMirrorSourceSelectionToSsrStrength,
     [switch]$SkipBuild,
     [switch]$SkipSigning,
     [switch]$SkipAnalysis,
@@ -119,8 +131,11 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_FULL_AUDIT_CAPTURE_FRAMES",
     "SE_HYBRID_REFLECTIONS_FULL_AUDIT_START_FRAME",
     "SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES",
+    "SE_HYBRID_REFLECTIONS_HIT_IBL_OFF",
+    "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF",
     "SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF",
     "SE_HYBRID_REFLECTIONS_APPLY_BLEND_MODE",
+    "SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF",
     "SE_HYBRID_REFLECTIONS_FULL_AUDIT_VERBOSE_PIXEL_CSV",
     "SE_HYBRID_REFLECTIONS_FULL_AUDIT_RAW_EVIDENCE",
     "SE_SSR",
@@ -136,7 +151,14 @@ $managedKeys = @(
     "SE_BENCHMARK_WARMUP_FRAMES",
     "SE_BENCHMARK_FRAMES",
     "SE_AUTO_EXIT_FRAMES",
-    "SE_BENCHMARK_CSV"
+    "SE_BENCHMARK_CSV",
+    "SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF",
+    "SE_SSR_FFX_RADIANCE_SANITIZE_OFF",
+    "SE_SSR_FFX_REPROJECT_BYPASS",
+    "SE_POINT_SPOT_DIRECT_SPECULAR_OFF",
+    "SE_REFLECTION_PROBE_OBJECT_STABLE_OFF",
+    "SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH",
+    "SE_SSR_FFX_MIRROR_SOURCE_SELECTION_STRENGTH_COUPLED"
 )
 $previous = @{}
 foreach ($key in $managedKeys) {
@@ -160,9 +182,21 @@ $environment = @{
     SE_HYBRID_REFLECTIONS_FULL_AUDIT_START_FRAME = [string]$AuditStartFrame
     SE_HYBRID_REFLECTIONS_FULL_AUDIT_VERBOSE_PIXEL_CSV = if ($VerbosePixelCsv) { "1" } else { "0" }
     SE_HYBRID_REFLECTIONS_FULL_AUDIT_RAW_EVIDENCE = if ($RawEvidence -or $VerbosePixelCsv) { "1" } else { "0" }
+    SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES = if ($ForceAllRayQueries) { "1" } else { "" }
+    SE_HYBRID_REFLECTIONS_HIT_IBL_OFF = if ($DisableRayQueryHitIbl) { "1" } else { "" }
+    SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF = if ($DisableDirectMirrorRayQuery) { "1" } else { "" }
+    SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF = if ($DisableBackFaceCull) { "1" } else { "" }
     SE_HYBRID_REFLECTIONS_APPLY_BLEND_MODE = if ($ApplyBlendMode -eq "default") { "" } else { $ApplyBlendMode }
+    SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF = if ($DisableHdrAlphaPreservation) { "1" } else { "" }
     SE_SSR = "1"
     SE_SSR_BACKEND = "ffx-sssr"
+    SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF = if ($DisableZeroConfidenceHistoryRejection) { "1" } else { "" }
+    SE_SSR_FFX_RADIANCE_SANITIZE_OFF = if ($DisableRadianceSanitization) { "1" } else { "" }
+    SE_SSR_FFX_REPROJECT_BYPASS = if ($BypassReproject) { "1" } else { "" }
+    SE_POINT_SPOT_DIRECT_SPECULAR_OFF = if ($DisablePointSpotDirectSpecular) { "1" } else { "" }
+    SE_REFLECTION_PROBE_OBJECT_STABLE_OFF = if ($DisableObjectStableProbeSelection) { "1" } else { "" }
+    SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH = if ($EnableHardPixelProbeSwitch) { "1" } else { "" }
+    SE_SSR_FFX_MIRROR_SOURCE_SELECTION_STRENGTH_COUPLED = if ($CoupleMirrorSourceSelectionToSsrStrength) { "1" } else { "" }
     SE_FORWARD3D_AA_MODE = $AaMode
     SE_BENCHMARK_SCENE = $effectiveBenchmarkScene
     SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = $productionFbxValue
@@ -199,6 +233,19 @@ $launchStarted = Get-Date
     signerSubject = if ($null -ne $signature.SignerCertificate) {
         $signature.SignerCertificate.Subject
     } else { "" }
+    zeroConfidenceHistoryRejectionExpected =
+        -not [bool]$DisableZeroConfidenceHistoryRejection
+    forceAllRayQueriesExpected = [bool]$ForceAllRayQueries
+    rayQueryHitIblEnabledExpected = -not [bool]$DisableRayQueryHitIbl
+    directMirrorRayQueryEnabledExpected = -not [bool]$DisableDirectMirrorRayQuery
+    pointSpotDirectSpecularDisabledExpected =
+        [bool]$DisablePointSpotDirectSpecular
+    reprojectBypassExpected = [bool]$BypassReproject
+    objectStableProbeSelectionExpected =
+        -not [bool]$DisableObjectStableProbeSelection
+    hardPixelProbeSwitchExpected = [bool]$EnableHardPixelProbeSwitch
+    mirrorSourceSelectionStrengthCoupledExpected =
+        [bool]$CoupleMirrorSourceSelectionToSsrStrength
     startedAt = $launchStarted.ToString("o")
     outputDirectory = $OutputDirectory
 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $launchContractPath

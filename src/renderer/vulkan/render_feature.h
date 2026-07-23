@@ -46,11 +46,18 @@ struct VulkanRenderFeatureContext {
     bool ffxSssrStableEnvironmentFallbackEnabled = false;
     bool ffxSssrConstantEnvironmentFallbackEnabled = false;
     bool ffxSssrPerfectReflectionDirectionsEnabled = false;
+    bool ffxSssrReprojectBypassEnabled = false;
     bool ffxSssrPrefilterBypassEnabled = false;
     bool ffxSssrResolveTemporalBypassEnabled = false;
+    bool ffxSssrMirrorDnsrPassthroughRequested = false;
+    bool ffxSssrMirrorDnsrPassthroughResourcesReady = false;
+    bool ffxSssrMirrorDnsrPassthroughActive = false;
+    u32 ffxSssrMirrorDnsrRoughnessThresholdMilliunits = 80u;
+    u32 ffxSssrMirrorDnsrConfidenceThresholdPermille = 995u;
     bool ffxSssrClassifySurfaceSeedEnabled = false;
     bool ffxSssrIntersectCoverageMarkerEnabled = false;
     u32 ffxSssrEnvironmentMipCount = 0u;
+    bool ffxSssrRadianceSanitizationEnabled = true;
     bool ffxSssrPrepareIndirectArgsResourcesReady = false;
     bool ffxSssrPrepareIndirectArgsDescriptorSetsReady = false;
     bool ffxSssrPrepareIndirectArgsPipelineReady = false;
@@ -102,6 +109,7 @@ struct VulkanRenderFeatureContext {
     f32 ffxSssrReprojectMotionVectorScaleY = 1.0f;
     bool ffxSssrReprojectMotionVectorContractReady = true;
     bool ffxSssrReprojectHitReprojectionEnabled = true;
+    bool ffxSssrZeroConfidenceHistoryRejectionEnabled = true;
     bool ffxSssrReprojectReprojectionContractReady = true;
     bool ffxSssrPrefilterResourcesReady = false;
     bool ffxSssrPrefilterDescriptorSetsReady = false;

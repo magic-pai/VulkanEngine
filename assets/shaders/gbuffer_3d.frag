@@ -62,6 +62,8 @@ layout(set = 1, binding = 9) uniform sampler2D clearcoatSampler;
 layout(set = 1, binding = 10) uniform sampler2D transmissionSampler;
 layout(set = 1, binding = 11) uniform sampler2D clearcoatRoughnessSampler;
 
+const float GBUFFER_MATERIAL_PROBE_STRIDE = 6.0;
+
 bool HasTextureFlag(float flags, float bit) {
     return mod(floor(flags / bit), 2.0) > 0.5;
 }
@@ -229,7 +231,18 @@ void main() {
 
     outAlbedo = vec4(baseColor, materialAlpha);
     outNormalRoughness = vec4(normal * 0.5 + 0.5, roughness);
-    outMaterial = vec4(metallic, occlusion, specularTextureFactor, max(objectData.materialControls.w, 0.0));
+    uint packedObjectMetadata = uint(max(objectData.viewport.w, 0.0) + 0.5);
+    float reflectionProbeAssignmentCode = float(packedObjectMetadata % 8u);
+    float packedMaterialProbe =
+        max(objectData.materialControls.w, 0.0) *
+            GBUFFER_MATERIAL_PROBE_STRIDE +
+        reflectionProbeAssignmentCode;
+    outMaterial = vec4(
+        metallic,
+        occlusion,
+        specularTextureFactor,
+        packedMaterialProbe
+    );
     outEmissive = vec4(emissive, clearcoat);
     vec2 currentNdc = fragCurrentClip.xy / max(abs(fragCurrentClip.w), 0.000001);
     vec2 previousNdc = fragPreviousClip.xy / max(abs(fragPreviousClip.w), 0.000001);

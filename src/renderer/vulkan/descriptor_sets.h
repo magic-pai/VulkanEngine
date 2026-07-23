@@ -167,7 +167,10 @@ public:
         VkImageView resolvedReflectionOverride = VK_NULL_HANDLE,
         VkImageLayout resolvedReflectionLayout = VK_IMAGE_LAYOUT_GENERAL,
         VkImageView hitConfidenceOverride = VK_NULL_HANDLE,
-        VkImageLayout hitConfidenceLayout = VK_IMAGE_LAYOUT_GENERAL
+        VkImageLayout hitConfidenceLayout = VK_IMAGE_LAYOUT_GENERAL,
+        VkImageView currentReflectionOverride = VK_NULL_HANDLE,
+        VkImageLayout currentReflectionLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
     void Recreate(

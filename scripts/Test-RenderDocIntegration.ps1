@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$CaptureManifest = "",
+    [string]$DescriptorInspectionReport = "",
     [string]$OutputPath = "tmp\renderdoc_integration_static.json",
     [switch]$Strict
 )
@@ -11,6 +12,7 @@ $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (![IO.Path]::IsPathRooted($OutputPath)) {
     $OutputPath = Join-Path $projectRoot $OutputPath
 }
+
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 
 $checks = [Collections.Generic.List[object]]::new()
@@ -21,6 +23,31 @@ function Add-Check([string]$Name, [bool]$Passed, $Actual, $Expected) {
         actual = $Actual
         expected = $Expected
     }) | Out-Null
+}
+
+if (![string]::IsNullOrWhiteSpace($DescriptorInspectionReport)) {
+    if (![IO.Path]::IsPathRooted($DescriptorInspectionReport)) {
+        $DescriptorInspectionReport = Join-Path $projectRoot `
+            $DescriptorInspectionReport
+    }
+    Add-Check "descriptor inspection report exists" `
+        (Test-Path $DescriptorInspectionReport) `
+        (Test-Path $DescriptorInspectionReport) $true
+    if (Test-Path $DescriptorInspectionReport) {
+        $descriptorReport = Get-Content -Raw $DescriptorInspectionReport |
+            ConvertFrom-Json
+        Add-Check "descriptor inspection completed" `
+            ($descriptorReport.status -eq "complete") `
+            $descriptorReport.status "complete"
+        Add-Check "descriptor inspection contract" `
+            ([uint32]$descriptorReport.contractVersion -eq 1) `
+            $descriptorReport.contractVersion 1
+        Add-Check "descriptor inspection checks" `
+            ([uint32]$descriptorReport.failCount -eq 0 -and
+             [uint32]$descriptorReport.passCount -ge 10) `
+            "$($descriptorReport.passCount)/$($descriptorReport.failCount)" `
+            ">=10/0"
+    }
 }
 
 $headerPath = Join-Path $projectRoot "thirdParty\renderdoc\renderdoc_app.h"

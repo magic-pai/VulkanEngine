@@ -2,6 +2,123 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-23 - Reflection Replacement Needs A Preserved Visibility Carrier
+
+Symptom:
+- Probe light duplication was reduced, but mirror geometry remained cubemap-
+  distorted and Ray Query geometry was weak or absent in the final HDR image.
+
+False leads:
+- Tuning source-fusion, hit-IBL, DNSR passthrough, or Probe weights. Those
+  controls did not change the visible failure because Apply did not own the
+  final indirect-specular term.
+- Disabling the Probe cubemap. That removed all useful reflection instead of
+  proving the Ray Query result reached HDR.
+
+Cause:
+- Deferred committed Probe specular after shadow, SSAO, transmission, and fog.
+  Apply subtracted an unattenuated Probe estimate, so additive replacement was
+  not mathematically equivalent.
+- HDR alpha already carried the exact specular visibility, but the fullscreen
+  weighted-translucency resolve overwrote it with zero before Apply. The prior
+  `DST_ALPHA` path therefore became a fixed-function no-op.
+
+Control test:
+- `SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF=1` restores the old alpha
+  write. Full Audit reports Apply shader/blend/actual luminance
+  `8664.51 / 0 / 0`, alpha `0..0`, and one blocking composition failure.
+
+Fix:
+- Forward residual and weighted-translucency RGB blending now preserve
+  destination alpha. Apply defaults to `DST_ALPHA + ONE`, implementing
+  `HDR + (resolved - Probe) * visibility`; additive remains a Debug control.
+- Full Audit contract v8 records mirror visibility ownership, and RenderDoc
+  asserts the physical Apply blend state in addition to descriptors.
+
+Prevention:
+- A reflection source is not integrated until its final HDR ownership equation
+  is conserved. Preserve explicit visibility metadata across every intervening
+  fullscreen/forward pass and retain a reverse control that makes the gate red.
+
+Validation:
+- LightingShowcase Full Audit `1103 / 0`, Forward3D `351 / 0`, FidelityFX
+  `1258 / 0`, Hybrid Reflections `418 / 0`, RenderDoc descriptor/blend `11 / 0`,
+  combined RenderDoc `36 / 0`. Visual acceptance remains pending.
+
+Sources:
+- https://gpuopen.com/manuals/fidelityfx_sdk/techniques/stochastic-screen-space-reflections/
+- https://github.com/GPUOpen-Effects/FidelityFX-SSSR
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/reflections-environment-in-unreal-engine
+
+## 2026-07-23 - Perfect Mirrors Need Object-Stable Probe Ownership
+
+Symptom:
+- Continuous blending removed the hard split on the LightingShowcase center
+  mirror, but duplicated wall fixtures and lights from different captured
+  Probe origins remained visibly overlaid.
+- The existing Full Audit passed because it checked resource identity, weight
+  normalization, and energy conservation, not reflection-source consistency
+  across one rendered object.
+
+False leads:
+- Tuning the dominant-weight margin or treating a smaller luminance distance
+  from the old hard-switch image as proof that ghosting improved.
+- Accepting one fixed camera and aggregate Probe weights as sufficient visual
+  coverage.
+
+Cause:
+- Captured cubemaps from different spatial origins are parallax-incompatible.
+  Blending both on a perfect mirror creates two valid but displaced images;
+  choosing a winner independently per pixel replaces the duplication with a
+  hard split where the winner changes.
+- Monitoring had no object-level expected Probe identity or final active
+  Probe mask, so both defects were outside its contract.
+
+Control test:
+- Run Full Audit v5 on the real LightingShowcase. The production path must
+  report zero mixed-source mirror pixels, assignment mismatches, metadata
+  mismatches, Probe-code changes, and multi-source mirror objects.
+- `-DisableObjectStableProbeSelection` restores continuous per-pixel blending
+  and must fail the mixed-source checks. Add
+  `-EnableHardPixelProbeSwitch` to restore winner-take-all selection; it must
+  fail object-level source consistency even when each pixel has one source.
+
+Fix:
+- Assign a local Probe once per renderable from its world-bounds center and
+  retain the previous scene Probe while it remains within 85% of the best
+  candidate. Carry the frame-local assignment through the per-object push
+  metadata and the existing GBuffer material channel.
+- Perfect/glossy receivers use that single Probe; rough receivers retain
+  continuous multi-Probe blending. Deferred, FFX Apply, Forward, weighted
+  translucency, and instancing share the same assignment contract.
+- Full Audit v5 packs the object assignment and final active Probe mask into
+  existing Apply flags and cross-checks them against GBuffer object identity
+  and CPU GBuffer-queue metadata without enlarging the GPU audit buffer.
+
+Prevention:
+- Never infer absence of Probe ghosting from normalized weights, resource
+  readiness, or a scalar image-distance metric. For mirror receivers, assert
+  one source per pixel and one Probe identity per object.
+- Use a Simple/single-Probe policy for perfect mirrors and reserve Blend
+  Probes for rough surfaces where filtering hides spatial disagreement.
+
+Validation:
+- LightingShowcase default Full Audit v5 passed `1098 / 0`: 95,276 mirror
+  samples and zero source-consistency failures. The close-camera lane passed
+  `966 / 0` over 260,608 mirror samples.
+- Continuous reverse control failed 3 checks with 95,276 mixed-source pixels
+  and 5 multi-source objects. Hard-switch reverse control failed 2 checks with
+  2,276 assignment mismatches and 1 multi-source object.
+- Animated Forward3D Full Audit passed `346 / 0`; SSR health passed `851 / 0`;
+  Probe capture health passed `1132 / 0 / 0`; RenderDoc integration passed
+  `32 / 0`. Final user visual acceptance is pending.
+
+Source:
+- https://docs.unity3d.com/ScriptReference/Rendering.ReflectionProbeUsage.html
+  documents separate `Simple` (no overlapping-Probe blend) and `BlendProbes`
+  policies; the SelfEngine mirror/roughness split follows that production
+  distinction.
+
 ## 2026-07-21 - SSR Must Preserve Hit Provenance Before IBL Fallback
 
 Symptom:
@@ -2764,31 +2881,36 @@ Validation:
 - The strict FFX integration matrix passed `1115 / 0` with zero FrameGraph/Vulkan diagnostics.
 - The SSR/Hi-Z regression passed `691 / 0` across LightingShowcase and the animated Forward3D FBX lane.
 
-## 2026-07-21 - Glossy Overlapping Probes Need Dominant Selection
+## 2026-07-23 - Glossy Overlapping Probes Must Not Hard-Switch Per Pixel
 
 Symptom:
-- Forcing captured Probe MIP0 made the fixture bars and housing crisp, but a metal receiver showed duplicated room/fixture silhouettes.
+- A mirror sphere was divided into large, visibly unrelated reflection regions.
+- The earlier hard-dominant Probe path reduced duplicate silhouettes but made neighboring mirror pixels switch entire cubemaps.
 
 False leads:
-- Increasing capture resolution, disabling global IBL, or treating the artifact as a missing captured object.
+- Treating the final Apply subtraction, TLAS front-face correction, capture resolution, or a single bad cubemap face as the primary split cause.
 
 Cause:
-- Two spatially overlapping local Probes were both valid and were mixed at `0.257578 / 0.742422`. Their different capture positions and Box Projection directions produced parallax-inconsistent mirror images. The FFX Apply fallback used the same multi-Probe blend contract and therefore had to agree with Deferred.
+- Multiple spatially overlapping Probes were valid. Their different capture positions and Box Projection directions are necessarily parallax-inconsistent on a perfect mirror.
+- The previous roughness-zero policy replaced continuous weights with a per-pixel winner-take-all Probe. When the largest weight changed across the sphere, the complete reflected image changed discontinuously.
 
 Control test:
-- Default `SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF` unset: roughness `0.24` resolves effective mask `0x2`, dominant weight `1.0`.
-- `SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF=1`: the same receiver returns effective mask `0x3` and dominant weight `0.742422`.
+- Production default keeps effective mask `0x3` and dominant normalized weight `0.742422`.
+- `SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH=1` restores the old effective mask `0x2` and dominant weight `1.0`.
+- On the same frozen frame and center-sphere object ID, hard switching produces `656` Apply-before adjacent luminance jumps above `0.2`; continuous blending produces `165`.
 
 Fix:
-- Use coverage/volume-priority dominant Probe selection for glossy materials, with a roughness-dependent transition from dominant-only at roughness `<=0.30` to regular multi-Probe blending by `0.60`.
-- Apply the same rule in Deferred environment resolution and FFX SSSR Apply fallback; keep the control Debug-only and scene-independent.
+- Keep coverage/volume-priority weights continuous for production mirror and glossy receivers.
+- Make the old dominant-only path an explicit Debug reverse control instead of the default. Deferred and FFX SSSR Apply now receive the same continuous mode; Forward and weighted translucency already used that contract.
 
 Prevention:
-- Do not solve glossy Probe ghosting by disabling IBL or lowering capture quality. Audit normalized Probe weights and Box Projection identity first, then use roughness-aware dominant selection for overlapping mirror views.
+- Never solve Probe ghosting with a per-pixel hard winner unless the transition is guaranteed outside visible geometry.
+- Cubemap Probes are an off-screen fallback, not exact mirror geometry. Use SSR/Ray Query/planar reflections for local mirror detail and retain continuous Probe fallback at source boundaries.
 
 Validation:
-- `Test-SsrRefinementHealth.ps1 -SkipBuild -Strict` passed `769 / 0` with default and dominant-selection-off lanes.
-- `Test-ReflectionCaptureHealth.ps1 -SkipBuild -Strict` passed `1109 / 0` with zero warnings/failures.
+- LightingShowcase Raw Full Audit passes `1114 / 0` with zero findings.
+- `Test-SsrRefinementHealth.ps1 -SkipBuild -SkipSigning -Strict -OutputDirectory tmp\\ssr_continuous_probe_regression` passes `809 / 0`, including the production continuous lane, old hard-switch reverse control, and three animated Forward3D FBX lanes.
+- The same-pixel reverse control increases Apply-before jumps above `0.2` by about `4x` and jumps above `0.4` from `10` to `52`.
 
 ## 2026-07-21 - Reflection Probe Captures Must Exclude the Receiving Surface
 
@@ -3077,38 +3199,41 @@ Validation:
 - LightingShowcase recorded `57,957` lighting hits/injections and `57,957 / 57,957 / 57,957,000` radiance/confidence/confidence-sum writes; animated Forward3D recorded `462` injections plus one explicit skinned fallback.
 - Debug Forward3D, Debug LightingShowcase, Release Forward3D, `spirv-val --target-env vulkan1.2`, FidelityFX SSSR `1115 / 0`, and SSR/Hi-Z `809 / 0` passed.
 - The user accepted the real Release LightingShowcase result as natural and stable, with no obvious white blocks, duplicate reflections, motion flicker, or re-entry delay.
-# 2026-07-22 - Ray Query Front-Face Convention Must Match Raster Winding
+# 2026-07-23 - Ray Query Front-Face Validation Must Prove The Nearest Side
 
 Symptom:
 - The LightingShowcase center mirror showed block-like reflection discontinuities and omitted the physically visible opposite silver sphere.
-- Analytic camera/sphere intersection predicted about 1.07% mirror coverage, but a material-color marker did not establish where the target was lost.
+- The center mirror also showed large black regions, duplicated or transparent-looking geometry, and reflections that appeared cut into unrelated pieces.
 
 False leads:
 - Moving the sphere, raising the SSSR acceptance threshold to `1.0`, and identifying the target only from metallic/roughness values.
-- Treating disabled back-face culling as an acceptable production fix.
+- Treating equal target-instance hit counts with culling on/off as proof that the face convention was correct.
+- The earlier 2026-07-22 conclusion that every TLAS instance needed `VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR`.
 
 Cause:
-- SelfEngine raster pipelines and built-in meshes use counter-clockwise front faces, but hybrid-reflection TLAS instances did not set `VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR`.
-- `RAY_FLAG_CULL_BACK_FACING_TRIANGLES` therefore rejected many intended exterior hits and retained the opposite face convention, producing missing geometry and discontinuous reflected regions.
+- SelfEngine flips clip-space Y in the Vulkan projection. Raster triangles are counter-clockwise after projection, while the object-space winding submitted to the acceleration structure uses Vulkan's default clockwise front convention.
+- Setting `VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR` reversed the Ray Query face classification. Closed meshes were still counted as hits, but the query skipped their near exterior surface and committed the far interior surface. Single-sided geometry such as the floor had no far surface and disappeared entirely.
 
 Control test:
-- Preserve the same scene, camera, ray list, and target material while comparing hybrid default, forced Ray Query with face culling, and forced Ray Query without culling.
-- Before the fix, forced culling reached the silver target `2416` times versus `11892` without culling. After correcting the face convention, production culling and no-cull both reached it `11892` times.
+- Preserve the same scene, camera, ray list, receiver object ID, and pixel coordinates while comparing production culling against disabled culling.
+- The broken path hit the opposite silver sphere at mean distance `2.102`; disabled culling selected `1.338`, a mean difference of `0.764` and maximum difference of `1.178`, approximately the sphere diameter. Pedestals, the gloss-black cube, walls, and ceiling showed the same far-side offset scaled by their thickness.
+- The broken path produced zero center-mirror floor hits; the correct control produced `2,811` matched floor hits. After the fix, all `19,609` center-mirror rays match the no-cull control, with zero hit-distance differences above `1e-5` and only two source/identity edge differences.
 
 Fix:
-- Mark every hybrid-reflection TLAS instance as counter-clockwise-front; preserve cull-disable only for explicitly double-sided materials.
-- Advance the Ray Query consumer contract to v3. The shader keeps a versioned v2 compatibility branch that culls the opposite Vulkan face for already-approved binaries whose instances lack the CCW flag.
-- Add opt-in submission-to-TLAS target attribution, forced-Ray-Query and no-cull controls, target hit/attribute/DNSR counters, and repeatable target-attribution scripts.
+- Keep the TLAS instance front-face flag at Vulkan's default clockwise convention; preserve `VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR` only for explicitly double-sided materials.
+- Advance the acceleration-structure and Ray Query contracts to v2/v4.
+- Full Audit v4 records whether a committed geometric face points away from the incoming reflection ray. Any such nearest hit on a single-sided material is a strict failure; `SE_HYBRID_REFLECTIONS_TLAS_FRONT_COUNTERCLOCKWISE=1` restores the old broken convention as a Debug-only reverse control.
 
 Prevention:
-- Treat raster `frontFace`, mesh winding, TLAS instance flags, and Ray Query cull flags as one producer-consumer contract.
-- Validate a closed CCW target with culling on and off; target hit coverage should agree while culling removes only irrelevant back-face work.
-- Do not use a material color marker as proof of instance traversal, and do not promote no-cull diagnostics to production behavior.
+- Treat object-space winding, projection-space Y inversion, raster `frontFace`, TLAS instance flags, and Ray Query cull flags as one producer-consumer contract.
+- Never validate face orientation from instance hit counts alone. Compare nearest hit distance and geometric-side orientation against a no-cull control; closed meshes can preserve hit counts while selecting their far surface.
+- Keep no-cull as a diagnostic control, not the production fix.
 
 Validation:
-- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` builds passed; the generated Ray Query SPIR-V passed Vulkan 1.2 validation.
-- `Invoke-HybridReflectionLegacyDiagnostic.ps1 -Strict` passed with hybrid/forced-cull/no-cull silver hits `11690/11892/11892` and zero invalid rays.
-- `Test-HybridReflectionsCapability.ps1 -Strict` passed `403 / 0` across LightingShowcase, Forward3D FBX, and fallback controls.
+- Debug `SelfEngineForward3D` and `SelfEngineLightingShowcase` build.
+- LightingShowcase Full Audit v4 passes `1093 / 0`; forced old-CCW control fails exactly one new invariant with `66,362` single-sided back-side hits.
+- Animated Forward3D Full Audit passes `340 / 0`.
+- Fixed production and no-cull RenderDoc frame-12 runs match all six candidate/accept/trace/hit/miss/injection counters exactly: `176197/16584/159613/90020/69593/90020`.
 ## 2026-07-22 - Reflection Audit Must Use Stable Identity And One Y Convention
 
 Symptom:
@@ -3299,6 +3424,251 @@ Validation:
 - Debug Forward3D/LightingShowcase and Release Forward3D builds, FidelityFX
   static integration `59/0`, and three Vulkan 1.2 SPIR-V validations passed.
   New-binary runtime certification remains blocked by Smart App Control 4551.
+
+## 2026-07-23 - Explicit Reflection Misses Must Invalidate Hit Provenance
+
+Symptom:
+- The LightingShowcase center mirror showed split, duplicate, and unstable
+  reflection regions even though the expected silver sphere reached TLAS, Ray
+  Query, DNSR, and Apply correctly.
+- Full Audit found 1,111 unstable Apply neighbor pairs and 505 large
+  Intersect-to-Reproject confidence increases; Reproject-to-Resolve was zero.
+
+False leads:
+- Disabling all hit reprojection removed useful denoising and increased Apply
+  boundaries from 1,111 to 1,267 and large contribution jumps from 200 to 425.
+- Treating every sharp mirror source transition as an error confused real
+  geometry edges with stale temporal state.
+
+Cause:
+- `SelfEngine_FfxSssrHitConfidence` used
+  `max(current, history * validity * weight)`, so a previous hit could survive
+  when the current frame explicitly reported zero confidence.
+- Raw Evidence classified the control path as 845 real source transitions,
+  239 zero/zero same-source misses, and 27 partial-confidence boundaries.
+
+Control test:
+- `SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF=1` restores the old rule.
+  It reports 239 blocking same-source miss boundaries and 505 large stage
+  transitions. The default rule reports zero blocking same-source misses and
+  about 18 large transitions while full hit reprojection remains enabled.
+
+Fix:
+- Reproject now returns zero provenance before history sampling when current
+  hit confidence is at most `0.0001`; environment-control bit 23 preserves the
+  narrow reverse control.
+- Full Audit classifies unstable pairs by source and hit identity, conserves
+  all class totals, and blocks only source/hit cases without a current physical
+  basis instead of raising the old blanket mirror-boundary warning.
+
+Prevention:
+- Temporal provenance must have an explicit invalidation rule for current
+  misses; receiver depth/normal validity alone cannot revoke an obsolete hit.
+- Classify discontinuities by current source and hit identity before changing
+  quality thresholds or disabling an entire temporal stage.
+
+Validation:
+- LightingShowcase compact Full Audit passed `1082 / 0` with zero findings;
+  Raw Evidence passed `1103 / 0` with zero findings.
+- FidelityFX SSSR, Hybrid Reflections, internal SSR/Hi-Z, target attribution,
+  hit-validation math, and octahedral-normal gates passed `1185 / 0`, `403 / 0`,
+  `809 / 0`, `44 / 0`, `30 / 0`, and `6 / 0` respectively.
+- Animated Forward3D reduced large Intersect-to-Reproject transitions from
+  1,423 to 138. Its Full Audit still has 12 independent pre-existing signed
+  radiance, queue/probe, and skinned-receiver audit failures; do not call the
+  cross-scene Full Audit closed until those are resolved.
+
+## 2026-07-23 - SSSR Environment Producers Must Share One Radiance Contract
+
+Symptom:
+- Forward3D Full Audit found 126,339 negative Intersect texels and smaller
+  negative sets in Prefilter, Resolve, HDR Apply, and TAA input even though the
+  LightingShowcase provenance fix was clean.
+- Two Debug light gizmos and one aggregate probe row also failed scene-object
+  and per-probe ownership checks despite carrying valid independent state.
+
+False leads:
+- Treating every Intersect texel as consumed DNSR data; most negative ground
+  texels were outside the active ray/Apply set.
+- Treating Reproject and Prefilter alpha as hit distance. Their wrappers write
+  `radiance.xyzz`, so alpha intentionally aliases blue.
+- Increasing ray TMin to hide grazing self hits, which would skip nearby real
+  geometry without proving ownership.
+
+Cause:
+- AMD's current `ClassifyTiles.hlsl` sample still hard-codes
+  `mip_count = 10` and does not share SelfEngine's Intersect constant/stable
+  fallback controls. Negative filtered environment values entered DNSR at this
+  first producer boundary.
+- Back-facing receiver normals and lower-hemisphere GGX samples lacked a
+  common fallback. Three grazing LightingShowcase rays then committed the
+  receiver TLAS instance and would have injected self lighting.
+- The audit modeled auxiliary overlays, aggregate probes, signed Apply
+  replacement deltas, and active DNSR consumers as ordinary scene/radiance
+  rows.
+
+Control test:
+- `SE_SSR_FFX_RADIANCE_SANITIZE_OFF=1` restores `481 / 1 / 482 / 10` negative
+  active Intersect/Reproject/Prefilter/Resolve samples in animated Forward3D.
+  The default path reports zero at all four stages.
+
+Fix:
+- Share real IBL mip count, stable/constant policy, view-facing normals,
+  lower-hemisphere fallback, and finite/non-negative radiance sanitization
+  across Classify, Intersect, Reproject, Prefilter, and ResolveTemporal.
+- Reject same-instance Ray Query hits before attributes/lighting and fall back
+  to SSSR/Probe/IBL; record rejection separately from active self hits.
+- Scope DNSR image checks to actual Apply consumer pixels, give each stage its
+  real alpha semantics, and model overlay/probe aggregate identities directly.
+- Permit signed values only for conserved `HdrAfterApply` and temporal-input
+  replacement corrections; reflection radiance sources remain non-negative.
+
+Prevention:
+- Vendor sample constants are examples, not engine resource contracts. Paired
+  producers must resolve dimensions, mip counts, controls, and valid ranges
+  from one shared source.
+- A strict gate must model producer/consumer semantics before judging every
+  allocated texel. Do not relax a physical radiance invariant to fix an audit
+  ownership error.
+- Reject verified self hits explicitly; do not solve them with an unbounded
+  origin bias or TMin.
+
+Validation:
+- AMD SSSR current Classify/Intersect sources and the Khronos Ray Query sample
+  were rechecked from their official repositories/documentation.
+- Animated Forward3D Raw Full Audit passes `360 / 0`; LightingShowcase passes
+  `1113 / 0` over 176,231 pixels, with zero active self hits and three explicit
+  self-hit fallbacks.
+- FidelityFX, Hybrid Reflections, internal SSR/Hi-Z, target attribution, hit
+  math, oct normal, and RenderDoc integration pass `1257 / 0`, `403 / 0`,
+  `809 / 0`, `44 / 0`, `30 / 0`, `6 / 0`, and `32 / 0`. Seven modified SPIR-V
+  modules pass `spirv-val --target-env vulkan1.2`.
+
+Sources:
+- https://github.com/GPUOpen-Effects/FidelityFX-SSSR
+- https://github.khronos.org/Vulkan-Site/samples/latest/samples/extensions/ray_queries/README.html
+
+## 2026-07-23 - Reflection Fusion Needs Source Ownership, Not A Second History
+
+Symptom:
+- The clear Ray Query result was expensive, while feeding every mirror hit
+  through the same temporal filter softened the result. Hard source switches
+  could also leave local edge instability and discontinuities.
+
+False leads:
+- Replacing the existing denoiser with NVIDIA NRD before proving AMD DNSR was
+  the limiting stage. That would add a second history/resource lifecycle.
+- Bypassing DNSR for every material, which would discard useful temporal
+  stability for rough and lower-confidence reflections.
+- Trusting CPU descriptor-write counters as proof of the GPU event bindings.
+
+Cause:
+- Mirror-quality pixels, ordinary glossy pixels, screen hits, Ray Query hits,
+  local Probe IBL, and global fallback had different confidence and filtering
+  needs but were treated too uniformly.
+- The previous data gate proved semantic intent but did not independently
+  inspect the physical descriptors at Apply and Ray Query dispatch time.
+
+Control test:
+- `SE_HYBRID_REFLECTIONS_SOURCE_FUSION_OFF=1` restores the hard source policy.
+- `SE_SSR_FFX_CONFIDENCE_SPATIAL_FILTER_OFF=1` removes only the compatible
+  confidence-neighbor filter.
+- Existing DNSR injection and hit-IBL controls isolate temporal and Probe
+  ownership independently.
+
+Fix:
+- Keep FidelityFX DNSR as the sole temporal owner, but pass full-rate mirror
+  pixels with roughness `<= 0.08` and confidence `>= 0.995` through current
+  Intersect radiance.
+- Blend screen and Ray Query sources through a bounded confidence transition;
+  resolve box-projected mip-aware local Probe IBL at the ray hit before global
+  fallback; spatially filter confidence only across compatible geometry and
+  material neighbors.
+- Bound visibility cost to two shadowed local lights and two rectangle samples
+  while retaining unshadowed radiance contribution from all lights.
+- Use RenderDoc's official Python API for physical descriptor truth and keep
+  SelfEngine's custom layer limited to semantic binding assertions.
+
+Prevention:
+- Assign one temporal-history owner before combining reflection sources.
+- Preserve high-confidence mirror detail selectively; do not globally disable
+  a production denoiser to recover sharpness.
+- Pair CSV contract checks with one captured-frame descriptor assertion when a
+  new producer is wired into an existing consumer.
+
+Validation:
+- FidelityFX matrix: `1258 pass / 0 fail`; Hybrid Reflections cross-scene
+  matrix: `418 / 0`; Full Audit: `1122 / 0`, zero findings.
+- RenderDoc binding inspection: `10 / 0`; combined integration: `36 / 0`.
+- Apply bindings `16/17/18` are distinct Intersect, radiance-history, and
+  confidence-history views. Ray Query bindings `24/25/26` are distinct local
+  specular/diffuse Probe views plus the spatial Probe buffer.
+- The user rejected this blended visual result despite the passing data gate;
+  the direct mirror-ownership correction below supersedes it.
+
+Sources:
+- https://gpuopen.com/manuals/fidelityfx_sdk/techniques/stochastic-screen-space-reflections/
+- https://github.com/GPUOpen-Effects/FidelityFX-SSSR
+- https://github.khronos.org/Vulkan-Site/samples/latest/samples/extensions/ray_queries/README.html
+- https://renderdoc.org/docs/python_api/index.html
+
+## 2026-07-23 - Mirror Ray Query Hits Must Own The Final Reflection Source
+
+Symptom:
+- The standalone Ray Query result was clear, but the final hybrid composition
+  lost geometry, distorted rectangle lights, or retained Probe/SSR ghosting.
+- Repeated source-fusion changes did not make the final mirror result match the
+  validated hardware trace.
+
+False leads:
+- Continuing to tune SSR/Probe transition weights after the user had already
+  established that the standalone Ray Query result was the acceptable source.
+- Treating a Ray Query dispatch and nonzero hit count as proof that the final
+  Apply pixel was owned by that result.
+
+Cause:
+- Mirror pixels could still accept screen hits, blend screen and Ray Query
+  payloads, and apply the resulting Probe replacement with a partial weight.
+- Invalid, rejected, or missed mirror traces did not all clear the current
+  radiance/confidence carrier, so stale screen confidence could survive a
+  hardware fallback.
+
+Control test:
+- `SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF=1` disables only direct mirror
+  ownership. Direct candidate/hit/fallback counters must all become zero while
+  the ordinary FidelityFX SSSR/Probe path remains active.
+
+Fix:
+- Roughness `<= 0.08` uses full-rate Ray Query and cannot accept an SSSR hit or
+  source-fusion payload. A valid hardware hit writes confidence `1`; every miss
+  or invalid/unresolved path writes zero current radiance and confidence.
+- High-confidence mirror current radiance uses Apply blend weight `1`, replacing
+  the existing Probe term exactly. A zero-confidence miss contributes no
+  replacement delta, leaving Probe as the deterministic fallback.
+
+Prevention:
+- Reflection source selection and final Apply ownership are one contract. Never
+  call a hardware path direct while a later stage can partially mix its result.
+- For exclusive sources, record `candidate = hit + fallback`, prove the reverse
+  control suppresses all three counters, and audit the final replacement weight.
+
+Validation:
+- Hybrid capability matrix: `487 pass / 0 fail`; default LightingShowcase
+  `19,584 = 16,048 + 3,536`, direct-off `0/0/0`.
+- LightingShowcase Full Audit: `1103 / 0`, zero findings; `19,611 = 16,070 +
+  3,541`, `16,066` current-radiance mirror Apply pixels, and zero
+  high-confidence partial Probe blends. Direct-off Full Audit is also
+  `1103 / 0`; animated Forward3D is `351 / 0`.
+- FidelityFX integration: `1258 / 0`; four modified SPIR-V modules validate for
+  Vulkan 1.2. Current RenderDoc frame 12 passes reflection binding/state
+  inspection `11 / 0` and combined integration `36 / 0`.
+- The user accepted the visible Release LightingShowcase result as a clear
+  improvement and sufficient for the current production baseline.
+
+Sources:
+- https://github.khronos.org/Vulkan-Site/samples/latest/samples/extensions/ray_queries/README.html
+- https://gpuopen.com/fidelityfx-hybrid-reflections/
+- https://developer.nvidia.com/blog/vulkan-raytracing/
 
 ## 2026-07-22 - External Frame Debuggers Own Generic GPU Truth
 

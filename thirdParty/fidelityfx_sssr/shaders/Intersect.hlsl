@@ -128,14 +128,6 @@ float3 SampleReflectionVector(float3 view_direction, float3 normal, float roughn
     return mul(reflected_direction_tbn, inv_tbn_transform);
 }
 
-bool StableEnvironmentFallbackEnabled() {
-    return (g_environment_fallback_control & 0x80000000u) != 0u;
-}
-
-bool ConstantEnvironmentFallbackEnabled() {
-    return (g_environment_fallback_control & 0x40000000u) != 0u;
-}
-
 bool PerfectReflectionDirectionsEnabled() {
     return (g_environment_fallback_control & 0x20000000u) != 0u;
 }
@@ -168,34 +160,30 @@ void SelfEngine_FfxSssrRecordHitAttribution(float confidence) {
     );
 }
 
-float EnvironmentMipCount() {
-    return max(1.0, float(g_environment_fallback_control & 0xffffu));
-}
-
 float3 SampleEnvironmentMap(
     float3 stochastic_direction,
     float3 stable_direction,
     float roughness
 ) {
-    if (ConstantEnvironmentFallbackEnabled()) {
+    if (SelfEngine_FfxSssrConstantEnvironmentFallbackEnabled()) {
         return float3(0.6, 0.6, 0.6);
     }
 
-    if (!StableEnvironmentFallbackEnabled()) {
-        return g_environment_map.SampleLevel(
+    float3 radiance;
+    if (!SelfEngine_FfxSssrStableEnvironmentFallbackEnabled()) {
+        radiance = g_environment_map.SampleLevel(
             g_environment_map_sampler,
             stochastic_direction,
             0.0
         ).xyz;
+    } else {
+        radiance = g_environment_map.SampleLevel(
+            g_environment_map_sampler,
+            normalize(stable_direction),
+            SelfEngine_FfxSssrEnvironmentMip(roughness)
+        ).xyz;
     }
-
-    float max_mip = max(0.0, EnvironmentMipCount() - 1.0);
-    float mip = saturate(roughness) * max_mip;
-    return g_environment_map.SampleLevel(
-        g_environment_map_sampler,
-        normalize(stable_direction),
-        mip
-    ).xyz;
+    return SelfEngine_FfxSssrSanitizeRadiance(radiance);
 }
 
 bool IsMirrorReflection(float roughness) {
@@ -212,6 +200,7 @@ void StoreIntersectionSample(
     float4 sample,
     float confidence
 ) {
+    sample.xyz = SelfEngine_FfxSssrSanitizeRadiance(sample.xyz);
     g_intersection_output[coords] = sample;
     g_hit_confidence_output[coords] = confidence;
 
@@ -272,19 +261,26 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
     float3 view_space_ray_direction = normalize(view_space_ray);
 
     float3 view_space_surface_normal = mul(g_view, float4(world_space_normal, 0)).xyz;
+    if (dot(-view_space_ray_direction, view_space_surface_normal) < 0.0) {
+        view_space_surface_normal = -view_space_surface_normal;
+    }
+    float3 view_space_perfect_reflection = reflect(
+        view_space_ray_direction,
+        view_space_surface_normal
+    );
     float3 view_space_reflected_direction =
         PerfectReflectionDirectionsEnabled()
-            ? reflect(view_space_ray_direction, view_space_surface_normal)
+            ? view_space_perfect_reflection
             : SampleReflectionVector(
                 view_space_ray_direction,
                 view_space_surface_normal,
                 roughness,
                 coords
             );
-    float3 view_space_environment_direction = reflect(
-        view_space_ray_direction,
-        view_space_surface_normal
-    );
+    if (dot(view_space_reflected_direction, view_space_surface_normal) <= 0.0) {
+        view_space_reflected_direction = view_space_perfect_reflection;
+    }
+    float3 view_space_environment_direction = view_space_perfect_reflection;
     float3 screen_space_ray_direction = ProjectDirection(view_space_ray, view_space_reflected_direction, screen_uv_space_ray_origin, g_proj);
     
     //====SSSR====

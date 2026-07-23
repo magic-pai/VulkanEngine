@@ -2491,6 +2491,16 @@ bool FfxSssrHitReprojectionEnabledFromEnvironment() {
     return true;
 }
 
+bool FfxSssrZeroConfidenceHistoryRejectionEnabledFromEnvironment() {
+    return !EnvironmentFlagEnabled(
+        "SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF"
+    );
+}
+
+bool FfxSssrRadianceSanitizationEnabledFromEnvironment() {
+    return !EnvironmentFlagEnabled("SE_SSR_FFX_RADIANCE_SANITIZE_OFF");
+}
+
 f32 FfxSssrTemporalStabilityFactorFromEnvironment() {
     const std::optional<f32> overrideValue =
         EnvironmentFloatOverride("SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR");
@@ -4124,6 +4134,9 @@ void WriteReflectionReceiverAuditStats(
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_BLEND");
     const bool independentIblEnergy =
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE");
+    const bool dominantMirrorHardSwitch = EnvironmentFlagEnabled(
+        "SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH"
+    );
     const bool dominantMirrorEnabled =
         productionBlend &&
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF");
@@ -4196,18 +4209,38 @@ void WriteReflectionReceiverAuditStats(
     if (stats.receiverAuditTotalWeight <= 0.0001f) {
         return;
     }
-    stats.receiverAuditDominantMirrorFactor = dominantMirrorEnabled
-        ? 1.0f - SmoothStep(0.30f, 0.60f, request.roughness)
-        : 0.0f;
+    f32 runnerUpNormalizedWeight = 0.0f;
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         const f32 normalized = stats.receiverAuditWeights[index] /
             stats.receiverAuditTotalWeight;
         stats.receiverAuditNormalizedWeights[index] = normalized;
         if (normalized > stats.receiverAuditDominantNormalizedWeight) {
+            runnerUpNormalizedWeight =
+                stats.receiverAuditDominantNormalizedWeight;
             stats.receiverAuditDominantNormalizedWeight = normalized;
             stats.receiverAuditDominantSlot = static_cast<i32>(index);
+        } else {
+            runnerUpNormalizedWeight = std::max(
+                runnerUpNormalizedWeight,
+                normalized
+            );
         }
     }
+    const f32 roughnessFactor =
+        1.0f - SmoothStep(0.30f, 0.60f, request.roughness);
+    const f32 dominanceMargin = std::clamp(
+        stats.receiverAuditDominantNormalizedWeight -
+            runnerUpNormalizedWeight,
+        0.0f,
+        1.0f
+    );
+    stats.receiverAuditDominantMirrorFactor = dominantMirrorEnabled
+        ? roughnessFactor * (
+            dominantMirrorHardSwitch
+                ? 1.0f
+                : SmoothStep(0.02f, 0.18f, dominanceMargin)
+        )
+        : 0.0f;
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         const f32 normalized = stats.receiverAuditNormalizedWeights[index];
         const f32 effective = normalized *
@@ -4442,8 +4475,8 @@ void WriteFrameReflectionProbeStats(
         EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_MIP0") ? 1u : 0u;
     stats.dominantMirrorSelectionEnabled =
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF")
-            ? 1u
-            : 0u;
+        ? 1u
+        : 0u;
     WriteReflectionReceiverAuditStats(frameProbes, stats);
 }
 
@@ -4489,6 +4522,16 @@ void PopulateReflectionProbeUniforms(
         EnvironmentFlagEnabled("SE_REFLECTION_PROBE_FORCE_MIP0");
     const bool dominantMirrorSelectionEnabled =
         !EnvironmentFlagEnabled("SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF");
+    const bool dominantMirrorHardSwitchEnabled = EnvironmentFlagEnabled(
+        "SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH"
+    );
+    const bool objectStableSelectionEnabled = !EnvironmentFlagEnabled(
+        "SE_REFLECTION_PROBE_OBJECT_STABLE_OFF"
+    );
+    const bool mirrorSourceSelectionIndependentEnabled =
+        !EnvironmentFlagEnabled(
+            "SE_SSR_FFX_MIRROR_SOURCE_SELECTION_STRENGTH_COUPLED"
+        );
     for (u32 index = 0; index < selectedProbeCount; ++index) {
         const RendererReflectionProbe& probe =
             reflectionProbes.selectedProbes[index];
@@ -4555,7 +4598,10 @@ void PopulateReflectionProbeUniforms(
             (EnvironmentFlagEnabled("SE_REFLECTION_PROBE_LEGACY_ENERGY_SCALE")
                 ? 0.0f
                 : 2.0f) +
-            (dominantMirrorSelectionEnabled ? 4.0f : 0.0f)
+            (dominantMirrorSelectionEnabled ? 4.0f : 0.0f) +
+            (dominantMirrorHardSwitchEnabled ? 8.0f : 0.0f) +
+            (objectStableSelectionEnabled ? 16.0f : 0.0f) +
+            (mirrorSourceSelectionIndependentEnabled ? 32.0f : 0.0f)
     );
 }
 
@@ -6089,6 +6135,26 @@ void VulkanRenderer::DrawFrame() {
         hybridRayQueryDiagnostics.finiteDirectRadianceCount;
     hybridReflections.rayQueryFiniteIblRadianceCount =
         hybridRayQueryDiagnostics.finiteIblRadianceCount;
+    hybridReflections.rayQueryLocalProbeIblResolvedCount =
+        hybridRayQueryDiagnostics.localProbeIblResolvedCount;
+    hybridReflections.rayQueryGlobalIblFallbackCount =
+        hybridRayQueryDiagnostics.globalIblFallbackCount;
+    hybridReflections.rayQueryLocalProbeIblInvalidCount =
+        hybridRayQueryDiagnostics.localProbeIblInvalidCount;
+    hybridReflections.rayQueryLocalProbeIblLuminanceSumMilliunits =
+        hybridRayQueryDiagnostics.localProbeIblLuminanceSumMilliunits;
+    hybridReflections.rayQuerySourceFusionCount =
+        hybridRayQueryDiagnostics.sourceFusionCount;
+    hybridReflections.rayQuerySourceFusionConfidenceSumPermille =
+        hybridRayQueryDiagnostics.sourceFusionConfidenceSumPermille;
+    hybridReflections.rayQuerySourceFusionScreenWeightSumPermille =
+        hybridRayQueryDiagnostics.sourceFusionScreenWeightSumPermille;
+    hybridReflections.rayQueryDirectMirrorCandidateCount =
+        hybridRayQueryDiagnostics.directMirrorCandidateCount;
+    hybridReflections.rayQueryDirectMirrorHitCount =
+        hybridRayQueryDiagnostics.directMirrorHitCount;
+    hybridReflections.rayQueryDirectMirrorFallbackCount =
+        hybridRayQueryDiagnostics.directMirrorFallbackCount;
     hybridReflections.rayQueryFiniteEmissiveRadianceCount =
         hybridRayQueryDiagnostics.finiteEmissiveRadianceCount;
     hybridReflections.rayQueryFiniteRadianceCount =
@@ -6451,6 +6517,20 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF");
     const bool ffxSssrHitConfidenceReverseControlActive =
         EnvironmentFlagEnabled("SE_SSR_FFX_HIT_CONFIDENCE_OFF");
+    const u32 ffxSssrSamplesPerQuad =
+        FfxSssrSamplesPerQuadFromEnvironment();
+#if !defined(NDEBUG)
+    const bool ffxSssrMirrorDnsrPassthroughReverseControlActive =
+        EnvironmentFlagEnabled("SE_SSR_FFX_MIRROR_DNSR_PASSTHROUGH_OFF");
+    const bool ffxSssrConfidenceSpatialFilterEnabled =
+        !EnvironmentFlagEnabled("SE_SSR_FFX_CONFIDENCE_SPATIAL_FILTER_OFF");
+#else
+    const bool ffxSssrMirrorDnsrPassthroughReverseControlActive = false;
+    const bool ffxSssrConfidenceSpatialFilterEnabled = true;
+#endif
+    const bool ffxSssrMirrorDnsrPassthroughRequested =
+        ffxSssrSamplesPerQuad == 4u &&
+        !ffxSssrMirrorDnsrPassthroughReverseControlActive;
     const bool ffxSssrSameFrameCompositeRequested =
         ffxSssrDeferredCompositeRequested &&
         !ffxSssrSameFrameCompositeReverseControlActive &&
@@ -6463,6 +6543,15 @@ void VulkanRenderer::DrawFrame() {
         m_HdrFramebuffer != nullptr &&
         imageIndex < m_FfxSssrReprojectResources->Count() &&
         imageIndex < m_FfxSssrApplyGBufferDescriptorSets->Count();
+    const bool ffxSssrMirrorDnsrPassthroughResourcesReady =
+        ffxSssrMirrorDnsrPassthroughRequested &&
+        ffxSssrSameFrameCompositeResourcesReady &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        imageIndex < m_FfxSssrClassifyTilesResources->Count() &&
+        !ExtentsDiffer(
+            m_FfxSssrClassifyTilesResources->Extent(),
+            m_FfxSssrReprojectResources->Extent()
+        );
     const VkImageView ffxSssrSameFrameCompositeView =
         ffxSssrSameFrameCompositeResourcesReady
             ? m_FfxSssrReprojectResources->RadianceHistoryView(imageIndex)
@@ -6484,11 +6573,21 @@ void VulkanRenderer::DrawFrame() {
                     imageIndex
                 )
                 : VK_NULL_HANDLE,
+            VK_IMAGE_LAYOUT_GENERAL,
+            ffxSssrMirrorDnsrPassthroughResourcesReady
+                ? m_FfxSssrClassifyTilesResources->IntersectionOutputView(
+                    imageIndex
+                )
+                : ffxSssrSameFrameCompositeView,
             VK_IMAGE_LAYOUT_GENERAL
         );
     const bool ffxSssrSameFrameCompositeActive =
         ffxSssrSameFrameCompositeRequested &&
         ffxSssrSameFrameCompositeDescriptorUpdated;
+    const bool ffxSssrMirrorDnsrPassthroughActive =
+        ffxSssrSameFrameCompositeActive &&
+        !ffxSssrHitConfidenceReverseControlActive &&
+        ffxSssrMirrorDnsrPassthroughResourcesReady;
     const bool ffxSssrDeferredCompositeActive =
         ffxSssrDeferredCompositeRequested &&
         !ffxSssrSameFrameCompositeActive &&
@@ -6538,6 +6637,11 @@ void VulkanRenderer::DrawFrame() {
         BuildFrameReflectionProbeSet(
             mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr
         );
+    const bool objectReflectionProbeAssignmentsChanged =
+        AssignObjectReflectionProbes(
+            m_RenderQueue.MutableCommands(),
+            frameReflectionProbes
+        );
     const u32 selectedReflectionProbeDescriptorWrites =
         UpdateEnvironmentDescriptorSets(
             m_DescriptorSets.get(),
@@ -6567,16 +6671,22 @@ void VulkanRenderer::DrawFrame() {
         FfxSssrMotionVectorScaleForMode(ffxSssrMotionVectorMode);
     const bool ffxSssrHitReprojectionEnabled =
         FfxSssrHitReprojectionEnabledFromEnvironment();
+    const bool ffxSssrZeroConfidenceHistoryRejectionEnabled =
+        FfxSssrZeroConfidenceHistoryRejectionEnabledFromEnvironment();
     const f32 ffxSssrTemporalStabilityFactor =
         FfxSssrTemporalStabilityFactorFromEnvironment();
-    const u32 ffxSssrSamplesPerQuad =
-        FfxSssrSamplesPerQuadFromEnvironment();
     const bool ffxSssrStableEnvironmentFallbackEnabled =
         FfxSssrStableEnvironmentFallbackEnabledFromEnvironment();
     const bool ffxSssrConstantEnvironmentFallbackEnabled =
         EnvironmentFlagEnabled("SE_SSR_FFX_CONSTANT_ENVIRONMENT");
     const bool ffxSssrPerfectReflectionDirectionsEnabled =
         FfxSssrPerfectReflectionDirectionsEnabledFromEnvironment();
+#if !defined(NDEBUG)
+    const bool ffxSssrReprojectBypassEnabled =
+        EnvironmentFlagEnabled("SE_SSR_FFX_REPROJECT_BYPASS");
+#else
+    const bool ffxSssrReprojectBypassEnabled = false;
+#endif
     const bool ffxSssrPrefilterBypassEnabled =
         EnvironmentFlagEnabled("SE_SSR_FFX_PREFILTER_BYPASS");
     const bool ffxSssrResolveTemporalBypassEnabled =
@@ -6587,6 +6697,8 @@ void VulkanRenderer::DrawFrame() {
         EnvironmentFlagEnabled("SE_SSR_FFX_INTERSECT_COVERAGE_MARKER");
     const bool ffxSssrHitAttributionEnabled =
         FfxSssrHitAttributionEnabledFromEnvironment();
+    const bool ffxSssrRadianceSanitizationEnabled =
+        FfxSssrRadianceSanitizationEnabledFromEnvironment();
     const u32 ffxSssrIblEnvironmentMipCount =
         m_IblPrefilteredImage != nullptr
             ? m_IblPrefilteredImage->MipLevels()
@@ -6654,11 +6766,18 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrStableEnvironmentFallbackEnabled,
         ffxSssrConstantEnvironmentFallbackEnabled,
         ffxSssrPerfectReflectionDirectionsEnabled,
+        ffxSssrReprojectBypassEnabled,
         ffxSssrPrefilterBypassEnabled,
         ffxSssrResolveTemporalBypassEnabled,
+        ffxSssrMirrorDnsrPassthroughRequested,
+        ffxSssrMirrorDnsrPassthroughResourcesReady,
+        ffxSssrMirrorDnsrPassthroughActive,
+        80u,
+        995u,
         ffxSssrClassifySurfaceSeedEnabled,
         ffxSssrIntersectCoverageMarkerEnabled,
         ffxSssrEnvironmentMipCount,
+        ffxSssrRadianceSanitizationEnabled,
         m_FfxSssrPrepareIndirectArgsResources != nullptr &&
             m_Swapchain != nullptr &&
             m_FfxSssrPrepareIndirectArgsResources->Count() ==
@@ -6818,6 +6937,7 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrMotionVectorScale.y,
         true,
         ffxSssrHitReprojectionEnabled,
+        ffxSssrZeroConfidenceHistoryRejectionEnabled,
         true,
         m_FfxSssrPrefilterResources != nullptr &&
             m_SceneRenderTargets != nullptr &&
@@ -6963,6 +7083,8 @@ void VulkanRenderer::DrawFrame() {
             localShadowTileCommandLists[index].size()
         );
     }
+    frameStats.ssr.fidelityFxSssrConfidenceSpatialFilterEnabled =
+        ffxSssrConfidenceSpatialFilterEnabled ? 1u : 0u;
     UpdateUniformBuffer(
         imageIndex,
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
@@ -6973,7 +7095,10 @@ void VulkanRenderer::DrawFrame() {
         &temporalState,
         ffxSssrDeferredCompositeActive,
         ffxSssrSameFrameCompositeActive,
-        ffxSssrSameFrameCompositeActive && !ffxSssrHitConfidenceReverseControlActive
+        ffxSssrSameFrameCompositeActive && !ffxSssrHitConfidenceReverseControlActive,
+        ffxSssrSameFrameCompositeActive &&
+            !ffxSssrHitConfidenceReverseControlActive &&
+            ffxSssrConfidenceSpatialFilterEnabled
     );
     UpdateFfxSssrConstants(
         imageIndex,
@@ -6984,11 +7109,14 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrStableEnvironmentFallbackEnabled,
         ffxSssrConstantEnvironmentFallbackEnabled,
         ffxSssrPerfectReflectionDirectionsEnabled,
+        ffxSssrReprojectBypassEnabled,
         ffxSssrPrefilterBypassEnabled,
         ffxSssrResolveTemporalBypassEnabled,
         ffxSssrClassifySurfaceSeedEnabled,
         ffxSssrIntersectCoverageMarkerEnabled,
         ffxSssrHitAttributionEnabled,
+        ffxSssrZeroConfidenceHistoryRejectionEnabled,
+        ffxSssrRadianceSanitizationEnabled,
         ffxSssrEnvironmentMipCount,
         ffxSssrCompositeConfidenceMode
     );
@@ -7042,7 +7170,8 @@ void VulkanRenderer::DrawFrame() {
             : 0u;
     const bool allowInstanceBatchCacheReuse =
         mainCacheStats.queueCacheHits > 0 &&
-        mainCacheStats.queueCacheMisses == 0;
+        mainCacheStats.queueCacheMisses == 0 &&
+        !objectReflectionProbeAssignmentsChanged;
     const bool reusedInstanceBatches = BuildMainInstanceBatches(
         mainCommands,
         allowInstanceBatchCacheReuse
@@ -8533,10 +8662,32 @@ void VulkanRenderer::DrawFrame() {
     frameStats.binds.frameDirectionalLightCount = frameLightSet.directionalCount;
     frameStats.binds.frameLocalLightCount = frameLightSet.localCount;
     frameStats.binds.frameRectLightCount = frameLightSet.rectCount;
+#if !defined(NDEBUG)
+    frameStats.binds.framePointLightCount = 0u;
+    frameStats.binds.frameSpotLightCount = 0u;
+    frameStats.binds.framePointSpotDirectSpecularEnabledCount = 0u;
+    frameStats.binds.framePointSpotDirectSpecularDisabledCount = 0u;
+#endif
     frameStats.binds.frameRectLightAnalyticSpecularEnabledCount = 0u;
     frameStats.binds.frameRectLightAnalyticSpecularDisabledCount = 0u;
     for (u32 index = 0u; index < frameLightSet.localCount; ++index) {
         const RendererLocalLight& light = frameLightSet.localLights[index];
+#if !defined(NDEBUG)
+        if (light.kind == RendererLightKind::Point ||
+            light.kind == RendererLightKind::Spot) {
+            if (light.kind == RendererLightKind::Point) {
+                ++frameStats.binds.framePointLightCount;
+            } else {
+                ++frameStats.binds.frameSpotLightCount;
+            }
+            if (light.specular > 0.0001f) {
+                ++frameStats.binds.framePointSpotDirectSpecularEnabledCount;
+            } else {
+                ++frameStats.binds.framePointSpotDirectSpecularDisabledCount;
+            }
+            continue;
+        }
+#endif
         if (light.kind != RendererLightKind::Rect) {
             continue;
         }
@@ -9032,6 +9183,132 @@ void VulkanRenderer::DrawFrame() {
         rayQuerySettings.forceAllRayQueries = EnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES"
         );
+#if !defined(NDEBUG)
+        rayQuerySettings.hitIblEnabled = !EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_HIT_IBL_OFF"
+        );
+        rayQuerySettings.sourceFusionEnabled = !EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_SOURCE_FUSION_OFF"
+        );
+        rayQuerySettings.directMirrorRayQueryEnabled = !EnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF"
+        );
+#endif
+        HybridReflectionProbeFrameInputs rayQueryProbeInputs{};
+        std::array<VkImageView, kMaxHybridReflectionProbes>
+            rayQueryProbePrefilteredViews{};
+        std::array<VkImageView, kMaxHybridReflectionProbes>
+            rayQueryProbeDiffuseViews{};
+        rayQueryProbePrefilteredViews.fill(m_IblPrefilteredView);
+        rayQueryProbeDiffuseViews.fill(m_IblIrradianceView);
+#if !defined(NDEBUG)
+        const bool rayQueryLocalProbeIblEnabled =
+            rayQuerySettings.hitIblEnabled &&
+            !EnvironmentFlagEnabled(
+                "SE_HYBRID_REFLECTIONS_LOCAL_PROBE_IBL_OFF"
+            );
+#else
+        const bool rayQueryLocalProbeIblEnabled =
+            rayQuerySettings.hitIblEnabled;
+#endif
+        const u32 rayQueryProbeCount = std::min<u32>(
+            frameReflectionProbes.selectedProbeCount,
+            kMaxHybridReflectionProbes
+        );
+        u32 rayQueryProbePrefilteredReadyMask = 0u;
+        u32 rayQueryProbeDiffuseReadyMask = 0u;
+        for (u32 probeIndex = 0u;
+            probeIndex < rayQueryProbeCount;
+            ++probeIndex) {
+            const RendererReflectionProbe& probe =
+                frameReflectionProbes.selectedProbes[probeIndex];
+            HybridReflectionProbeGpuRecord& output =
+                rayQueryProbeInputs.probes[probeIndex];
+            const bool probeApplied =
+                frameReflectionProbes.fallbackEnabled &&
+                ReflectionProbeContributes(probe);
+            const bool prefilteredReady = probeApplied &&
+                frameReflectionProbes
+                    .selectedCaptureDescriptorBound[probeIndex];
+            bool diffuseReady = false;
+            if (probe.captureSource ==
+                RendererReflectionProbeCaptureSource::BuiltInProcedural) {
+                rayQueryProbePrefilteredViews[probeIndex] =
+                    m_ReflectionProbeResources.DescriptorViewFor(
+                        m_IblPrefilteredView,
+                        m_IblSampler
+                    );
+            } else if (probe.captureSource ==
+                RendererReflectionProbeCaptureSource::AuthoredCubemap) {
+                rayQueryProbePrefilteredViews[probeIndex] =
+                    m_ReflectionProbeResources.AuthoredDescriptorViewFor(
+                        probe.captureAssetId,
+                        m_IblPrefilteredView,
+                        m_IblSampler
+                    );
+            } else if (probe.captureSource ==
+                RendererReflectionProbeCaptureSource::CapturedScene) {
+                rayQueryProbePrefilteredViews[probeIndex] =
+                    m_ReflectionProbeResources.CapturedSceneDescriptorViewFor(
+                        probe.sceneIndex,
+                        m_IblPrefilteredView,
+                        m_IblSampler
+                    );
+                rayQueryProbeDiffuseViews[probeIndex] =
+                    m_ReflectionProbeResources
+                        .CapturedSceneDiffuseIrradianceDescriptorViewFor(
+                            probe.sceneIndex,
+                            m_IblIrradianceView,
+                            m_IblSampler
+                        );
+                diffuseReady = prefilteredReady &&
+                    frameReflectionProbes
+                        .selectedCapturedSceneDiffuseIrradianceReady[probeIndex];
+            }
+            const glm::vec3 samplingTint = probe.captureSource ==
+                    RendererReflectionProbeCaptureSource::CapturedScene
+                ? glm::vec3(1.0f)
+                : glm::clamp(
+                    probe.color,
+                    glm::vec3(0.0f),
+                    glm::vec3(4.0f)
+                );
+            const u32 mipCount =
+                frameReflectionProbes.selectedCaptureMipCounts[probeIndex];
+            output.positionRadius = glm::vec4(probe.center, probe.radius);
+            output.controls = glm::vec4(
+                probeApplied ? 1.0f : 0.0f,
+                probe.intensity,
+                probe.blendStrength,
+                probe.falloff
+            );
+            output.colorAndMip = glm::vec4(
+                samplingTint,
+                mipCount > 0u ? static_cast<f32>(mipCount - 1u) : 0.0f
+            );
+            output.boxExtentsProjection = glm::vec4(
+                glm::max(probe.boxExtents, glm::vec3(0.01f)),
+                ReflectionProbeBoxProjectionEnabled(probe) ? 1.0f : 0.0f
+            );
+            output.resourceControls = glm::vec4(
+                prefilteredReady ? 1.0f : 0.0f,
+                diffuseReady ? 1.0f : 0.0f,
+                0.0f,
+                0.0f
+            );
+            if (prefilteredReady) {
+                rayQueryProbePrefilteredReadyMask |= 1u << probeIndex;
+            }
+            if (diffuseReady) {
+                rayQueryProbeDiffuseReadyMask |= 1u << probeIndex;
+            }
+        }
+        rayQueryProbeInputs.controls = glm::uvec4(
+            rayQueryProbeCount,
+            rayQueryProbePrefilteredReadyMask,
+            rayQueryProbeDiffuseReadyMask,
+            rayQueryLocalProbeIblEnabled ? 1u : 0u
+        );
         rayQuerySettings.cullBackFacingTriangles = !EnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF"
         );
@@ -9083,6 +9360,9 @@ void VulkanRenderer::DrawFrame() {
             rayQueryDiagnosticsEnabled,
             frameLightSet.directionalCount,
             frameLightSet.localCount,
+            rayQueryProbeInputs,
+            rayQueryProbePrefilteredViews,
+            rayQueryProbeDiffuseViews,
             rayQuerySettings,
             hybridReflections
         );
@@ -9255,6 +9535,14 @@ void VulkanRenderer::DrawFrame() {
                 record.bonePaletteReady = source.bonePaletteReady;
                 record.bonePaletteDescriptorReady = source.bonePaletteDescriptorSetReady;
                 record.worldBoundsValid = source.worldBounds.valid ? 1u : 0u;
+                record.reflectionProbeAssignmentCode =
+                    source.reflectionProbeAssignmentCode;
+                record.reflectionProbeSceneIndex =
+                    source.reflectionProbeSceneIndex;
+#if !defined(NDEBUG)
+                record.reflectionProbeAssignmentWeightBits =
+                    std::bit_cast<u32>(source.reflectionProbeAssignmentWeight);
+#endif
                 record.boundsMin = glm::vec4(source.worldBounds.min, 0.0f);
                 record.boundsMax = glm::vec4(source.worldBounds.max, 0.0f);
 #if !defined(NDEBUG)
@@ -10109,6 +10397,9 @@ RendererTemporalAntialiasingMode VulkanRenderer::TemporalAntialiasingMode() cons
 }
 
 void VulkanRenderer::SetImGui3DContext(Scene3D* scene, Camera3D* camera) {
+    if (m_MainScene3D != scene) {
+        m_ObjectReflectionProbeAssignments.clear();
+    }
     m_MainScene3D = scene;
     m_ImGuiScene3D = scene;
     m_ImGuiCamera3D = camera;
@@ -14822,7 +15113,8 @@ void VulkanRenderer::UpdateUniformBuffer(
     const FrameTemporalState* temporalState,
     bool ssrFidelityFxDeferredCompositeActive,
     bool ssrFidelityFxSameFrameCompositeActive,
-    bool ssrFidelityFxHitConfidenceActive
+    bool ssrFidelityFxHitConfidenceActive,
+    bool ssrFidelityFxConfidenceSpatialFilterActive
 ) const {
     UniformBufferObject uniformData{};
     if (matrices != nullptr) {
@@ -14899,7 +15191,8 @@ void VulkanRenderer::UpdateUniformBuffer(
         (m_ShadowSettings.ssrTemporalMissHistoryRejectEnabled ? 65536.0f : 0.0f) +
         (ssrFidelityFxDeferredCompositeActive ? 131072.0f : 0.0f) +
         (ssrFidelityFxSameFrameCompositeActive ? 262144.0f : 0.0f) +
-        (ssrFidelityFxHitConfidenceActive ? 524288.0f : 0.0f);
+        (ssrFidelityFxHitConfidenceActive ? 524288.0f : 0.0f) +
+        (ssrFidelityFxConfidenceSpatialFilterActive ? 1048576.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
@@ -15022,11 +15315,14 @@ void VulkanRenderer::UpdateFfxSssrConstants(
     bool stableEnvironmentFallbackEnabled,
     bool constantEnvironmentFallbackEnabled,
     bool perfectReflectionDirectionsEnabled,
+    bool reprojectBypassEnabled,
     bool prefilterBypassEnabled,
     bool resolveTemporalBypassEnabled,
     bool classifySurfaceSeedEnabled,
     bool intersectCoverageMarkerEnabled,
     bool hitAttributionEnabled,
+    bool zeroConfidenceHistoryRejectionEnabled,
+    bool radianceSanitizationEnabled,
     u32 environmentMipCount,
     u32 compositeConfidenceMode
 ) const {
@@ -15104,6 +15400,9 @@ void VulkanRenderer::UpdateFfxSssrConstants(
         std::min<u32>(compositeConfidenceMode, 1u);
     constants.environmentFallbackControl =
         std::min<u32>(environmentMipCount, 0xffffu) |
+        (reprojectBypassEnabled ? 0x00200000u : 0u) |
+        (!radianceSanitizationEnabled ? 0x00400000u : 0u) |
+        (!zeroConfidenceHistoryRejectionEnabled ? 0x00800000u : 0u) |
         (hitAttributionEnabled ? 0x01000000u : 0u) |
         (intersectCoverageMarkerEnabled ? 0x02000000u : 0u) |
         (classifySurfaceSeedEnabled ? 0x04000000u : 0u) |
@@ -15356,14 +15655,21 @@ void VulkanRenderer::UpdateLightBuffer(
             localLightType = 2.0f;
         }
         record.directionType = glm::vec4(direction, localLightType);
-        record.parameters = glm::vec4(
-            light.kind == RendererLightKind::Rect
-                ? std::clamp(light.specular, 0.0f, 1.0f)
-                : std::clamp(light.innerConeCos, -1.0f, 1.0f),
-            std::clamp(light.outerConeCos, -1.0f, 1.0f),
-            std::max(light.width, 0.0f),
-            std::max(light.height, 0.0f)
-        );
+        if (light.kind == RendererLightKind::Rect) {
+            record.parameters = glm::vec4(
+                std::clamp(light.specular, 0.0f, 1.0f),
+                std::clamp(light.outerConeCos, -1.0f, 1.0f),
+                std::max(light.width, 0.0f),
+                std::max(light.height, 0.0f)
+            );
+        } else {
+            record.parameters = glm::vec4(
+                std::clamp(light.innerConeCos, -1.0f, 1.0f),
+                std::clamp(light.outerConeCos, -1.0f, 1.0f),
+                std::max(light.sourceRadius, 0.0f),
+                std::clamp(light.specular, 0.0f, 1.0f)
+            );
+        }
     }
     const FrameLightTileStats populatedTileStats =
         PopulateLightTileAssignments(*lightData, localCount, extent, matrices);
@@ -15828,6 +16134,17 @@ FrameLightSet VulkanRenderer::BuildFrameLightSet(std::span<const RenderCommand> 
     AddSceneSpotLights(m_MainScene3D, lights);
     AddSceneRectLights(m_MainScene3D, lights);
     AddDebugLocalLights(lights);
+#if !defined(NDEBUG)
+    if (EnvironmentFlagEnabled("SE_POINT_SPOT_DIRECT_SPECULAR_OFF")) {
+        for (u32 index = 0u; index < lights.localCount; ++index) {
+            RendererLocalLight& light = lights.localLights[index];
+            if (light.kind == RendererLightKind::Point ||
+                light.kind == RendererLightKind::Spot) {
+                light.specular = 0.0f;
+            }
+        }
+    }
+#endif
     return lights;
 }
 
@@ -16288,6 +16605,106 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             probes.selectedCaptureFallbackReasons[0];
     }
     return probes;
+}
+
+bool VulkanRenderer::AssignObjectReflectionProbes(
+    std::span<RenderCommand> renderCommands,
+    const FrameReflectionProbeSet& reflectionProbes
+) {
+    constexpr f32 kAssignmentWeightEpsilon = 0.0001f;
+    constexpr f32 kAssignmentRetentionRatio = 0.85f;
+    const u32 probeCount = std::min<u32>(
+        reflectionProbes.selectedProbeCount,
+        static_cast<u32>(kMaxFrameReflectionProbes)
+    );
+    bool changed = false;
+
+    for (RenderCommand& command : renderCommands) {
+        const glm::vec3 anchor = command.worldBounds.valid
+            ? (command.worldBounds.min + command.worldBounds.max) * 0.5f
+            : glm::vec3(command.model[3]);
+        std::array<f32, kMaxFrameReflectionProbes> coverages{};
+        std::array<f32, kMaxFrameReflectionProbes> priorities{};
+        std::array<f32, kMaxFrameReflectionProbes> weights{};
+        f32 bestPriority = 0.0f;
+        for (u32 index = 0u; index < probeCount; ++index) {
+            const RendererReflectionProbe& probe =
+                reflectionProbes.selectedProbes[index];
+            coverages[index] = ReflectionProbeProductionCoverage(probe, anchor);
+            priorities[index] = ReflectionProbeVolumePriority(probe);
+            if (coverages[index] > kAssignmentWeightEpsilon) {
+                bestPriority = std::max(bestPriority, priorities[index]);
+            }
+        }
+
+        i32 selectedSlot = -1;
+        f32 selectedWeight = 0.0f;
+        for (u32 index = 0u; index < probeCount; ++index) {
+            weights[index] = coverages[index] * SmoothStep(
+                0.35f,
+                0.95f,
+                priorities[index] / std::max(bestPriority, 0.000001f)
+            );
+            if (weights[index] > selectedWeight) {
+                selectedSlot = static_cast<i32>(index);
+                selectedWeight = weights[index];
+            }
+        }
+
+        const auto previous = command.renderableIdentity != 0u
+            ? m_ObjectReflectionProbeAssignments.find(command.renderableIdentity)
+            : m_ObjectReflectionProbeAssignments.end();
+        if (previous != m_ObjectReflectionProbeAssignments.end() &&
+            previous->second.sceneIndex >= 0) {
+            for (u32 index = 0u; index < probeCount; ++index) {
+                if (reflectionProbes.selectedProbes[index].sceneIndex !=
+                    previous->second.sceneIndex) {
+                    continue;
+                }
+                const f32 retainedWeight = weights[index];
+                if (retainedWeight > kAssignmentWeightEpsilon &&
+                    retainedWeight >= selectedWeight * kAssignmentRetentionRatio) {
+                    selectedSlot = static_cast<i32>(index);
+                    selectedWeight = retainedWeight;
+                }
+                break;
+            }
+        }
+
+        if (selectedWeight <= kAssignmentWeightEpsilon) {
+            selectedSlot = -1;
+            selectedWeight = 0.0f;
+        }
+        const u32 assignmentCode = selectedSlot >= 0
+            ? static_cast<u32>(selectedSlot) + 1u
+            : 0u;
+        const i32 sceneIndex = selectedSlot >= 0
+            ? reflectionProbes.selectedProbes[static_cast<u32>(selectedSlot)].sceneIndex
+            : -1;
+        changed = changed || (
+            previous != m_ObjectReflectionProbeAssignments.end()
+                ? previous->second.sceneIndex != sceneIndex ||
+                    previous->second.assignmentCode != assignmentCode
+                : command.reflectionProbeAssignmentCode != assignmentCode ||
+                    command.reflectionProbeSceneIndex != sceneIndex
+        );
+        command.reflectionProbeAssignmentCode = assignmentCode;
+        command.reflectionProbeSceneIndex = sceneIndex;
+#if !defined(NDEBUG)
+        command.reflectionProbeAnchor = anchor;
+        command.reflectionProbeAssignmentWeight = selectedWeight;
+#endif
+        if (command.renderableIdentity != 0u) {
+            m_ObjectReflectionProbeAssignments[command.renderableIdentity] =
+                ObjectReflectionProbeAssignment{
+                    sceneIndex,
+                    selectedWeight,
+                    assignmentCode
+                };
+        }
+    }
+
+    return changed;
 }
 
 FrameMaterialSet VulkanRenderer::BuildFrameMaterialSet(
@@ -18358,6 +18775,8 @@ bool VulkanRenderer::BuildMainInstanceBatches(
             if (candidate.mesh != firstCommand.mesh ||
                 candidate.material != firstCommand.material ||
                 candidate.drawOrder != firstCommand.drawOrder ||
+                candidate.reflectionProbeAssignmentCode !=
+                    firstCommand.reflectionProbeAssignmentCode ||
                 candidate.tint != firstCommand.tint) {
                 break;
             }

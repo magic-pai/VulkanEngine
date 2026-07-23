@@ -5,8 +5,8 @@ param(
     [switch]$SkipBuild,
     [switch]$UseShowcaseForwardControl,
     [switch]$UseForwardForShowcaseControl,
-    [ValidateSet(2, 3)]
-    [uint32]$ExpectedRayQueryConsumerContractVersion = 3,
+    [ValidateSet(2, 3, 4, 5, 6)]
+    [uint32]$ExpectedRayQueryConsumerContractVersion = 6,
     [switch]$Strict,
     [string]$OutputDirectory = "tmp\hybrid_reflections_capability"
 )
@@ -128,6 +128,7 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_HIT_LIGHTING_OFF",
     "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF",
     "SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF",
+    "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF",
     "SE_HYBRID_REFLECTIONS_DIAGNOSTICS",
     "SE_SSR",
     "SE_SSR_BACKEND",
@@ -186,6 +187,22 @@ $laneSpecs = @(
             SE_HYBRID_REFLECTIONS_RT = "1"
             SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "1"
             SE_LIGHTING_SHOWCASE_FORCE_OFF = "1"
+        }
+    },
+    [pscustomobject]@{
+        name = "lighting-showcase-direct-mirror-disabled-control"
+        executable = $showcaseExecutable
+        requested = 1
+        disabled = 0
+        consumerDisabled = 0
+        hitAttributesDisabled = 0
+        materialTexturesDisabled = 0
+        hitLightingDisabled = 0
+        shadowVisibilityDisabled = 0
+        denoiserInjectionDisabled = 0
+        environment = @{
+            SE_HYBRID_REFLECTIONS_RT = "1"
+            SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF = "1"
         }
     },
     [pscustomobject]@{
@@ -449,6 +466,28 @@ foreach ($lane in $laneSpecs) {
             $iblPrefilteredDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_prefiltered_descriptor_ready"
             $iblSamplerDescriptorReady = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_sampler_descriptor_ready"
             $iblPrefilteredMipCount = Get-UIntValue $last "hybrid_reflections_ray_query_ibl_prefiltered_mip_count"
+            $localProbeIblContractVersion = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_ibl_contract_version"
+            $localProbeIblResourcesReady = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_ibl_resources_ready"
+            $localProbeIblEnabled = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_ibl_enabled"
+            $localProbeCount = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_count"
+            $localProbePrefilteredReadyMask = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_prefiltered_ready_mask"
+            $localProbeDiffuseReadyMask = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_diffuse_ready_mask"
+            $localProbeDescriptorWriteCount = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_local_probe_descriptor_write_count"
+            $sourceFusionEnabled = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_source_fusion_enabled"
+            $directMirrorEnabled = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_direct_mirror_enabled"
+            $screenHitConfidenceThreshold = Get-UIntValue $last `
+                "hybrid_reflections_ray_query_screen_hit_confidence_threshold_permille"
+            $confidenceSpatialFilterEnabled = Get-UIntValue $last `
+                "ssr_ffx_sssr_confidence_spatial_filter_enabled"
             $directionalLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_directional_light_count"
             $localLightCount = Get-UIntValue $last "hybrid_reflections_ray_query_local_light_count"
             $hitLightingVisibilityMode = Get-UIntValue $last "hybrid_reflections_ray_query_hit_lighting_visibility_mode"
@@ -467,6 +506,16 @@ foreach ($lane in $laneSpecs) {
             $ffxSameFrameActive = Get-UIntValue $last "ssr_ffx_sssr_same_frame_composite_active"
             $ffxApplyDraws = Get-UIntValue $last "ssr_ffx_sssr_same_frame_composite_apply_draws"
             $ffxHitConfidenceApplyBound = Get-UIntValue $last "ssr_ffx_sssr_hit_confidence_apply_bound"
+            $ffxMirrorDnsrPassthroughRequested = Get-UIntValue $last `
+                "ssr_ffx_sssr_mirror_dnsr_passthrough_requested"
+            $ffxMirrorDnsrPassthroughResourcesReady = Get-UIntValue $last `
+                "ssr_ffx_sssr_mirror_dnsr_passthrough_resources_ready"
+            $ffxMirrorDnsrPassthroughActive = Get-UIntValue $last `
+                "ssr_ffx_sssr_mirror_dnsr_passthrough_active"
+            $ffxMirrorDnsrRoughnessThreshold = Get-UIntValue $last `
+                "ssr_ffx_sssr_mirror_dnsr_roughness_threshold_milliunits"
+            $ffxMirrorDnsrConfidenceThreshold = Get-UIntValue $last `
+                "ssr_ffx_sssr_mirror_dnsr_confidence_threshold_permille"
             $active = Get-UIntValue $last "hybrid_reflections_active"
             $fallback = Get-UIntValue $last "hybrid_reflections_fallback_reason"
             $rayQueryReadbackRows = @(
@@ -530,6 +579,26 @@ foreach ($lane in $laneSpecs) {
             $rectLightContributionCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_rect_light_contribution_count"
             $finiteDirectRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_direct_radiance_count"
             $finiteIblRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_ibl_radiance_count"
+            $localProbeIblResolvedCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_local_probe_ibl_resolved_count"
+            $globalIblFallbackCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_global_ibl_fallback_count"
+            $localProbeIblInvalidCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_local_probe_ibl_invalid_count"
+            $localProbeIblLuminanceSum = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_local_probe_ibl_luminance_sum_milliunits"
+            $sourceFusionCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_source_fusion_count"
+            $sourceFusionConfidenceSum = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_source_fusion_confidence_sum_permille"
+            $sourceFusionScreenWeightSum = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_source_fusion_screen_weight_sum_permille"
+            $directMirrorCandidateCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_direct_mirror_candidate_count"
+            $directMirrorHitCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_direct_mirror_hit_count"
+            $directMirrorFallbackCount = Get-UIntValue $rayQueryReadback `
+                "hybrid_reflections_ray_query_direct_mirror_fallback_count"
             $finiteEmissiveRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_emissive_radiance_count"
             $finiteRadianceCount = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_finite_radiance_count"
             $directLuminanceSum = Get-UIntValue $rayQueryReadback "hybrid_reflections_ray_query_direct_luminance_sum_milliunits"
@@ -656,6 +725,11 @@ foreach ($lane in $laneSpecs) {
                 $lane.requested -eq 1 -and
                 $lane.disabled -eq 0 -and
                 $hardwareReady -eq 1
+            $expectedAccelerationStructureContract = if ($runtimeResourcesExpected) {
+                2
+            } else {
+                0
+            }
             $rayQueryDispatchExpected =
                 $runtimeResourcesExpected -and
                 $lane.consumerDisabled -eq 0
@@ -674,6 +748,10 @@ foreach ($lane in $laneSpecs) {
             $denoiserInjectionExpected =
                 $shadowVisibilityResolutionExpected -and
                 $lane.denoiserInjectionDisabled -eq 0
+            $directMirrorExpected =
+                -not $lane.environment.ContainsKey(
+                    "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF"
+                )
             $expectedRayQueryConsumerContract = if ($runtimeResourcesExpected) {
                 $ExpectedRayQueryConsumerContractVersion
             } else {
@@ -760,8 +838,10 @@ foreach ($lane in $laneSpecs) {
                 "$deviceEnabled/$shaderInt64Enabled/$nonUniformSampledImageEnabled" `
                 "$([uint32]$expectedDeviceEnabled)/$([uint32]$expectedDeviceEnabled)/$([uint32]$expectedDeviceEnabled)")) | Out-Null
             $checks.Add((New-Check "$($lane.name) acceleration-structure contract" `
-                ($accelerationStructureContract -eq [uint32]$runtimeResourcesExpected) `
-                $accelerationStructureContract ([uint32]$runtimeResourcesExpected))) | Out-Null
+                ($accelerationStructureContract -eq
+                    $expectedAccelerationStructureContract) `
+                $accelerationStructureContract $expectedAccelerationStructureContract)) |
+                Out-Null
             $checks.Add((New-Check "$($lane.name) Ray Query consumer contract" `
                 ($rayQueryConsumerContract -eq $expectedRayQueryConsumerContract) `
                 $rayQueryConsumerContract $expectedRayQueryConsumerContract)) | Out-Null
@@ -873,16 +953,38 @@ foreach ($lane in $laneSpecs) {
                     $hitLightingResourceContractValid `
                     "resources=$hitLightingResourcesReady,light=$lightBufferDescriptorReady,ibl=$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady,mips=$iblPrefilteredMipCount,lights=$directionalLightCount+$localLightCount" `
                     "resources/light/ibl=1,mips>0,directional<=1,local<=64")) | Out-Null
+                $localProbeMaskLimit = if ($localProbeCount -eq 0) {
+                    0
+                } else {
+                    (1 -shl $localProbeCount) - 1
+                }
+                $localProbeIblContractValid =
+                    $localProbeIblContractVersion -eq 1 -and
+                    $localProbeIblResourcesReady -eq 1 -and
+                    $localProbeIblEnabled -eq 1 -and
+                    $sourceFusionEnabled -eq 1 -and
+                    $screenHitConfidenceThreshold -eq 950 -and
+                    $confidenceSpatialFilterEnabled -eq 1 -and
+                    $localProbeCount -le 4 -and
+                    $localProbeDescriptorWriteCount -eq 3 -and
+                    ($localProbePrefilteredReadyMask -band
+                        (-bnot $localProbeMaskLimit)) -eq 0 -and
+                    ($localProbeDiffuseReadyMask -band
+                        (-bnot $localProbeMaskLimit)) -eq 0
+                $checks.Add((New-Check "$($lane.name) Ray Query hit IBL consumes bounded scene Probe inputs" `
+                    $localProbeIblContractValid `
+                    "contract/resources/enabled/fusion/filter=$localProbeIblContractVersion/$localProbeIblResourcesReady/$localProbeIblEnabled/$sourceFusionEnabled/$confidenceSpatialFilterEnabled,count=$localProbeCount,masks=$localProbePrefilteredReadyMask/$localProbeDiffuseReadyMask,writes=$localProbeDescriptorWriteCount,threshold=$screenHitConfidenceThreshold" `
+                    "contract/resources/enabled/fusion/filter=1/1/1/1/1,count<=4,masks within count,writes=3,threshold=950")) | Out-Null
                 $shadowBudgetContractValid =
                     $shadowVisibilityResourcesReady -eq 1 -and
-                    $shadowMaxLocalLightCount -eq 8 -and
-                    $shadowRectangleSampleCount -eq 4 -and
+                    $shadowMaxLocalLightCount -eq 2 -and
+                    $shadowRectangleSampleCount -eq 2 -and
                     $shadowMaxRaysPerHit -eq
-                        ($directionalLightCount + 32)
+                        ($directionalLightCount + 4)
                 $checks.Add((New-Check "$($lane.name) shadow-ray budget is bounded" `
                     $shadowBudgetContractValid `
                     "resources=$shadowVisibilityResourcesReady,local=$shadowMaxLocalLightCount,rectSamples=$shadowRectangleSampleCount,maxRays=$shadowMaxRaysPerHit" `
-                    "resources=1,local=8,rectSamples=4,maxRays=directional+32")) | Out-Null
+                    "resources=1,local=2,rectSamples=2,maxRays=directional+4")) | Out-Null
                 $denoiserResourceContractValid =
                     $denoiserResourcesReady -eq 1 -and
                     $denoiserRadianceDescriptorReady -eq 1 -and
@@ -906,6 +1008,16 @@ foreach ($lane in $laneSpecs) {
                         $ffxDenoiserChainValid `
                         "dnsr=$ffxReprojectDispatches/$ffxPrefilterDispatches/$ffxResolveDispatches,apply=$ffxSameFrameActive/$ffxApplyDraws,confidence=$ffxHitConfidenceApplyBound" `
                         "dnsr=1/1/1,apply=1/1,confidence=1")) | Out-Null
+                    $mirrorDnsrFusionValid =
+                        $ffxMirrorDnsrPassthroughRequested -eq 1 -and
+                        $ffxMirrorDnsrPassthroughResourcesReady -eq 1 -and
+                        $ffxMirrorDnsrPassthroughActive -eq 1 -and
+                        $ffxMirrorDnsrRoughnessThreshold -eq 80 -and
+                        $ffxMirrorDnsrConfidenceThreshold -eq 995
+                    $checks.Add((New-Check "$($lane.name) full-rate mirror pixels use the selective DNSR fusion contract" `
+                        $mirrorDnsrFusionValid `
+                        "requested/resources/active=$ffxMirrorDnsrPassthroughRequested/$ffxMirrorDnsrPassthroughResourcesReady/$ffxMirrorDnsrPassthroughActive,thresholds=$ffxMirrorDnsrRoughnessThreshold/$ffxMirrorDnsrConfidenceThreshold" `
+                        "requested/resources/active=1/1/1,thresholds=80/995")) | Out-Null
                 }
                 $expectedVisibilityMode = if ($shadowVisibilityResolutionExpected) {
                     2
@@ -924,6 +1036,10 @@ foreach ($lane in $laneSpecs) {
                     "$hitLightingVisibilityMode/$hitLightingVisibilityFallback" `
                     "$expectedVisibilityMode/$expectedVisibilityFallback")) | Out-Null
                 if ($rayQueryDispatchExpected) {
+                    $checks.Add((New-Check "$($lane.name) direct mirror Ray Query mode" `
+                        ($directMirrorEnabled -eq [uint32]$directMirrorExpected) `
+                        $directMirrorEnabled `
+                        ([uint32]$directMirrorExpected))) | Out-Null
                     $dispatchRecorded =
                         $rayQueryDispatchReady -eq 1 -and
                         $rayQueryDispatchCount -eq 1 -and
@@ -958,6 +1074,32 @@ foreach ($lane in $laneSpecs) {
                         $traceEquation `
                         "$rayQueryTraceCount=$rayQueryCommittedHitCount+$rayQueryMissCount" `
                         "trace=committedHit+miss")) | Out-Null
+                    if ($directMirrorExpected) {
+                        $directMirrorAccounting =
+                            [uint64]$directMirrorCandidateCount -eq
+                            ([uint64]$directMirrorHitCount +
+                                [uint64]$directMirrorFallbackCount)
+                        $checks.Add((New-Check "$($lane.name) direct mirror ownership is conserved" `
+                            $directMirrorAccounting `
+                            "$directMirrorCandidateCount=$directMirrorHitCount+$directMirrorFallbackCount" `
+                            "candidate=hit+fallback")) | Out-Null
+                        if ($lane.name -eq "lighting-showcase-requested") {
+                            $checks.Add((New-Check "$($lane.name) direct mirror Ray Query is exercised" `
+                                ($directMirrorCandidateCount -gt 0 -and `
+                                    $directMirrorHitCount -gt 0) `
+                                "candidates=$directMirrorCandidateCount,hits=$directMirrorHitCount,fallbacks=$directMirrorFallbackCount" `
+                                "candidates>0,hits>0")) | Out-Null
+                        }
+                    } else {
+                        $directMirrorSuppressed =
+                            $directMirrorCandidateCount -eq 0 -and
+                            $directMirrorHitCount -eq 0 -and
+                            $directMirrorFallbackCount -eq 0
+                        $checks.Add((New-Check "$($lane.name) direct mirror diagnostics are suppressed" `
+                            $directMirrorSuppressed `
+                            "$directMirrorCandidateCount/$directMirrorHitCount/$directMirrorFallbackCount" `
+                            "0/0/0")) | Out-Null
+                    }
                     $checks.Add((New-Check "$($lane.name) Ray Query hit distances are bounded" `
                         ($rayQueryDistanceMin -gt 0 -and `
                             $rayQueryDistanceMax -ge $rayQueryDistanceMin) `
@@ -1062,6 +1204,17 @@ foreach ($lane in $laneSpecs) {
                                     $hitLightingContractValid `
                                     "samples=$textureSampleResolvedCount,resolved=$hitLightingResolvedCount,invalid=$hitLightingInvalidCount,finite=$finiteDirectRadianceCount/$finiteIblRadianceCount/$finiteEmissiveRadianceCount/$finiteRadianceCount,payload=$hitSurfacePayloadWriteCount,energy=$directLuminanceSum/$iblLuminanceSum/$emissiveLuminanceSum,range=$radianceLuminanceMin..$radianceLuminanceMax,checksum=$radianceChecksum" `
                                     "samples=resolved=all finite=payload,invalid=0,energy>0,valid range/checksum")) | Out-Null
+                                $localProbeIblDiagnosticsValid =
+                                    $localProbeIblInvalidCount -eq 0 -and
+                                    ($localProbeIblResolvedCount +
+                                        $globalIblFallbackCount) -eq
+                                        $hitLightingResolvedCount -and
+                                    ($localProbeIblResolvedCount -eq 0 -or
+                                        $localProbeIblLuminanceSum -gt 0)
+                                $checks.Add((New-Check "$($lane.name) local Probe and global IBL attribution is conserved" `
+                                    $localProbeIblDiagnosticsValid `
+                                    "local/global=$localProbeIblResolvedCount/$globalIblFallbackCount,resolved=$hitLightingResolvedCount,invalid=$localProbeIblInvalidCount,energy=$localProbeIblLuminanceSum" `
+                                    "local+global=resolved,invalid=0,local energy>0 when used")) | Out-Null
                                 $lightEvaluationContractValid =
                                     ($directionalLightCount -eq 0 -or
                                         $directionalLightEvaluationCount -gt 0) -and
@@ -1119,6 +1272,10 @@ foreach ($lane in $laneSpecs) {
                                             $shadowOccludedCount) -gt 0 -and
                                         $visibleDirectLuminanceSum -le
                                             $unshadowedDirectLuminanceSum -and
+                                        ($localShadowDroppedCount -eq 0 -or
+                                            $localShadowDroppedLuminanceSum -gt 0) -and
+                                        $visibleDirectLuminanceSum -ge
+                                            $localShadowDroppedLuminanceSum -and
                                         $shadowVisibilityMin -le
                                             $shadowVisibilityMax -and
                                         $shadowVisibilityMax -le 1000 -and
@@ -1128,7 +1285,7 @@ foreach ($lane in $laneSpecs) {
                                     $checks.Add((New-Check "$($lane.name) shadow visibility is finite and non-self-intersecting" `
                                         $shadowVisibilityValuesValid `
                                         "invalid=$shadowInvalidCount,self=$shadowSelfIntersectionCandidateCount,visible/occluded=$shadowVisibleCount/$shadowOccludedCount,direct=$visibleDirectLuminanceSum<=$unshadowedDirectLuminanceSum,visibility=$shadowVisibilityMin..$shadowVisibilityMax,hitMm=$shadowHitDistanceMin..$shadowHitDistanceMax,droppedEnergy=$localShadowDroppedLuminanceSum" `
-                                        "invalid/self=0,visible+occluded>0,visibleDirect<=unshadowed,visibility=0..1000,occluded hit distance ordered")) | Out-Null
+                                        "invalid/self=0,visible+occluded>0,dropped energy retained,visibleDirect<=unshadowed,visibility=0..1000,occluded hit distance ordered")) | Out-Null
                                 } else {
                                     $checks.Add((New-Check "$($lane.name) shadow visibility is suppressed" `
                                         $shadowVisibilityDiagnosticsSuppressed `
@@ -1136,22 +1293,35 @@ foreach ($lane in $laneSpecs) {
                                         "all=0 while hit lighting remains independently controlled")) | Out-Null
                                 }
                                 if ($denoiserInjectionExpected) {
+                                    $expectedDenoiserInjectionCount =
+                                        [uint64]$hitLightingResolvedCount +
+                                        [uint64]$directMirrorFallbackCount
                                     $denoiserInjectionContractValid =
-                                        $denoiserInjectionResolvedCount -eq
-                                            $hitLightingResolvedCount -and
+                                        [uint64]$denoiserInjectionResolvedCount -eq
+                                            $expectedDenoiserInjectionCount -and
                                         $denoiserRadiancePixelWriteCount -ge
                                             $denoiserInjectionResolvedCount -and
                                         $denoiserRadiancePixelWriteCount -le
                                             $rayQueryResultWriteCount -and
                                         $denoiserConfidencePixelWriteCount -eq
                                             $denoiserRadiancePixelWriteCount -and
-                                        [uint64]$denoiserConfidenceSumPermille -eq
+                                        $denoiserConfidenceSumPermille -gt 0 -and
+                                        [uint64]$denoiserConfidenceSumPermille -le
                                             ([uint64]$denoiserConfidencePixelWriteCount *
-                                                1000)
+                                                1000) -and
+                                        $sourceFusionCount -le
+                                            $denoiserInjectionResolvedCount -and
+                                        ($sourceFusionCount -eq 0 -or
+                                            ($sourceFusionConfidenceSum -gt 0 -and
+                                                $sourceFusionScreenWeightSum -gt 0 -and
+                                                [uint64]$sourceFusionConfidenceSum -le
+                                                    ([uint64]$sourceFusionCount * 1000) -and
+                                                [uint64]$sourceFusionScreenWeightSum -le
+                                                    ([uint64]$sourceFusionCount * 1000)))
                                     $checks.Add((New-Check "$($lane.name) hardware radiance enters the existing DNSR carrier" `
                                         $denoiserInjectionContractValid `
-                                        "lighting=$hitLightingResolvedCount,injected=$denoiserInjectionResolvedCount,radianceWrites=$denoiserRadiancePixelWriteCount,confidenceWrites=$denoiserConfidencePixelWriteCount,confidenceSum=$denoiserConfidenceSumPermille,resultWrites=$rayQueryResultWriteCount" `
-                                        "lighting=injected,radiance=confidence,injected<=writes<=result,confidence=1000 per pixel")) | Out-Null
+                                        "lighting=$hitLightingResolvedCount,fallback=$directMirrorFallbackCount,injected=$denoiserInjectionResolvedCount,radianceWrites=$denoiserRadiancePixelWriteCount,confidenceWrites=$denoiserConfidencePixelWriteCount,confidenceSum=$denoiserConfidenceSumPermille,fusion=$sourceFusionCount/$sourceFusionConfidenceSum/$sourceFusionScreenWeightSum,resultWrites=$rayQueryResultWriteCount" `
+                                        "lighting+directMirrorFallback=injected,radiance=confidence,injected<=writes<=result,0<=confidence<=1000 per pixel,fusion bounded")) | Out-Null
                                 } else {
                                     $checks.Add((New-Check "$($lane.name) DNSR injection is suppressed" `
                                         $denoiserDiagnosticsSuppressed `
@@ -1331,12 +1501,14 @@ foreach ($lane in $laneSpecs) {
                 hitSurface = "$($hitSurfaceWidth)x$hitSurfaceHeight/$hitSurfaceFormat"
                 hitLightingResourcesReady = $hitLightingResourcesReady
                 hitLightingDescriptors = "$lightBufferDescriptorReady/$iblBrdfDescriptorReady/$iblIrradianceDescriptorReady/$iblPrefilteredDescriptorReady/$iblSamplerDescriptorReady"
+                localProbeIbl = "$localProbeIblContractVersion/$localProbeIblResourcesReady/$localProbeIblEnabled/$localProbeCount/$localProbePrefilteredReadyMask/$localProbeDiffuseReadyMask/$localProbeDescriptorWriteCount/$sourceFusionEnabled/$directMirrorEnabled/$screenHitConfidenceThreshold/$confidenceSpatialFilterEnabled"
                 hitLightingLightCounts = "$directionalLightCount+$localLightCount"
                 hitLightingVisibility = "$hitLightingVisibilityMode/$hitLightingVisibilityFallback"
                 shadowVisibilityResourcesReady = $shadowVisibilityResourcesReady
                 shadowRayBudget = "$shadowMaxLocalLightCount/$shadowRectangleSampleCount/$shadowMaxRaysPerHit"
                 denoiserBridge = "$denoiserResourcesReady/$denoiserRadianceDescriptorReady/$denoiserConfidenceDescriptorReady/$denoiserInjectionEnabled"
                 denoiserChain = "$ffxReprojectDispatches/$ffxPrefilterDispatches/$ffxResolveDispatches/$ffxSameFrameActive/$ffxApplyDraws/$ffxHitConfidenceApplyBound"
+                mirrorDnsrFusion = "$ffxMirrorDnsrPassthroughRequested/$ffxMirrorDnsrPassthroughResourcesReady/$ffxMirrorDnsrPassthroughActive/$ffxMirrorDnsrRoughnessThreshold/$ffxMirrorDnsrConfidenceThreshold"
                 rayQueryDispatchReady = $rayQueryDispatchReady
                 rayQueryDispatchCount = $rayQueryDispatchCount
                 rayQueryReadbackValid = $rayQueryReadbackValid
@@ -1373,6 +1545,9 @@ foreach ($lane in $laneSpecs) {
                 hitLightingEvaluations = "$directionalLightEvaluationCount/$pointLightEvaluationCount/$spotLightEvaluationCount/$rectLightEvaluationCount"
                 hitLightingContributions = "$directionalLightContributionCount/$pointLightContributionCount/$spotLightContributionCount/$rectLightContributionCount"
                 hitLightingFinite = "$finiteDirectRadianceCount/$finiteIblRadianceCount/$finiteEmissiveRadianceCount/$finiteRadianceCount"
+                localProbeIblAttribution = "$localProbeIblResolvedCount/$globalIblFallbackCount/$localProbeIblInvalidCount/$localProbeIblLuminanceSum"
+                sourceFusion = "$sourceFusionCount/$sourceFusionConfidenceSum/$sourceFusionScreenWeightSum"
+                directMirror = "$directMirrorCandidateCount/$directMirrorHitCount/$directMirrorFallbackCount"
                 hitLightingEnergyMilliunits = "$directLuminanceSum/$iblLuminanceSum/$emissiveLuminanceSum"
                 hitLightingRadianceRange = "$radianceLuminanceMin..$radianceLuminanceMax"
                 hitLightingRadianceChecksum = $radianceChecksum

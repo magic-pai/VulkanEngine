@@ -7,6 +7,21 @@
 
 namespace se {
 
+namespace {
+
+ColorBlendMode HdrReflectionVisibilityPreservingAlphaBlendMode() {
+#if !defined(NDEBUG)
+    if (VulkanEnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF"
+        )) {
+        return ColorBlendMode::Alpha;
+    }
+#endif
+    return ColorBlendMode::AlphaPreserveDestinationAlpha;
+}
+
+} // namespace
+
 ColorBlendMode FidelityFxSssrApplyBlendMode() {
 #if !defined(NDEBUG)
     const std::string overrideMode = LowerAscii(
@@ -20,7 +35,7 @@ ColorBlendMode FidelityFxSssrApplyBlendMode() {
         return ColorBlendMode::DestinationAlphaAdditive;
     }
 #endif
-    return ColorBlendMode::Additive;
+    return ColorBlendMode::DestinationAlphaAdditive;
 }
 
 const char* ColorBlendModeName(ColorBlendMode mode) {
@@ -29,6 +44,8 @@ const char* ColorBlendModeName(ColorBlendMode mode) {
         return "disabled";
     case ColorBlendMode::Alpha:
         return "alpha";
+    case ColorBlendMode::AlphaPreserveDestinationAlpha:
+        return "alpha_preserve_destination_alpha";
     case ColorBlendMode::Additive:
         return "additive";
     case ColorBlendMode::DestinationAlphaAdditive:
@@ -82,7 +99,8 @@ PipelineSpec PipelineSpec::ForwardResidual3D(
     spec.instancedVertexShaderPath.clear();
     spec.depthWriteEnabled = false;
     spec.alphaBlendEnabled = true;
-    spec.colorBlendModes[0] = ColorBlendMode::Alpha;
+    spec.colorBlendModes[0] =
+        HdrReflectionVisibilityPreservingAlphaBlendMode();
     return spec;
 }
 
@@ -256,7 +274,8 @@ PipelineSpec PipelineSpec::WeightedTranslucencyResolve(
         std::move(fragmentShaderPath)
     );
     spec.alphaBlendEnabled = true;
-    spec.colorBlendModes[0] = ColorBlendMode::Alpha;
+    spec.colorBlendModes[0] =
+        HdrReflectionVisibilityPreservingAlphaBlendMode();
     return spec;
 }
 

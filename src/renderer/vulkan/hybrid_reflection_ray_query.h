@@ -2,6 +2,7 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <array>
 #include <glm/vec4.hpp>
 
 namespace se {
@@ -22,6 +23,7 @@ struct HybridReflectionInstanceAuditRecord;
 struct RendererHybridReflectionStats;
 
 inline constexpr u32 kMaxHybridReflectionMaterials = 256u;
+inline constexpr u32 kMaxHybridReflectionProbes = 4u;
 inline constexpr u32 kHybridReflectionFullAuditMaxRayRecords = 1048576u;
 inline constexpr u32 kHybridReflectionFullAuditMaxApplyRecords = 1048576u;
 inline constexpr u32 kHybridReflectionFullAuditImageStageCount = 14u;
@@ -95,22 +97,45 @@ struct HybridReflectionFullAuditQueueCommandRecord {
     u32 bonePaletteReady = 0u;
     u32 bonePaletteDescriptorReady = 0u;
     u32 worldBoundsValid = 0u;
+    u32 reflectionProbeAssignmentCode = 0u;
+    i32 reflectionProbeSceneIndex = -1;
+    u32 reflectionProbeAssignmentWeightBits = 0u;
     glm::vec4 boundsMin{ 0.0f };
     glm::vec4 boundsMax{ 0.0f };
     std::string renderableName;
 };
 
+struct alignas(16) HybridReflectionProbeGpuRecord {
+    glm::vec4 positionRadius{ 0.0f };
+    glm::vec4 controls{ 0.0f };
+    glm::vec4 colorAndMip{ 1.0f, 1.0f, 1.0f, 0.0f };
+    glm::vec4 boxExtentsProjection{ 1.0f, 1.0f, 1.0f, 0.0f };
+    glm::vec4 resourceControls{ 0.0f };
+};
+
+struct alignas(16) HybridReflectionProbeFrameInputs {
+    std::array<
+        HybridReflectionProbeGpuRecord,
+        kMaxHybridReflectionProbes
+    > probes{};
+    // x: count, y: prefiltered-ready mask, z: diffuse-ready mask, w: enabled.
+    glm::uvec4 controls{ 0u };
+};
+
 struct HybridReflectionRayQuerySettings {
     f32 maxRayDistance = 100.0f;
-    f32 screenHitConfidenceThreshold = 0.75f;
+    f32 screenHitConfidenceThreshold = 0.95f;
     f32 originBiasMin = 0.002f;
     f32 originBiasScale = 0.00025f;
     f32 originBiasMax = 0.05f;
-    u32 maxShadowedLocalLights = 8u;
-    u32 rectangleShadowSampleCount = 4u;
+    u32 maxShadowedLocalLights = 2u;
+    u32 rectangleShadowSampleCount = 2u;
     u32 diagnosticTargetSubmissionIndex = std::numeric_limits<u32>::max();
     u32 diagnosticTargetInstanceIndex = std::numeric_limits<u32>::max();
     bool forceAllRayQueries = false;
+    bool hitIblEnabled = true;
+    bool sourceFusionEnabled = true;
+    bool directMirrorRayQueryEnabled = true;
     bool cullBackFacingTriangles = true;
     bool fullAuditEnabled = false;
 };
@@ -168,6 +193,16 @@ struct HybridReflectionRayQueryDiagnostics {
     u32 rectLightContributionCount = 0u;
     u32 finiteDirectRadianceCount = 0u;
     u32 finiteIblRadianceCount = 0u;
+    u32 localProbeIblResolvedCount = 0u;
+    u32 globalIblFallbackCount = 0u;
+    u32 localProbeIblInvalidCount = 0u;
+    u32 localProbeIblLuminanceSumMilliunits = 0u;
+    u32 sourceFusionCount = 0u;
+    u32 sourceFusionConfidenceSumPermille = 0u;
+    u32 sourceFusionScreenWeightSumPermille = 0u;
+    u32 directMirrorCandidateCount = 0u;
+    u32 directMirrorHitCount = 0u;
+    u32 directMirrorFallbackCount = 0u;
     u32 finiteEmissiveRadianceCount = 0u;
     u32 finiteRadianceCount = 0u;
     u32 directLuminanceSumMilliunits = 0u;
@@ -245,6 +280,11 @@ public:
         bool diagnosticsEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
+        const HybridReflectionProbeFrameInputs& reflectionProbeInputs,
+        const std::array<VkImageView, kMaxHybridReflectionProbes>&
+            reflectionProbePrefilteredViews,
+        const std::array<VkImageView, kMaxHybridReflectionProbes>&
+            reflectionProbeDiffuseViews,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     );

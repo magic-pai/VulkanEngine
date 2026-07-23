@@ -39,22 +39,26 @@ namespace se {
 
 namespace {
 
-constexpr u32 kRayQueryContractVersion = 3u;
+constexpr u32 kRayQueryContractVersion = 6u;
 constexpr u32 kHitAttributeContractVersion = 1u;
 constexpr u32 kMaterialTableContractVersion = 1u;
 constexpr u32 kHitLightingContractVersion = 1u;
 constexpr u32 kShadowVisibilityContractVersion = 1u;
 constexpr u32 kDenoiserBridgeContractVersion = 1u;
+constexpr u32 kLocalProbeIblContractVersion = 1u;
 constexpr u32 kHitLightingVisibilityModeUnshadowed = 1u;
 constexpr u32 kHitLightingVisibilityModeRayQuery = 2u;
 constexpr u32 kHitLightingVisibilityFallbackPendingRayQuery = 1u;
 constexpr u32 kMaxShadowedLocalLights = 8u;
 constexpr u32 kMaxRectangleShadowSamples = 4u;
-constexpr u32 kDiagnosticValueCount = 86u;
+constexpr u32 kDiagnosticValueCount = 97u;
 constexpr u32 kRayQueryRuntimeForceAllRaysBit = 1u << 0u;
 constexpr u32 kRayQueryRuntimeDisableBackFaceCullBit = 1u << 1u;
 constexpr u32 kRayQueryRuntimeTargetAttributionBit = 1u << 2u;
 constexpr u32 kRayQueryRuntimeFullAuditBit = 1u << 3u;
+constexpr u32 kRayQueryRuntimeDisableHitIblBit = 1u << 4u;
+constexpr u32 kRayQueryRuntimeDisableSourceFusionBit = 1u << 5u;
+constexpr u32 kRayQueryRuntimeDirectMirrorBit = 1u << 6u;
 constexpr u32 kFullAuditHeaderWordCount = 128u;
 constexpr u32 kFullAuditInstanceCounterCount = 8u;
 constexpr u32 kFullAuditRayRecordWordCount = 24u;
@@ -101,6 +105,18 @@ static_assert(offsetof(HybridReflectionMaterialRecord, uvTransform) == 48u);
 static_assert(offsetof(HybridReflectionMaterialRecord, uvControls) == 64u);
 static_assert(offsetof(HybridReflectionMaterialRecord, textureInfo) == 80u);
 static_assert(offsetof(HybridReflectionMaterialRecord, textureExtent) == 96u);
+static_assert(sizeof(HybridReflectionProbeGpuRecord) == 80u);
+static_assert(offsetof(HybridReflectionProbeGpuRecord, positionRadius) == 0u);
+static_assert(offsetof(HybridReflectionProbeGpuRecord, controls) == 16u);
+static_assert(offsetof(HybridReflectionProbeGpuRecord, colorAndMip) == 32u);
+static_assert(
+    offsetof(HybridReflectionProbeGpuRecord, boxExtentsProjection) == 48u
+);
+static_assert(
+    offsetof(HybridReflectionProbeGpuRecord, resourceControls) == 64u
+);
+static_assert(sizeof(HybridReflectionProbeFrameInputs) == 336u);
+static_assert(offsetof(HybridReflectionProbeFrameInputs, controls) == 320u);
 
 struct alignas(16) RayQueryControls {
     f32 maxRayDistance = 100.0f;
@@ -514,6 +530,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         fullAuditMetadata.clear();
         instanceMetadataBuffers.clear();
         materialBuffers.clear();
+        reflectionProbeBuffers.clear();
         controlsBuffers.clear();
         hitSurfaceImages.clear();
         resultImages.clear();
@@ -532,7 +549,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     }
 
     void CreateDescriptorSetLayout(const VulkanDevice& device) {
-        std::array<VkDescriptorSetLayoutBinding, 24> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 27> bindings{};
         auto setBinding = [&](u32 binding, VkDescriptorType type, u32 count = 1u) {
             bindings[binding].binding = binding;
             bindings[binding].descriptorType = type;
@@ -569,6 +586,17 @@ struct VulkanHybridReflectionRayQuery::Impl {
         setBinding(21u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         setBinding(22u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
         setBinding(23u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+        setBinding(
+            24u,
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            kMaxHybridReflectionProbes
+        );
+        setBinding(
+            25u,
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            kMaxHybridReflectionProbes
+        );
+        setBinding(26u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
         VkDescriptorSetLayoutCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -628,6 +656,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         diagnosticsBuffers.reserve(count);
         instanceMetadataBuffers.reserve(count);
         materialBuffers.reserve(count);
+        reflectionProbeBuffers.reserve(count);
         submitted.assign(count, false);
         frameEnabled.assign(count, false);
         denoiserInjectionActive.assign(count, false);
@@ -646,6 +675,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         const std::vector<u32> diagnostics =
             BuildDiagnosticClearValues(diagnosticWordCount);
         const RayQueryControls defaultControls{};
+        const HybridReflectionProbeFrameInputs defaultReflectionProbes{};
         for (std::size_t imageIndex = 0; imageIndex < count; ++imageIndex) {
             auto result = std::make_unique<VulkanImage>(
                 device,
@@ -709,11 +739,21 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                 hostMemory
             );
+            auto reflectionProbeBuffer = std::make_unique<VulkanBuffer>(
+                device,
+                physicalDevice,
+                sizeof(HybridReflectionProbeFrameInputs),
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                hostMemory
+            );
             controls->Upload(
                 std::as_bytes(std::span{ &defaultControls, 1u })
             );
             diagnosticBuffer->Upload(
                 std::as_bytes(std::span<const u32>(diagnostics))
+            );
+            reflectionProbeBuffer->Upload(
+                std::as_bytes(std::span{ &defaultReflectionProbes, 1u })
             );
             resultImages.push_back(std::move(result));
             hitSurfaceImages.push_back(std::move(hitSurface));
@@ -723,6 +763,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 std::move(instanceMetadataBuffer)
             );
             materialBuffers.push_back(std::move(materialBuffer));
+            reflectionProbeBuffers.push_back(
+                std::move(reflectionProbeBuffer)
+            );
         }
 
         if (fullAuditResourcesAllocated) {
@@ -820,7 +863,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
         poolSizes[1] = {
             VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
             static_cast<u32>(
-                count * (9u + kMaxHybridReflectionMaterials)
+                count * (
+                    9u + kMaxHybridReflectionMaterials +
+                    kMaxHybridReflectionProbes * 2u
+                )
             )
         };
         poolSizes[2] = {
@@ -837,7 +883,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         poolSizes[5] = {
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            static_cast<u32>(count)
+            static_cast<u32>(count * 2u)
         };
         poolSizes[6] = {
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -976,6 +1022,31 @@ struct VulkanHybridReflectionRayQuery::Impl {
             };
             std::array<
                 VkDescriptorImageInfo,
+                kMaxHybridReflectionProbes
+            > localProbePrefilteredInfos{};
+            std::array<
+                VkDescriptorImageInfo,
+                kMaxHybridReflectionProbes
+            > localProbeDiffuseInfos{};
+            for (u32 slot = 0u; slot < kMaxHybridReflectionProbes; ++slot) {
+                localProbePrefilteredInfos[slot] = {
+                    VK_NULL_HANDLE,
+                    iblPrefilteredView,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                };
+                localProbeDiffuseInfos[slot] = {
+                    VK_NULL_HANDLE,
+                    iblIrradianceView,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                };
+            }
+            const VkDescriptorBufferInfo reflectionProbeInfo{
+                reflectionProbeBuffers[imageIndex]->Handle(),
+                0u,
+                sizeof(HybridReflectionProbeFrameInputs)
+            };
+            std::array<
+                VkDescriptorImageInfo,
                 kMaxHybridReflectionMaterials
             > materialTextureInfos{};
             std::array<
@@ -999,7 +1070,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     fallbackSampler->Handle();
             }
 
-            std::array<VkWriteDescriptorSet, 23> writes{};
+            std::array<VkWriteDescriptorSet, 26> writes{};
             for (u32 sourceIndex = 0u; sourceIndex < sampledImages.size();
                 ++sourceIndex) {
                 VkWriteDescriptorSet& write = writes[sourceIndex];
@@ -1088,6 +1159,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             writes[21] = writes[14];
             writes[21].dstBinding = 22u;
             writes[21].pImageInfo = &denoiserConfidenceImage;
+            u32 nextWrite = 22u;
             VkDescriptorImageInfo objectIdInfo{};
             if (fullAuditResourcesAllocated) {
                 if (!renderTargets.ReflectionAuditObjectIdEnabled()) {
@@ -1099,18 +1171,36 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     renderTargets.ReflectionAuditObjectIdView(imageIndex);
                 objectIdInfo.imageLayout =
                     VK_IMAGE_LAYOUT_GENERAL;
-                writes[22].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writes[22].dstSet = descriptorSets[imageIndex];
-                writes[22].dstBinding = 23u;
-                writes[22].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                writes[22].descriptorCount = 1u;
-                writes[22].pImageInfo = &objectIdInfo;
+                writes[nextWrite].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[nextWrite].dstSet = descriptorSets[imageIndex];
+                writes[nextWrite].dstBinding = 23u;
+                writes[nextWrite].descriptorType =
+                    VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                writes[nextWrite].descriptorCount = 1u;
+                writes[nextWrite].pImageInfo = &objectIdInfo;
+                ++nextWrite;
             }
+            writes[nextWrite].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[nextWrite].dstSet = descriptorSets[imageIndex];
+            writes[nextWrite].dstBinding = 24u;
+            writes[nextWrite].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writes[nextWrite].descriptorCount = kMaxHybridReflectionProbes;
+            writes[nextWrite].pImageInfo = localProbePrefilteredInfos.data();
+            ++nextWrite;
+            writes[nextWrite] = writes[nextWrite - 1u];
+            writes[nextWrite].dstBinding = 25u;
+            writes[nextWrite].pImageInfo = localProbeDiffuseInfos.data();
+            ++nextWrite;
+            writes[nextWrite].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[nextWrite].dstSet = descriptorSets[imageIndex];
+            writes[nextWrite].dstBinding = 26u;
+            writes[nextWrite].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[nextWrite].descriptorCount = 1u;
+            writes[nextWrite].pBufferInfo = &reflectionProbeInfo;
+            ++nextWrite;
             vkUpdateDescriptorSets(
                 device.Handle(),
-                fullAuditResourcesAllocated
-                    ? static_cast<u32>(writes.size())
-                    : static_cast<u32>(writes.size() - 1u),
+                nextWrite,
                 writes.data(),
                 0u,
                 nullptr
@@ -1133,6 +1223,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
         bool diagnosticsEnabled,
         u32 directionalLightCount,
         u32 localLightCount,
+        const HybridReflectionProbeFrameInputs& reflectionProbeInputs,
+        const std::array<VkImageView, kMaxHybridReflectionProbes>&
+            reflectionProbePrefilteredViews,
+        const std::array<VkImageView, kMaxHybridReflectionProbes>&
+            reflectionProbeDiffuseViews,
         const HybridReflectionRayQuerySettings& settings,
         RendererHybridReflectionStats& stats
     ) {
@@ -1141,6 +1236,66 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "Hybrid reflection Ray Query frame index is out of range"
             );
         }
+        reflectionProbeBuffers[imageIndex]->Upload(
+            std::as_bytes(std::span{ &reflectionProbeInputs, 1u })
+        );
+        std::array<
+            VkDescriptorImageInfo,
+            kMaxHybridReflectionProbes
+        > localProbePrefilteredInfos{};
+        std::array<
+            VkDescriptorImageInfo,
+            kMaxHybridReflectionProbes
+        > localProbeDiffuseInfos{};
+        for (u32 slot = 0u; slot < kMaxHybridReflectionProbes; ++slot) {
+            if (reflectionProbePrefilteredViews[slot] == VK_NULL_HANDLE ||
+                reflectionProbeDiffuseViews[slot] == VK_NULL_HANDLE) {
+                throw std::runtime_error(
+                    "Hybrid reflection local Probe IBL view is null"
+                );
+            }
+            localProbePrefilteredInfos[slot] = {
+                VK_NULL_HANDLE,
+                reflectionProbePrefilteredViews[slot],
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            };
+            localProbeDiffuseInfos[slot] = {
+                VK_NULL_HANDLE,
+                reflectionProbeDiffuseViews[slot],
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            };
+        }
+        const VkDescriptorBufferInfo reflectionProbeInfo{
+            reflectionProbeBuffers[imageIndex]->Handle(),
+            0u,
+            sizeof(HybridReflectionProbeFrameInputs)
+        };
+        std::array<VkWriteDescriptorSet, 3> reflectionProbeWrites{};
+        reflectionProbeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        reflectionProbeWrites[0].dstSet = descriptorSets[imageIndex];
+        reflectionProbeWrites[0].dstBinding = 24u;
+        reflectionProbeWrites[0].descriptorType =
+            VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        reflectionProbeWrites[0].descriptorCount = kMaxHybridReflectionProbes;
+        reflectionProbeWrites[0].pImageInfo =
+            localProbePrefilteredInfos.data();
+        reflectionProbeWrites[1] = reflectionProbeWrites[0];
+        reflectionProbeWrites[1].dstBinding = 25u;
+        reflectionProbeWrites[1].pImageInfo = localProbeDiffuseInfos.data();
+        reflectionProbeWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        reflectionProbeWrites[2].dstSet = descriptorSets[imageIndex];
+        reflectionProbeWrites[2].dstBinding = 26u;
+        reflectionProbeWrites[2].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        reflectionProbeWrites[2].descriptorCount = 1u;
+        reflectionProbeWrites[2].pBufferInfo = &reflectionProbeInfo;
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            static_cast<u32>(reflectionProbeWrites.size()),
+            reflectionProbeWrites.data(),
+            0u,
+            nullptr
+        );
         if (instanceMetadata.size() > kMaxHybridReflectionInstances) {
             throw std::runtime_error(
                 "Hybrid reflection instance metadata exceeds capacity"
@@ -1308,6 +1463,15 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 : 0u) |
             (settings.fullAuditEnabled && fullAuditResourcesAllocated
                 ? kRayQueryRuntimeFullAuditBit
+                : 0u) |
+            (!settings.hitIblEnabled
+                ? kRayQueryRuntimeDisableHitIblBit
+                : 0u) |
+            (!settings.sourceFusionEnabled
+                ? kRayQueryRuntimeDisableSourceFusionBit
+                : 0u) |
+            (settings.directMirrorRayQueryEnabled
+                ? kRayQueryRuntimeDirectMirrorBit
                 : 0u);
         controls.diagnosticsEnabled = enabled && diagnosticsEnabled ? 1u : 0u;
         controlsBuffers[imageIndex]->Upload(
@@ -1390,6 +1554,15 @@ struct VulkanHybridReflectionRayQuery::Impl {
         }
         stats.rayQueryForceAllRayQueries =
             settings.forceAllRayQueries ? 1u : 0u;
+        stats.rayQueryHitIblEnabled = settings.hitIblEnabled ? 1u : 0u;
+        stats.rayQuerySourceFusionEnabled =
+            settings.sourceFusionEnabled ? 1u : 0u;
+        stats.rayQueryDirectMirrorEnabled =
+            settings.directMirrorRayQueryEnabled ? 1u : 0u;
+        stats.rayQueryScreenHitConfidenceThresholdPermille =
+            static_cast<u32>(std::round(
+                controls.screenHitConfidenceThreshold * 1000.0f
+            ));
         stats.rayQueryCullBackFacingTriangles =
             settings.cullBackFacingTriangles ? 1u : 0u;
         stats.rayQueryFullAuditRequested = settings.fullAuditEnabled ? 1u : 0u;
@@ -1448,6 +1621,23 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryIblPrefilteredDescriptorReady = 1u;
         stats.rayQueryIblSamplerDescriptorReady = 1u;
         stats.rayQueryIblPrefilteredMipCount = iblPrefilteredMipCount;
+        stats.rayQueryLocalProbeIblContractVersion =
+            kLocalProbeIblContractVersion;
+        stats.rayQueryLocalProbeIblResourcesReady = 1u;
+        stats.rayQueryLocalProbeIblEnabled =
+            reflectionProbeInputs.controls.w != 0u ? 1u : 0u;
+        stats.rayQueryLocalProbeCount = std::min(
+            reflectionProbeInputs.controls.x,
+            kMaxHybridReflectionProbes
+        );
+        stats.rayQueryLocalProbePrefilteredReadyMask =
+            reflectionProbeInputs.controls.y &
+            ((1u << kMaxHybridReflectionProbes) - 1u);
+        stats.rayQueryLocalProbeDiffuseReadyMask =
+            reflectionProbeInputs.controls.z &
+            ((1u << kMaxHybridReflectionProbes) - 1u);
+        stats.rayQueryLocalProbeDescriptorWriteCount =
+            static_cast<u32>(reflectionProbeWrites.size());
         stats.rayQueryDirectionalLightCount = controls.directionalLightCount;
         stats.rayQueryLocalLightCount = controls.localLightCount;
         stats.rayQueryHitLightingVisibilityMode =
@@ -1556,7 +1746,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             confidenceForReadWrite
         };
 
-        std::array<VkBufferMemoryBarrier, 5> bufferBarriers{};
+        std::array<VkBufferMemoryBarrier, 6> bufferBarriers{};
         auto setBufferBarrier = [&] (
             VkBufferMemoryBarrier& barrier,
             VkBuffer buffer,
@@ -1605,6 +1795,13 @@ struct VulkanHybridReflectionRayQuery::Impl {
             bufferBarriers[4],
             materialBuffers[imageIndex]->Handle(),
             materialBuffers[imageIndex]->Size(),
+            VK_ACCESS_HOST_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT
+        );
+        setBufferBarrier(
+            bufferBarriers[5],
+            reflectionProbeBuffers[imageIndex]->Handle(),
+            reflectionProbeBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT
         );
@@ -1785,6 +1982,16 @@ struct VulkanHybridReflectionRayQuery::Impl {
         result.diagnosticTargetCommittedHitCount = values[83];
         result.diagnosticTargetAttributeResolvedCount = values[84];
         result.diagnosticTargetDenoiserWriteCount = values[85];
+        result.localProbeIblResolvedCount = values[87];
+        result.globalIblFallbackCount = values[88];
+        result.localProbeIblInvalidCount = values[89];
+        result.localProbeIblLuminanceSumMilliunits = values[90];
+        result.sourceFusionCount = values[91];
+        result.sourceFusionConfidenceSumPermille = values[92];
+        result.sourceFusionScreenWeightSumPermille = values[93];
+        result.directMirrorCandidateCount = values[94];
+        result.directMirrorHitCount = values[95];
+        result.directMirrorFallbackCount = values[96];
         return result;
     }
 
@@ -2218,7 +2425,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "receiver_object_id,resolved_r,resolved_g,resolved_b,"
                 "provenance_confidence,probe_r,probe_g,probe_b,"
                 "blend_weight,contribution_r,contribution_g,"
-                "contribution_b,roughness,metallic,flags\n";
+                "contribution_b,roughness,metallic,flags,"
+                "mirror_dnsr_passthrough,"
+                "object_probe_assignment_code,active_probe_mask,"
+                "object_stable_enabled\n";
             gBufferSamplesFile <<
                 "capture_index,frame_number,sample_index,pixel_x,pixel_y,"
                 "receiver_object_id,roughness,metallic,confidence,"
@@ -2234,7 +2444,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "width,height,format,pixel_count,finite_count,"
                 "non_finite_count,negative_count,luminance_sum,"
                 "luminance_min,luminance_max,alpha_sum,alpha_min,alpha_max,"
-                "zero_alpha_count,one_alpha_count\n";
+                "zero_alpha_count,one_alpha_count,consumer_pixel_count,"
+                "consumer_finite_count,consumer_non_finite_count,"
+                "consumer_negative_count\n";
             lightsFile <<
                 "capture_index,frame_number,light_index,kind,enabled,"
                 "casts_shadow,position_x,position_y,position_z,radius,"
@@ -2258,6 +2470,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "lod_level,cast_shadow,reflection_capture_visible,"
                 "skinned_bounds_conservative,bone_palette_ready,"
                 "bone_palette_descriptor_ready,world_bounds_valid,"
+                "reflection_probe_assignment_code,"
+                "reflection_probe_scene_index,"
+                "reflection_probe_assignment_weight,"
                 "bounds_min_x,bounds_min_y,bounds_min_z,bounds_max_x,"
                 "bounds_max_y,bounds_max_z,renderable_name\n";
             auditIndexFile <<
@@ -2267,13 +2482,24 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "invalid_stage_chain_count,missing_object_id_count,"
                 "unknown_object_id_count,receiver_truth_mismatch_count,"
                 "receiver_origin_outside_bounds_count,self_hit_count,"
+                "self_hit_rejected_count,"
                 "negative_hemisphere_count,"
                 "negative_hemisphere_rejected_count,"
+                "single_sided_back_side_hit_count,"
                 "scene_receiver_identity_resolved_count,"
                 "tlas_eligible_receiver_ray_count,"
                 "tlas_eligible_receiver_resolved_count,"
                 "apply_missing_object_id_count,"
                 "apply_unknown_object_id_count,apply_non_finite_count,"
+                "apply_mirror_sample_count,"
+                "apply_mirror_mixed_source_pixel_count,"
+                "apply_mirror_assignment_mismatch_count,"
+                "apply_mirror_metadata_mismatch_count,"
+                "apply_mirror_probe_code_inconsistent_count,"
+                "apply_mirror_multi_source_object_count,"
+                "apply_mirror_high_confidence_partial_blend_count,"
+                "apply_mirror_cross_source_blend_risk_count,"
+                "apply_mirror_dnsr_passthrough_count,"
                 "gbuffer_non_finite_count,gbuffer_source_negative_count,"
                 "apply_negative_contribution_count,"
                 "receiver_counter_mismatch_count,"
@@ -2282,7 +2508,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "apply_contribution_luminance_sum,apply_blend_mode,"
                 "apply_confidence_source,"
                 "apply_blend_expected_luminance_sum,"
-                "apply_alpha_lookup_missing_count,hdr_before_luminance_sum,"
+                "apply_alpha_lookup_missing_count,"
+                "apply_mirror_high_confidence_zero_visibility_count,"
+                "hdr_before_luminance_sum,"
                 "hdr_after_luminance_sum,hdr_actual_luminance_delta,"
                 "hdr_before_alpha_sum,hdr_before_alpha_min,"
                 "hdr_before_alpha_max,hdr_before_zero_alpha_count,"
@@ -2316,7 +2544,17 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "apply_unexplained_blend_discontinuity_count,"
                 "apply_blend_contribution_jump_count,"
                 "apply_contribution_jump_count,"
-                "apply_large_source_disagreement_count\n";
+                "apply_large_source_disagreement_count,"
+                "apply_source_transition_discontinuity_count,"
+                "apply_same_source_different_hit_discontinuity_count,"
+                "apply_same_source_same_hit_discontinuity_count,"
+                "apply_same_source_miss_discontinuity_count,"
+                "apply_unclassified_discontinuity_count,"
+                "apply_source_transition_contribution_jump_count,"
+                "apply_same_source_different_hit_contribution_jump_count,"
+                "apply_same_source_same_hit_contribution_jump_count,"
+                "apply_same_source_miss_contribution_jump_count,"
+                "apply_unclassified_contribution_jump_count\n";
             runtimeApplyDiscontinuityFile <<
                 "capture_index,frame_number,receiver_tlas_index,"
                 "receiver_object_id,receiver_name,pixel_x,pixel_y,"
@@ -2327,7 +2565,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "neighbor_probe_luminance,contribution_luminance,"
                 "neighbor_contribution_luminance,roughness_delta,"
                 "confidence_delta,blend_delta,contribution_delta,flags,"
-                "neighbor_flags\n";
+                "neighbor_flags,classification,source,neighbor_source,"
+                "hit_tlas_index,neighbor_hit_tlas_index,source_confidence,"
+                "neighbor_source_confidence\n";
             runtimeDnsrConfidenceQualityFile <<
                 "capture_index,frame_number,stage,stage_index,"
                 "receiver_tlas_index,receiver_object_id,receiver_name,"
@@ -2460,6 +2700,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             u64 applyBlendContributionJumps = 0u;
             u64 applyContributionJumps = 0u;
             u64 applyLargeSourceDisagreements = 0u;
+            std::array<u64, 5> applyDiscontinuityClassCounts{};
+            std::array<u64, 5> applyContributionJumpClassCounts{};
         };
         struct PairCounters {
             u64 total = 0u;
@@ -2478,14 +2720,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
             u64 receiverTruthMismatches = 0u;
             u64 receiverOriginsOutsideBounds = 0u;
             u64 selfHits = 0u;
+            u64 selfHitsRejected = 0u;
             u64 negativeHemisphere = 0u;
             u64 negativeHemisphereRejected = 0u;
+            u64 singleSidedBackSideHits = 0u;
             u64 sceneReceiverIdentityResolved = 0u;
             u64 tlasEligibleReceiverRays = 0u;
             u64 tlasEligibleReceiverResolved = 0u;
             u64 applyMissingObjectIds = 0u;
             u64 applyUnknownObjectIds = 0u;
             u64 applyNonFinite = 0u;
+            u64 applyMirrorSamples = 0u;
+            u64 applyMirrorMixedSourcePixels = 0u;
+            u64 applyMirrorAssignmentMismatches = 0u;
+            u64 applyMirrorMetadataMismatches = 0u;
+            u64 applyMirrorProbeCodeInconsistent = 0u;
+            u64 applyMirrorMultiSourceObjects = 0u;
+            u64 applyMirrorHighConfidencePartialBlend = 0u;
+            u64 applyMirrorCrossSourceBlendRisk = 0u;
+            u64 applyMirrorDnsrPassthrough = 0u;
             u64 gBufferNonFinite = 0u;
             u64 gBufferSourceNegative = 0u;
             u64 negativeApplyContributions = 0u;
@@ -2493,6 +2746,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             u64 incomingCounterMismatches = 0u;
             u64 nonzeroApplyContributions = 0u;
             u64 applyAlphaLookupMissing = 0u;
+            u64 applyMirrorZeroVisibility = 0u;
             double applyContributionLuminance = 0.0;
         } frameAudit;
 
@@ -2503,6 +2757,9 @@ struct VulkanHybridReflectionRayQuery::Impl {
         );
         std::unordered_map<u32, const HybridReflectionInstanceAuditRecord*>
             objectByAuditId;
+        std::unordered_map<u32, u32> expectedProbeCodeByObjectId;
+        std::unordered_map<u32, u32> mirrorProbeMaskByObjectId;
+        std::unordered_map<u32, u32> mirrorProbeCodeByObjectId;
         objectByAuditId.reserve(instances.size());
         for (const HybridReflectionInstanceAuditRecord& instance : instances) {
             if (instance.reflectionAuditObjectId != 0u) {
@@ -2511,6 +2768,17 @@ struct VulkanHybridReflectionRayQuery::Impl {
             if (instance.inTlas != 0u &&
                 instance.tlasIndex < instanceByTlas.size()) {
                 instanceByTlas[instance.tlasIndex] = &instance;
+            }
+        }
+        if (metadata != nullptr) {
+            for (const HybridReflectionFullAuditQueueCommandRecord& command :
+                 metadata->commands) {
+                if (command.queueKind == 1u &&
+                    command.reflectionAuditObjectId != 0u) {
+                    expectedProbeCodeByObjectId[
+                        command.reflectionAuditObjectId
+                    ] = command.reflectionProbeAssignmentCode;
+                }
             }
         }
         std::vector<DerivedObjectCounters> derivedByTlas(
@@ -2536,6 +2804,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 ? committedHit ? 2u : 3u
                 : 0u;
         };
+        constexpr u32 kApplySourceTransition = 0u;
+        constexpr u32 kApplySameSourceDifferentHit = 1u;
+        constexpr u32 kApplySameSourceSameHit = 2u;
+        constexpr u32 kApplySameSourceMiss = 3u;
+        constexpr u32 kApplyUnclassified = 4u;
+        auto applyDiscontinuityClassName = [](u32 classification) {
+            switch (classification) {
+            case kApplySourceTransition:
+                return "source_transition";
+            case kApplySameSourceDifferentHit:
+                return "same_source_different_hit";
+            case kApplySameSourceSameHit:
+                return "same_source_same_hit";
+            case kApplySameSourceMiss:
+                return "same_source_miss";
+            default:
+                return "unclassified";
+            }
+        };
         auto computeLuminance = [](f32 red, f32 green, f32 blue) {
             return 0.2126 * static_cast<double>(red) +
                 0.7152 * static_cast<double>(green) +
@@ -2560,6 +2847,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             const bool objectIdMapped = (flags & (1u << 12u)) != 0u;
             const bool selfHit = (flags & (1u << 13u)) != 0u;
             const bool negativeHemisphere = (flags & (1u << 14u)) != 0u;
+            const bool selfHitRejected = (flags & (1u << 15u)) != 0u;
+            const bool committedBackSide = (flags & (1u << 19u)) != 0u;
             const u32 receiverTlasIndex = values[base + 2u];
             const u32 hitTlasIndex = values[base + 4u];
             const u32 receiverObjectId = values[base + 20u];
@@ -2576,7 +2865,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 ++frameAudit.invalidStageChains;
             }
             if (selfHit) {
-                ++frameAudit.selfHits;
+                if (selfHitRejected) {
+                    ++frameAudit.selfHitsRejected;
+                } else {
+                    ++frameAudit.selfHits;
+                }
             }
             if (negativeHemisphere) {
                 if (raySource(flags) == 0u) {
@@ -2639,6 +2932,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     instanceByTlas[hitTlasIndex] == nullptr) {
                     ++frameAudit.unknownHits;
                 } else {
+                    const HybridReflectionInstanceAuditRecord& hitInstance =
+                        *instanceByTlas[hitTlasIndex];
+                    if (attributesResolved && committedBackSide &&
+                        hitInstance.doubleSided == 0u) {
+                        ++frameAudit.singleSidedBackSideHits;
+                    }
                     DerivedObjectCounters& incoming = derivedByTlas[hitTlasIndex];
                     ++incoming.incomingHits;
                     if (attributesResolved) {
@@ -2671,7 +2970,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
                         ++derived.productionMisses;
                     }
                 }
-                if (selfHit) {
+                if (selfHit && !selfHitRejected) {
                     ++derived.selfHits;
                 }
                 const f32 normalDotReflection =
@@ -2795,6 +3094,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
             const u32 base = kFullAuditApplyRecordBase +
                 applyIndex * kFullAuditApplyRecordWordCount;
             const u32 packedCoordinates = values[base + 0u];
+            const u32 applyFlags = values[base + 15u];
+            const u32 objectProbeAssignmentCode =
+                (applyFlags >> 8u) & 0x7u;
+            const u32 activeProbeMask = (applyFlags >> 11u) & 0xFu;
+            const bool objectStableEnabled =
+                (applyFlags & (1u << 15u)) != 0u;
+            const bool mirrorDnsrPassthrough =
+                (applyFlags & (1u << 6u)) != 0u;
             if (fullAuditRawEvidence) {
                 applyFile << fullAuditFramesWritten << ','
                     << capturedFrameNumber << ',' << applyIndex << ','
@@ -2803,7 +3110,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 for (u32 word = 2u; word <= 14u; ++word) {
                     applyFile << ',' << std::bit_cast<f32>(values[base + word]);
                 }
-                applyFile << ',' << values[base + 15u] << '\n';
+                applyFile << ',' << applyFlags << ','
+                    << (mirrorDnsrPassthrough ? 1u : 0u) << ','
+                    << objectProbeAssignmentCode << ',' << activeProbeMask
+                    << ',' << (objectStableEnabled ? 1u : 0u) << '\n';
             }
             const f32 resolvedR = std::bit_cast<f32>(values[base + 2u]);
             const f32 resolvedG = std::bit_cast<f32>(values[base + 3u]);
@@ -2830,7 +3140,52 @@ struct VulkanHybridReflectionRayQuery::Impl {
             const u32 objectId = values[base + 1u];
             const u32 pixelX = packedCoordinates & 0xffffu;
             const u32 pixelY = packedCoordinates >> 16u;
-            const u32 applyFlags = values[base + 15u];
+            const f32 receiverRoughness =
+                std::bit_cast<f32>(values[base + 13u]);
+            if (mirrorDnsrPassthrough) {
+                ++frameAudit.applyMirrorDnsrPassthrough;
+            }
+            if (receiverRoughness <= 0.3001f) {
+                ++frameAudit.applyMirrorSamples;
+                if (confidence >= 0.999f && blendWeight < 0.999f) {
+                    ++frameAudit.applyMirrorHighConfidencePartialBlend;
+                }
+                const f32 resolvedLuminance =
+                    resolvedR * 0.2126f + resolvedG * 0.7152f +
+                    resolvedB * 0.0722f;
+                const f32 probeLuminance =
+                    probeR * 0.2126f + probeG * 0.7152f +
+                    probeB * 0.0722f;
+                if (blendWeight > 0.05f && blendWeight < 0.95f &&
+                    std::abs(resolvedLuminance - probeLuminance) > 0.25f) {
+                    ++frameAudit.applyMirrorCrossSourceBlendRisk;
+                }
+                const u32 expectedMask = objectProbeAssignmentCode > 0u &&
+                    objectProbeAssignmentCode <= kMaxFrameReflectionProbes
+                    ? 1u << (objectProbeAssignmentCode - 1u)
+                    : 0u;
+                if (std::popcount(activeProbeMask) > 1) {
+                    ++frameAudit.applyMirrorMixedSourcePixels;
+                }
+                if (activeProbeMask != expectedMask) {
+                    ++frameAudit.applyMirrorAssignmentMismatches;
+                }
+                const auto expectedCode =
+                    expectedProbeCodeByObjectId.find(objectId);
+                if (expectedCode == expectedProbeCodeByObjectId.end() ||
+                    expectedCode->second != objectProbeAssignmentCode) {
+                    ++frameAudit.applyMirrorMetadataMismatches;
+                }
+                const auto observedCode =
+                    mirrorProbeCodeByObjectId.find(objectId);
+                if (observedCode == mirrorProbeCodeByObjectId.end()) {
+                    mirrorProbeCodeByObjectId[objectId] =
+                        objectProbeAssignmentCode;
+                } else if (observedCode->second != objectProbeAssignmentCode) {
+                    ++frameAudit.applyMirrorProbeCodeInconsistent;
+                }
+                mirrorProbeMaskByObjectId[objectId] |= activeProbeMask;
+            }
             const bool allAuditValuesFinite =
                 (applyFlags & (1u << 3u)) != 0u &&
                 (applyFlags & (1u << 4u)) != 0u &&
@@ -2906,6 +3261,13 @@ struct VulkanHybridReflectionRayQuery::Impl {
             }
         }
 
+        for (const auto& [objectId, probeMask] : mirrorProbeMaskByObjectId) {
+            (void)objectId;
+            if (std::popcount(probeMask) > 1) {
+                ++frameAudit.applyMirrorMultiSourceObjects;
+            }
+        }
+
         constexpr std::array<std::array<u32, 2>, 2> kApplyNeighborOffsets{{
             {{1u, 0u}}, {{0u, 1u}}
         }};
@@ -2968,11 +3330,61 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     ++quality.applyBlendDiscontinuities;
                     if (confidenceDelta > 0.35f) {
                         ++quality.applyConfidenceDiscontinuities;
-                    } else {
+                    }
+                    u32 classification = kApplyUnclassified;
+                    u32 source = 0u;
+                    u32 neighborSource = 0u;
+                    u32 hitTlasIndex = kInvalidAuditIndex;
+                    u32 neighborHitTlasIndex = kInvalidAuditIndex;
+                    f32 sourceConfidence = 0.0f;
+                    f32 neighborSourceConfidence = 0.0f;
+                    const u32 rayIndex = rayAtPixel[
+                        static_cast<std::size_t>(y) * extent.width + x
+                    ];
+                    const u32 neighborRayIndex = rayAtPixel[
+                        static_cast<std::size_t>(neighborY) * extent.width +
+                            neighborX
+                    ];
+                    if (rayIndex != kInvalidAuditIndex &&
+                        neighborRayIndex != kInvalidAuditIndex) {
+                        const u32 rayBase = kFullAuditRayRecordBase +
+                            rayIndex * kFullAuditRayRecordWordCount;
+                        const u32 neighborRayBase = kFullAuditRayRecordBase +
+                            neighborRayIndex * kFullAuditRayRecordWordCount;
+                        const u32 rayFlags = values[rayBase + 1u];
+                        const u32 neighborRayFlags = values[neighborRayBase + 1u];
+                        source = raySource(rayFlags);
+                        neighborSource = raySource(neighborRayFlags);
+                        hitTlasIndex = values[rayBase + 4u];
+                        neighborHitTlasIndex = values[neighborRayBase + 4u];
+                        sourceConfidence =
+                            std::bit_cast<f32>(values[rayBase + 3u]);
+                        neighborSourceConfidence =
+                            std::bit_cast<f32>(values[neighborRayBase + 3u]);
+                        if (source != neighborSource) {
+                            classification = kApplySourceTransition;
+                        } else if (source == 3u) {
+                            classification = kApplySameSourceMiss;
+                        } else if (source == 2u) {
+                            classification = hitTlasIndex != neighborHitTlasIndex
+                                ? kApplySameSourceDifferentHit
+                                : kApplySameSourceSameHit;
+                        } else if (source == 1u &&
+                            (rayFlags & (1u << 4u)) != 0u &&
+                            (neighborRayFlags & (1u << 4u)) != 0u) {
+                            classification = hitTlasIndex != neighborHitTlasIndex
+                                ? kApplySameSourceDifferentHit
+                                : kApplySameSourceSameHit;
+                        }
+                    }
+                    ++quality.applyDiscontinuityClassCounts[classification];
+                    if (confidenceDelta <= 0.35f &&
+                        classification == kApplyUnclassified) {
                         ++quality.applyUnexplainedBlendDiscontinuities;
                     }
                     if (contributionDelta > 0.25) {
                         ++quality.applyBlendContributionJumps;
+                        ++quality.applyContributionJumpClassCounts[classification];
                     }
                     if (fullAuditRawEvidence) {
                         const auto luminanceAt = [&](u32 recordBase, u32 offset) {
@@ -3001,7 +3413,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
                             << roughnessDelta << ',' << confidenceDelta << ','
                             << blendDelta << ',' << contributionDelta << ','
                             << values[base + 15u] << ','
-                            << values[neighborBase + 15u] << '\n';
+                            << values[neighborBase + 15u] << ','
+                            << applyDiscontinuityClassName(classification) << ','
+                            << source << ',' << neighborSource << ','
+                            << hitTlasIndex << ',' << neighborHitTlasIndex << ','
+                            << sourceConfidence << ','
+                            << neighborSourceConfidence << '\n';
                     }
                 }
                 if (contributionDelta > 0.25) {
@@ -3067,7 +3484,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     << command.skinnedBoundsConservative << ','
                     << command.bonePaletteReady << ','
                     << command.bonePaletteDescriptorReady << ','
-                    << command.worldBoundsValid << ',' << command.boundsMin.x
+                    << command.worldBoundsValid << ','
+                    << command.reflectionProbeAssignmentCode << ','
+                    << command.reflectionProbeSceneIndex << ','
+                    << std::bit_cast<f32>(
+                        command.reflectionProbeAssignmentWeightBits
+                    ) << ',' << command.boundsMin.x
                     << ',' << command.boundsMin.y << ',' << command.boundsMin.z
                     << ',' << command.boundsMax.x << ',' << command.boundsMax.y
                     << ',' << command.boundsMax.z << ','
@@ -3147,7 +3569,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 << derived.applyUnexplainedBlendDiscontinuities << ','
                 << derived.applyBlendContributionJumps << ','
                 << derived.applyContributionJumps << ','
-                << derived.applyLargeSourceDisagreements << '\n';
+                << derived.applyLargeSourceDisagreements;
+            for (u64 count : derived.applyDiscontinuityClassCounts) {
+                runtimeQualityFile << ',' << count;
+            }
+            for (u64 count : derived.applyContributionJumpClassCounts) {
+                runtimeQualityFile << ',' << count;
+            }
+            runtimeQualityFile << '\n';
         }
         std::vector<u64> sortedPairKeys;
         sortedPairKeys.reserve(pairCounters.size());
@@ -3322,6 +3751,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
             double alphaMax = -std::numeric_limits<double>::infinity();
             u64 zeroAlphaCount = 0u;
             u64 oneAlphaCount = 0u;
+            u64 consumerPixelCount = 0u;
+            u64 consumerFiniteCount = 0u;
+            u64 consumerNonFiniteCount = 0u;
+            u64 consumerNegativeCount = 0u;
             if (stageIndex == static_cast<u32>(
                     HybridReflectionFullAuditImageStage::DeferredHdrBeforeApply
                 )) {
@@ -3403,6 +3836,22 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     if (negative) {
                         ++negativeCount;
                     }
+                    const bool consumedByApply =
+                        snapshotExtent.width == extent.width &&
+                        snapshotExtent.height == extent.height &&
+                        pixelIndex < applyAtPixel.size() &&
+                        applyAtPixel[pixelIndex] != kInvalidAuditIndex;
+                    if (consumedByApply) {
+                        ++consumerPixelCount;
+                        if (finite) {
+                            ++consumerFiniteCount;
+                        } else {
+                            ++consumerNonFiniteCount;
+                        }
+                        if (negative) {
+                            ++consumerNegativeCount;
+                        }
+                    }
                     if (!beforeApplyAlpha.empty() &&
                         stageIndex == static_cast<u32>(
                             HybridReflectionFullAuditImageStage::DeferredHdrBeforeApply
@@ -3457,7 +3906,10 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 << negativeCount << ',' << luminanceSum << ','
                 << luminanceMin << ',' << luminanceMax << ',' << alphaSum
                 << ',' << alphaMin << ',' << alphaMax << ','
-                << zeroAlphaCount << ',' << oneAlphaCount << '\n';
+                << zeroAlphaCount << ',' << oneAlphaCount << ','
+                << consumerPixelCount << ',' << consumerFiniteCount << ','
+                << consumerNonFiniteCount << ',' << consumerNegativeCount
+                << '\n';
         }
 
         const bool dnsrConfidenceReady = !objectIds.empty() &&
@@ -3657,6 +4109,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
                     blendFactor = 0.0;
                 } else {
                     blendFactor = beforeApplyAlpha[pixelIndex];
+                    const f32 confidence =
+                        std::bit_cast<f32>(values[base + 5u]);
+                    const f32 roughness =
+                        std::bit_cast<f32>(values[base + 13u]);
+                    if (roughness <= 0.3001f && confidence >= 0.999f &&
+                        blendFactor <= 0.0001) {
+                        ++frameAudit.applyMirrorZeroVisibility;
+                    }
                 }
             }
             blendExpectedLuminance +=
@@ -3671,7 +4131,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             static_cast<u32>(HybridReflectionFullAuditImageStage::HdrAfterApply)
         ];
         const double hdrActualDelta = hdrAfterLuminance - hdrBeforeLuminance;
-        auditIndexFile << 3u << ',' << fullAuditFramesWritten << ','
+        auditIndexFile << 8u << ',' << fullAuditFramesWritten << ','
             << capturedFrameNumber << ',' << recordCount << ','
             << applyRecordCount << ',' << applyRecordCount << ','
             << frameAudit.unknownReceivers << ',' << frameAudit.unknownHits
@@ -3681,14 +4141,25 @@ struct VulkanHybridReflectionRayQuery::Impl {
             << frameAudit.unknownObjectIds << ','
             << frameAudit.receiverTruthMismatches << ','
             << frameAudit.receiverOriginsOutsideBounds << ','
-            << frameAudit.selfHits << ',' << frameAudit.negativeHemisphere
+            << frameAudit.selfHits << ',' << frameAudit.selfHitsRejected << ','
+            << frameAudit.negativeHemisphere
             << ',' << frameAudit.negativeHemisphereRejected << ','
+            << frameAudit.singleSidedBackSideHits << ','
             << frameAudit.sceneReceiverIdentityResolved << ','
             << frameAudit.tlasEligibleReceiverRays << ','
             << frameAudit.tlasEligibleReceiverResolved << ','
             << frameAudit.applyMissingObjectIds << ','
             << frameAudit.applyUnknownObjectIds << ','
             << frameAudit.applyNonFinite << ','
+            << frameAudit.applyMirrorSamples << ','
+            << frameAudit.applyMirrorMixedSourcePixels << ','
+            << frameAudit.applyMirrorAssignmentMismatches << ','
+            << frameAudit.applyMirrorMetadataMismatches << ','
+            << frameAudit.applyMirrorProbeCodeInconsistent << ','
+            << frameAudit.applyMirrorMultiSourceObjects << ','
+            << frameAudit.applyMirrorHighConfidencePartialBlend << ','
+            << frameAudit.applyMirrorCrossSourceBlendRisk << ','
+            << frameAudit.applyMirrorDnsrPassthrough << ','
             << frameAudit.gBufferNonFinite << ','
             << frameAudit.gBufferSourceNegative << ','
             << frameAudit.negativeApplyContributions << ','
@@ -3700,6 +4171,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             << "ffx_resolve_temporal_history" << ','
             << blendExpectedLuminance << ','
             << frameAudit.applyAlphaLookupMissing << ','
+            << frameAudit.applyMirrorZeroVisibility << ','
             << hdrBeforeLuminance << ',' << hdrAfterLuminance << ','
             << hdrActualDelta << ',' << beforeApplyAlphaSum << ','
             << beforeApplyAlphaMin << ',' << beforeApplyAlphaMax << ','
@@ -3722,7 +4194,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             sizeof(HybridReflectionInstanceMetadata) *
                 kMaxHybridReflectionInstances +
             sizeof(HybridReflectionMaterialRecord) *
-                kMaxHybridReflectionMaterials;
+                kMaxHybridReflectionMaterials +
+            sizeof(HybridReflectionProbeFrameInputs);
         return static_cast<u64>(descriptorSets.size()) * perFrameBytes;
     }
 
@@ -3759,6 +4232,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
     std::vector<FullAuditMetadata> fullAuditMetadata;
     std::vector<std::unique_ptr<VulkanBuffer>> instanceMetadataBuffers;
     std::vector<std::unique_ptr<VulkanBuffer>> materialBuffers;
+    std::vector<std::unique_ptr<VulkanBuffer>> reflectionProbeBuffers;
     std::unique_ptr<VulkanTexture2D> fallbackTexture;
     std::unique_ptr<VulkanSampler> fallbackSampler;
     std::vector<std::array<VkImageView, kMaxHybridReflectionMaterials>>
@@ -3836,6 +4310,11 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
     bool diagnosticsEnabled,
     u32 directionalLightCount,
     u32 localLightCount,
+    const HybridReflectionProbeFrameInputs& reflectionProbeInputs,
+    const std::array<VkImageView, kMaxHybridReflectionProbes>&
+        reflectionProbePrefilteredViews,
+    const std::array<VkImageView, kMaxHybridReflectionProbes>&
+        reflectionProbeDiffuseViews,
     const HybridReflectionRayQuerySettings& settings,
     RendererHybridReflectionStats& stats
 ) {
@@ -3854,6 +4333,9 @@ void VulkanHybridReflectionRayQuery::PrepareFrame(
         diagnosticsEnabled,
         directionalLightCount,
         localLightCount,
+        reflectionProbeInputs,
+        reflectionProbePrefilteredViews,
+        reflectionProbeDiffuseViews,
         settings,
         stats
     );

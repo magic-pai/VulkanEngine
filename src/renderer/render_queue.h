@@ -100,6 +100,13 @@ struct RenderCommand {
     std::size_t submissionIndex = 0;
     u64 renderableIdentity = 0u;
     u32 reflectionAuditObjectId = 0u;
+    // 0 selects global IBL; 1..4 select a stable frame-local reflection probe.
+    u32 reflectionProbeAssignmentCode = 0u;
+    i32 reflectionProbeSceneIndex = -1;
+#if !defined(NDEBUG)
+    glm::vec3 reflectionProbeAnchor{ 0.0f };
+    f32 reflectionProbeAssignmentWeight = 0.0f;
+#endif
     std::string bonePaletteResourceId;
     u32 bonePaletteCurrentEntryCount = 0;
     u32 bonePalettePreviousEntryCount = 0;
@@ -144,6 +151,7 @@ public:
     void SortForDraw(bool optimizeStateChanges = false);
 
     std::span<const RenderCommand> Commands() const;
+    std::span<RenderCommand> MutableCommands();
     bool Empty() const;
     std::size_t Count() const;
 

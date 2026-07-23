@@ -50,7 +50,8 @@ struct alignas(16) FfxSssrConstants {
     // constant-color diagnostic, bit 29 bypasses GGX/TBN ray sampling, bit 28
     // bypasses the spatial prefilter, bit 27 bypasses temporal resolve, bit 26
     // seeds classified surface pixels for coverage diagnosis, bit 25 marks
-    // rays received by Intersect, and bits 0..15 store mip count.
+    // rays received by Intersect, bit 24 enables hit attribution, bit 23
+    // disables current-miss history rejection, and bits 0..15 store mip count.
     u32 environmentFallbackControl = 0u;
 };
 

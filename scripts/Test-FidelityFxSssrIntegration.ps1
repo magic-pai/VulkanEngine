@@ -299,10 +299,10 @@ function Invoke-StaticChecks {
             $commonShader -match "uint g_reprojection_contract_ready" -and
             $reprojectShader -match "SelfEngine_FfxSssrMotionVectorScale" -and
             $reprojectShader -match "FFX_DNSR_Reflections_HitPositionReprojectionEnabled" -and
-            $reprojectShader -match "g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz" -and
-            $reprojectShader -match "g_out_average_radiance\[pixel_coordinate\] = value\.xyzz" -and
+            $reprojectShader -match "g_out_reprojected_radiance\[pixel_coordinate\] = radiance\.xyzz" -and
+            $reprojectShader -match "g_out_average_radiance\[pixel_coordinate\] = radiance\.xyzz" -and
             $reprojectShader -match "numthreads\(8, 8, 1\)") `
-        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float4> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float4> g_out_average_radiance'),mv=$($commonShader -match 'uint g_motion_vector_mode')/$($reprojectShader -match 'SelfEngine_FfxSssrMotionVectorScale'),hit=$($commonShader -match 'uint g_hit_reprojection_enabled')/$($reprojectShader -match 'FFX_DNSR_Reflections_HitPositionReprojectionEnabled'),rgbaStores=$($reprojectShader -match 'g_out_reprojected_radiance\[pixel_coordinate\] = value\.xyzz')/$($reprojectShader -match 'g_out_average_radiance\[pixel_coordinate\] = value\.xyzz'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
+        "depth=$($reprojectShader -match 'Texture2D<float> g_depth_buffer'),radiance=$($reprojectShader -match 'Texture2D<float4> g_in_radiance'),outputs=$($reprojectShader -match 'RWTexture2D<float4> g_out_reprojected_radiance')/$($reprojectShader -match 'RWTexture2D<float4> g_out_average_radiance'),mv=$($commonShader -match 'uint g_motion_vector_mode')/$($reprojectShader -match 'SelfEngine_FfxSssrMotionVectorScale'),hit=$($commonShader -match 'uint g_hit_reprojection_enabled')/$($reprojectShader -match 'FFX_DNSR_Reflections_HitPositionReprojectionEnabled'),rgbaStores=$($reprojectShader -match 'g_out_reprojected_radiance\[pixel_coordinate\] = radiance\.xyzz')/$($reprojectShader -match 'g_out_average_radiance\[pixel_coordinate\] = radiance\.xyzz'),tiles=$($reprojectShader -match 'Buffer<uint> g_denoiser_tile_list')" `
         "true/true/true/true/true"
     $checks += New-Check `
         "FFX SSSR Prefilter shader contract present" `
@@ -500,7 +500,14 @@ function Invoke-StaticChecks {
             $ffxApplyShader -match "FFX_SSSR_ROUGHNESS_THRESHOLD = 0\.6" -and
             $pipelineSpecSource -match "FidelityFxSssrApply" -and
             $pipelineSpecSource -match "DestinationAlphaAdditive" -and
+            ([regex]::Matches(
+                $pipelineSpecSource,
+                "HdrReflectionVisibilityPreservingAlphaBlendMode"
+            ).Count -ge 3) -and
+            $pipelineSpecSource -match
+                "SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF" -and
             $graphicsPipelineSource -match "VK_BLEND_FACTOR_DST_ALPHA" -and
+            $graphicsPipelineSource -match "dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE" -and
             $renderTargetsHeader -match "VulkanHdrRenderPass[\s\S]*?LoadHandle\(\) const" -and
             $renderTargetsSource -match "VK_ATTACHMENT_LOAD_OP_LOAD" -and
             $commandBufferSource -match "VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT" -and
@@ -508,8 +515,8 @@ function Invoke-StaticChecks {
             $ssrFeatureSource -match "FidelityFXSSSRApplyReflections" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_same_frame_composite_source_frame_age" -and
             $benchmarkRecorderSource -match "ffx_sssr_apply_draws") `
-        "shader=$($cmakeSource -match 'ffx_sssr_apply\.frag'),reverse=$($rendererSource -match 'SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF'),currentView=$($rendererSource -match 'RadianceHistoryView\(imageIndex\)'),bit=$($deferredLightingShader -match '262144\.0'),apply=$($pipelineSpecSource -match 'FidelityFxSssrApply'),dstAlpha=$($graphicsPipelineSource -match 'VK_BLEND_FACTOR_DST_ALPHA'),load=$($renderTargetsSource -match 'VK_ATTACHMENT_LOAD_OP_LOAD'),order=$sameFrameCommandOrder,frameGraph=$($ssrFeatureSource -match 'FidelityFXSSSRApplyReflections'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_same_frame_composite_source_frame_age')" `
-        "true/true/true/true/true/true/true/true/true/true"
+        "shader=$($cmakeSource -match 'ffx_sssr_apply\.frag'),reverse=$($rendererSource -match 'SE_SSR_FFX_SAME_FRAME_COMPOSITE_OFF'),currentView=$($rendererSource -match 'RadianceHistoryView\(imageIndex\)'),bit=$($deferredLightingShader -match '262144\.0'),apply=$($pipelineSpecSource -match 'FidelityFxSssrApply'),dstAlpha=$($graphicsPipelineSource -match 'VK_BLEND_FACTOR_DST_ALPHA'),preserveAlpha=$($pipelineSpecSource -match 'HdrReflectionVisibilityPreservingAlphaBlendMode'),alphaControl=$($pipelineSpecSource -match 'SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF'),load=$($renderTargetsSource -match 'VK_ATTACHMENT_LOAD_OP_LOAD'),order=$sameFrameCommandOrder,frameGraph=$($ssrFeatureSource -match 'FidelityFXSSSRApplyReflections'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_same_frame_composite_source_frame_age')" `
+        "true/true/true/true/true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX temporal stability is an audited runtime control" `
         ($rendererSource -match "SE_SSR_FFX_TEMPORAL_STABILITY_FACTOR" -and
@@ -542,20 +549,38 @@ function Invoke-StaticChecks {
             $rendererSource -match "ffxSssrEnvironmentLod0Enabled && ffxSssrIblEnvironmentMipCount > 0u" -and
             $adapterHeader -match "environmentFallbackControl" -and
             $commonShader -match "g_environment_fallback_control" -and
-            $intersectShader -match "StableEnvironmentFallbackEnabled" -and
-            $intersectShader -match "ConstantEnvironmentFallbackEnabled" -and
+            $commonShader -match "SelfEngine_FfxSssrStableEnvironmentFallbackEnabled" -and
+            $commonShader -match "SelfEngine_FfxSssrConstantEnvironmentFallbackEnabled" -and
             $intersectShader -match "PerfectReflectionDirectionsEnabled" -and
-            $intersectShader -match "reflect\(view_space_ray_direction, view_space_surface_normal\)" -and
+            $intersectShader -match "view_space_perfect_reflection\s*=\s*reflect" -and
+            $intersectShader -match "dot\(view_space_reflected_direction, view_space_surface_normal\)\s*<=\s*0\.0" -and
             $intersectShader -match "float3\(0\.6, 0\.6, 0\.6\)" -and
-            $intersectShader -match "EnvironmentMipCount" -and
+            $commonShader -match "SelfEngine_FfxSssrEnvironmentMipCount" -and
+            $commonShader -match "SelfEngine_FfxSssrEnvironmentMip" -and
+            $classifyShader -notmatch "mip_count\s*=\s*10" -and
+            $classifyShader -match "SelfEngine_FfxSssrEnvironmentMip" -and
             $intersectShader -match "view_space_environment_direction" -and
-            $intersectShader -match "saturate\(roughness\) \* max_mip" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_stable_environment_fallback_enabled" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_constant_environment_fallback_enabled" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_perfect_reflection_directions_enabled" -and
             $benchmarkRecorderSource -match "ssr_ffx_sssr_environment_mip_count") `
-        "stable=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK'),stableOff=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF'),lod0=$($rendererSource -match 'SE_SSR_FFX_ENVIRONMENT_LOD0'),constantEnv=$($rendererSource -match 'SE_SSR_FFX_CONSTANT_ENVIRONMENT'),perfectDirections=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS'),perfectOff=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF'),mips=$($rendererSource -match 'm_IblPrefilteredImage->MipLevels\(\)'),resolve=$($rendererSource -match 'ffxSssrEnvironmentLod0Enabled && ffxSssrIblEnvironmentMipCount > 0u'),constant=$($adapterHeader -match 'environmentFallbackControl'),cbuffer=$($commonShader -match 'g_environment_fallback_control'),stableMode=$($intersectShader -match 'StableEnvironmentFallbackEnabled'),constantMode=$($intersectShader -match 'ConstantEnvironmentFallbackEnabled'),perfectMode=$($intersectShader -match 'PerfectReflectionDirectionsEnabled'),perfectReflect=$($intersectShader -match 'reflect\(view_space_ray_direction, view_space_surface_normal\)'),constantColor=$($intersectShader -match 'float3\(0\.6, 0\.6, 0\.6\)'),mipFn=$($intersectShader -match 'EnvironmentMipCount'),stableDir=$($intersectShader -match 'view_space_environment_direction'),roughnessLod=$($intersectShader -match 'saturate\(roughness\) \* max_mip'),stableCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_stable_environment_fallback_enabled'),constantCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_constant_environment_fallback_enabled'),perfectCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_perfect_reflection_directions_enabled'),mipCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_environment_mip_count')" `
-        "true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true"
+        "stable=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK'),stableOff=$($rendererSource -match 'SE_SSR_FFX_STABLE_ENVIRONMENT_FALLBACK_OFF'),lod0=$($rendererSource -match 'SE_SSR_FFX_ENVIRONMENT_LOD0'),constantEnv=$($rendererSource -match 'SE_SSR_FFX_CONSTANT_ENVIRONMENT'),perfectDirections=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS'),perfectOff=$($rendererSource -match 'SE_SSR_FFX_PERFECT_REFLECTION_DIRECTIONS_OFF'),mips=$($rendererSource -match 'm_IblPrefilteredImage->MipLevels\(\)'),resolve=$($rendererSource -match 'ffxSssrEnvironmentLod0Enabled && ffxSssrIblEnvironmentMipCount > 0u'),constant=$($adapterHeader -match 'environmentFallbackControl'),cbuffer=$($commonShader -match 'g_environment_fallback_control'),stableMode=$($commonShader -match 'SelfEngine_FfxSssrStableEnvironmentFallbackEnabled'),constantMode=$($commonShader -match 'SelfEngine_FfxSssrConstantEnvironmentFallbackEnabled'),perfectMode=$($intersectShader -match 'PerfectReflectionDirectionsEnabled'),perfectReflect=$($intersectShader -match 'view_space_perfect_reflection\s*=\s*reflect'),hemisphereFallback=$($intersectShader -match 'dot\(view_space_reflected_direction, view_space_surface_normal\)\s*<=\s*0\.0'),constantColor=$($intersectShader -match 'float3\(0\.6, 0\.6, 0\.6\)'),mipFn=$($commonShader -match 'SelfEngine_FfxSssrEnvironmentMipCount'),classifyRealMips=$($classifyShader -notmatch 'mip_count\s*=\s*10' -and $classifyShader -match 'SelfEngine_FfxSssrEnvironmentMip'),stableDir=$($intersectShader -match 'view_space_environment_direction'),stableCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_stable_environment_fallback_enabled'),constantCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_constant_environment_fallback_enabled'),perfectCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_perfect_reflection_directions_enabled'),mipCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_environment_mip_count')" `
+        "true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX radiance production boundaries are finite and non-negative" `
+        ($commonShader -match "SelfEngine_FfxSssrRadianceSanitizationEnabled" -and
+            $commonShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $commonShader -match "isfinite\(radiance\)" -and
+            $commonShader -match "0x00400000u" -and
+            $classifyShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $intersectShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $reprojectShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $prefilterShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $resolveTemporalShader -match "SelfEngine_FfxSssrSanitizeRadiance" -and
+            $rendererSource -match "SE_SSR_FFX_RADIANCE_SANITIZE_OFF" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_radiance_sanitization_enabled") `
+        "shared=$($commonShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),finite=$($commonShader -match 'isfinite\(radiance\)'),bit=$($commonShader -match '0x00400000u'),classify=$($classifyShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),intersect=$($intersectShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),reproject=$($reprojectShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),prefilter=$($prefilterShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),resolve=$($resolveTemporalShader -match 'SelfEngine_FfxSssrSanitizeRadiance'),control=$($rendererSource -match 'SE_SSR_FFX_RADIANCE_SANITIZE_OFF'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_radiance_sanitization_enabled')" `
+        "true/true/true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX visible output clear is a default-on audited control" `
         ($rendererSource -match "SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT" -and
@@ -583,6 +608,22 @@ function Invoke-StaticChecks {
             $benchmarkRecorderSource -match "ssr_ffx_sssr_resolve_temporal_bypass_enabled") `
         "env=$($rendererSource -match 'SE_SSR_FFX_RESOLVE_TEMPORAL_BYPASS'),branch=$($resolveTemporalShader -match 'SelfEngine_FfxSssrResolveTemporalBypassEnabled'),copy=$($resolveTemporalShader -match 'g_out_radiance\[remapped_dispatch_thread_id\] = float4'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_resolve_temporal_bypass_enabled')" `
         "true/true/true/true"
+    $checks += New-Check `
+        "SelfEngine FFX uses selective full-rate mirror DNSR fusion" `
+        ($rendererSource -match "SE_SSR_FFX_MIRROR_DNSR_PASSTHROUGH_OFF" -and
+            $rendererSource -match "IntersectionOutputView" -and
+            $descriptorSetsSource -match "currentReflectionOverride" -and
+            $ffxApplyShader -match "binding = 16" -and
+            $ffxApplyShader -match "FFX_SSSR_MIRROR_DNSR_ROUGHNESS_THRESHOLD = 0\.08" -and
+            $ffxApplyShader -match "FFX_SSSR_MIRROR_DNSR_CONFIDENCE_THRESHOLD = 0\.995" -and
+            $ffxApplyShader -match "mirrorDnsrPassthrough" -and
+            $rendererSource -match "SE_SSR_FFX_CONFIDENCE_SPATIAL_FILTER_OFF" -and
+            $ffxApplyShader -match "FfxSssrFilteredHitConfidence" -and
+            $commandBufferSource -match "intersectionForApply" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_mirror_dnsr_passthrough_active" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_confidence_spatial_filter_enabled") `
+        "control=$($rendererSource -match 'SE_SSR_FFX_MIRROR_DNSR_PASSTHROUGH_OFF'),raw=$($rendererSource -match 'IntersectionOutputView'),descriptor=$($descriptorSetsSource -match 'currentReflectionOverride'),binding=$($ffxApplyShader -match 'binding = 16'),roughness=$($ffxApplyShader -match 'FFX_SSSR_MIRROR_DNSR_ROUGHNESS_THRESHOLD = 0\.08'),confidence=$($ffxApplyShader -match 'FFX_SSSR_MIRROR_DNSR_CONFIDENCE_THRESHOLD = 0\.995'),branch=$($ffxApplyShader -match 'mirrorDnsrPassthrough'),filterControl=$($rendererSource -match 'SE_SSR_FFX_CONFIDENCE_SPATIAL_FILTER_OFF'),filter=$($ffxApplyShader -match 'FfxSssrFilteredHitConfidence'),barrier=$($commandBufferSource -match 'intersectionForApply'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_mirror_dnsr_passthrough_active'),filterCsv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_confidence_spatial_filter_enabled')" `
+        "true/true/true/true/true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX Classify surface coverage seed is audited" `
         ($rendererSource -match "SE_SSR_FFX_CLASSIFY_SURFACE_SEED" -and
@@ -626,8 +667,17 @@ function Invoke-StaticChecks {
             $benchmarkRecorderSource -match "ssr_ffx_sssr_hit_confidence_contract_version") `
         "classify=$($classifyShader -match 'g_hit_confidence_output'),intersect=$($intersectShader -match 'g_hit_confidence_output'),history=$($reprojectShader -match 'g_hit_confidence_history'),temporal=$($reprojectShader -match 'SelfEngine_FfxSssrHitConfidence'),adapter=$($adapterSource -match 'HitConfidenceHistoryView'),barrier=$($commandBufferSource -match 'HitConfidenceHistoryImage'),deferred=$($deferredLightingShader -match 'SsrFidelityFxHitProvenanceEnabled'),probe=$($ffxApplyShader -match 'SelectedLocalProbeRadiance'),priority=$($ffxApplyShader -match 'bestPriority'),boxGuard=$($ffxApplyShader -match 'safeDirection\.x ='),apply=$($ffxApplyShader -match 'ffxSssrHitConfidence'),historyGuard=$($rendererSource -match 'm_FfxSssrRadianceHistoryValid'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_hit_confidence_contract_version')" `
         "true/true/true/true/true/true/true/true/true/true/true/true/true"
-    $contractVersionThirteen =
-        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*13u'
+    $checks += New-Check `
+        "SelfEngine FFX rejects stale hit provenance on an explicit current miss" `
+        ($reprojectShader -match "SelfEngine_FfxSssrZeroConfidenceHistoryRejectionEnabled" -and
+            $reprojectShader -match "current\s*<=\s*0\.0001" -and
+            $reprojectShader -match "0x00800000u" -and
+            $rendererSource -match "SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF" -and
+            $benchmarkRecorderSource -match "ssr_ffx_sssr_zero_confidence_history_rejection_enabled") `
+        "shader=$($reprojectShader -match 'SelfEngine_FfxSssrZeroConfidenceHistoryRejectionEnabled'),threshold=$($reprojectShader -match 'current\s*<=\s*0\.0001'),bit=$($reprojectShader -match '0x00800000u'),control=$($rendererSource -match 'SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF'),csv=$($benchmarkRecorderSource -match 'ssr_ffx_sssr_zero_confidence_history_rejection_enabled')" `
+        "true/true/true/true/true"
+    $contractVersionSixteen =
+        $ssrFeatureSource -match 'fidelityFxSssrContractVersion\s*=\s*16u'
     $adapterDefaultsLocked =
         $adapterHeader -match 'samplesPerQuad\s*=\s*4u' -and
         $adapterHeader -match 'compositeConfidenceMode\s*=\s*0u'
@@ -641,17 +691,23 @@ function Invoke-StaticChecks {
         '(?s)u32\s+FfxSssrCompositeConfidenceModeFromEnvironment\(\).*?"SE_SSR_FFX_SAMPLE_VARIANCE_CONFIDENCE"\s*\)\s*\?\s*1u\s*:\s*0u;'
     $visibleOutputClearDefault = $rendererSource -match
         '(?s)ffxSssrVisibleOutputClearRequested\s*=\s*EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT"\)\s*\|\|\s*!EnvironmentFlagEnabled\("SE_SSR_FFX_CLEAR_VISIBLE_OUTPUT_OFF"\);'
+    $zeroConfidenceHistoryRejectionDefault = $rendererSource -match
+        '(?s)bool\s+FfxSssrZeroConfidenceHistoryRejectionEnabledFromEnvironment\(\).*?return\s+!EnvironmentFlagEnabled\(\s*"SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF"\s*\);'
+    $radianceSanitizationDefault = $rendererSource -match
+        '(?s)bool\s+FfxSssrRadianceSanitizationEnabledFromEnvironment\(\).*?return\s+!EnvironmentFlagEnabled\(\s*"SE_SSR_FFX_RADIANCE_SANITIZE_OFF"\s*\);'
     $checks += New-Check `
-        "SelfEngine FFX production visual defaults are locked by contract v13" `
-        ($contractVersionThirteen -and
+        "SelfEngine FFX production visual defaults are locked by contract v16" `
+        ($contractVersionSixteen -and
             $adapterDefaultsLocked -and
             $fourRaysDefault -and
             $stableEnvironmentDefault -and
             $perfectDirectionsDefault -and
             $vendorConfidenceDefault -and
-            $visibleOutputClearDefault) `
-        "contract13=$contractVersionThirteen,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault" `
-        "true/true/true/true/true/true/true"
+            $visibleOutputClearDefault -and
+            $zeroConfidenceHistoryRejectionDefault -and
+            $radianceSanitizationDefault) `
+        "contract16=$contractVersionSixteen,adapter=$adapterDefaultsLocked,rays4=$fourRaysDefault,stable=$stableEnvironmentDefault,perfect=$perfectDirectionsDefault,confidence0=$vendorConfidenceDefault,clear=$visibleOutputClearDefault,missReject=$zeroConfidenceHistoryRejectionDefault,radianceSanitize=$radianceSanitizationDefault" `
+        "true/true/true/true/true/true/true/true/true"
     $checks += New-Check `
         "SelfEngine FFX pipelines use AMD constants set zero" `
         ($adapterSource -match "VulkanFfxSssrConstantsDescriptorSetLayout" -and
@@ -688,11 +744,13 @@ function Invoke-RuntimeLane {
         [double]$ExpectedMotionVectorScaleX = 1.0,
         [double]$ExpectedMotionVectorScaleY = 1.0,
         [uint32]$ExpectedHitReprojectionEnabled = 1,
+        [uint32]$ExpectedZeroConfidenceHistoryRejectionEnabled = 1,
         [double]$ExpectedTemporalStabilityFactor = 0.95,
         [uint32]$ExpectedSamplesPerQuad = 4,
         [uint32]$ExpectedStableEnvironmentFallbackEnabled = 1,
         [uint32]$ExpectedConstantEnvironmentFallbackEnabled = 0,
         [uint32]$ExpectedPerfectReflectionDirectionsEnabled = 1,
+        [uint32]$ExpectedRadianceSanitizationEnabled = 1,
         [uint32]$ExpectedPrefilterBypassEnabled = 0,
         [uint32]$ExpectedResolveTemporalBypassEnabled = 0,
         [uint32]$ExpectedClassifySurfaceSeedEnabled = 0,
@@ -786,6 +844,8 @@ function Invoke-RuntimeLane {
     $classifySurfaceSeedEnabled = Get-UIntMetric $last "ssr_ffx_sssr_classify_surface_seed_enabled"
     $intersectCoverageMarkerEnabled = Get-UIntMetric $last "ssr_ffx_sssr_intersect_coverage_marker_enabled"
     $environmentMipCount = Get-UIntMetric $last "ssr_ffx_sssr_environment_mip_count"
+    $radianceSanitizationEnabled = Get-UIntMetric $last `
+        "ssr_ffx_sssr_radiance_sanitization_enabled"
     $iblPrefilteredMipCount = Get-UIntMetric $last "ibl_prefiltered_mip_count"
     $deferredReceiverReprojectionEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_receiver_reprojection_enabled"
     $deferredValidatedBilinearEnabled = Get-UIntMetric $last "ssr_reconstruction_deferred_validated_bilinear_enabled"
@@ -880,6 +940,7 @@ function Invoke-RuntimeLane {
     $reprojectMotionVectorScaleY = Get-FloatMetric $last "ssr_ffx_sssr_reproject_motion_vector_scale_y"
     $reprojectMotionVectorContractReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_motion_vector_contract_ready"
     $reprojectHitReprojectionEnabled = Get-UIntMetric $last "ssr_ffx_sssr_reproject_hit_reprojection_enabled"
+    $zeroConfidenceHistoryRejectionEnabled = Get-UIntMetric $last "ssr_ffx_sssr_zero_confidence_history_rejection_enabled"
     $reprojectReprojectionContractReady = Get-UIntMetric $last "ssr_ffx_sssr_reproject_reprojection_contract_ready"
     $reprojectBindDispatches = Get-UIntMetric $last "ffx_sssr_reproject_dispatches"
     $reprojectBindDescriptorBinds = Get-UIntMetric $last "ffx_sssr_reproject_descriptor_binds"
@@ -1162,6 +1223,9 @@ function Invoke-RuntimeLane {
     $reprojectHitReprojectionContractMatches =
         $reprojectReprojectionContractReady -eq 1 -and
         $reprojectHitReprojectionEnabled -eq $ExpectedHitReprojectionEnabled
+    $zeroConfidenceHistoryRejectionContractMatches =
+        $zeroConfidenceHistoryRejectionEnabled -eq
+            $ExpectedZeroConfidenceHistoryRejectionEnabled
     $prefilterResourceContractMatches =
         $prefilterResourcesReady -eq 1 -and
         $prefilterDescriptorSetsReady -eq 1 -and
@@ -1307,15 +1371,18 @@ function Invoke-RuntimeLane {
             "requested=0,active=0"
         }
     if ($ExpectedActiveProvider -eq 1) {
+        $expectedApplyConfidenceSource = if (
+            $sameFrameCompositeDescriptorBound -eq 1
+        ) { 2 } else { 0 }
         $hitConfidenceContractMatches =
             $hitConfidenceContractVersion -eq 2 -and
             $hitConfidenceResourcesReady -eq 1 -and
             $hitConfidenceHistoryReady -eq 1 -and
             $hitConfidenceApplyBound -eq $sameFrameCompositeDescriptorBound -and
-            $applyConfidenceSource -eq 2 -and
+            $applyConfidenceSource -eq $expectedApplyConfidenceSource -and
             $probeFallbackConsumer -eq $sameFrameCompositeActive
         $hitConfidenceExpectedLabel =
-            "version=2,resources/history=1,apply/probeFallback==sameFrame,source=2"
+            "version=2,resources/history=1,apply/probeFallback==sameFrame,source=$expectedApplyConfidenceSource"
     } else {
         $hitConfidenceContractMatches =
             $hitConfidenceContractVersion -eq 2 -and
@@ -1336,8 +1403,8 @@ function Invoke-RuntimeLane {
             ($activeProvider -eq $ExpectedActiveProvider) `
             "$activeProvider" "$ExpectedActiveProvider"),
         (New-Check "$Name FFX source contract ready" `
-            ($contractVersion -eq 13 -and $sourceReady -eq 1) `
-            "contract=$contractVersion,source=$sourceReady" "13/1"),
+            ($contractVersion -eq 16 -and $sourceReady -eq 1) `
+            "contract=$contractVersion,source=$sourceReady" "14/1"),
         (New-Check "$Name FFX shader build integrated" `
             ($shaderBuild -eq 1 -and $shaderCount -eq 8) `
             "build=$shaderBuild,count=$shaderCount" "1/8"),
@@ -1364,6 +1431,11 @@ function Invoke-RuntimeLane {
             ($constantEnvironmentFallbackEnabled -eq $ExpectedConstantEnvironmentFallbackEnabled) `
             "$constantEnvironmentFallbackEnabled" `
             "$ExpectedConstantEnvironmentFallbackEnabled"),
+        (New-Check "$Name radiance sanitization control" `
+            ($radianceSanitizationEnabled -eq
+                $ExpectedRadianceSanitizationEnabled) `
+            "$radianceSanitizationEnabled" `
+            "$ExpectedRadianceSanitizationEnabled"),
         (New-Check "$Name perfect reflection directions control" `
             ($perfectReflectionDirectionsEnabled -eq $ExpectedPerfectReflectionDirectionsEnabled) `
             "$perfectReflectionDirectionsEnabled" `
@@ -1465,6 +1537,10 @@ function Invoke-RuntimeLane {
             $reprojectHitReprojectionContractMatches `
             "ready=$reprojectReprojectionContractReady,hit=$reprojectHitReprojectionEnabled" `
             "ready=1,hit=$ExpectedHitReprojectionEnabled"),
+        (New-Check "$Name zero-confidence history rejection contract" `
+            $zeroConfidenceHistoryRejectionContractMatches `
+            "enabled=$zeroConfidenceHistoryRejectionEnabled" `
+            "enabled=$ExpectedZeroConfidenceHistoryRejectionEnabled"),
         (New-Check "$Name reproject dispatch/bind state" `
             $reprojectDispatchStateMatches `
             "stats=$reprojectDispatches/$reprojectDescriptorBinds,binds=$reprojectBindDispatches/$reprojectBindDescriptorBinds" `
@@ -1538,6 +1614,7 @@ function Invoke-RuntimeLane {
             classifySurfaceSeedEnabled = $classifySurfaceSeedEnabled
             intersectCoverageMarkerEnabled = $intersectCoverageMarkerEnabled
             environmentMipCount = $environmentMipCount
+            radianceSanitizationEnabled = $radianceSanitizationEnabled
             iblPrefilteredMipCount = $iblPrefilteredMipCount
             deferredReceiverReprojectionEnabled = $deferredReceiverReprojectionEnabled
             deferredValidatedBilinearEnabled = $deferredValidatedBilinearEnabled
@@ -1626,6 +1703,7 @@ function Invoke-RuntimeLane {
             reprojectMotionVectorScaleY = $reprojectMotionVectorScaleY
             reprojectMotionVectorContractReady = $reprojectMotionVectorContractReady
             reprojectHitReprojectionEnabled = $reprojectHitReprojectionEnabled
+            zeroConfidenceHistoryRejectionEnabled = $zeroConfidenceHistoryRejectionEnabled
             reprojectReprojectionContractReady = $reprojectReprojectionContractReady
             reprojectBindDispatches = $reprojectBindDispatches
             reprojectBindDescriptorBinds = $reprojectBindDescriptorBinds
@@ -1814,6 +1892,42 @@ $reports += Invoke-RuntimeLane `
     -ExpectedFallbackReason 0 `
     -ExpectDeferredComposite $true `
     -ExpectedHitReprojectionEnabled 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-zero-confidence-history-rejection-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_ZERO_CONFIDENCE_HISTORY_REJECTION_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedZeroConfidenceHistoryRejectionEnabled 0
+
+$reports += Invoke-RuntimeLane `
+    -Name "lighting-showcase-ffx-radiance-sanitize-off-control" `
+    -Executable $showcaseExecutable `
+    -Environment ($common.Clone() + @{
+        SE_BENCHMARK_SCENE = "lighting-showcase"
+        SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+        SE_SSR_BACKEND = "ffx-sssr"
+        SE_SSR_FFX_RADIANCE_SANITIZE_OFF = "1"
+    }) `
+    -ExpectedRequestedProvider 1 `
+    -ExpectedActiveProvider 1 `
+    -ExpectedDispatchReady 1 `
+    -ExpectedRuntimeActive 1 `
+    -ExpectPrepareDispatch $true `
+    -ExpectedFallbackReason 0 `
+    -ExpectDeferredComposite $true `
+    -ExpectedRadianceSanitizationEnabled 0
 
 $reports += Invoke-RuntimeLane `
     -Name "lighting-showcase-ffx-temporal-stability-075-control" `

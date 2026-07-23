@@ -734,7 +734,9 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     VkImageView resolvedReflectionOverride,
     VkImageLayout resolvedReflectionLayout,
     VkImageView hitConfidenceOverride,
-    VkImageLayout hitConfidenceLayout
+    VkImageLayout hitConfidenceLayout,
+    VkImageView currentReflectionOverride,
+    VkImageLayout currentReflectionLayout
 ) {
     if (descriptorIndex >= m_DescriptorSets.size() ||
         historyImageIndex >= renderTargets.Count()) {
@@ -742,8 +744,12 @@ bool VulkanGBufferDescriptorSets::UpdateSsrSceneColorHistory(
     }
 
     VkDescriptorImageInfo historyColorInfo{};
-    historyColorInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    historyColorInfo.imageView = renderTargets.TemporalHistoryColorView(historyImageIndex);
+    historyColorInfo.imageLayout = currentReflectionOverride != VK_NULL_HANDLE
+        ? currentReflectionLayout
+        : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    historyColorInfo.imageView = currentReflectionOverride != VK_NULL_HANDLE
+        ? currentReflectionOverride
+        : renderTargets.TemporalHistoryColorView(historyImageIndex);
     historyColorInfo.sampler = sampler.Handle();
 
     VkDescriptorImageInfo resolvedInfo{};

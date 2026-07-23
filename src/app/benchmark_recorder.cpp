@@ -614,11 +614,19 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrStableEnvironmentFallbackEnabled << ','
         << ssr.fidelityFxSssrConstantEnvironmentFallbackEnabled << ','
         << ssr.fidelityFxSssrPerfectReflectionDirectionsEnabled << ','
+        << ssr.fidelityFxSssrReprojectBypassEnabled << ','
         << ssr.fidelityFxSssrPrefilterBypassEnabled << ','
         << ssr.fidelityFxSssrResolveTemporalBypassEnabled << ','
+        << ssr.fidelityFxSssrMirrorDnsrPassthroughRequested << ','
+        << ssr.fidelityFxSssrMirrorDnsrPassthroughResourcesReady << ','
+        << ssr.fidelityFxSssrMirrorDnsrPassthroughActive << ','
+        << ssr.fidelityFxSssrMirrorDnsrRoughnessThresholdMilliunits << ','
+        << ssr.fidelityFxSssrMirrorDnsrConfidenceThresholdPermille << ','
+        << ssr.fidelityFxSssrConfidenceSpatialFilterEnabled << ','
         << ssr.fidelityFxSssrClassifySurfaceSeedEnabled << ','
         << ssr.fidelityFxSssrIntersectCoverageMarkerEnabled << ','
         << ssr.fidelityFxSssrEnvironmentMipCount << ','
+        << ssr.fidelityFxSssrRadianceSanitizationEnabled << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsResourcesReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsDescriptorSetsReady << ','
         << ssr.fidelityFxSssrPrepareIndirectArgsPipelineReady << ','
@@ -680,6 +688,7 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrReprojectMotionVectorScaleY << ','
         << ssr.fidelityFxSssrReprojectMotionVectorContractReady << ','
         << ssr.fidelityFxSssrReprojectHitReprojectionEnabled << ','
+        << ssr.fidelityFxSssrZeroConfidenceHistoryRejectionEnabled << ','
         << ssr.fidelityFxSssrReprojectReprojectionContractReady << ','
         << ssr.fidelityFxSssrPrefilterResourcesReady << ','
         << ssr.fidelityFxSssrPrefilterDescriptorSetsReady << ','
@@ -842,6 +851,7 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryDiagnosticTargetTlasIndex << ','
         << hybridReflections.rayQueryDiagnosticTargetMaterialIndex << ','
         << hybridReflections.rayQueryForceAllRayQueries << ','
+        << hybridReflections.rayQueryHitIblEnabled << ','
         << hybridReflections.rayQueryCullBackFacingTriangles << ','
         << hybridReflections.rayQueryFullAuditRequested << ','
         << hybridReflections.rayQueryFullAuditResourcesReady << ','
@@ -876,6 +886,16 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryIblPrefilteredDescriptorReady << ','
         << hybridReflections.rayQueryIblSamplerDescriptorReady << ','
         << hybridReflections.rayQueryIblPrefilteredMipCount << ','
+        << hybridReflections.rayQueryLocalProbeIblContractVersion << ','
+        << hybridReflections.rayQueryLocalProbeIblResourcesReady << ','
+        << hybridReflections.rayQueryLocalProbeIblEnabled << ','
+        << hybridReflections.rayQueryLocalProbeCount << ','
+        << hybridReflections.rayQueryLocalProbePrefilteredReadyMask << ','
+        << hybridReflections.rayQueryLocalProbeDiffuseReadyMask << ','
+        << hybridReflections.rayQueryLocalProbeDescriptorWriteCount << ','
+        << hybridReflections.rayQuerySourceFusionEnabled << ','
+        << hybridReflections.rayQueryDirectMirrorEnabled << ','
+        << hybridReflections.rayQueryScreenHitConfidenceThresholdPermille << ','
         << hybridReflections.rayQueryDirectionalLightCount << ','
         << hybridReflections.rayQueryLocalLightCount << ','
         << hybridReflections.rayQueryHitLightingVisibilityMode << ','
@@ -940,6 +960,16 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryRectLightContributionCount << ','
         << hybridReflections.rayQueryFiniteDirectRadianceCount << ','
         << hybridReflections.rayQueryFiniteIblRadianceCount << ','
+        << hybridReflections.rayQueryLocalProbeIblResolvedCount << ','
+        << hybridReflections.rayQueryGlobalIblFallbackCount << ','
+        << hybridReflections.rayQueryLocalProbeIblInvalidCount << ','
+        << hybridReflections.rayQueryLocalProbeIblLuminanceSumMilliunits << ','
+        << hybridReflections.rayQuerySourceFusionCount << ','
+        << hybridReflections.rayQuerySourceFusionConfidenceSumPermille << ','
+        << hybridReflections.rayQuerySourceFusionScreenWeightSumPermille << ','
+        << hybridReflections.rayQueryDirectMirrorCandidateCount << ','
+        << hybridReflections.rayQueryDirectMirrorHitCount << ','
+        << hybridReflections.rayQueryDirectMirrorFallbackCount << ','
         << hybridReflections.rayQueryFiniteEmissiveRadianceCount << ','
         << hybridReflections.rayQueryFiniteRadianceCount << ','
         << hybridReflections.rayQueryDirectLuminanceSumMilliunits << ','
@@ -1938,6 +1968,10 @@ void BenchmarkRecorder::RecordFrame(
         << binds.frameDirectionalLightCount << ','
         << binds.frameLocalLightCount << ','
         << binds.frameRectLightCount << ','
+        << binds.framePointLightCount << ','
+        << binds.frameSpotLightCount << ','
+        << binds.framePointSpotDirectSpecularEnabledCount << ','
+        << binds.framePointSpotDirectSpecularDisabledCount << ','
         << binds.frameRectLightAnalyticSpecularEnabledCount << ','
         << binds.frameRectLightAnalyticSpecularDisabledCount << ','
         << binds.frameLightTileSize << ','
@@ -2292,11 +2326,19 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_stable_environment_fallback_enabled,"
         << "ssr_ffx_sssr_constant_environment_fallback_enabled,"
         << "ssr_ffx_sssr_perfect_reflection_directions_enabled,"
+        << "ssr_ffx_sssr_reproject_bypass_enabled,"
         << "ssr_ffx_sssr_prefilter_bypass_enabled,"
         << "ssr_ffx_sssr_resolve_temporal_bypass_enabled,"
+        << "ssr_ffx_sssr_mirror_dnsr_passthrough_requested,"
+        << "ssr_ffx_sssr_mirror_dnsr_passthrough_resources_ready,"
+        << "ssr_ffx_sssr_mirror_dnsr_passthrough_active,"
+        << "ssr_ffx_sssr_mirror_dnsr_roughness_threshold_milliunits,"
+        << "ssr_ffx_sssr_mirror_dnsr_confidence_threshold_permille,"
+        << "ssr_ffx_sssr_confidence_spatial_filter_enabled,"
         << "ssr_ffx_sssr_classify_surface_seed_enabled,"
         << "ssr_ffx_sssr_intersect_coverage_marker_enabled,"
         << "ssr_ffx_sssr_environment_mip_count,"
+        << "ssr_ffx_sssr_radiance_sanitization_enabled,"
         << "ssr_ffx_sssr_prepare_indirect_args_resources_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_descriptor_sets_ready,"
         << "ssr_ffx_sssr_prepare_indirect_args_pipeline_ready,"
@@ -2358,6 +2400,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_reproject_motion_vector_scale_y,"
         << "ssr_ffx_sssr_reproject_motion_vector_contract_ready,"
         << "ssr_ffx_sssr_reproject_hit_reprojection_enabled,"
+        << "ssr_ffx_sssr_zero_confidence_history_rejection_enabled,"
         << "ssr_ffx_sssr_reproject_reprojection_contract_ready,"
         << "ssr_ffx_sssr_prefilter_resources_ready,"
         << "ssr_ffx_sssr_prefilter_descriptor_sets_ready,"
@@ -2514,6 +2557,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_diagnostic_target_tlas_index,"
         << "hybrid_reflections_ray_query_diagnostic_target_material_index,"
         << "hybrid_reflections_ray_query_force_all_ray_queries,"
+        << "hybrid_reflections_ray_query_hit_ibl_enabled,"
         << "hybrid_reflections_ray_query_cull_back_facing_triangles,"
         << "hybrid_reflections_ray_query_full_audit_requested,"
         << "hybrid_reflections_ray_query_full_audit_resources_ready,"
@@ -2548,6 +2592,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_ibl_prefiltered_descriptor_ready,"
         << "hybrid_reflections_ray_query_ibl_sampler_descriptor_ready,"
         << "hybrid_reflections_ray_query_ibl_prefiltered_mip_count,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_contract_version,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_resources_ready,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_enabled,"
+        << "hybrid_reflections_ray_query_local_probe_count,"
+        << "hybrid_reflections_ray_query_local_probe_prefiltered_ready_mask,"
+        << "hybrid_reflections_ray_query_local_probe_diffuse_ready_mask,"
+        << "hybrid_reflections_ray_query_local_probe_descriptor_write_count,"
+        << "hybrid_reflections_ray_query_source_fusion_enabled,"
+        << "hybrid_reflections_ray_query_direct_mirror_enabled,"
+        << "hybrid_reflections_ray_query_screen_hit_confidence_threshold_permille,"
         << "hybrid_reflections_ray_query_directional_light_count,"
         << "hybrid_reflections_ray_query_local_light_count,"
         << "hybrid_reflections_ray_query_hit_lighting_visibility_mode,"
@@ -2612,6 +2666,16 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_rect_light_contribution_count,"
         << "hybrid_reflections_ray_query_finite_direct_radiance_count,"
         << "hybrid_reflections_ray_query_finite_ibl_radiance_count,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_resolved_count,"
+        << "hybrid_reflections_ray_query_global_ibl_fallback_count,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_invalid_count,"
+        << "hybrid_reflections_ray_query_local_probe_ibl_luminance_sum_milliunits,"
+        << "hybrid_reflections_ray_query_source_fusion_count,"
+        << "hybrid_reflections_ray_query_source_fusion_confidence_sum_permille,"
+        << "hybrid_reflections_ray_query_source_fusion_screen_weight_sum_permille,"
+        << "hybrid_reflections_ray_query_direct_mirror_candidate_count,"
+        << "hybrid_reflections_ray_query_direct_mirror_hit_count,"
+        << "hybrid_reflections_ray_query_direct_mirror_fallback_count,"
         << "hybrid_reflections_ray_query_finite_emissive_radiance_count,"
         << "hybrid_reflections_ray_query_finite_radiance_count,"
         << "hybrid_reflections_ray_query_direct_luminance_sum_milliunits,"
@@ -3443,6 +3507,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "frame_light_constant_updates,frame_light_buffer_updates,"
         << "frame_light_total_count,frame_directional_light_count,frame_local_light_count,"
         << "frame_rect_light_count,"
+        << "frame_point_light_count,frame_spot_light_count,"
+        << "frame_point_spot_direct_specular_enabled_count,"
+        << "frame_point_spot_direct_specular_disabled_count,"
         << "frame_rect_light_analytic_specular_enabled_count,"
         << "frame_rect_light_analytic_specular_disabled_count,"
         << "frame_light_tile_size,frame_light_tile_count_x,frame_light_tile_count_y,"

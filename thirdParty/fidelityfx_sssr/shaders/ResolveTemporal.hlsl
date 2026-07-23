@@ -54,7 +54,13 @@ void FFX_DNSR_Reflections_StoreTemporalAccumulation(int2 pixel_coordinate, min16
     float composite_confidence = g_composite_confidence_mode == 0u
         ? glossy_validity
         : saturate(sample_confidence * variance_confidence);
-    g_out_radiance[pixel_coordinate] = float4(radiance.xyz, composite_confidence);
+    float3 sanitized_radiance = SelfEngine_FfxSssrSanitizeRadiance(
+        (float3)radiance
+    );
+    g_out_radiance[pixel_coordinate] = float4(
+        sanitized_radiance,
+        composite_confidence
+    );
     g_out_variance[pixel_coordinate] = variance.x;
     g_out_sample_count[pixel_coordinate] = sample_count;
 }

@@ -113,6 +113,11 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         fullAuditRequested = VulkanEnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_FULL_AUDIT"
         );
+#if !defined(NDEBUG)
+        forceFrontCounterClockwise = VulkanEnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_TLAS_FRONT_COUNTERCLOCKWISE"
+        );
+#endif
         createAccelerationStructure = reinterpret_cast<
             PFN_vkCreateAccelerationStructureKHR
         >(vkGetDeviceProcAddr(device.Handle(), "vkCreateAccelerationStructureKHR"));
@@ -388,7 +393,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             }
         }
 
-        stats.accelerationStructureContractVersion = 1u;
+        stats.accelerationStructureContractVersion = 2u;
         stats.fullSceneCommandCount = static_cast<u32>(renderCommands.size());
         stats.opaqueRigidCommandCount = 0u;
         stats.skinnedFallbackCount = 0u;
@@ -553,8 +558,15 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             instance.instanceCustomIndex = static_cast<u32>(instances.size()) & 0x00ffffffu;
             instance.mask = 0xffu;
             instance.instanceShaderBindingTableRecordOffset = 0u;
-            instance.flags =
-                VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR;
+            // SelfEngine's Vulkan projection flips clip-space Y. The raster
+            // front-face contract is therefore counter-clockwise after the
+            // projection, while the object-space mesh winding presented to
+            // ray tracing uses Vulkan's default clockwise front convention.
+            // Keep the two contracts aligned so culling selects the nearest
+            // exterior surface instead of the far side of closed meshes.
+            instance.flags = forceFrontCounterClockwise
+                ? VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR
+                : 0u;
             if (command.material != nullptr &&
                 command.material->Properties().doubleSided) {
                 instance.flags |=
@@ -846,6 +858,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
     PFN_vkCmdBuildAccelerationStructuresKHR cmdBuildAccelerationStructures = nullptr;
     VkDeviceSize scratchAlignment = 1u;
     bool fullAuditRequested = false;
+    bool forceFrontCounterClockwise = false;
     std::unordered_map<const VulkanMesh*, std::unique_ptr<BlasEntry>> blasCache;
     std::vector<FrameTlas> frames;
 };

@@ -86,7 +86,8 @@ mat4 WeightedSkinMatrix(uint currentPaletteOffset, vec4 weights) {
 
 void main() {
     float boneWeightSum = dot(inBoneWeights, vec4(1.0));
-    uint currentPaletteOffset = uint(max(objectData.viewport.w, 0.0) + 0.5);
+    uint packedObjectMetadata = uint(max(objectData.viewport.w, 0.0) + 0.5);
+    uint currentPaletteOffset = packedObjectMetadata / 8u;
     bool skinningEnabled = boneWeightSum > 0.00001 && currentPaletteOffset > 0u;
     vec4 normalizedBoneWeights = skinningEnabled
         ? inBoneWeights / boneWeightSum

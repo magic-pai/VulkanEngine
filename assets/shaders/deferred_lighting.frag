@@ -173,6 +173,7 @@ const int MAX_LIGHTS_PER_TILE = 16;
 const int LIGHT_INDEX_GROUPS_PER_TILE = 4;
 const int MAX_LIGHT_TILE_OVERFLOW_INDICES = 65536;
 const int MAX_FRAME_MATERIALS = 256;
+const int GBUFFER_MATERIAL_PROBE_STRIDE = 6;
 const int MAX_DIRECTIONAL_SHADOW_CASCADES = 4;
 const int MAX_LOCAL_SHADOW_TILES = 64;
 const int MAX_LOCAL_SHADOW_TILES_PER_LIGHT = 6;
@@ -229,6 +230,16 @@ bool TryGetMaterialRecord(float materialIdFloat, out MaterialRecord materialReco
 
     materialRecord = frameMaterials.materials[materialId - 1];
     return true;
+}
+
+int GBufferMaterialId(float packedMaterialProbe) {
+    return int(floor(max(packedMaterialProbe, 0.0) /
+        float(GBUFFER_MATERIAL_PROBE_STRIDE) + 0.0001));
+}
+
+int GBufferObjectProbeAssignmentCode(float packedMaterialProbe) {
+    int packed = int(max(packedMaterialProbe, 0.0) + 0.5);
+    return packed % GBUFFER_MATERIAL_PROBE_STRIDE;
 }
 
 float DistributionGGX(vec3 normal, vec3 halfDir, float roughness) {
@@ -568,8 +579,36 @@ bool ReflectionProbeDominantMirrorEnabled() {
     ) > 0.5;
 }
 
-float ReflectionProbeDominantMirrorFactor(float roughness) {
+bool ReflectionProbeDominantMirrorHardSwitchEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 8.0), 2.0) > 0.5;
+}
+
+bool ReflectionProbeObjectStableEnabled() {
+    float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
+    return mod(floor(mode / 16.0), 2.0) > 0.5;
+}
+
+float ReflectionProbeMirrorFactor(float roughness) {
     return 1.0 - smoothstep(0.30, 0.60, clamp(roughness, 0.0, 1.0));
+}
+
+float ReflectionProbeDominantMirrorFactor(
+    float roughness,
+    float dominantWeight,
+    float runnerUpWeight,
+    float totalWeight
+) {
+    float roughnessFactor = ReflectionProbeMirrorFactor(roughness);
+    if (ReflectionProbeDominantMirrorHardSwitchEnabled()) {
+        return roughnessFactor;
+    }
+    float dominanceMargin = clamp(
+        (dominantWeight - runnerUpWeight) / max(totalWeight, 0.000001),
+        0.0,
+        1.0
+    );
+    return roughnessFactor * smoothstep(0.02, 0.18, dominanceMargin);
 }
 
 float LocalReflectionProbeShapeCoordinateAt(
@@ -740,7 +779,8 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
     vec3 direction,
     vec3 sunDirection,
     float roughness,
-    vec3 worldPosition
+    vec3 worldPosition,
+    int objectProbeAssignmentCode
 ) {
     EnvironmentRadianceResult result;
     result.globalRadiance = GlobalEnvironmentRadiance(
@@ -797,30 +837,66 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
             ? max(result.localCoverage, coverages[probeIndex])
             : clamp(totalWeight, 0.0, 1.0);
     }
-    if (totalWeight <= 0.0001) {
+    int assignedProbeIndex = objectProbeAssignmentCode - 1;
+    bool assignedProbeValid = assignedProbeIndex >= 0 &&
+        assignedProbeIndex < probeCount;
+    float objectStableFactor = productionBlend &&
+        ReflectionProbeDominantMirrorEnabled() &&
+        ReflectionProbeObjectStableEnabled()
+        ? ReflectionProbeMirrorFactor(roughness)
+        : 0.0;
+    if (totalWeight <= 0.0001 &&
+        !(assignedProbeValid && objectStableFactor > 0.0001)) {
         return result;
     }
 
     int dominantProbeIndex = -1;
     float dominantRawWeight = 0.0;
+    float runnerUpRawWeight = 0.0;
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
         if (probeIndex < probeCount && weights[probeIndex] > dominantRawWeight) {
+            runnerUpRawWeight = dominantRawWeight;
             dominantRawWeight = weights[probeIndex];
             dominantProbeIndex = probeIndex;
+        } else if (probeIndex < probeCount) {
+            runnerUpRawWeight = max(runnerUpRawWeight, weights[probeIndex]);
         }
     }
     float dominantMirrorFactor = productionBlend &&
         ReflectionProbeDominantMirrorEnabled() &&
+        !ReflectionProbeObjectStableEnabled() &&
         dominantProbeIndex >= 0
-        ? ReflectionProbeDominantMirrorFactor(roughness)
+        ? ReflectionProbeDominantMirrorFactor(
+            roughness,
+            dominantRawWeight,
+            runnerUpRawWeight,
+            totalWeight
+        )
         : 0.0;
+    int resolvedMirrorProbeIndex = ReflectionProbeObjectStableEnabled()
+        ? assignedProbeIndex
+        : dominantProbeIndex;
+    float resolvedMirrorFactor = ReflectionProbeObjectStableEnabled()
+        ? objectStableFactor
+        : dominantMirrorFactor;
+    float localWeightDenominator = totalWeight > 0.0001
+        ? totalWeight
+        : 1.0;
+    result.localCoverage = mix(
+        result.localCoverage,
+        assignedProbeValid ? 1.0 : 0.0,
+        objectStableFactor
+    );
 
     vec3 localBlend = vec3(0.0);
     float roughnessClamped = clamp(roughness, 0.0, 1.0);
     float glossBoost = IblSpecularStability(roughnessClamped);
     for (int probeIndex = 0; probeIndex < MAX_REFLECTION_PROBES; ++probeIndex) {
         float rawWeight = weights[probeIndex];
-        if (probeIndex >= probeCount || rawWeight <= 0.0001) {
+        bool stableAssignedProbe = objectStableFactor > 0.0001 &&
+            assignedProbeValid && probeIndex == assignedProbeIndex;
+        if (probeIndex >= probeCount ||
+            (rawWeight <= 0.0001 && !stableAssignedProbe)) {
             continue;
         }
 
@@ -866,13 +942,16 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
             glossBoost;
         float effectiveWeight = mix(
             rawWeight,
-            probeIndex == dominantProbeIndex ? totalWeight : 0.0,
-            dominantMirrorFactor
+            probeIndex == resolvedMirrorProbeIndex
+                ? localWeightDenominator
+                : 0.0,
+            resolvedMirrorFactor
         );
         if (effectiveWeight <= 0.0001) {
             continue;
         }
-        localBlend += localRadiance * (effectiveWeight / totalWeight);
+        localBlend += localRadiance *
+            (effectiveWeight / localWeightDenominator);
     }
 
     result.localRadiance = localBlend;
@@ -894,7 +973,24 @@ vec3 EnvironmentRadiance(
         direction,
         sunDirection,
         roughness,
-        worldPosition
+        worldPosition,
+        0
+    ).resolvedRadiance;
+}
+
+vec3 ObjectEnvironmentRadiance(
+    vec3 direction,
+    vec3 sunDirection,
+    float roughness,
+    vec3 worldPosition,
+    int objectProbeAssignmentCode
+) {
+    return ResolveEnvironmentRadiance(
+        direction,
+        sunDirection,
+        roughness,
+        worldPosition,
+        objectProbeAssignmentCode
     ).resolvedRadiance;
 }
 
@@ -910,11 +1006,18 @@ IblAmbientResult BuildIblAmbient(
     float occlusion,
     float diffuseScale,
     float specularScale,
-    vec3 specularRadiance
+    vec3 specularRadiance,
+    int objectProbeAssignmentCode
 ) {
     IblAmbientResult result;
     float nDotV = max(dot(normal, viewDir), 0.0);
-    vec3 diffuseEnv = EnvironmentRadiance(normal, lightDir, 1.0, worldPosition);
+    vec3 diffuseEnv = ObjectEnvironmentRadiance(
+        normal,
+        lightDir,
+        1.0,
+        worldPosition,
+        objectProbeAssignmentCode
+    );
     vec3 envFresnel = FresnelSchlickRoughness(nDotV, f0, roughness);
     vec3 envDiffuse = (vec3(1.0) - envFresnel) * (1.0 - metallic);
     vec2 envBrdf = SampleEnvironmentBrdf(roughness, nDotV);
@@ -4167,6 +4270,8 @@ void AccumulateLocalLight(
         );
 
     vec3 localSpecular = vec3(0.0);
+    float localSpecularStrength =
+        specularStrength * clamp(parameters.w, 0.0, 1.0);
     vec3 localDirect = DirectPbrContribution(
         baseColor,
         roughness,
@@ -4175,7 +4280,7 @@ void AccumulateLocalLight(
         viewDir,
         localLightDir,
         radiance,
-        specularStrength,
+        localSpecularStrength,
         specularColorFactor,
         clearcoat,
         clearcoatRoughness,
@@ -4632,9 +4737,14 @@ void main() {
     float metallic = clamp(material.r, 0.0, 1.0);
     float occlusion = clamp(material.g, 0.0, 1.0);
     float specularTextureFactor = clamp(material.b, 0.0, 1.0);
+    int objectProbeAssignmentCode =
+        GBufferObjectProbeAssignmentCode(material.a);
     vec3 emissiveColor = max(emissive.rgb, vec3(0.0));
     MaterialRecord materialRecord;
-    bool hasMaterialRecord = TryGetMaterialRecord(material.a, materialRecord);
+    bool hasMaterialRecord = TryGetMaterialRecord(
+        float(GBufferMaterialId(material.a)),
+        materialRecord
+    );
     float materialMetallic = clamp(materialRecord.cameraControls.x, 0.0, 1.0);
     float materialRoughness = clamp(materialRecord.cameraControls.y, 0.04, 1.0);
     float materialSpecular = clamp(materialRecord.materialControls.z, 0.0, 2.0);
@@ -4833,7 +4943,13 @@ void main() {
     vec3 dielectricF0 = clamp(vec3(0.04) * specularColorFactor, vec3(0.0), vec3(1.0));
     f0 = mix(dielectricF0, baseColor, metallic);
     vec3 environmentReflection =
-        EnvironmentRadiance(reflection, lightDir, roughness, worldPosition);
+        ObjectEnvironmentRadiance(
+            reflection,
+            lightDir,
+            roughness,
+            worldPosition,
+            objectProbeAssignmentCode
+        );
     SsrTraceResult ssrTrace;
     ssrTrace.hitUv = fragUv;
     ssrTrace.confidence = 0.0;
@@ -4940,7 +5056,8 @@ void main() {
         ReflectionProbeIndependentIblEnergyEnabled()
             ? 1.0
             : 0.36 * ambientStrength,
-        ssrReflection
+        ssrReflection,
+        objectProbeAssignmentCode
     );
     float ffxSameFrameBlendWeight =
         ffxSameFrameComposite && roughness < 0.6 &&
@@ -5256,7 +5373,8 @@ void main() {
             reflection,
             lightDir,
             roughness,
-            worldPosition
+            worldPosition,
+            objectProbeAssignmentCode
         );
         vec3 displayRadiance = probeRadiance.localRadiance /
             (probeRadiance.localRadiance + vec3(1.0));

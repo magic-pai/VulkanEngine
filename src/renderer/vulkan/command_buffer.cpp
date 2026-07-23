@@ -66,6 +66,7 @@ constexpr std::size_t kMaterialPushConstantOffset =
     offsetof(ObjectPushConstants, materialBaseColorFactor);
 constexpr std::size_t kMaterialPushConstantBytes =
     sizeof(ObjectPushConstants) - kMaterialPushConstantOffset;
+constexpr u32 kObjectMetadataProbeStride = 8u;
 struct ShadowDepthPushConstants {
     alignas(16) glm::mat4 model{ 1.0f };
     alignas(16) glm::mat4 lightViewProjection{ 1.0f };
@@ -77,6 +78,18 @@ static_assert(
     kObjectPushConstantBytes == sizeof(glm::mat4) * 2 + sizeof(glm::vec4),
     "Object push constant segment must contain model, previous model, and tint"
 );
+
+f32 PackedObjectMetadata(const RenderCommand& renderCommand) {
+    const u32 probeCode = std::min(
+        renderCommand.reflectionProbeAssignmentCode,
+        static_cast<u32>(kMaxFrameReflectionProbes)
+    );
+    return static_cast<f32>(
+        renderCommand.bonePalettePreviousEntryCount *
+            kObjectMetadataProbeStride +
+        probeCode
+    );
+}
 static_assert(
     sizeof(RenderMaterialPushConstants) == kMaterialPushConstantBytes,
     "Render material push constants must match the ObjectPushConstants material segment"
@@ -240,7 +253,7 @@ void PushMaterialConstants(
         static_cast<f32>(extent.width),
         static_cast<f32>(extent.height),
         hdrOutputFlag,
-        static_cast<f32>(renderCommand.bonePalettePreviousEntryCount)
+        PackedObjectMetadata(renderCommand)
     );
 
     PushConstants(
@@ -463,6 +476,17 @@ void DrawRenderCommand(
         commandBuffer,
         graphicsPipeline,
         renderCommand,
+        pushConstantUpdateCount,
+        pushConstantByteCount
+    );
+    const f32 packedObjectMetadata = PackedObjectMetadata(renderCommand);
+    PushConstants(
+        commandBuffer,
+        graphicsPipeline,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        offsetof(ObjectPushConstants, viewport) + sizeof(f32) * 3u,
+        sizeof(f32),
+        &packedObjectMetadata,
         pushConstantUpdateCount,
         pushConstantByteCount
     );
@@ -2259,6 +2283,17 @@ void DrawInstancedRenderCommand(
         0,
         kObjectPushConstantBytes,
         &objectData,
+        pushConstantUpdateCount,
+        pushConstantByteCount
+    );
+    const f32 packedObjectMetadata = PackedObjectMetadata(renderCommand);
+    PushConstants(
+        commandBuffer,
+        graphicsPipeline,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        offsetof(ObjectPushConstants, viewport) + sizeof(f32) * 3u,
+        sizeof(f32),
+        &packedObjectMetadata,
         pushConstantUpdateCount,
         pushConstantByteCount
     );
@@ -4953,6 +4988,8 @@ void VulkanCommandBuffer::Record(
         deferredLightingFrameDescriptorSets->Count() > imageIndex &&
         ffxSssrReprojectResources != nullptr &&
         ffxSssrReprojectResources->Count() > imageIndex &&
+        ffxSssrClassifyTilesResources != nullptr &&
+        ffxSssrClassifyTilesResources->Count() > imageIndex &&
         hdrRenderPass != nullptr &&
         hdrFramebuffer != nullptr;
     if (ffxSssrSameFrameApplyReady) {
@@ -4981,22 +5018,18 @@ void VulkanCommandBuffer::Record(
         radianceForApply.subresourceRange.levelCount = 1u;
         radianceForApply.subresourceRange.baseArrayLayer = 0u;
         radianceForApply.subresourceRange.layerCount = 1u;
-        vkCmdPipelineBarrier(
-            commandBuffer,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,
-            0,
-            nullptr,
-            0,
-            nullptr,
-            1u,
-            &radianceForApply
-        );
         VkImageMemoryBarrier hitConfidenceForApply = radianceForApply;
         hitConfidenceForApply.image =
             ffxSssrReprojectResources->HitConfidenceHistoryImage(imageIndex);
+        VkImageMemoryBarrier intersectionForApply = radianceForApply;
+        intersectionForApply.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        intersectionForApply.image =
+            ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex);
+        const std::array<VkImageMemoryBarrier, 3> applyReadBarriers{
+            radianceForApply,
+            hitConfidenceForApply,
+            intersectionForApply
+        };
         vkCmdPipelineBarrier(
             commandBuffer,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
@@ -5007,8 +5040,8 @@ void VulkanCommandBuffer::Record(
             nullptr,
             0,
             nullptr,
-            1u,
-            &hitConfidenceForApply
+            static_cast<u32>(applyReadBarriers.size()),
+            applyReadBarriers.data()
         );
         if (hybridReflectionRayQuery != nullptr) {
             if (ssrTargets != nullptr) {

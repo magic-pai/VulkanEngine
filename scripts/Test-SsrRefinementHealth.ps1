@@ -702,14 +702,14 @@ function Invoke-SsrLane {
             $receiverAuditDominantMirrorEnabled $dominantMirrorExpected
         if ($dominantMirrorExpected -eq 1) {
             $expectedEffectiveMask = 1 -shl $receiverAuditDominantSlot
-            $checks += New-Check "low-roughness receiver selects one dominant probe" `
+            $checks += New-Check "low-roughness receiver resolves stable Probe dominance" `
                 ($receiverAuditDominantMirrorFactor -ge 0.99 -and
                     $receiverAuditEffectivePositiveWeightMask -eq $expectedEffectiveMask -and
                     $receiverAuditEffectiveDominantWeight -ge 0.99) `
                 "factor=$receiverAuditDominantMirrorFactor,mask=$receiverAuditEffectivePositiveWeightMask,dominant=$receiverAuditEffectiveDominantWeight" `
                 "factor>=0.99,mask=$expectedEffectiveMask,dominant>=0.99"
         } else {
-            $checks += New-Check "dominant-mirror control preserves multi-probe weights" `
+            $checks += New-Check "production mirror blend preserves continuous multi-probe weights" `
                 ($receiverAuditDominantMirrorFactor -eq 0.0 -and
                     $receiverAuditEffectivePositiveWeightMask -eq $receiverAuditPositiveWeightMask -and
                     [math]::Abs($receiverAuditEffectiveDominantWeight - $receiverAuditDominantWeight) -lt 0.0001) `
@@ -1021,6 +1021,8 @@ $normalShowcase = $common.Clone()
 $normalShowcase.Remove("SE_SHADOW_QUALITY")
 $explicitReenable = $common.Clone()
 
+$dominantMirrorHardSwitch = $common.Clone()
+$dominantMirrorHardSwitch["SE_REFLECTION_PROBE_DOMINANT_MIRROR_HARD_SWITCH"] = "1"
 $dominantMirrorDisabled = $common.Clone()
 $dominantMirrorDisabled["SE_REFLECTION_PROBE_DOMINANT_MIRROR_OFF"] = "1"
 
@@ -1121,9 +1123,22 @@ $lanes = @(
         }
     },
     [pscustomobject]@{
+        name = "lighting-showcase-dominant-mirror-hard-switch"
+        executable = $showcaseExecutable
+        scene = "LightingShowcase dominant mirror hard-switch control"
+        mode = "hiz"
+        environment = $dominantMirrorHardSwitch + @{
+            SE_BENCHMARK_SCENE = "lighting-showcase"
+            SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = "0"
+            SE_SSR = "1"
+            SE_SSR_HIZ = "1"
+            SE_SSR_REFINEMENT = "1"
+        }
+    },
+    [pscustomobject]@{
         name = "lighting-showcase-dominant-mirror-disabled"
         executable = $showcaseExecutable
-        scene = "LightingShowcase dominant mirror Probe control"
+        scene = "LightingShowcase continuous multi-Probe control"
         mode = "hiz"
         environment = $dominantMirrorDisabled + @{
             SE_BENCHMARK_SCENE = "lighting-showcase"
