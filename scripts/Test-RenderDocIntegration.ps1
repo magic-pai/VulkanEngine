@@ -2,6 +2,7 @@
 param(
     [string]$CaptureManifest = "",
     [string]$DescriptorInspectionReport = "",
+    [string]$SkinnedBlasInspectionReport = "",
     [string]$OutputPath = "tmp\renderdoc_integration_static.json",
     [switch]$Strict
 )
@@ -23,6 +24,31 @@ function Add-Check([string]$Name, [bool]$Passed, $Actual, $Expected) {
         actual = $Actual
         expected = $Expected
     }) | Out-Null
+}
+
+if (![string]::IsNullOrWhiteSpace($SkinnedBlasInspectionReport)) {
+    if (![IO.Path]::IsPathRooted($SkinnedBlasInspectionReport)) {
+        $SkinnedBlasInspectionReport = Join-Path $projectRoot `
+            $SkinnedBlasInspectionReport
+    }
+    Add-Check "skinned BLAS inspection report exists" `
+        (Test-Path $SkinnedBlasInspectionReport) `
+        (Test-Path $SkinnedBlasInspectionReport) $true
+    if (Test-Path $SkinnedBlasInspectionReport) {
+        $skinnedReport = Get-Content -Raw $SkinnedBlasInspectionReport |
+            ConvertFrom-Json
+        Add-Check "skinned BLAS inspection completed" `
+            ($skinnedReport.status -eq "complete") `
+            $skinnedReport.status "complete"
+        Add-Check "skinned BLAS inspection contract" `
+            ([uint32]$skinnedReport.contractVersion -eq 1) `
+            $skinnedReport.contractVersion 1
+        Add-Check "skinned BLAS physical resource checks" `
+            ([uint32]$skinnedReport.failCount -eq 0 -and
+             [uint32]$skinnedReport.passCount -ge 6) `
+            "$($skinnedReport.passCount)/$($skinnedReport.failCount)" `
+            ">=6/0"
+    }
 }
 
 if (![string]::IsNullOrWhiteSpace($DescriptorInspectionReport)) {
@@ -59,6 +85,8 @@ $ffxAdapterPath = Join-Path $projectRoot `
     "src\renderer\vulkan\fidelityfx_sssr_adapter.cpp"
 $cmakePath = Join-Path $projectRoot "CMakeLists.txt"
 $captureScriptPath = Join-Path $projectRoot "scripts\Capture-RenderDocFrame.ps1"
+$skinnedInspectorPath = Join-Path $projectRoot `
+    "scripts\Inspect-RenderDocSkinnedBlas.py"
 $expectedHeaderHash =
     "B7005E7DC34C3635046868BBD76D81B9B055AEDE0F56DAA0BD39FEDEE0639FFB"
 
@@ -102,6 +130,11 @@ Add-Check "CMake includes controller source" `
 Add-Check "CMake includes official header directory" `
     ($cmake.Contains("thirdParty/renderdoc")) `
     ($cmake.Contains("thirdParty/renderdoc")) $true
+Add-Check "skinned BLAS inspector uses the official RenderDoc API" `
+    ((Test-Path $skinnedInspectorPath) -and
+        (Get-Content -Raw $skinnedInspectorPath) -match
+            'controller.GetDescriptorAccess') `
+    (Test-Path $skinnedInspectorPath) $true
 foreach ($label in @(
     "SelfEngine.Reflection.FFX.ClassifyTiles",
     "SelfEngine.Reflection.FFX.Intersect",

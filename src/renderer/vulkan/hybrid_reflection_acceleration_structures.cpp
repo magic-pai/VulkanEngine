@@ -2,11 +2,14 @@
 
 #include "renderer/render_queue.h"
 #include "renderer/vulkan/buffer.h"
+#include "renderer/vulkan/descriptor_set_layout.h"
 #include "renderer/vulkan/device.h"
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/mesh.h"
 #include "renderer/vulkan/physical_device.h"
 #include "renderer/vulkan/renderer_stats.h"
+#include "renderer/vulkan/shader_module.h"
+#include "renderer/vulkan/vertex.h"
 
 #include <algorithm>
 #include <limits>
@@ -18,7 +21,19 @@ namespace se {
 namespace {
 
 constexpr u32 kMaxBlasCacheEntries = 1024u;
+constexpr u32 kMaxDynamicBlasCacheEntriesPerFrame = 256u;
+constexpr u32 kSkinningWorkgroupSize = 64u;
+constexpr u32 kSkinningAuditWordCount = 5u;
 constexpr u32 kInvalidFrameIndex = std::numeric_limits<u32>::max();
+
+struct SkinningPushConstants {
+    u32 vertexCount = 0u;
+    u32 vertexStride = 0u;
+    u32 currentPaletteOffset = 0u;
+    u32 currentPaletteCount = 0u;
+};
+
+static_assert(sizeof(SkinningPushConstants) == 16u);
 
 VkDeviceSize AlignUp(VkDeviceSize value, VkDeviceSize alignment) {
     if (alignment <= 1u) {
@@ -56,6 +71,23 @@ bool IsSkinnedCommand(const RenderCommand& command) {
     return !command.bonePaletteResourceId.empty();
 }
 
+bool IsSkinnedCommandReady(const RenderCommand& command) {
+    const u64 requiredPaletteBytes =
+        (static_cast<u64>(command.bonePalettePreviousEntryCount) +
+            static_cast<u64>(command.bonePaletteCurrentEntryCount)) *
+        sizeof(glm::mat4);
+    return command.bonePaletteReady != 0u &&
+        command.bonePaletteRevision != 0u &&
+        command.bonePaletteDescriptorSetReady != 0u &&
+        command.bonePaletteDescriptorSet != VK_NULL_HANDLE &&
+        command.bonePalettePreviousData != nullptr &&
+        command.bonePaletteCurrentData != nullptr &&
+        command.bonePalettePreviousEntryCount > 0u &&
+        command.bonePalettePreviousEntryCount ==
+            command.bonePaletteCurrentEntryCount &&
+        requiredPaletteBytes <= command.bonePaletteDescriptorRangeBytes;
+}
+
 bool IsOpaqueCommand(const RenderCommand& command) {
     return command.material == nullptr ||
         command.material->Properties().alphaMode == MaterialAlphaMode::Opaque;
@@ -84,6 +116,63 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         BlasState state = BlasState::Allocated;
     };
 
+    struct DynamicBlasKey {
+        const VulkanMesh* mesh = nullptr;
+        std::string bonePaletteResourceId;
+
+        bool operator==(const DynamicBlasKey& other) const {
+            return mesh == other.mesh &&
+                bonePaletteResourceId == other.bonePaletteResourceId;
+        }
+    };
+
+    struct DynamicBlasKeyHash {
+        std::size_t operator()(const DynamicBlasKey& key) const noexcept {
+            const std::size_t meshHash = std::hash<const VulkanMesh*>{}(key.mesh);
+            const std::size_t paletteHash =
+                std::hash<std::string>{}(key.bonePaletteResourceId);
+            return meshHash ^ (paletteHash + 0x9e3779b9u +
+                (meshHash << 6u) + (meshHash >> 2u));
+        }
+    };
+
+    struct DynamicBlasEntry {
+        const VulkanMesh* mesh = nullptr;
+        VkDescriptorSet skinningDescriptorSet = VK_NULL_HANDLE;
+        VkDescriptorSet paletteDescriptorSet = VK_NULL_HANDLE;
+        std::unique_ptr<VulkanBuffer> skinnedVertices;
+        std::unique_ptr<VulkanBuffer> paletteSnapshot;
+#if !defined(NDEBUG)
+        std::unique_ptr<VulkanBuffer> diagnostics;
+        std::array<u32, kSkinningAuditWordCount> lastDiagnostics{};
+        bool diagnosticsPending = false;
+#endif
+        std::unique_ptr<VulkanBuffer> storage;
+        std::unique_ptr<VulkanBuffer> scratch;
+        VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+        VkDeviceAddress address = 0u;
+        VkDeviceAddress scratchAddress = 0u;
+        VkDeviceSize storageBytes = 0u;
+        VkDeviceSize scratchBytes = 0u;
+        VkDeviceSize vertexBytes = 0u;
+        u32 primitiveCount = 0u;
+        u32 currentPaletteOffset = 0u;
+        u32 currentPaletteCount = 0u;
+        u64 preparedPoseRevision = 0u;
+        u64 lastPoseRevision = 0u;
+        u64 outputRevision = 0u;
+        u64 blasRevision = 0u;
+        bool built = false;
+        bool prepared = false;
+        bool updateRequired = false;
+    };
+
+    using DynamicBlasCache = std::unordered_map<
+        DynamicBlasKey,
+        std::unique_ptr<DynamicBlasEntry>,
+        DynamicBlasKeyHash
+    >;
+
     struct FrameTlas {
         std::unique_ptr<VulkanBuffer> instances;
         std::unique_ptr<VulkanBuffer> storage;
@@ -108,11 +197,23 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
     Impl(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        u32 frameCount
-    ) : device(device), physicalDevice(physicalDevice), frames(frameCount) {
+        u32 frameCount,
+        const std::string& skinningShaderPath
+    ) : device(device),
+        physicalDevice(physicalDevice),
+        frames(frameCount),
+        dynamicBlasCaches(frameCount) {
         fullAuditRequested = VulkanEnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_FULL_AUDIT"
         );
+        skinnedBlasControlDisabled = VulkanEnvironmentFlagEnabled(
+            "SE_HYBRID_REFLECTIONS_SKINNED_BLAS_OFF"
+        );
+        if (frameCount == 0u) {
+            throw std::runtime_error(
+                "Hybrid reflection acceleration structures need at least one frame"
+            );
+        }
 #if !defined(NDEBUG)
         forceFrontCounterClockwise = VulkanEnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_TLAS_FRONT_COUNTERCLOCKWISE"
@@ -155,14 +256,59 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             accelerationProperties.minAccelerationStructureScratchOffsetAlignment,
             1u
         );
+        if (!skinnedBlasControlDisabled) {
+            CreateSkinningResources(skinningShaderPath);
+        }
     }
 
     ~Impl() {
+        for (DynamicBlasCache& cache : dynamicBlasCaches) {
+            for (auto& entry : cache) {
+                DestroyAccelerationStructure(entry.second->handle);
+            }
+        }
         for (FrameTlas& frame : frames) {
             DestroyAccelerationStructure(frame.handle);
         }
         for (auto& entry : blasCache) {
             DestroyAccelerationStructure(entry.second->handle);
+        }
+        dynamicBlasCaches.clear();
+        if (skinningPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device.Handle(), skinningPipeline, nullptr);
+            skinningPipeline = VK_NULL_HANDLE;
+        }
+        if (skinningPipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(
+                device.Handle(),
+                skinningPipelineLayout,
+                nullptr
+            );
+            skinningPipelineLayout = VK_NULL_HANDLE;
+        }
+        if (skinningDescriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(
+                device.Handle(),
+                skinningDescriptorPool,
+                nullptr
+            );
+            skinningDescriptorPool = VK_NULL_HANDLE;
+        }
+        if (skinningIoDescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(
+                device.Handle(),
+                skinningIoDescriptorSetLayout,
+                nullptr
+            );
+            skinningIoDescriptorSetLayout = VK_NULL_HANDLE;
+        }
+        if (skinningPaletteDescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(
+                device.Handle(),
+                skinningPaletteDescriptorSetLayout,
+                nullptr
+            );
+            skinningPaletteDescriptorSetLayout = VK_NULL_HANDLE;
         }
     }
 
@@ -231,6 +377,378 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         );
         alignedAddress = AlignUp(buffer->DeviceAddress(), scratchAlignment);
         return buffer;
+    }
+
+    void CreateSkinningResources(const std::string& shaderPath) {
+        if (shaderPath.empty()) {
+            throw std::runtime_error(
+                "Hybrid reflection skinning shader path must not be empty"
+            );
+        }
+
+        std::array<VkDescriptorSetLayoutBinding, 3> ioBindings{};
+        ioBindings[0].binding = 0u;
+        ioBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        ioBindings[0].descriptorCount = 1u;
+        ioBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        ioBindings[1] = ioBindings[0];
+        ioBindings[1].binding = 1u;
+#if !defined(NDEBUG)
+        const bool auditShader = fullAuditRequested;
+        ioBindings[2] = ioBindings[0];
+        ioBindings[2].binding = 2u;
+#else
+        constexpr bool auditShader = false;
+#endif
+
+        VkDescriptorSetLayoutCreateInfo ioLayoutInfo{};
+        ioLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        ioLayoutInfo.bindingCount = auditShader ? 3u : 2u;
+        ioLayoutInfo.pBindings = ioBindings.data();
+        if (vkCreateDescriptorSetLayout(
+                device.Handle(),
+                &ioLayoutInfo,
+                nullptr,
+                &skinningIoDescriptorSetLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create hybrid reflection skinning IO layout"
+            );
+        }
+
+        VkDescriptorSetLayoutBinding paletteBinding =
+            BonePaletteDescriptorSetLayoutBinding();
+        VkDescriptorSetLayoutCreateInfo paletteLayoutInfo{};
+        paletteLayoutInfo.sType =
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        paletteLayoutInfo.bindingCount = 1u;
+        paletteLayoutInfo.pBindings = &paletteBinding;
+        if (vkCreateDescriptorSetLayout(
+                device.Handle(),
+                &paletteLayoutInfo,
+                nullptr,
+                &skinningPaletteDescriptorSetLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create hybrid reflection skinning palette layout"
+            );
+        }
+
+        const u32 maxSets = static_cast<u32>(dynamicBlasCaches.size()) *
+            kMaxDynamicBlasCacheEntriesPerFrame;
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSize.descriptorCount = maxSets * (auditShader ? 4u : 3u);
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1u;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = maxSets * 2u;
+        if (vkCreateDescriptorPool(
+                device.Handle(),
+                &poolInfo,
+                nullptr,
+                &skinningDescriptorPool
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create hybrid reflection skinning descriptor pool"
+            );
+        }
+
+        const VkDescriptorSetLayout setLayouts[] = {
+            skinningIoDescriptorSetLayout,
+            skinningPaletteDescriptorSetLayout
+        };
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        pushConstantRange.offset = 0u;
+        pushConstantRange.size = sizeof(SkinningPushConstants);
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 2u;
+        pipelineLayoutInfo.pSetLayouts = setLayouts;
+        pipelineLayoutInfo.pushConstantRangeCount = 1u;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+        if (vkCreatePipelineLayout(
+                device.Handle(),
+                &pipelineLayoutInfo,
+                nullptr,
+                &skinningPipelineLayout
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create hybrid reflection skinning pipeline layout"
+            );
+        }
+
+        VulkanShaderModule computeShader(device, shaderPath);
+        VkPipelineShaderStageCreateInfo shaderStage{};
+        shaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        shaderStage.module = computeShader.Handle();
+        shaderStage.pName = "main";
+        VkComputePipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.stage = shaderStage;
+        pipelineInfo.layout = skinningPipelineLayout;
+        if (vkCreateComputePipelines(
+                device.Handle(),
+                device.PipelineCacheHandle(),
+                1u,
+                &pipelineInfo,
+                nullptr,
+                &skinningPipeline
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to create hybrid reflection skinning pipeline"
+            );
+        }
+        SetVulkanDebugObjectName(
+            device.Handle(),
+            VK_OBJECT_TYPE_PIPELINE,
+            skinningPipeline,
+            "SelfEngine.Reflection.Skinned.ComputePipeline"
+        );
+    }
+
+    std::unique_ptr<DynamicBlasEntry> CreateDynamicBlasEntry(
+        const RenderCommand& command
+    ) {
+        SE_ASSERT(command.mesh != nullptr, "Dynamic BLAS requires a mesh");
+        const VulkanMesh& mesh = *command.mesh;
+        const u32 primitiveCount = mesh.IndexCount() / 3u;
+        const VkDeviceSize vertexBytes =
+            static_cast<VkDeviceSize>(mesh.VertexCount()) * mesh.VertexStride();
+        const VkDeviceSize paletteBytes = static_cast<VkDeviceSize>(
+            static_cast<u64>(command.bonePalettePreviousEntryCount) +
+            static_cast<u64>(command.bonePaletteCurrentEntryCount)
+        ) * sizeof(glm::mat4);
+        if (primitiveCount == 0u || vertexBytes == 0u || paletteBytes == 0u) {
+            return nullptr;
+        }
+
+        auto entry = std::make_unique<DynamicBlasEntry>();
+        entry->mesh = &mesh;
+        entry->primitiveCount = primitiveCount;
+        entry->vertexBytes = vertexBytes;
+        entry->skinnedVertices = std::make_unique<VulkanBuffer>(
+            device,
+            physicalDevice,
+            vertexBytes,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+        );
+        entry->paletteSnapshot = std::make_unique<VulkanBuffer>(
+            device,
+            physicalDevice,
+            paletteBytes,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        );
+        const std::string vertexBufferName =
+            "SelfEngine.Reflection.SkinnedVertices." +
+            command.bonePaletteResourceId;
+        const std::string paletteBufferName =
+            "SelfEngine.Reflection.SkinnedPalette." +
+            command.bonePaletteResourceId;
+        SetVulkanDebugObjectName(
+            device.Handle(),
+            VK_OBJECT_TYPE_BUFFER,
+            entry->skinnedVertices->Handle(),
+            vertexBufferName.c_str()
+        );
+        SetVulkanDebugObjectName(
+            device.Handle(),
+            VK_OBJECT_TYPE_BUFFER,
+            entry->paletteSnapshot->Handle(),
+            paletteBufferName.c_str()
+        );
+#if !defined(NDEBUG)
+        if (fullAuditRequested) {
+            entry->diagnostics = std::make_unique<VulkanBuffer>(
+                device,
+                physicalDevice,
+                sizeof(u32) * kSkinningAuditWordCount,
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+            );
+            const std::array<u32, kSkinningAuditWordCount> zeros{};
+            entry->diagnostics->Upload(std::as_bytes(std::span(zeros)));
+        }
+#endif
+
+        VkDescriptorSetAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocateInfo.descriptorPool = skinningDescriptorPool;
+        allocateInfo.descriptorSetCount = 1u;
+        allocateInfo.pSetLayouts = &skinningIoDescriptorSetLayout;
+        if (vkAllocateDescriptorSets(
+                device.Handle(),
+                &allocateInfo,
+                &entry->skinningDescriptorSet
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to allocate hybrid reflection skinning descriptor set"
+            );
+        }
+        allocateInfo.pSetLayouts = &skinningPaletteDescriptorSetLayout;
+        if (vkAllocateDescriptorSets(
+                device.Handle(),
+                &allocateInfo,
+                &entry->paletteDescriptorSet
+            ) != VK_SUCCESS) {
+            throw std::runtime_error(
+                "Failed to allocate hybrid reflection palette snapshot descriptor set"
+            );
+        }
+
+        std::array<VkDescriptorBufferInfo, 3> bufferInfos{};
+        bufferInfos[0].buffer = mesh.VertexBufferHandle();
+        bufferInfos[0].range = vertexBytes;
+        bufferInfos[1].buffer = entry->skinnedVertices->Handle();
+        bufferInfos[1].range = vertexBytes;
+#if !defined(NDEBUG)
+        if (entry->diagnostics != nullptr) {
+            bufferInfos[2].buffer = entry->diagnostics->Handle();
+            bufferInfos[2].range = entry->diagnostics->Size();
+        }
+#endif
+        std::array<VkWriteDescriptorSet, 3> writes{};
+        const u32 writeCount =
+#if !defined(NDEBUG)
+            entry->diagnostics != nullptr ? 3u : 2u;
+#else
+            2u;
+#endif
+        for (u32 index = 0u; index < writeCount; ++index) {
+            writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[index].dstSet = entry->skinningDescriptorSet;
+            writes[index].dstBinding = index;
+            writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[index].descriptorCount = 1u;
+            writes[index].pBufferInfo = &bufferInfos[index];
+        }
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            writeCount,
+            writes.data(),
+            0u,
+            nullptr
+        );
+        VkDescriptorBufferInfo paletteBufferInfo{};
+        paletteBufferInfo.buffer = entry->paletteSnapshot->Handle();
+        paletteBufferInfo.range = entry->paletteSnapshot->Size();
+        VkWriteDescriptorSet paletteWrite{};
+        paletteWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        paletteWrite.dstSet = entry->paletteDescriptorSet;
+        paletteWrite.dstBinding = kBonePaletteDescriptorBinding;
+        paletteWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        paletteWrite.descriptorCount = 1u;
+        paletteWrite.pBufferInfo = &paletteBufferInfo;
+        vkUpdateDescriptorSets(
+            device.Handle(),
+            1u,
+            &paletteWrite,
+            0u,
+            nullptr
+        );
+
+        VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
+        triangles.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        triangles.vertexData.deviceAddress =
+            entry->skinnedVertices->DeviceAddress();
+        triangles.vertexStride = mesh.VertexStride();
+        triangles.maxVertex = mesh.VertexCount() - 1u;
+        triangles.indexType = VK_INDEX_TYPE_UINT32;
+        triangles.indexData.deviceAddress = mesh.IndexDeviceAddress();
+        VkAccelerationStructureGeometryKHR geometry{};
+        geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        geometry.geometry.triangles = triangles;
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+        buildInfo.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags =
+            VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+            VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        buildInfo.geometryCount = 1u;
+        buildInfo.pGeometries = &geometry;
+        VkAccelerationStructureBuildSizesInfoKHR sizes{};
+        sizes.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+        getBuildSizes(
+            device.Handle(),
+            VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+            &buildInfo,
+            &primitiveCount,
+            &sizes
+        );
+        if (sizes.accelerationStructureSize == 0u ||
+            sizes.buildScratchSize == 0u) {
+            return nullptr;
+        }
+        entry->storageBytes = sizes.accelerationStructureSize;
+        entry->scratchBytes = std::max(
+            sizes.buildScratchSize,
+            sizes.updateScratchSize
+        );
+        CreateAccelerationStructureResource(
+            VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+            entry->storageBytes,
+            entry->storage,
+            entry->handle
+        );
+        entry->scratch = CreateScratchBuffer(
+            entry->scratchBytes,
+            entry->scratchAddress
+        );
+        entry->address = AccelerationStructureAddress(entry->handle);
+        if (entry->address == 0u) {
+            DestroyAccelerationStructure(entry->handle);
+            return nullptr;
+        }
+        return entry;
+    }
+
+    bool UploadPaletteSnapshot(
+        DynamicBlasEntry& entry,
+        const RenderCommand& command
+    ) {
+        if (entry.paletteSnapshot == nullptr ||
+            command.bonePalettePreviousData == nullptr ||
+            command.bonePaletteCurrentData == nullptr) {
+            return false;
+        }
+        const std::span<const glm::mat4> previous(
+            command.bonePalettePreviousData,
+            command.bonePalettePreviousEntryCount
+        );
+        const std::span<const glm::mat4> current(
+            command.bonePaletteCurrentData,
+            command.bonePaletteCurrentEntryCount
+        );
+        std::vector<glm::mat4> snapshot;
+        snapshot.reserve(previous.size() + current.size());
+        snapshot.insert(snapshot.end(), previous.begin(), previous.end());
+        snapshot.insert(snapshot.end(), current.begin(), current.end());
+        if (snapshot.empty() ||
+            snapshot.size() * sizeof(glm::mat4) !=
+                entry.paletteSnapshot->Size()) {
+            return false;
+        }
+        entry.paletteSnapshot->Upload(
+            std::as_bytes(std::span<const glm::mat4>(snapshot))
+        );
+        return true;
     }
 
     std::unique_ptr<BlasEntry> CreateBlasEntry(const VulkanMesh& mesh) {
@@ -393,10 +911,52 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             }
         }
 
-        stats.accelerationStructureContractVersion = 2u;
+        DynamicBlasCache& dynamicCache = dynamicBlasCaches[frameIndex];
+        for (auto& cached : dynamicCache) {
+            DynamicBlasEntry& entry = *cached.second;
+            entry.prepared = false;
+            entry.updateRequired = false;
+#if !defined(NDEBUG)
+            if (entry.diagnosticsPending && entry.diagnostics != nullptr) {
+                entry.diagnostics->Download(
+                    std::as_writable_bytes(std::span(entry.lastDiagnostics))
+                );
+                entry.diagnosticsPending = false;
+            }
+#endif
+        }
+
+        stats.accelerationStructureContractVersion = 3u;
         stats.fullSceneCommandCount = static_cast<u32>(renderCommands.size());
         stats.opaqueRigidCommandCount = 0u;
         stats.skinnedFallbackCount = 0u;
+        stats.skinnedBlasControlDisabled =
+            skinnedBlasControlDisabled ? 1u : 0u;
+        stats.skinnedCandidateCount = 0u;
+        stats.skinnedEligibleCount = 0u;
+        stats.skinnedTlasInstanceCount = 0u;
+        stats.skinnedDynamicBlasCount = 0u;
+        stats.skinnedDynamicBlasBuildCount = 0u;
+        stats.skinnedDynamicBlasUpdateCount = 0u;
+        stats.skinnedDynamicBlasReuseCount = 0u;
+        stats.skinnedSkinningDispatchCount = 0u;
+        stats.skinnedSkinningVertexCount = 0u;
+        stats.skinnedSkinningBufferBytes = 0u;
+        stats.skinnedPaletteSnapshotBytes = 0u;
+        stats.skinnedPoseRevisionMin = 0u;
+        stats.skinnedPoseRevisionMax = 0u;
+        stats.skinnedOutputRevisionMin = 0u;
+        stats.skinnedOutputRevisionMax = 0u;
+        stats.skinnedBlasRevisionMin = 0u;
+        stats.skinnedBlasRevisionMax = 0u;
+        stats.skinnedPoseBlasRevisionMismatchCount = 0u;
+        stats.skinnedInvalidPaletteCount = 0u;
+        stats.skinnedSkinningReadbackValid = 0u;
+        stats.skinnedSkinningReadbackVertexCount = 0u;
+        stats.skinnedSkinningReadbackSkinnedVertexCount = 0u;
+        stats.skinnedSkinningReadbackUnweightedVertexCount = 0u;
+        stats.skinnedSkinningReadbackInvalidBoneIndexCount = 0u;
+        stats.skinnedSkinningReadbackNonFiniteVertexCount = 0u;
         stats.alphaFallbackCount = 0u;
         stats.invalidGeometryCount = 0u;
         stats.instanceOverflowCount = 0u;
@@ -501,12 +1061,9 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                 ++stats.invalidGeometryCount;
                 continue;
             }
-            if (IsSkinnedCommand(command)) {
-                if (audit != nullptr) {
-                    audit->exclusionReason = 2u;
-                }
-                ++stats.skinnedFallbackCount;
-                continue;
+            const bool skinnedCommand = IsSkinnedCommand(command);
+            if (skinnedCommand) {
+                ++stats.skinnedCandidateCount;
             }
             if (!IsOpaqueCommand(command)) {
                 if (audit != nullptr) {
@@ -530,29 +1087,130 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                 continue;
             }
 
-            auto found = blasCache.find(command.mesh);
-            if (found == blasCache.end()) {
-                if (blasCache.size() >= kMaxBlasCacheEntries) {
+            VkDeviceAddress instanceBlasAddress = 0u;
+            VkDeviceAddress metadataVertexAddress =
+                command.mesh->VertexDeviceAddress();
+            if (skinnedCommand) {
+                if (skinnedBlasControlDisabled ||
+                    skinningPipeline == VK_NULL_HANDLE ||
+                    !IsSkinnedCommandReady(command)) {
                     if (audit != nullptr) {
-                        audit->exclusionReason = 6u;
+                        audit->exclusionReason = 2u;
                     }
-                    ++stats.instanceOverflowCount;
+                    ++stats.skinnedFallbackCount;
+                    if (!skinnedBlasControlDisabled &&
+                        !IsSkinnedCommandReady(command)) {
+                        ++stats.skinnedInvalidPaletteCount;
+                    }
                     continue;
                 }
-                std::unique_ptr<BlasEntry> created = CreateBlasEntry(*command.mesh);
-                if (created == nullptr) {
+
+                DynamicBlasKey key{};
+                key.mesh = command.mesh;
+                key.bonePaletteResourceId = command.bonePaletteResourceId;
+                auto dynamic = dynamicCache.find(key);
+                if (dynamic == dynamicCache.end()) {
+                    if (dynamicCache.size() >=
+                        kMaxDynamicBlasCacheEntriesPerFrame) {
+                        if (audit != nullptr) {
+                            audit->exclusionReason = 6u;
+                        }
+                        ++stats.instanceOverflowCount;
+                        ++stats.skinnedFallbackCount;
+                        continue;
+                    }
+                    std::unique_ptr<DynamicBlasEntry> created =
+                        CreateDynamicBlasEntry(command);
+                    if (created == nullptr) {
+                        if (audit != nullptr) {
+                            audit->exclusionReason = 7u;
+                        }
+                        ++stats.invalidGeometryCount;
+                        ++stats.skinnedFallbackCount;
+                        continue;
+                    }
+                    dynamic = dynamicCache.emplace(
+                        std::move(key),
+                        std::move(created)
+                    ).first;
+                } else {
+                    ++stats.skinnedDynamicBlasReuseCount;
+                }
+
+                DynamicBlasEntry& dynamicBlas = *dynamic->second;
+                const bool firstPreparation = !dynamicBlas.prepared;
+                if (dynamicBlas.prepared &&
+                    dynamicBlas.preparedPoseRevision !=
+                        command.bonePaletteRevision) {
                     if (audit != nullptr) {
                         audit->exclusionReason = 7u;
                     }
-                    ++stats.invalidGeometryCount;
+                    ++stats.skinnedInvalidPaletteCount;
+                    ++stats.skinnedFallbackCount;
                     continue;
                 }
-                found = blasCache.emplace(command.mesh, std::move(created)).first;
+                dynamicBlas.currentPaletteOffset =
+                    command.bonePalettePreviousEntryCount;
+                dynamicBlas.currentPaletteCount =
+                    command.bonePaletteCurrentEntryCount;
+                dynamicBlas.preparedPoseRevision =
+                    command.bonePaletteRevision;
+                dynamicBlas.updateRequired = !dynamicBlas.built ||
+                    dynamicBlas.lastPoseRevision !=
+                        dynamicBlas.preparedPoseRevision;
+                if (firstPreparation && dynamicBlas.updateRequired &&
+                    !UploadPaletteSnapshot(dynamicBlas, command)) {
+                    if (audit != nullptr) {
+                        audit->exclusionReason = 7u;
+                    }
+                    dynamicBlas.updateRequired = false;
+                    ++stats.skinnedInvalidPaletteCount;
+                    ++stats.skinnedFallbackCount;
+                    continue;
+                }
+                dynamicBlas.prepared = true;
+#if !defined(NDEBUG)
+                if (firstPreparation && dynamicBlas.updateRequired &&
+                    dynamicBlas.diagnostics != nullptr) {
+                    const std::array<u32, kSkinningAuditWordCount> zeros{};
+                    dynamicBlas.diagnostics->Upload(
+                        std::as_bytes(std::span(zeros))
+                    );
+                }
+#endif
+                instanceBlasAddress = dynamicBlas.address;
+                metadataVertexAddress =
+                    dynamicBlas.skinnedVertices->DeviceAddress();
+                ++stats.skinnedEligibleCount;
             } else {
-                ++stats.blasReuseCount;
+                auto found = blasCache.find(command.mesh);
+                if (found == blasCache.end()) {
+                    if (blasCache.size() >= kMaxBlasCacheEntries) {
+                        if (audit != nullptr) {
+                            audit->exclusionReason = 6u;
+                        }
+                        ++stats.instanceOverflowCount;
+                        continue;
+                    }
+                    std::unique_ptr<BlasEntry> created =
+                        CreateBlasEntry(*command.mesh);
+                    if (created == nullptr) {
+                        if (audit != nullptr) {
+                            audit->exclusionReason = 7u;
+                        }
+                        ++stats.invalidGeometryCount;
+                        continue;
+                    }
+                    found = blasCache.emplace(
+                        command.mesh,
+                        std::move(created)
+                    ).first;
+                } else {
+                    ++stats.blasReuseCount;
+                }
+                instanceBlasAddress = found->second->address;
             }
 
-            BlasEntry& blas = *found->second;
             VkAccelerationStructureInstanceKHR instance{};
             instance.transform = ToAccelerationStructureTransform(command.model);
             instance.instanceCustomIndex = static_cast<u32>(instances.size()) & 0x00ffffffu;
@@ -572,7 +1230,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
                 instance.flags |=
                     VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
             }
-            instance.accelerationStructureReference = blas.address;
+            instance.accelerationStructureReference = instanceBlasAddress;
             u32 materialIndex = 0u;
             if (command.material != nullptr) {
                 const auto [material, inserted] = materialIndices.emplace(
@@ -586,7 +1244,7 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             }
             HybridReflectionInstanceMetadata metadata{};
             metadata.vertexAddress = SplitDeviceAddress(
-                command.mesh->VertexDeviceAddress()
+                metadataVertexAddress
             );
             metadata.indexAddress = SplitDeviceAddress(
                 command.mesh->IndexDeviceAddress()
@@ -613,7 +1271,11 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             instanceMetadata.push_back(metadata);
             instanceSubmissionIndices.push_back(submissionIndex);
             meshesUsedThisFrame.insert(command.mesh);
-            ++stats.opaqueRigidCommandCount;
+            if (skinnedCommand) {
+                ++stats.skinnedTlasInstanceCount;
+            } else {
+                ++stats.opaqueRigidCommandCount;
+            }
         }
 
         FrameTlas& frame = frames[frameIndex];
@@ -644,6 +1306,61 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             stats.blasStorageBytes += entry.storageBytes;
             stats.blasScratchBytes +=
                 entry.scratch != nullptr ? entry.scratch->Size() : 0u;
+        }
+        stats.skinnedDynamicBlasCount = static_cast<u32>(std::count_if(
+            dynamicCache.begin(),
+            dynamicCache.end(),
+            [](const auto& cached) {
+                return cached.second->prepared;
+            }
+        ));
+        for (const auto& cached : dynamicCache) {
+            const DynamicBlasEntry& entry = *cached.second;
+            if (!entry.prepared) {
+                continue;
+            }
+            stats.skinnedSkinningBufferBytes += entry.vertexBytes;
+            stats.skinnedPaletteSnapshotBytes +=
+                entry.paletteSnapshot != nullptr
+                    ? entry.paletteSnapshot->Size()
+                    : 0u;
+            const auto includeRevision = [](u64 revision, u64& minimum, u64& maximum) {
+                if (revision == 0u) {
+                    return;
+                }
+                minimum = minimum == 0u ? revision : std::min(minimum, revision);
+                maximum = std::max(maximum, revision);
+            };
+            includeRevision(
+                entry.preparedPoseRevision,
+                stats.skinnedPoseRevisionMin,
+                stats.skinnedPoseRevisionMax
+            );
+            includeRevision(
+                entry.outputRevision,
+                stats.skinnedOutputRevisionMin,
+                stats.skinnedOutputRevisionMax
+            );
+            includeRevision(
+                entry.blasRevision,
+                stats.skinnedBlasRevisionMin,
+                stats.skinnedBlasRevisionMax
+            );
+#if !defined(NDEBUG)
+            if (entry.lastDiagnostics[0] > 0u) {
+                stats.skinnedSkinningReadbackValid = 1u;
+                stats.skinnedSkinningReadbackVertexCount +=
+                    entry.lastDiagnostics[0];
+                stats.skinnedSkinningReadbackSkinnedVertexCount +=
+                    entry.lastDiagnostics[1];
+                stats.skinnedSkinningReadbackUnweightedVertexCount +=
+                    entry.lastDiagnostics[2];
+                stats.skinnedSkinningReadbackInvalidBoneIndexCount +=
+                    entry.lastDiagnostics[3];
+                stats.skinnedSkinningReadbackNonFiniteVertexCount +=
+                    entry.lastDiagnostics[4];
+            }
+#endif
         }
         stats.frameUniqueBlasCount = static_cast<u32>(meshesUsedThisFrame.size());
         stats.tlasInstanceCount = frame.preparedInstanceCount;
@@ -685,6 +1402,11 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
         if (!frame.prepared || frame.preparedInstanceCount == 0u) {
             return;
         }
+        const VulkanDebugLabelScope accelerationStructureLabel(
+            device.Handle(),
+            commandBuffer,
+            "SelfEngine.Reflection.AccelerationStructures"
+        );
 
         VkBufferMemoryBarrier hostInstanceBarrier{};
         hostInstanceBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -708,6 +1430,111 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             0u,
             nullptr
         );
+
+        DynamicBlasCache& dynamicCache = dynamicBlasCaches[frameIndex];
+        const bool hasSkinningDispatch = std::any_of(
+            dynamicCache.begin(),
+            dynamicCache.end(),
+            [](const auto& cached) {
+                return cached.second->prepared &&
+                    cached.second->updateRequired;
+            }
+        );
+        if (hasSkinningDispatch) {
+            const VulkanDebugLabelScope skinningLabel(
+                device.Handle(),
+                commandBuffer,
+                "SelfEngine.Reflection.Skinned.Compute"
+            );
+            VkMemoryBarrier hostToSkinningBarrier{};
+            hostToSkinningBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            hostToSkinningBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+            hostToSkinningBarrier.dstAccessMask =
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_HOST_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0u,
+                1u,
+                &hostToSkinningBarrier,
+                0u,
+                nullptr,
+                0u,
+                nullptr
+            );
+
+            vkCmdBindPipeline(
+                commandBuffer,
+                VK_PIPELINE_BIND_POINT_COMPUTE,
+                skinningPipeline
+            );
+            for (auto& cached : dynamicCache) {
+                DynamicBlasEntry& entry = *cached.second;
+                if (!entry.prepared || !entry.updateRequired) {
+                    continue;
+                }
+                const VkDescriptorSet descriptorSets[] = {
+                    entry.skinningDescriptorSet,
+                    entry.paletteDescriptorSet
+                };
+                vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_COMPUTE,
+                    skinningPipelineLayout,
+                    0u,
+                    2u,
+                    descriptorSets,
+                    0u,
+                    nullptr
+                );
+                const SkinningPushConstants constants{
+                    entry.mesh->VertexCount(),
+                    entry.mesh->VertexStride(),
+                    entry.currentPaletteOffset,
+                    entry.currentPaletteCount
+                };
+                vkCmdPushConstants(
+                    commandBuffer,
+                    skinningPipelineLayout,
+                    VK_SHADER_STAGE_COMPUTE_BIT,
+                    0u,
+                    sizeof(constants),
+                    &constants
+                );
+                vkCmdDispatch(
+                    commandBuffer,
+                    (constants.vertexCount + kSkinningWorkgroupSize - 1u) /
+                        kSkinningWorkgroupSize,
+                    1u,
+                    1u
+                );
+                ++stats.skinnedSkinningDispatchCount;
+                stats.skinnedSkinningVertexCount += constants.vertexCount;
+            }
+
+            VkMemoryBarrier skinningConsumerBarrier{};
+            skinningConsumerBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            skinningConsumerBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            skinningConsumerBarrier.dstAccessMask =
+                VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                VK_ACCESS_SHADER_READ_BIT |
+                VK_ACCESS_HOST_READ_BIT;
+            vkCmdPipelineBarrier(
+                commandBuffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_HOST_BIT,
+                0u,
+                1u,
+                &skinningConsumerBarrier,
+                0u,
+                nullptr,
+                0u,
+                nullptr
+            );
+        }
 
         for (auto& cached : blasCache) {
             BlasEntry& entry = *cached.second;
@@ -752,6 +1579,107 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
             entry.state = BlasState::Scheduled;
             entry.buildFrameIndex = frameIndex;
             ++stats.blasBuildCount;
+        }
+
+        {
+            const VulkanDebugLabelScope dynamicBlasLabel(
+                device.Handle(),
+                commandBuffer,
+                "SelfEngine.Reflection.Skinned.BLAS"
+            );
+            for (auto& cached : dynamicCache) {
+            DynamicBlasEntry& entry = *cached.second;
+            if (!entry.prepared || !entry.updateRequired) {
+                continue;
+            }
+
+            VkAccelerationStructureGeometryTrianglesDataKHR triangles{};
+            triangles.sType =
+                VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+            triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+            triangles.vertexData.deviceAddress =
+                entry.skinnedVertices->DeviceAddress();
+            triangles.vertexStride = entry.mesh->VertexStride();
+            triangles.maxVertex = entry.mesh->VertexCount() - 1u;
+            triangles.indexType = VK_INDEX_TYPE_UINT32;
+            triangles.indexData.deviceAddress = entry.mesh->IndexDeviceAddress();
+            VkAccelerationStructureGeometryKHR geometry{};
+            geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+            geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+            geometry.geometry.triangles = triangles;
+            VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+            buildInfo.sType =
+                VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+            buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+            buildInfo.flags =
+                VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR |
+                VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+            buildInfo.mode = entry.built
+                ? VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR
+                : VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+            buildInfo.srcAccelerationStructure = entry.built
+                ? entry.handle
+                : VK_NULL_HANDLE;
+            buildInfo.dstAccelerationStructure = entry.handle;
+            buildInfo.geometryCount = 1u;
+            buildInfo.pGeometries = &geometry;
+            buildInfo.scratchData.deviceAddress = entry.scratchAddress;
+            VkAccelerationStructureBuildRangeInfoKHR range{};
+            range.primitiveCount = entry.primitiveCount;
+            const VkAccelerationStructureBuildRangeInfoKHR* rangePointer = &range;
+            cmdBuildAccelerationStructures(
+                commandBuffer,
+                1u,
+                &buildInfo,
+                &rangePointer
+            );
+            if (entry.built) {
+                ++stats.skinnedDynamicBlasUpdateCount;
+            } else {
+                ++stats.skinnedDynamicBlasBuildCount;
+            }
+            entry.built = true;
+            entry.lastPoseRevision = entry.preparedPoseRevision;
+            entry.outputRevision = entry.preparedPoseRevision;
+            entry.blasRevision = entry.preparedPoseRevision;
+            entry.updateRequired = false;
+#if !defined(NDEBUG)
+            entry.diagnosticsPending = entry.diagnostics != nullptr;
+#endif
+            }
+        }
+        stats.skinnedOutputRevisionMin = 0u;
+        stats.skinnedOutputRevisionMax = 0u;
+        stats.skinnedBlasRevisionMin = 0u;
+        stats.skinnedBlasRevisionMax = 0u;
+        stats.skinnedPoseBlasRevisionMismatchCount = 0u;
+        for (const auto& cached : dynamicCache) {
+            const DynamicBlasEntry& entry = *cached.second;
+            if (!entry.prepared) {
+                continue;
+            }
+            const auto includeRevision = [](u64 revision, u64& minimum, u64& maximum) {
+                if (revision == 0u) {
+                    return;
+                }
+                minimum = minimum == 0u ? revision : std::min(minimum, revision);
+                maximum = std::max(maximum, revision);
+            };
+            includeRevision(
+                entry.outputRevision,
+                stats.skinnedOutputRevisionMin,
+                stats.skinnedOutputRevisionMax
+            );
+            includeRevision(
+                entry.blasRevision,
+                stats.skinnedBlasRevisionMin,
+                stats.skinnedBlasRevisionMax
+            );
+            if (entry.preparedPoseRevision != entry.outputRevision ||
+                entry.outputRevision != entry.blasRevision) {
+                ++stats.skinnedPoseBlasRevisionMismatchCount;
+            }
         }
 
         VkMemoryBarrier blasToTlasBarrier{};
@@ -858,17 +1786,30 @@ struct VulkanHybridReflectionAccelerationStructures::Impl {
     PFN_vkCmdBuildAccelerationStructuresKHR cmdBuildAccelerationStructures = nullptr;
     VkDeviceSize scratchAlignment = 1u;
     bool fullAuditRequested = false;
+    bool skinnedBlasControlDisabled = false;
     bool forceFrontCounterClockwise = false;
+    VkDescriptorSetLayout skinningIoDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout skinningPaletteDescriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool skinningDescriptorPool = VK_NULL_HANDLE;
+    VkPipelineLayout skinningPipelineLayout = VK_NULL_HANDLE;
+    VkPipeline skinningPipeline = VK_NULL_HANDLE;
     std::unordered_map<const VulkanMesh*, std::unique_ptr<BlasEntry>> blasCache;
     std::vector<FrameTlas> frames;
+    std::vector<DynamicBlasCache> dynamicBlasCaches;
 };
 
 VulkanHybridReflectionAccelerationStructures::
 VulkanHybridReflectionAccelerationStructures(
     const VulkanDevice& device,
     const VulkanPhysicalDevice& physicalDevice,
-    u32 frameCount
-) : m_Impl(std::make_unique<Impl>(device, physicalDevice, frameCount)) {
+    u32 frameCount,
+    const std::string& skinningShaderPath
+) : m_Impl(std::make_unique<Impl>(
+        device,
+        physicalDevice,
+        frameCount,
+        skinningShaderPath
+    )) {
     if (frameCount == 0u) {
         throw std::runtime_error(
             "Hybrid reflection acceleration structures need at least one frame"

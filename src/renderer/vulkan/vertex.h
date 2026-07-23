@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <type_traits>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -122,6 +123,16 @@ struct Vertex3D {
         return attributeDescriptions;
     }
 };
+
+static_assert(std::is_standard_layout_v<Vertex3D>);
+static_assert(sizeof(Vertex3D) == 92u);
+static_assert(offsetof(Vertex3D, position) == 0u);
+static_assert(offsetof(Vertex3D, normal) == 12u);
+static_assert(offsetof(Vertex3D, color) == 24u);
+static_assert(offsetof(Vertex3D, texCoord) == 36u);
+static_assert(offsetof(Vertex3D, tangent) == 44u);
+static_assert(offsetof(Vertex3D, boneIndices) == 60u);
+static_assert(offsetof(Vertex3D, boneWeights) == 76u);
 
 struct Instance3D {
     glm::mat4 model{ 1.0f };

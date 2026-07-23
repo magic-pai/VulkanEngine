@@ -36,6 +36,7 @@ public:
     SE_DISABLE_MOVE(VulkanVertexBuffer);
 
     VkBuffer Handle() const;
+    VkBufferUsageFlags Usage() const;
     u32 VertexCount() const;
     VkDeviceAddress DeviceAddress() const;
 

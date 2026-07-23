@@ -10669,7 +10669,11 @@ void VulkanRenderer::CreateSwapchainResources() {
             std::make_unique<VulkanHybridReflectionAccelerationStructures>(
                 m_Device,
                 m_PhysicalDevice,
-                static_cast<u32>(m_Swapchain->Images().size())
+                static_cast<u32>(m_Swapchain->Images().size()),
+                std::string(SE_SHADER_DIR) +
+                    (HybridReflectionFullAuditRequested()
+                        ? "/hybrid_reflection_skinning_audit.hlsl.spv"
+                        : "/hybrid_reflection_skinning.hlsl.spv")
             );
     } else {
         m_HybridReflectionAccelerationStructures.reset();
@@ -12057,7 +12061,11 @@ void VulkanRenderer::RecreateSwapchain() {
             std::make_unique<VulkanHybridReflectionAccelerationStructures>(
                 m_Device,
                 m_PhysicalDevice,
-                static_cast<u32>(m_Swapchain->Images().size())
+                static_cast<u32>(m_Swapchain->Images().size()),
+                std::string(SE_SHADER_DIR) +
+                    (HybridReflectionFullAuditRequested()
+                        ? "/hybrid_reflection_skinning_audit.hlsl.spv"
+                        : "/hybrid_reflection_skinning.hlsl.spv")
             );
     }
     m_UniformBuffer->Recreate(m_Device, m_PhysicalDevice, m_Swapchain->Images().size());

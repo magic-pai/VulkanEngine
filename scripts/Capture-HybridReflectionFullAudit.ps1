@@ -24,6 +24,8 @@ param(
     [switch]$ForceAllRayQueries,
     [switch]$DisableRayQueryHitIbl,
     [switch]$DisableDirectMirrorRayQuery,
+    [switch]$DisableSkinnedBlas,
+    [switch]$FreezeFbxAnimation,
     [switch]$DisableHdrAlphaPreservation,
     [switch]$DisablePointSpotDirectSpecular,
     [switch]$BypassReproject,
@@ -133,6 +135,7 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES",
     "SE_HYBRID_REFLECTIONS_HIT_IBL_OFF",
     "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF",
+    "SE_HYBRID_REFLECTIONS_SKINNED_BLAS_OFF",
     "SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF",
     "SE_HYBRID_REFLECTIONS_APPLY_BLEND_MODE",
     "SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF",
@@ -146,6 +149,7 @@ $managedKeys = @(
     "SE_LIGHTING_SHOWCASE_FORCE_OFF",
     "SE_FORWARD3D_DEBUG_DEFAULT_SCENE",
     "SE_SCENE_UPDATE_FREEZE",
+    "SE_FBX_ANIMATION_FREEZE",
     "SE_VISUAL_QA_HIDE_IMGUI",
     "SE_WINDOW_HIDDEN",
     "SE_BENCHMARK_WARMUP_FRAMES",
@@ -185,6 +189,7 @@ $environment = @{
     SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES = if ($ForceAllRayQueries) { "1" } else { "" }
     SE_HYBRID_REFLECTIONS_HIT_IBL_OFF = if ($DisableRayQueryHitIbl) { "1" } else { "" }
     SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF = if ($DisableDirectMirrorRayQuery) { "1" } else { "" }
+    SE_HYBRID_REFLECTIONS_SKINNED_BLAS_OFF = if ($DisableSkinnedBlas) { "1" } else { "" }
     SE_HYBRID_REFLECTIONS_CULL_BACK_FACES_OFF = if ($DisableBackFaceCull) { "1" } else { "" }
     SE_HYBRID_REFLECTIONS_APPLY_BLEND_MODE = if ($ApplyBlendMode -eq "default") { "" } else { $ApplyBlendMode }
     SE_HYBRID_REFLECTIONS_HDR_ALPHA_PRESERVATION_OFF = if ($DisableHdrAlphaPreservation) { "1" } else { "" }
@@ -203,6 +208,7 @@ $environment = @{
     SE_LIGHTING_SHOWCASE_FORCE_OFF = $forceShowcaseOffValue
     SE_FORWARD3D_DEBUG_DEFAULT_SCENE = ""
     SE_SCENE_UPDATE_FREEZE = "1"
+    SE_FBX_ANIMATION_FREEZE = if ($FreezeFbxAnimation) { "1" } else { "" }
     SE_VISUAL_QA_HIDE_IMGUI = "1"
     SE_WINDOW_HIDDEN = "1"
     SE_BENCHMARK_WARMUP_FRAMES = [string]$AuditStartFrame

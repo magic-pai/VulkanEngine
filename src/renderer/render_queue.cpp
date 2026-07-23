@@ -249,6 +249,9 @@ void RefreshBonePaletteCommandState(
     command.bonePalettePreviousEntryCount = 0;
     command.bonePaletteChangedEntryCount = 0;
     command.bonePaletteReady = 0;
+    command.bonePaletteRevision = 0u;
+    command.bonePalettePreviousData = nullptr;
+    command.bonePaletteCurrentData = nullptr;
     command.bonePaletteDescriptorSet = VK_NULL_HANDLE;
     command.bonePaletteDescriptorSetReady = 0;
     command.bonePaletteDescriptorSetIndex = 0;
@@ -268,6 +271,9 @@ void RefreshBonePaletteCommandState(
         static_cast<u32>(palette.previousPalette.size());
     command.bonePaletteChangedEntryCount = palette.changedEntryCount;
     command.bonePaletteReady = palette.ready;
+    command.bonePaletteRevision = palette.revision;
+    command.bonePalettePreviousData = palette.previousPalette.data();
+    command.bonePaletteCurrentData = palette.currentPalette.data();
     command.bonePaletteDescriptorSet = palette.descriptorSet;
     command.bonePaletteDescriptorSetReady = palette.descriptorSetReady;
     command.bonePaletteDescriptorSetIndex = palette.descriptorSetIndex;

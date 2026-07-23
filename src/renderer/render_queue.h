@@ -112,6 +112,9 @@ struct RenderCommand {
     u32 bonePalettePreviousEntryCount = 0;
     u32 bonePaletteChangedEntryCount = 0;
     u32 bonePaletteReady = 0;
+    u64 bonePaletteRevision = 0u;
+    const glm::mat4* bonePalettePreviousData = nullptr;
+    const glm::mat4* bonePaletteCurrentData = nullptr;
     VkDescriptorSet bonePaletteDescriptorSet = VK_NULL_HANDLE;
     u32 bonePaletteDescriptorSetReady = 0;
     u32 bonePaletteDescriptorSetIndex = 0;

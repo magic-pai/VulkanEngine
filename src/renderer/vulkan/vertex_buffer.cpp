@@ -64,6 +64,10 @@ VkBuffer VulkanVertexBuffer::Handle() const {
     return m_Buffer->Handle();
 }
 
+VkBufferUsageFlags VulkanVertexBuffer::Usage() const {
+    return m_Buffer != nullptr ? m_Buffer->Usage() : 0u;
+}
+
 u32 VulkanVertexBuffer::VertexCount() const {
     return m_VertexCount;
 }
@@ -105,6 +109,7 @@ void VulkanVertexBuffer::CreateVertexBuffer(
     VkMemoryAllocateFlags allocationFlags = 0;
     if (m_DeviceAddressReady) {
         vertexUsage |=
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
             VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
         allocationFlags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;

@@ -808,6 +808,32 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.fullSceneCommandCount << ','
         << hybridReflections.opaqueRigidCommandCount << ','
         << hybridReflections.skinnedFallbackCount << ','
+        << hybridReflections.skinnedBlasControlDisabled << ','
+        << hybridReflections.skinnedCandidateCount << ','
+        << hybridReflections.skinnedEligibleCount << ','
+        << hybridReflections.skinnedTlasInstanceCount << ','
+        << hybridReflections.skinnedDynamicBlasCount << ','
+        << hybridReflections.skinnedDynamicBlasBuildCount << ','
+        << hybridReflections.skinnedDynamicBlasUpdateCount << ','
+        << hybridReflections.skinnedDynamicBlasReuseCount << ','
+        << hybridReflections.skinnedSkinningDispatchCount << ','
+        << hybridReflections.skinnedSkinningVertexCount << ','
+        << hybridReflections.skinnedSkinningBufferBytes << ','
+        << hybridReflections.skinnedPaletteSnapshotBytes << ','
+        << hybridReflections.skinnedPoseRevisionMin << ','
+        << hybridReflections.skinnedPoseRevisionMax << ','
+        << hybridReflections.skinnedOutputRevisionMin << ','
+        << hybridReflections.skinnedOutputRevisionMax << ','
+        << hybridReflections.skinnedBlasRevisionMin << ','
+        << hybridReflections.skinnedBlasRevisionMax << ','
+        << hybridReflections.skinnedPoseBlasRevisionMismatchCount << ','
+        << hybridReflections.skinnedInvalidPaletteCount << ','
+        << hybridReflections.skinnedSkinningReadbackValid << ','
+        << hybridReflections.skinnedSkinningReadbackVertexCount << ','
+        << hybridReflections.skinnedSkinningReadbackSkinnedVertexCount << ','
+        << hybridReflections.skinnedSkinningReadbackUnweightedVertexCount << ','
+        << hybridReflections.skinnedSkinningReadbackInvalidBoneIndexCount << ','
+        << hybridReflections.skinnedSkinningReadbackNonFiniteVertexCount << ','
         << hybridReflections.alphaFallbackCount << ','
         << hybridReflections.invalidGeometryCount << ','
         << hybridReflections.instanceOverflowCount << ','
@@ -2514,6 +2540,32 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_full_scene_command_count,"
         << "hybrid_reflections_opaque_rigid_command_count,"
         << "hybrid_reflections_skinned_fallback_count,"
+        << "hybrid_reflections_skinned_blas_control_disabled,"
+        << "hybrid_reflections_skinned_candidate_count,"
+        << "hybrid_reflections_skinned_eligible_count,"
+        << "hybrid_reflections_skinned_tlas_instance_count,"
+        << "hybrid_reflections_skinned_dynamic_blas_count,"
+        << "hybrid_reflections_skinned_dynamic_blas_build_count,"
+        << "hybrid_reflections_skinned_dynamic_blas_update_count,"
+        << "hybrid_reflections_skinned_dynamic_blas_reuse_count,"
+        << "hybrid_reflections_skinned_skinning_dispatch_count,"
+        << "hybrid_reflections_skinned_skinning_vertex_count,"
+        << "hybrid_reflections_skinned_skinning_buffer_bytes,"
+        << "hybrid_reflections_skinned_palette_snapshot_bytes,"
+        << "hybrid_reflections_skinned_pose_revision_min,"
+        << "hybrid_reflections_skinned_pose_revision_max,"
+        << "hybrid_reflections_skinned_output_revision_min,"
+        << "hybrid_reflections_skinned_output_revision_max,"
+        << "hybrid_reflections_skinned_blas_revision_min,"
+        << "hybrid_reflections_skinned_blas_revision_max,"
+        << "hybrid_reflections_skinned_pose_blas_revision_mismatch_count,"
+        << "hybrid_reflections_skinned_invalid_palette_count,"
+        << "hybrid_reflections_skinned_skinning_readback_valid,"
+        << "hybrid_reflections_skinned_skinning_readback_vertex_count,"
+        << "hybrid_reflections_skinned_skinning_readback_skinned_vertex_count,"
+        << "hybrid_reflections_skinned_skinning_readback_unweighted_vertex_count,"
+        << "hybrid_reflections_skinned_skinning_readback_invalid_bone_index_count,"
+        << "hybrid_reflections_skinned_skinning_readback_non_finite_vertex_count,"
         << "hybrid_reflections_alpha_fallback_count,"
         << "hybrid_reflections_invalid_geometry_count,"
         << "hybrid_reflections_instance_overflow_count,"

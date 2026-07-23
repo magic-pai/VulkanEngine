@@ -94,6 +94,10 @@ bool VulkanMesh::AccelerationStructureInputReady() const {
         m_IndexBuffer.IndexCount() >= 3u;
 }
 
+VkBuffer VulkanMesh::VertexBufferHandle() const {
+    return m_VertexBuffer.Handle();
+}
+
 VkDeviceAddress VulkanMesh::VertexDeviceAddress() const {
     return m_VertexBuffer.DeviceAddress();
 }

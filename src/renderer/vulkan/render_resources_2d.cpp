@@ -4,10 +4,27 @@
 #include "renderer/vulkan/mesh.h"
 
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <utility>
 
 namespace se {
+
+namespace {
+
+bool BonePalettesEqual(
+    std::span<const glm::mat4> left,
+    std::span<const glm::mat4> right
+) {
+    return left.size() == right.size() &&
+        (left.empty() || std::memcmp(
+            left.data(),
+            right.data(),
+            left.size_bytes()
+        ) == 0);
+}
+
+}
 
 std::size_t VulkanRenderResources2D::StringViewHash::operator()(
     std::string_view value
@@ -77,6 +94,10 @@ void VulkanRenderResources2D::UpdateBonePalette(
     SE_ASSERT(found != m_BonePaletteIndexById.end(), "Bone palette resource was not found");
 
     BonePaletteResource& palette = m_BonePalettes[found->second].palette;
+    const bool poseChanged = !BonePalettesEqual(
+        palette.currentPalette,
+        currentPalette
+    );
     palette.previousPalette = std::move(previousPalette);
     palette.currentPalette = std::move(currentPalette);
     palette.changedEntryCount = changedEntryCount;
@@ -86,6 +107,9 @@ void VulkanRenderResources2D::UpdateBonePalette(
         palette.previousPalette.size() == palette.currentPalette.size()
             ? 1u
             : 0u;
+    if (poseChanged && palette.revision < std::numeric_limits<u64>::max()) {
+        ++palette.revision;
+    }
 }
 
 void VulkanRenderResources2D::UpdateBonePaletteDescriptor(

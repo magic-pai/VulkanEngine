@@ -3670,6 +3670,47 @@ Sources:
 - https://gpuopen.com/fidelityfx-hybrid-reflections/
 - https://developer.nvidia.com/blog/vulkan-raytracing/
 
+## 2026-07-23 - Skinned Ray Queries Need Pose-Owned Geometry And Frame-Owned Palettes
+
+Symptom:
+- Animated Forward3D rasterization and shadows used the current FBX pose, but Ray Query explicitly omitted the skinned mesh and reported one fallback.
+- Reusing a static bind-pose BLAS would have produced physically wrong reflection hits even if the command appeared in the TLAS.
+
+Wrong turns avoided:
+- CPU skinning followed by a full per-frame BLAS rebuild, which adds transfer and rebuild cost for topology-stable animation.
+- Sharing the runtime model's single host-visible palette descriptor directly across multiple in-flight frame slots.
+- Updating only BLAS positions while leaving Ray Query hit metadata pointed at bind-pose vertices.
+- Importing `nvpro_core` wholesale even though its educational builder owns queue waits and duplicates the existing SelfEngine AS lifecycle.
+
+Cause:
+- Hybrid acceleration structures had only a static `VulkanMesh* -> BLAS` cache and classified every command with a bone-palette resource as fallback.
+- The renderer had current/previous palettes and a correct raster skinning contract, but no GPU vertex producer, pose revision, dynamic BLAS owner, or compute-to-AS synchronization contract.
+
+Fix:
+- Adapt NVIDIA's current Vulkan animation sample and Khronos update rules: compute skinning writes a frame-slot `Vertex3D` buffer, then a shader-write to AS-read barrier precedes an `ALLOW_UPDATE` BLAS build/update.
+- Give each frame slot its own palette snapshot, skinned output, BLAS, and scratch storage. Pose revision changes trigger work; frozen poses reuse the completed BLAS.
+- Point both BLAS geometry and Ray Query instance metadata at the same skinned output. Keep indices, material identity, TLAS transforms, and normal-space handling unchanged.
+- Add `SE_HYBRID_REFLECTIONS_SKINNED_BLAS_OFF=1`, Debug-only vertex audit readback, RenderDoc event/resource labels, and pose/output/BLAS revision conservation.
+
+Prevention:
+- Dynamic geometry producers, acceleration structures, and hit-attribute consumers must share one pose revision and one vertex resource identity.
+- Never bind a mutable host-updated palette across in-flight frames without frame-slot ownership or an equivalent synchronization/lifetime proof.
+- Use BLAS update only for stable topology and local deformation. Rebuild when topology changes or refit quality degrades from large locality changes.
+- A dispatch counter is insufficient: validate every processed vertex, invalid bone indices, finite outputs, BLAS/TLAS inclusion, and a reverse-control fallback.
+
+Validation:
+- Dynamic Forward3D: `37,878 / 37,878` processed/skinned vertices, zero invalid/non-finite records, one dynamic TLAS instance, and equal pose/output/BLAS revisions.
+- Frozen Forward3D: zero steady-state skinning dispatches and BLAS builds/updates. Disabled control: one fallback and zero dynamic resources.
+- Static LightingShowcase: zero dynamic candidates and unchanged `4` static BLAS / `51` TLAS instances.
+- Strict gates pass: skinned BLAS `27 / 0`, Hybrid capability `487 / 0`, Forward3D Full Audit `360 / 0`, LightingShowcase Full Audit `1103 / 0`, RenderDoc physical inspection `6 / 0`, and combined RenderDoc integration `37 / 0`.
+- The user accepted the real fullscreen Release Forward3D result with no obvious visual issue.
+
+Sources:
+- https://github.com/nvpro-samples/vk_raytracing_tutorial_KHR/tree/v2/raytrace_tutorial/14_animation
+- https://github.com/nvpro-samples/nvpro_core/blob/master/nvvk/raytraceKHR_vk.hpp
+- https://developer.nvidia.com/blog/rtx-best-practices/
+- https://github.com/KhronosGroup/Vulkan-Docs/blob/main/chapters/accelstructures.adoc
+
 ## 2026-07-22 - External Frame Debuggers Own Generic GPU Truth
 
 Symptom:

@@ -289,6 +289,47 @@ add_custom_command(
 )
 list(APPEND SHADER_OUTPUTS ${HYBRID_REFLECTION_RAY_QUERY_AUDIT_OUTPUT})
 
+set(HYBRID_REFLECTION_SKINNING_SHADER
+    ${SHADER_SOURCE_DIR}/hybrid_reflection_skinning.hlsl
+)
+set(HYBRID_REFLECTION_SKINNING_OUTPUT
+    ${SHADER_OUTPUT_DIR}/hybrid_reflection_skinning.hlsl.spv
+)
+set(HYBRID_REFLECTION_SKINNING_AUDIT_OUTPUT
+    ${SHADER_OUTPUT_DIR}/hybrid_reflection_skinning_audit.hlsl.spv
+)
+add_custom_command(
+    OUTPUT ${HYBRID_REFLECTION_SKINNING_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${DXC_EXECUTABLE}
+        -spirv
+        "-fspv-target-env=vulkan1.2"
+        -T cs_6_6
+        -E main
+        ${HYBRID_REFLECTION_SKINNING_SHADER}
+        -Fo ${HYBRID_REFLECTION_SKINNING_OUTPUT}
+    DEPENDS ${HYBRID_REFLECTION_SKINNING_SHADER}
+    VERBATIM
+)
+add_custom_command(
+    OUTPUT ${HYBRID_REFLECTION_SKINNING_AUDIT_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+    COMMAND ${DXC_EXECUTABLE}
+        -spirv
+        "-fspv-target-env=vulkan1.2"
+        -T cs_6_6
+        -E main
+        -DSE_HYBRID_REFLECTION_SKINNING_AUDIT=1
+        ${HYBRID_REFLECTION_SKINNING_SHADER}
+        -Fo ${HYBRID_REFLECTION_SKINNING_AUDIT_OUTPUT}
+    DEPENDS ${HYBRID_REFLECTION_SKINNING_SHADER}
+    VERBATIM
+)
+list(APPEND SHADER_OUTPUTS
+    ${HYBRID_REFLECTION_SKINNING_OUTPUT}
+    ${HYBRID_REFLECTION_SKINNING_AUDIT_OUTPUT}
+)
+
 add_custom_target(SelfEngineShaders DEPENDS ${SHADER_OUTPUTS})
 
 set(SELFENGINE_COMMON_SOURCES

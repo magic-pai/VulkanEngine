@@ -129,6 +129,7 @@ $managedKeys = @(
     "SE_HYBRID_REFLECTIONS_SHADOW_VISIBILITY_OFF",
     "SE_HYBRID_REFLECTIONS_DNSR_INJECTION_OFF",
     "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF",
+    "SE_HYBRID_REFLECTIONS_SKINNED_BLAS_OFF",
     "SE_HYBRID_REFLECTIONS_DIAGNOSTICS",
     "SE_SSR",
     "SE_SSR_BACKEND",
@@ -137,6 +138,7 @@ $managedKeys = @(
     "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
     "SE_LIGHTING_SHOWCASE_FORCE_OFF",
     "SE_SCENE_UPDATE_FREEZE",
+    "SE_FBX_ANIMATION_FREEZE",
     "SE_VISUAL_QA_HIDE_IMGUI",
     "SE_WINDOW_HIDDEN",
     "SE_AUTO_EXIT_FRAMES",
@@ -413,6 +415,23 @@ foreach ($lane in $laneSpecs) {
             $fullSceneCommands = Get-UIntValue $last "hybrid_reflections_full_scene_command_count"
             $opaqueRigidCommands = Get-UIntValue $last "hybrid_reflections_opaque_rigid_command_count"
             $skinnedFallback = Get-UIntValue $last "hybrid_reflections_skinned_fallback_count"
+            $skinnedBlasControlDisabled = Get-UIntValue $last "hybrid_reflections_skinned_blas_control_disabled"
+            $skinnedCandidateCount = Get-UIntValue $last "hybrid_reflections_skinned_candidate_count"
+            $skinnedEligibleCount = Get-UIntValue $last "hybrid_reflections_skinned_eligible_count"
+            $skinnedTlasInstanceCount = Get-UIntValue $last "hybrid_reflections_skinned_tlas_instance_count"
+            $skinnedDynamicBlasCount = Get-UIntValue $last "hybrid_reflections_skinned_dynamic_blas_count"
+            $skinnedDynamicBlasUpdateCount = Get-UIntValue $last "hybrid_reflections_skinned_dynamic_blas_update_count"
+            $skinnedSkinningDispatchCount = Get-UIntValue $last "hybrid_reflections_skinned_skinning_dispatch_count"
+            $skinnedPoseRevision = Get-UInt64Value $last "hybrid_reflections_skinned_pose_revision_min"
+            $skinnedOutputRevision = Get-UInt64Value $last "hybrid_reflections_skinned_output_revision_min"
+            $skinnedBlasRevision = Get-UInt64Value $last "hybrid_reflections_skinned_blas_revision_min"
+            $skinnedRevisionMismatch = Get-UIntValue $last "hybrid_reflections_skinned_pose_blas_revision_mismatch_count"
+            $skinnedInvalidPalette = Get-UIntValue $last "hybrid_reflections_skinned_invalid_palette_count"
+            $skinnedReadbackValid = Get-UIntValue $last "hybrid_reflections_skinned_skinning_readback_valid"
+            $skinnedReadbackVertexCount = Get-UIntValue $last "hybrid_reflections_skinned_skinning_readback_vertex_count"
+            $skinnedReadbackSkinnedVertexCount = Get-UIntValue $last "hybrid_reflections_skinned_skinning_readback_skinned_vertex_count"
+            $skinnedReadbackInvalidBoneIndexCount = Get-UIntValue $last "hybrid_reflections_skinned_skinning_readback_invalid_bone_index_count"
+            $skinnedReadbackNonFiniteVertexCount = Get-UIntValue $last "hybrid_reflections_skinned_skinning_readback_non_finite_vertex_count"
             $alphaFallback = Get-UIntValue $last "hybrid_reflections_alpha_fallback_count"
             $invalidGeometry = Get-UIntValue $last "hybrid_reflections_invalid_geometry_count"
             $instanceOverflow = Get-UIntValue $last "hybrid_reflections_instance_overflow_count"
@@ -726,7 +745,7 @@ foreach ($lane in $laneSpecs) {
                 $lane.disabled -eq 0 -and
                 $hardwareReady -eq 1
             $expectedAccelerationStructureContract = if ($runtimeResourcesExpected) {
-                2
+                3
             } else {
                 0
             }
@@ -1406,9 +1425,24 @@ foreach ($lane in $laneSpecs) {
                     "invalid=$invalidGeometry,alphaFallback=$alphaFallback" `
                     "invalid=0")) | Out-Null
                 if ($lane.name -eq "forward3d-fbx-requested") {
-                    $checks.Add((New-Check "$($lane.name) skinned geometry uses fallback" `
-                        ($maxSkinnedFallback -gt 0) `
-                        $maxSkinnedFallback ">0")) | Out-Null
+                    $skinnedDynamicContract =
+                        $maxSkinnedFallback -eq 0 -and
+                        $skinnedBlasControlDisabled -eq 0 -and
+                        $skinnedCandidateCount -gt 0 -and
+                        $skinnedEligibleCount -eq $skinnedCandidateCount -and
+                        $skinnedTlasInstanceCount -eq $skinnedEligibleCount -and
+                        $skinnedDynamicBlasCount -gt 0 -and
+                        $skinnedDynamicBlasUpdateCount -gt 0 -and
+                        $skinnedSkinningDispatchCount -gt 0 -and
+                        $skinnedPoseRevision -gt 0 -and
+                        $skinnedPoseRevision -eq $skinnedOutputRevision -and
+                        $skinnedOutputRevision -eq $skinnedBlasRevision -and
+                        $skinnedRevisionMismatch -eq 0 -and
+                        $skinnedInvalidPalette -eq 0
+                    $checks.Add((New-Check "$($lane.name) skinned geometry owns a revision-aligned dynamic BLAS" `
+                        $skinnedDynamicContract `
+                        "candidate/eligible/tlas/blas=$skinnedCandidateCount/$skinnedEligibleCount/$skinnedTlasInstanceCount/$skinnedDynamicBlasCount,fallback=$maxSkinnedFallback,update/dispatch=$skinnedDynamicBlasUpdateCount/$skinnedSkinningDispatchCount,revision=$skinnedPoseRevision/$skinnedOutputRevision/$skinnedBlasRevision,invalid=$skinnedInvalidPalette" `
+                        "candidate=eligible=tlas>0,blas/update/dispatch>0,fallback=0,pose=output=blas,invalid=0")) | Out-Null
                 }
             } else {
                 $noResources = @(
@@ -1427,6 +1461,10 @@ foreach ($lane in $laneSpecs) {
                         (Get-UIntValue $_ "hybrid_reflections_ray_query_dispatch_count") -ne 0 -or
                         (Get-UInt64Value $_ "hybrid_reflections_ray_query_memory_bytes") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_blas_cache_count") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_skinned_dynamic_blas_count") -ne 0 -or
+                        (Get-UIntValue $_ "hybrid_reflections_skinned_skinning_dispatch_count") -ne 0 -or
+                        (Get-UInt64Value $_ "hybrid_reflections_skinned_skinning_buffer_bytes") -ne 0 -or
+                        (Get-UInt64Value $_ "hybrid_reflections_skinned_palette_snapshot_bytes") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_tlas_instance_count") -ne 0 -or
                         (Get-UIntValue $_ "hybrid_reflections_tlas_address_ready") -ne 0
                     }
@@ -1469,6 +1507,10 @@ foreach ($lane in $laneSpecs) {
                 fullSceneCommands = $fullSceneCommands
                 opaqueRigidCommands = $opaqueRigidCommands
                 skinnedFallback = $skinnedFallback
+                skinnedDynamic = "$skinnedCandidateCount/$skinnedEligibleCount/$skinnedTlasInstanceCount/$skinnedDynamicBlasCount"
+                skinnedUpdateDispatch = "$skinnedDynamicBlasUpdateCount/$skinnedSkinningDispatchCount"
+                skinnedRevisions = "$skinnedPoseRevision/$skinnedOutputRevision/$skinnedBlasRevision/$skinnedRevisionMismatch"
+                skinnedReadback = "$skinnedReadbackSkinnedVertexCount/$skinnedReadbackVertexCount/$skinnedReadbackInvalidBoneIndexCount/$skinnedReadbackNonFiniteVertexCount"
                 alphaFallback = $alphaFallback
                 blasCacheCount = $blasCacheCount
                 blasReadyCount = $blasReadyCount

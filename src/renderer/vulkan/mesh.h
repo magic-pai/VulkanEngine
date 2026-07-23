@@ -42,6 +42,7 @@ public:
     void Bind(VkCommandBuffer commandBuffer) const;
     bool Is3D() const;
     bool AccelerationStructureInputReady() const;
+    VkBuffer VertexBufferHandle() const;
     VkDeviceAddress VertexDeviceAddress() const;
     VkDeviceAddress IndexDeviceAddress() const;
     u32 VertexCount() const;

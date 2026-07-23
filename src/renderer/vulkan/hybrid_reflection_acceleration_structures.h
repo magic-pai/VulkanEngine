@@ -69,7 +69,8 @@ public:
     VulkanHybridReflectionAccelerationStructures(
         const VulkanDevice& device,
         const VulkanPhysicalDevice& physicalDevice,
-        u32 frameCount
+        u32 frameCount,
+        const std::string& skinningShaderPath
     );
     ~VulkanHybridReflectionAccelerationStructures();
 

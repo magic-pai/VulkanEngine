@@ -20,6 +20,7 @@ public:
         std::vector<glm::mat4> currentPalette;
         u32 changedEntryCount = 0;
         u32 ready = 0;
+        u64 revision = 1u;
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
         u32 descriptorSetReady = 0;
         u32 descriptorSetIndex = 0;
