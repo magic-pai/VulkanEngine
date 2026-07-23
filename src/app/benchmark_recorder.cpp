@@ -309,6 +309,29 @@ void BenchmarkRecorder::RecordFrame(
         << sceneDiagnostics.runtimeImportSourceBaseColorTextureMaterialCount << ','
         << sceneDiagnostics.runtimeImportSourceNormalTextureMaterialCount << ','
         << sceneDiagnostics.runtimeImportSourceMetallicRoughnessTextureMaterialCount << ','
+        << sceneDiagnostics.runtimeImportLodCacheRequested << ','
+        << sceneDiagnostics.runtimeImportLodCacheHit << ','
+        << sceneDiagnostics.runtimeImportLodCacheMiss << ','
+        << sceneDiagnostics.runtimeImportLodCacheRejected << ','
+        << sceneDiagnostics.runtimeImportLodCacheWritten << ','
+        << sceneDiagnostics.runtimeImportLodCacheFallbackReason << ','
+        << sceneDiagnostics.runtimeImportLodCacheableMeshCount << ','
+        << sceneDiagnostics.runtimeImportLodCacheDecodedChainCount << ','
+        << sceneDiagnostics.runtimeImportLodCacheDecodedLevelCount << ','
+        << sceneDiagnostics.runtimeImportLodCacheSourceFileBytes << ','
+        << sceneDiagnostics.runtimeImportLodCacheSourceHash << ','
+        << sceneDiagnostics.runtimeImportLodCacheSettingsHash << ','
+        << sceneDiagnostics.runtimeImportLodCacheKeyHash << ','
+        << sceneDiagnostics.runtimeImportLodCacheRawBytes << ','
+        << sceneDiagnostics.runtimeImportLodCacheEncodedBytes << ','
+        << sceneDiagnostics.runtimeImportLodCacheFileBytes << ','
+        << sceneDiagnostics.runtimeImportLodCacheSourceHashMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheReadMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheDecodeMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheBuildMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheWriteMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheImportMicroseconds << ','
+        << sceneDiagnostics.runtimeImportLodCacheTotalLoadMicroseconds << ','
         << sceneDiagnostics.runtimeImportNodeCount << ','
         << sceneDiagnostics.runtimeImportBoneNodeCount << ','
         << sceneDiagnostics.runtimeImportAnimationChannelBoundCount << ','
@@ -2165,6 +2188,27 @@ void BenchmarkRecorder::WriteHeader() {
         << "runtime_import_source_base_color_texture_material_count,"
         << "runtime_import_source_normal_texture_material_count,"
         << "runtime_import_source_metallic_roughness_texture_material_count,"
+        << "runtime_import_lod_cache_requested,runtime_import_lod_cache_hit,"
+        << "runtime_import_lod_cache_miss,runtime_import_lod_cache_rejected,"
+        << "runtime_import_lod_cache_written,"
+        << "runtime_import_lod_cache_fallback_reason,"
+        << "runtime_import_lod_cacheable_mesh_count,"
+        << "runtime_import_lod_cache_decoded_chain_count,"
+        << "runtime_import_lod_cache_decoded_level_count,"
+        << "runtime_import_lod_cache_source_file_bytes,"
+        << "runtime_import_lod_cache_source_hash,"
+        << "runtime_import_lod_cache_settings_hash,"
+        << "runtime_import_lod_cache_key_hash,"
+        << "runtime_import_lod_cache_raw_bytes,"
+        << "runtime_import_lod_cache_encoded_bytes,"
+        << "runtime_import_lod_cache_file_bytes,"
+        << "runtime_import_lod_cache_source_hash_microseconds,"
+        << "runtime_import_lod_cache_read_microseconds,"
+        << "runtime_import_lod_cache_decode_microseconds,"
+        << "runtime_import_lod_cache_build_microseconds,"
+        << "runtime_import_lod_cache_write_microseconds,"
+        << "runtime_import_lod_cache_import_microseconds,"
+        << "runtime_import_lod_cache_total_load_microseconds,"
         << "runtime_import_node_count,"
         << "runtime_import_bone_node_count,"
         << "runtime_import_animation_channel_bound_count,"

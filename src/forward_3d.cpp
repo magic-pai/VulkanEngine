@@ -5190,6 +5190,52 @@ int main() {
         defaultModelLoad.sourceNormalTextureMaterialCount;
     sceneDiagnostics.runtimeImportSourceMetallicRoughnessTextureMaterialCount =
         defaultModelLoad.sourceMetallicRoughnessTextureMaterialCount;
+    sceneDiagnostics.runtimeImportLodCacheRequested =
+        defaultModelLoad.meshLodCache.requested;
+    sceneDiagnostics.runtimeImportLodCacheHit =
+        defaultModelLoad.meshLodCache.hit;
+    sceneDiagnostics.runtimeImportLodCacheMiss =
+        defaultModelLoad.meshLodCache.miss;
+    sceneDiagnostics.runtimeImportLodCacheRejected =
+        defaultModelLoad.meshLodCache.rejected;
+    sceneDiagnostics.runtimeImportLodCacheWritten =
+        defaultModelLoad.meshLodCache.written;
+    sceneDiagnostics.runtimeImportLodCacheFallbackReason =
+        static_cast<se::u32>(defaultModelLoad.meshLodCache.fallbackReason);
+    sceneDiagnostics.runtimeImportLodCacheableMeshCount =
+        defaultModelLoad.meshLodCache.cacheableMeshCount;
+    sceneDiagnostics.runtimeImportLodCacheDecodedChainCount =
+        defaultModelLoad.meshLodCache.decodedChainCount;
+    sceneDiagnostics.runtimeImportLodCacheDecodedLevelCount =
+        defaultModelLoad.meshLodCache.decodedLevelCount;
+    sceneDiagnostics.runtimeImportLodCacheSourceFileBytes =
+        defaultModelLoad.meshLodCache.sourceFileBytes;
+    sceneDiagnostics.runtimeImportLodCacheSourceHash =
+        defaultModelLoad.meshLodCache.sourceHash;
+    sceneDiagnostics.runtimeImportLodCacheSettingsHash =
+        defaultModelLoad.meshLodCache.settingsHash;
+    sceneDiagnostics.runtimeImportLodCacheKeyHash =
+        defaultModelLoad.meshLodCache.cacheKeyHash;
+    sceneDiagnostics.runtimeImportLodCacheRawBytes =
+        defaultModelLoad.meshLodCache.rawBytes;
+    sceneDiagnostics.runtimeImportLodCacheEncodedBytes =
+        defaultModelLoad.meshLodCache.encodedBytes;
+    sceneDiagnostics.runtimeImportLodCacheFileBytes =
+        defaultModelLoad.meshLodCache.fileBytes;
+    sceneDiagnostics.runtimeImportLodCacheSourceHashMicroseconds =
+        defaultModelLoad.meshLodCache.sourceHashMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheReadMicroseconds =
+        defaultModelLoad.meshLodCache.readMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheDecodeMicroseconds =
+        defaultModelLoad.meshLodCache.decodeMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheBuildMicroseconds =
+        defaultModelLoad.meshLodCache.buildMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheWriteMicroseconds =
+        defaultModelLoad.meshLodCache.writeMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheImportMicroseconds =
+        defaultModelLoad.meshLodCache.importMicroseconds;
+    sceneDiagnostics.runtimeImportLodCacheTotalLoadMicroseconds =
+        defaultModelLoad.meshLodCache.totalLoadMicroseconds;
     sceneDiagnostics.runtimeImportNodeCount = defaultModelLoad.sourceNodeCount;
     sceneDiagnostics.runtimeImportBoneNodeCount = defaultModelLoad.sourceBoneNodeCount;
     sceneDiagnostics.runtimeImportAnimationChannelBoundCount =

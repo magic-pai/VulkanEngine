@@ -337,6 +337,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/app/application_2d.cpp
     src/app/benchmark_recorder.cpp
     src/app/renderdoc_capture.cpp
+    src/assets/mesh_lod_derived_data_cache.cpp
     src/assets/model_importer.cpp
     src/assets/unreal_project_bridge.cpp
     src/renderer/render_queue.cpp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "assets/mesh_lod_derived_data_cache.h"
 #include "assets/model_importer.h"
 #include "renderer/vulkan/buffer.h"
 #include "renderer/vulkan/material.h"
@@ -88,6 +89,7 @@ struct RuntimeModelLoadResult {
     u32 sourceBaseColorTextureMaterialCount = 0;
     u32 sourceNormalTextureMaterialCount = 0;
     u32 sourceMetallicRoughnessTextureMaterialCount = 0;
+    MeshLodDerivedDataCacheStats meshLodCache{};
 };
 
 struct RuntimeModelAnimationPlaybackDiagnostics {
@@ -138,6 +140,7 @@ private:
 
         std::vector<std::unique_ptr<VulkanMesh>> meshes;
         std::vector<std::vector<std::unique_ptr<VulkanMesh>>> lodMeshes;
+        std::vector<MeshLodChain> lodChains;
         std::vector<VulkanMaterial*> materials;
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
@@ -201,6 +204,7 @@ private:
         u32 sourceBaseColorTextureMaterialCount = 0;
         u32 sourceNormalTextureMaterialCount = 0;
         u32 sourceMetallicRoughnessTextureMaterialCount = 0;
+        MeshLodDerivedDataCacheStats meshLodCache{};
         ImportedModel3D animationSource;
         u32 animationPlaybackCandidate = 0;
         u32 animationPlaybackClipIndex = 0;

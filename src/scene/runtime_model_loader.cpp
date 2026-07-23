@@ -1,5 +1,6 @@
 #include "scene/runtime_model_loader.h"
 
+#include "assets/mesh_lod_derived_data_cache.h"
 #include "renderer/vulkan/material.h"
 #include "renderer/vulkan/material_library.h"
 #include "renderer/vulkan/mesh_lod.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -796,6 +798,33 @@ bool EnvironmentFlagEnabled(const char* name) {
         text != "NO";
 }
 
+bool EnvironmentTextEnabled(std::string_view text) {
+    return !text.empty() &&
+        text != "0" &&
+        text != "false" && text != "False" && text != "FALSE" &&
+        text != "off" && text != "Off" && text != "OFF" &&
+        text != "no" && text != "No" && text != "NO";
+}
+
+MeshLodDerivedDataCacheOptions MeshLodCacheOptions(
+    f32 targetMaxExtent,
+    bool generateTangents
+) {
+    MeshLodDerivedDataCacheOptions options{};
+    const std::string enabled = ReadEnvironmentString("SE_MESH_LOD_CACHE");
+    options.enabled = enabled.empty() || EnvironmentTextEnabled(enabled);
+    options.forceRebuild = EnvironmentFlagEnabled("SE_MESH_LOD_CACHE_REBUILD");
+    options.generateTangents = generateTangents;
+    options.targetMaxExtent = targetMaxExtent;
+    options.keySalt = ReadEnvironmentString("SE_MESH_LOD_CACHE_KEY_SALT");
+    const std::string directory = ReadEnvironmentString("SE_MESH_LOD_CACHE_DIR");
+    options.directory = directory.empty()
+        ? std::filesystem::path(SE_ASSET_DIR).parent_path() /
+            ".selfengine" / "cache" / "mesh_lod"
+        : std::filesystem::path(directory);
+    return options;
+}
+
 bool ImportedSkinningPreviewEnabled() {
     return EnvironmentFlagEnabled("SE_ENABLE_IMPORTED_SKINNING_PREVIEW") ||
         EnvironmentFlagEnabled("SE_IMPORTED_SKINNING_PREVIEW");
@@ -839,6 +868,13 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
     glm::vec3 scale,
     bool bindBonePalettePreview
 ) {
+    using LoadClock = std::chrono::steady_clock;
+    const LoadClock::time_point totalLoadBegin = LoadClock::now();
+    const auto elapsedMicroseconds = [](LoadClock::time_point begin) {
+        return static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+            LoadClock::now() - begin
+        ).count());
+    };
     try {
         std::error_code ec;
         const std::string cacheKey = std::filesystem::canonical(modelPath, ec).string();
@@ -853,8 +889,15 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 ShouldBindImportedBonePalette(modelPath, bindBonePalettePreview);
 
             for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
-                m_RenderResources.RegisterMesh(idPrefix + "_Mesh" + std::to_string(mi),
-                    *cached.meshes[mi]);
+                const std::string meshId = idPrefix + "_Mesh" + std::to_string(mi);
+                m_RenderResources.RegisterMesh(meshId, *cached.meshes[mi]);
+                if (mi < cached.lodChains.size() &&
+                    cached.lodChains[mi].Count() > 1u) {
+                    m_RenderResources.RegisterMeshLodChain(
+                        meshId,
+                        cached.lodChains[mi]
+                    );
+                }
             }
             for (std::size_t mi = 0; mi < cached.materials.size(); ++mi) {
                 m_RenderResources.RegisterMaterial(idPrefix + "_Material" + std::to_string(mi),
@@ -904,6 +947,17 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             if (cachedRenderableBound != 0u) {
                 cached.runtimeSkinnedAnimationRenderableBound = 1u;
             }
+
+            MeshLodDerivedDataCacheStats memoryReuseStats = cached.meshLodCache;
+            memoryReuseStats.requested = 0u;
+            memoryReuseStats.hit = 0u;
+            memoryReuseStats.miss = 0u;
+            memoryReuseStats.rejected = 0u;
+            memoryReuseStats.written = 0u;
+            memoryReuseStats.fallbackReason =
+                MeshLodCacheFallbackReason::InMemoryReuse;
+            memoryReuseStats.totalLoadMicroseconds =
+                elapsedMicroseconds(totalLoadBegin);
 
             return RuntimeModelLoadResult{true,
                 "Loaded (cached) " + PathLabel(modelPath) + " (" +
@@ -976,7 +1030,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 cached.sourceTexturedMaterialCount,
                 cached.sourceBaseColorTextureMaterialCount,
                 cached.sourceNormalTextureMaterialCount,
-                cached.sourceMetallicRoughnessTextureMaterialCount};
+                cached.sourceMetallicRoughnessTextureMaterialCount,
+                memoryReuseStats};
         }
 
         ModelImportOptions importOptions{};
@@ -991,9 +1046,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         importOptions.readSkinningMetadata = true;
         importOptions.validateScene = false;
         importOptions.optimizeMeshes = false;
+        const LoadClock::time_point importBegin = LoadClock::now();
         ImportedModel3D importedModelData =
             ModelImporter::LoadModel3D(modelPath, importOptions);
         NormalizeImportedModel(importedModelData, targetMaxExtent);
+        const u64 importMicroseconds = elapsedMicroseconds(importBegin);
 
         const auto saturatedCount = [](std::size_t count) {
             return count > std::numeric_limits<u32>::max()
@@ -1030,6 +1087,42 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                     : 0u;
         }
 
+        std::vector<MeshLodCacheSourceMesh> lodCacheSourceMeshes;
+        lodCacheSourceMeshes.reserve(importedModelData.meshes.size());
+        for (const ImportedMesh3D& mesh : importedModelData.meshes) {
+            lodCacheSourceMeshes.push_back(MeshLodCacheSourceMesh{
+                saturatedCount(mesh.mesh.vertices.size()),
+                saturatedCount(mesh.mesh.indices.size()),
+                !mesh.bones.empty()
+            });
+        }
+        MeshLodDerivedDataCache lodCache(
+            modelPath,
+            lodCacheSourceMeshes,
+            MeshLodCacheOptions(targetMaxExtent, importOptions.generateTangents)
+        );
+        lodCache.SetImportMicroseconds(importMicroseconds);
+        std::vector<GeneratedMeshLodChain> generatedLodChains;
+        const bool derivedDataCacheHit = lodCache.TryLoad(generatedLodChains);
+        if (!derivedDataCacheHit) {
+            generatedLodChains.resize(importedModelData.meshes.size());
+            const LoadClock::time_point lodBuildBegin = LoadClock::now();
+            for (std::size_t meshIndex = 0;
+                 meshIndex < importedModelData.meshes.size();
+                 ++meshIndex) {
+                ImportedMesh3D& mesh = importedModelData.meshes[meshIndex];
+                if (!mesh.bones.empty()) {
+                    continue;
+                }
+                generatedLodChains[meshIndex] = MeshLodGenerator::Generate(
+                    std::move(mesh.mesh.vertices),
+                    std::move(mesh.mesh.indices)
+                );
+            }
+            lodCache.SetBuildMicroseconds(elapsedMicroseconds(lodBuildBegin));
+            lodCache.Store(generatedLodChains);
+        }
+
         auto loadedModel = std::make_unique<LoadedRuntimeModel>();
         loadedModel->sourceVertexCount = sourceVertexCount;
         loadedModel->sourceTriangleCount = sourceTriangleCount;
@@ -1049,18 +1142,16 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
 
         loadedModel->meshes.reserve(importedModelData.meshes.size());
         loadedModel->lodMeshes.reserve(importedModelData.meshes.size());
+        loadedModel->lodChains.reserve(importedModelData.meshes.size());
         loadedModel->meshIds.reserve(importedModelData.meshes.size());
         std::vector<MeshLodChain> runtimeLodChains;
         runtimeLodChains.reserve(importedModelData.meshes.size());
-        for (ImportedMesh3D& importedMeshData : importedModelData.meshes) {
-            const bool skinnedMesh = !importedMeshData.bones.empty();
-            GeneratedMeshLodChain generatedLods{};
-            if (!skinnedMesh) {
-                generatedLods = MeshLodGenerator::Generate(
-                    std::move(importedMeshData.mesh.vertices),
-                    std::move(importedMeshData.mesh.indices)
-                );
-            }
+        for (std::size_t meshIndex = 0;
+             meshIndex < importedModelData.meshes.size();
+             ++meshIndex) {
+            ImportedMesh3D& importedMeshData = importedModelData.meshes[meshIndex];
+            GeneratedMeshLodChain generatedLods =
+                std::move(generatedLodChains[meshIndex]);
 
             if (generatedLods.Empty()) {
                 GeneratedMeshLodLevel base{};
@@ -1124,6 +1215,7 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             }
             runtimeLodChains.push_back(std::move(runtimeChain));
         }
+        loadedModel->lodChains = runtimeLodChains;
 
         loadedModel->materialIds.reserve(importedModelData.materials.size());
         loadedModel->materials.reserve(importedModelData.materials.size());
@@ -1637,7 +1729,7 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 runtimeLodChains[meshIndex].Count() > 1u) {
                 m_RenderResources.RegisterMeshLodChain(
                     meshId,
-                    std::move(runtimeLodChains[meshIndex])
+                    runtimeLodChains[meshIndex]
                 );
             }
         }
@@ -1866,6 +1958,10 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         }
         const u32 runtimeSkinnedAnimationRenderableBound =
             loadedModel->runtimeSkinnedAnimationRenderableBound;
+        lodCache.SetTotalLoadMicroseconds(elapsedMicroseconds(totalLoadBegin));
+        loadedModel->meshLodCache = lodCache.Stats();
+        const MeshLodDerivedDataCacheStats meshLodCacheStats =
+            loadedModel->meshLodCache;
         m_ModelCache[lookupKey] = m_LoadedModels.size();
         m_LoadedModels.push_back(std::move(loadedModel));
 
@@ -1939,7 +2035,8 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
             sourceTexturedMaterialCount,
             sourceBaseColorTextureMaterialCount,
             sourceNormalTextureMaterialCount,
-            sourceMetallicRoughnessTextureMaterialCount
+            sourceMetallicRoughnessTextureMaterialCount,
+            meshLodCacheStats
         };
     } catch (const std::exception& error) {
         return RuntimeModelLoadResult{

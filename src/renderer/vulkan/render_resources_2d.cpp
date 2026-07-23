@@ -207,31 +207,33 @@ void VulkanRenderResources2D::RegisterMeshLodChain(
     SE_ASSERT(!HasLodChain(id), "LOD mesh resource id already exists");
 
     const MeshLodLevel& base = chain.levels.front();
-    ++m_LodResidencyStats.chainCount;
-    m_LodResidencyStats.levelCount += static_cast<u32>(chain.Count());
-    m_LodResidencyStats.sourceVertexBytes +=
-        static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
-    m_LodResidencyStats.sourceIndexBytes +=
-        static_cast<u64>(base.indexCount) * sizeof(u32);
-    m_LodResidencyStats.residentVertexBytes += chain.residentVertexBytes;
-    m_LodResidencyStats.residentIndexBytes += chain.residentIndexBytes;
-    const u64 baseVertexBytes =
-        static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
-    const u64 baseIndexBytes =
-        static_cast<u64>(base.indexCount) * sizeof(u32);
-    m_LodResidencyStats.extraVertexBytes +=
-        chain.residentVertexBytes >= baseVertexBytes
-            ? chain.residentVertexBytes - baseVertexBytes
-            : 0u;
-    m_LodResidencyStats.extraIndexBytes +=
-        chain.residentIndexBytes >= baseIndexBytes
-            ? chain.residentIndexBytes - baseIndexBytes
-            : 0u;
-    for (const MeshLodLevel& level : chain.levels) {
-        m_LodResidencyStats.maxSimplificationError = std::max(
-            m_LodResidencyStats.maxSimplificationError,
-            level.simplificationError
-        );
+    if (m_RegisteredLodResidencyMeshes.insert(base.mesh).second) {
+        ++m_LodResidencyStats.chainCount;
+        m_LodResidencyStats.levelCount += static_cast<u32>(chain.Count());
+        m_LodResidencyStats.sourceVertexBytes +=
+            static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
+        m_LodResidencyStats.sourceIndexBytes +=
+            static_cast<u64>(base.indexCount) * sizeof(u32);
+        m_LodResidencyStats.residentVertexBytes += chain.residentVertexBytes;
+        m_LodResidencyStats.residentIndexBytes += chain.residentIndexBytes;
+        const u64 baseVertexBytes =
+            static_cast<u64>(base.vertexCount) * sizeof(Vertex3D);
+        const u64 baseIndexBytes =
+            static_cast<u64>(base.indexCount) * sizeof(u32);
+        m_LodResidencyStats.extraVertexBytes +=
+            chain.residentVertexBytes >= baseVertexBytes
+                ? chain.residentVertexBytes - baseVertexBytes
+                : 0u;
+        m_LodResidencyStats.extraIndexBytes +=
+            chain.residentIndexBytes >= baseIndexBytes
+                ? chain.residentIndexBytes - baseIndexBytes
+                : 0u;
+        for (const MeshLodLevel& level : chain.levels) {
+            m_LodResidencyStats.maxSimplificationError = std::max(
+                m_LodResidencyStats.maxSimplificationError,
+                level.simplificationError
+            );
+        }
     }
 
     m_LodChains.emplace(std::move(id), std::move(chain));

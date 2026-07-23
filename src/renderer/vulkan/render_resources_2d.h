@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace se {
 
@@ -117,6 +118,7 @@ private:
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_MaterialIndexById;
     std::unordered_map<std::string, std::size_t, StringViewHash, std::equal_to<>> m_BonePaletteIndexById;
     std::unordered_map<std::string, MeshLodChain, StringViewHash, std::equal_to<>> m_LodChains;
+    std::unordered_set<const VulkanMesh*> m_RegisteredLodResidencyMeshes;
     MeshLodResidencyStats m_LodResidencyStats{};
 };
 

@@ -3870,3 +3870,70 @@ Sources:
 - https://github.com/zeux/meshoptimizer/releases/tag/v1.2
 - https://github.com/zeux/meshoptimizer#simplification
 - https://dev.epicgames.com/documentation/en-us/unreal-engine/static-mesh-automatic-lod-generation-in-unreal-engine
+
+## 2026-07-24 - Derived LOD Data Must Survive Process Restarts
+
+Symptom:
+- Every process launch rebuilt the same static-mesh LOD chain after Assimp
+  import, adding seconds to startup for the 499,719-triangle PBR reference.
+- The first persistent-cache run terminated immediately after `Loading startup
+  model` without a C++ exception or benchmark CSV.
+
+False leads:
+- Treating the in-process `RuntimeModelLoader` map as a persistent cache.
+- Adding a glTF-only offline rewrite to solve a cache that must also support
+  FBX, DAE, and OBJ after import.
+- Diagnosing the silent exit as a Vulkan or GPU-upload failure before checking
+  Windows Error Reporting.
+
+Cause:
+- Generated normalized/optimized LOD vertices and indices had no disk-derived
+  data representation, so every process repeated meshoptimizer simplification.
+- The first source-content hash implementation placed a 1 MiB byte array on
+  the Windows main-thread stack. WER reported `0xc00000fd` stack overflow before
+  cache publication or renderer startup.
+
+Control test:
+- Run one GLB with an empty isolated cache, then rerun it cross-process; the
+  first lane must miss/write and the second must hit with zero LOD build time.
+- Force rebuild, corrupt the published header, disable the cache, repeat with
+  OBJ, and load a fully skinned FBX. Each path must resolve a distinct measured
+  fallback while source triangles and GPU LOD residency remain conserved.
+
+Fix:
+- Add a versioned `.selod` derived-data format keyed by source content and all
+  LOD-affecting settings. Encode vertices and indices losslessly with
+  meshoptimizer v1.2, validate bounded data and checksums, and atomically
+  replace cache files after a complete write.
+- Move the 1 MiB source-hash read buffer to heap storage.
+- Preserve lightweight GPU LOD-chain metadata in the in-process model cache,
+  re-register it for repeated instances, and deduplicate residency statistics
+  by the base `VulkanMesh` identity.
+
+Prevention:
+- Persistent derived data needs content/settings keys, explicit schema/codec
+  versions, integrity and topology checks, deterministic fallback, atomic
+  publication, and a corruption recovery test.
+- Do not put buffers near the Windows default thread-stack size in local
+  frames. File I/O scratch buffers of this size belong on the heap.
+- A warm-cache claim must prove `build_us = 0`, positive read/decode work,
+  conserved geometry identities/counts, and a real cross-process hit.
+- A generated-mesh cache does not replace a full imported-model cache; record
+  import, derived build, decode, upload, and total load separately.
+
+Validation:
+- `Test-MeshLodDerivedDataCache.ps1 -SkipBuild -Strict`: `133 pass / 0 fail`
+  across GLB cold/warm/forced/corrupt/recovered/disabled, OBJ cold/warm,
+  repeated same-process GLB instances, and fully skinned FBX fallback lanes.
+- `lvjuren.glb` raw/encoded bytes are `74,766,016 / 24,436,106` (`0.3268`).
+  The final loaded-system run records cold build/write at
+  `2,088,245 / 1,576,201 us`, warm read/decode at `28,961 / 327,175 us`, and
+  total load at `11,279,623 / 8,682,924 us`.
+- `Test-PbrModelLodHealth.ps1 -SkipBuild -Strict`: `38 pass / 0 fail`.
+- `Test-PbrModelShowcase.ps1 -SkipBuild -Strict`: `18 pass / 0 fail`.
+- Debug PBR/Forward3D/LightingShowcase and Release PBR builds pass.
+
+Sources:
+- https://github.com/zeux/meshoptimizer/releases/tag/v1.2
+- https://github.com/zeux/meshoptimizer#vertex-buffer-compression
+- https://dev.epicgames.com/documentation/en-us/unreal-engine/using-derived-data-cache-in-unreal-engine
