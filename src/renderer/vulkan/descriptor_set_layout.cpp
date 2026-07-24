@@ -526,12 +526,12 @@ void VulkanOcclusionCullDescriptorSetLayout::Release() {
 void VulkanOcclusionCullDescriptorSetLayout::CreateDescriptorSetLayout(
     const VulkanDevice& device
 ) {
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
     bindings[0].binding = 0u;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1u;
     bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    for (u32 binding = 1u; binding <= 2u; ++binding) {
+    for (u32 binding = 1u; binding <= 3u; ++binding) {
         bindings[binding].binding = binding;
         bindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[binding].descriptorCount = 1u;

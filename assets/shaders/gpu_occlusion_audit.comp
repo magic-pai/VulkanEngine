@@ -12,6 +12,7 @@ const uint REASON_NEAR_PLANE = 2u;
 const uint REASON_INVALID_PROJECTION = 3u;
 const uint REASON_INVALID_RECT = 4u;
 const uint REASON_INVALID_MIP = 5u;
+const uint REASON_INVALID_BOUNDS = 6u;
 
 struct Candidate {
     vec4 boundsMin;
@@ -24,16 +25,28 @@ struct Result {
     uvec4 metadata;
 };
 
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
+
 layout(set = 0, binding = 0) uniform sampler2D depthPyramid;
 layout(std430, set = 0, binding = 1) readonly buffer InputBuffer {
     mat4 viewProjection;
     vec4 cameraPositionEpsilon;
+    vec4 temporalJitterPixelsGuard;
     uvec4 info;
     Candidate candidates[];
 } inputs;
 layout(std430, set = 0, binding = 2) writeonly buffer ResultBuffer {
     Result results[];
 } outputs;
+layout(std430, set = 0, binding = 3) writeonly buffer IndirectBuffer {
+    DrawIndexedIndirectCommand commands[];
+} indirectOutput;
 
 void WriteResult(
     uint index,
@@ -50,6 +63,12 @@ void WriteResult(
         sampledTexels
     );
     outputs.results[index].metadata = candidate.metadata;
+    indirectOutput.commands[index].indexCount =
+        classification == CLASS_OCCLUDED ? 0u : candidate.metadata.z * 3u;
+    indirectOutput.commands[index].instanceCount = 1u;
+    indirectOutput.commands[index].firstIndex = 0u;
+    indirectOutput.commands[index].vertexOffset = 0;
+    indirectOutput.commands[index].firstInstance = 0u;
 }
 
 bool InvalidVec4(vec4 value) {
@@ -63,6 +82,17 @@ void main() {
     }
 
     Candidate candidate = inputs.candidates[index];
+    if (candidate.boundsMin.w < 0.5) {
+        WriteResult(
+            index,
+            candidate,
+            CLASS_UNCERTAIN,
+            REASON_INVALID_BOUNDS,
+            0u,
+            0u
+        );
+        return;
+    }
     vec3 cameraPosition = inputs.cameraPositionEpsilon.xyz;
     if (all(greaterThanEqual(cameraPosition, candidate.boundsMin.xyz)) &&
         all(lessThanEqual(cameraPosition, candidate.boundsMax.xyz))) {
@@ -136,15 +166,20 @@ void main() {
         framebufferSize;
     vec2 rectMax = (clamp(ndcMax, vec2(-1.0), vec2(1.0)) * 0.5 + 0.5) *
         framebufferSize;
-    // Expand by one raster pixel so a subpixel projection or jitter delta can
-    // only reduce culling efficiency, never create a false occlusion.
+    // The base raster guard covers conservative integer bounds. The additional
+    // temporal guard is the maximum delta accepted by the history consumer.
+    int rectangleGuardPixels = 1 + int(ceil(clamp(
+        inputs.temporalJitterPixelsGuard.z,
+        0.0,
+        4.0
+    )));
     ivec2 pixelMin = clamp(
-        ivec2(floor(rectMin)) - ivec2(1),
+        ivec2(floor(rectMin)) - ivec2(rectangleGuardPixels),
         ivec2(0),
         ivec2(inputs.info.yz) - ivec2(1)
     );
     ivec2 pixelMax = clamp(
-        ivec2(ceil(rectMax)) + ivec2(1),
+        ivec2(ceil(rectMax)) + ivec2(rectangleGuardPixels),
         ivec2(0),
         ivec2(inputs.info.yz) - ivec2(1)
     );

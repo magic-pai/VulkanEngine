@@ -325,6 +325,7 @@ public:
         const VulkanDepthPyramid* occlusionHizDepthPyramid = nullptr,
         VulkanGpuOcclusionAudit* gpuOcclusionAudit = nullptr,
         RendererGpuOcclusionStats* gpuOcclusionStats = nullptr,
+        bool gpuOcclusionIndirectConsume = false,
         const VulkanComputePipeline* ssrTracePipeline = nullptr,
         const VulkanComputePipeline* ssrTemporalPipeline = nullptr,
         const VulkanComputePipeline* ssrSpatialPipeline = nullptr,

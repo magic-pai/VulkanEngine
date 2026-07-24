@@ -2367,11 +2367,7 @@ bool GpuOcclusionDiagnosticsRequestedFromEnvironment() {
 }
 
 bool GpuOcclusionResourcesRequestedFromEnvironment() {
-#if !defined(NDEBUG)
-    return GpuOcclusionDiagnosticsRequestedFromEnvironment();
-#else
-    return false;
-#endif
+    return GpuOcclusionRequestedFromEnvironment();
 }
 
 f32 GpuOcclusionDepthEpsilonFromEnvironment() {
@@ -5952,9 +5948,6 @@ void VulkanRenderer::DrawFrame() {
     gpuOcclusion.fallbackReason = static_cast<u32>(
         gpuOcclusion.requested == 0u
             ? RendererGpuOcclusionFallbackReason::Disabled
-#if defined(NDEBUG)
-            : RendererGpuOcclusionFallbackReason::DebugBuildRequired
-#else
             : RendererGpuOcclusionFallbackReason::ResourcesUnavailable
 #endif
     );
@@ -6590,6 +6583,7 @@ void VulkanRenderer::DrawFrame() {
         DepthPyramidMemoryBytes(m_OcclusionDepthPyramid.get());
     gpuOcclusion.auditBufferMemoryBytes = m_GpuOcclusionAudit != nullptr
         ? m_GpuOcclusionAudit->BufferMemoryBytes()
+    bool gpuOcclusionIndirectConsume = false;
         : 0u;
 
     if (gpuOcclusion.requested > 0u && !has3DMainPass) {
@@ -6605,13 +6599,24 @@ void VulkanRenderer::DrawFrame() {
         glm::mat4 occlusionProjection = mainFrameMatrices->proj;
         if (temporalState.jitterApplied) {
             ApplyProjectionJitter(occlusionProjection, temporalState.jitterUv);
+        const glm::mat4 canonicalViewProjection =
+            mainFrameMatrices->proj * mainFrameMatrices->view;
+        const f32 occlusionReuseJitterGuardPixels =
+            temporalState.jitterApplied
+                ? (TemporalNativeTaaModeActive()
+                    ? NativeTaaJitterScaleFromEnvironment()
+                    : 1.0f)
+                : 0.0f;
         }
         const glm::mat4 inverseView = glm::inverse(mainFrameMatrices->view);
         const GpuOcclusionPrepareResult prepared =
             m_GpuOcclusionAudit->PrepareFrame(
                 imageIndex,
                 mainCommands,
+                canonicalViewProjection,
                 occlusionProjection * mainFrameMatrices->view,
+                temporalState.jitterPixels,
+                occlusionReuseJitterGuardPixels,
                 glm::vec3(inverseView[3]),
                 m_OcclusionDepthPyramid->Extent(),
                 m_OcclusionDepthPyramid->MipCount(),
@@ -6624,9 +6629,49 @@ void VulkanRenderer::DrawFrame() {
         gpuOcclusion.capacityDroppedCount = prepared.capacityDroppedCount;
         gpuOcclusion.uploadedCandidateCount = prepared.uploadedCandidateCount;
         gpuOcclusion.uploadedCandidateBytes = prepared.uploadedCandidateBytes;
+        gpuOcclusion.candidateContentHash = prepared.candidateContentHash;
+        gpuOcclusion.classificationJitterPixelsX =
+            prepared.classificationJitterPixelsX;
+        gpuOcclusion.classificationJitterPixelsY =
+            prepared.classificationJitterPixelsY;
+        gpuOcclusion.classificationJitterGuardPixels =
+            prepared.reuseJitterGuardPixels;
         gpuOcclusion.candidateIdentityHash = prepared.candidateIdentityHash;
         gpuOcclusion.actualTriangleCount = prepared.actualTriangleCount;
         gpuOcclusion.active = prepared.uploadedCandidateCount > 0u ? 1u : 0u;
+        GpuOcclusionConsumeStatus consumeStatus =
+            m_GpuOcclusionAudit->ConsumeStatus(
+                imageIndex,
+                prepared,
+                canonicalViewProjection,
+                temporalState.jitterPixels
+            );
+        if (prepared.capacityDroppedCount > 0u) {
+            consumeStatus.ready = false;
+            consumeStatus.fallbackReason = static_cast<u32>(
+                RendererGpuOcclusionIndirectFallbackReason::CandidateCountChanged
+            );
+        }
+        gpuOcclusion.indirectConsumerReady = consumeStatus.ready ? 1u : 0u;
+        gpuOcclusion.indirectConsumerActive = consumeStatus.ready ? 1u : 0u;
+        gpuOcclusion.indirectFallbackReason = consumeStatus.fallbackReason;
+        gpuOcclusion.indirectCandidateCountMatches =
+            consumeStatus.candidateCountMatches ? 1u : 0u;
+        gpuOcclusion.indirectCandidateContentMatches =
+            consumeStatus.candidateContentMatches ? 1u : 0u;
+        gpuOcclusion.indirectCanonicalViewProjectionMatches =
+            consumeStatus.canonicalViewProjectionMatches ? 1u : 0u;
+        gpuOcclusion.indirectProjectionExtentMatches =
+            consumeStatus.projectionExtentMatches ? 1u : 0u;
+        gpuOcclusion.indirectJitterDeltaWithinGuard =
+            consumeStatus.jitterDeltaWithinGuard ? 1u : 0u;
+        gpuOcclusion.indirectJitterDeltaPixelsX =
+            consumeStatus.jitterDeltaPixelsX;
+        gpuOcclusion.indirectJitterDeltaPixelsY =
+            consumeStatus.jitterDeltaPixelsY;
+        gpuOcclusion.indirectJitterGuardPixels =
+            consumeStatus.jitterGuardPixels;
+        gpuOcclusionIndirectConsume = consumeStatus.ready;
         gpuOcclusion.actualDrawsUnchanged = gpuOcclusion.active;
         gpuOcclusion.fallbackReason = static_cast<u32>(
             gpuOcclusion.active > 0u
@@ -10014,6 +10059,7 @@ void VulkanRenderer::DrawFrame() {
             ? m_FfxSssrClassifyTilesPipeline.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+        gpuOcclusionIndirectConsume,
             ? m_FfxSssrClassifyTilesResources.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
@@ -11318,7 +11364,8 @@ void VulkanRenderer::CreateSwapchainResources() {
             *m_OcclusionCullDescriptorSetLayout,
             *m_OcclusionDepthPyramid,
             *m_SsrDepthPyramidSampler,
-            std::string(SE_SHADER_DIR) + "/gpu_occlusion_audit.comp.spv"
+            std::string(SE_SHADER_DIR) + "/gpu_occlusion_audit.comp.spv",
+            GpuOcclusionDiagnosticsRequestedFromEnvironment()
         );
     }
     m_SsrReconstructionDescriptorSets =
@@ -12755,7 +12802,8 @@ void VulkanRenderer::RecreateSwapchain() {
             m_PhysicalDevice,
             *m_OcclusionCullDescriptorSetLayout,
             *m_OcclusionDepthPyramid,
-            *m_SsrDepthPyramidSampler
+            *m_SsrDepthPyramidSampler,
+            GpuOcclusionDiagnosticsRequestedFromEnvironment()
         );
     }
     if (m_SsrReconstructionDescriptorSets != nullptr &&
@@ -17270,7 +17318,11 @@ void VulkanRenderer::BuildGBufferCommandList(
     forwardResidualCommands.clear();
     forwardResidualCommands.reserve(renderCommands.size());
 
-    for (const RenderCommand& command : renderCommands) {
+    for (std::size_t commandIndex = 0u;
+         commandIndex < renderCommands.size();
+         ++commandIndex) {
+        RenderCommand command = renderCommands[commandIndex];
+        command.gpuOcclusionCandidateIndex = static_cast<u32>(commandIndex);
         const u64 triangles = TriangleCountForCommand(command);
         switch (RenderClassForCommand(command)) {
         case MaterialRenderClass::Transparent:

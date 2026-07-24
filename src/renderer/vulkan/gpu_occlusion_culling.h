@@ -31,7 +31,27 @@ struct GpuOcclusionPrepareResult {
     u32 uploadedCandidateCount = 0;
     u64 uploadedCandidateBytes = 0;
     u64 candidateIdentityHash = 0;
+    u64 candidateContentHash = 0;
     u64 actualTriangleCount = 0;
+    u32 extentWidth = 0;
+    u32 extentHeight = 0;
+    f32 classificationJitterPixelsX = 0.0f;
+    f32 classificationJitterPixelsY = 0.0f;
+    f32 reuseJitterGuardPixels = 0.0f;
+};
+
+struct GpuOcclusionConsumeStatus {
+    bool ready = false;
+    bool candidateCountMatches = false;
+    bool candidateContentMatches = false;
+    bool canonicalViewProjectionMatches = false;
+    bool projectionExtentMatches = false;
+    bool jitterDeltaWithinGuard = false;
+    u32 candidateCount = 0;
+    u32 fallbackReason = 0;
+    f32 jitterDeltaPixelsX = 0.0f;
+    f32 jitterDeltaPixelsY = 0.0f;
+    f32 jitterGuardPixels = 0.0f;
 };
 
 struct GpuOcclusionReadbackResult {
@@ -56,7 +76,7 @@ struct GpuOcclusionReadbackResult {
 
 class VulkanGpuOcclusionAudit {
 public:
-    static constexpr u32 kContractVersion = 1u;
+    static constexpr u32 kContractVersion = 3u;
     static constexpr u32 kMaxCandidates = 4096u;
     static constexpr u32 kWorkgroupSize = 64u;
 
@@ -66,7 +86,8 @@ public:
         const VulkanOcclusionCullDescriptorSetLayout& descriptorSetLayout,
         const VulkanDepthPyramid& depthPyramid,
         const VulkanSampler& sampler,
-        const std::string& computeShaderPath
+        const std::string& computeShaderPath,
+        bool diagnosticsEnabled
     );
     ~VulkanGpuOcclusionAudit();
 
@@ -80,13 +101,27 @@ public:
     GpuOcclusionPrepareResult PrepareFrame(
         std::size_t imageIndex,
         std::span<const RenderCommand> commands,
-        const glm::mat4& viewProjection,
+        const glm::mat4& classificationViewProjection,
+        const glm::mat4& canonicalViewProjection,
         const glm::vec3& cameraPosition,
+        const glm::vec2& temporalJitterPixels,
+        f32 reuseJitterGuardPixels,
         VkExtent2D extent,
         u32 mipCount,
         f32 depthEpsilon
     );
     GpuOcclusionReadbackResult Readback(std::size_t imageIndex);
+    GpuOcclusionConsumeStatus ConsumeStatus(
+        std::size_t imageIndex,
+        const GpuOcclusionPrepareResult& prepared,
+        const glm::mat4& canonicalViewProjection,
+        const glm::vec2& temporalJitterPixels
+    ) const;
+    bool CanConsumeCommand(
+        std::size_t imageIndex,
+        u32 commandIndex
+    ) const;
+    VkBuffer IndirectBuffer(std::size_t imageIndex) const;
     bool RecordDispatch(
         VkCommandBuffer commandBuffer,
         std::size_t imageIndex,
@@ -98,7 +133,8 @@ public:
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanOcclusionCullDescriptorSetLayout& descriptorSetLayout,
         const VulkanDepthPyramid& depthPyramid,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool diagnosticsEnabled
     );
     void Release();
 
@@ -106,7 +142,19 @@ private:
     struct FrameState {
         u32 candidateCount = 0;
         u64 expectedIdentityHash = 0;
+        u64 candidateContentHash = 0;
+        glm::mat4 canonicalViewProjection{ 1.0f };
+        glm::vec2 temporalJitterPixels{ 0.0f };
+        VkExtent2D projectionExtent{};
+        f32 reuseJitterGuardPixels = 0.0f;
         bool submitted = false;
+        bool indirectReady = false;
+        u32 readyCandidateCount = 0;
+        u64 readyContentHash = 0;
+        glm::mat4 readyCanonicalViewProjection{ 1.0f };
+        glm::vec2 readyTemporalJitterPixels{ 0.0f };
+        VkExtent2D readyProjectionExtent{};
+        f32 readyReuseJitterGuardPixels = 0.0f;
     };
 
     void CreateResources(
@@ -114,15 +162,18 @@ private:
         const VulkanPhysicalDevice& physicalDevice,
         const VulkanOcclusionCullDescriptorSetLayout& descriptorSetLayout,
         const VulkanDepthPyramid& depthPyramid,
-        const VulkanSampler& sampler
+        const VulkanSampler& sampler,
+        bool diagnosticsEnabled
     );
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
     VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+    bool m_DiagnosticsEnabled = false;
     std::unique_ptr<VulkanComputePipeline> m_Pipeline;
     std::vector<std::unique_ptr<VulkanBuffer>> m_InputBuffers;
     std::vector<std::unique_ptr<VulkanBuffer>> m_ResultBuffers;
+    std::vector<std::unique_ptr<VulkanBuffer>> m_IndirectBuffers;
     std::vector<VkDescriptorSet> m_DescriptorSets;
     std::vector<FrameState> m_FrameStates;
 };

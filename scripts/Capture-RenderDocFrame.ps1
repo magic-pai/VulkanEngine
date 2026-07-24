@@ -9,6 +9,7 @@ param(
     [string]$AaMode = "taa",
     [string]$BenchmarkScene = "lighting-showcase",
     [switch]$Forward3DFbx,
+    [switch]$GpuOcclusion,
     [switch]$KeepWindowVisible,
     [switch]$SkipBuild,
     [switch]$SkipSigning
@@ -116,6 +117,7 @@ $captureComments = [ordered]@{
     scene = $effectiveScene
     renderedFrame = $CaptureFrame
     aaMode = $AaMode
+    gpuOcclusion = [bool]$GpuOcclusion
     resolutionSource = "runtime"
 } | ConvertTo-Json -Compress
 
@@ -130,7 +132,12 @@ $managedKeys = @(
     "SE_SSR_BACKEND",
     "SE_HYBRID_REFLECTIONS_RT",
     "SE_FORWARD3D_AA_MODE",
+    "SE_NATIVE_TAA_JITTER_SCALE",
     "SE_BENCHMARK_SCENE",
+    "SE_BENCHMARK_CAMERA_MOTION",
+    "SE_BENCHMARK_CAMERA_MOTION_SPEED",
+    "SE_GPU_OCCLUSION",
+    "SE_GPU_OCCLUSION_DIAGNOSTICS_OFF",
     "SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION",
     "SE_LIGHTING_SHOWCASE_FORCE_OFF",
     "SE_SCENE_UPDATE_FREEZE",
@@ -154,11 +161,16 @@ $environment = @{
     SE_RENDERDOC_CAPTURE_PATH = $captureTemplate
     SE_RENDERDOC_CAPTURE_TITLE = "SelfEngine $effectiveScene frame $CaptureFrame"
     SE_RENDERDOC_CAPTURE_COMMENTS = $captureComments
-    SE_SSR = "1"
-    SE_SSR_BACKEND = "ffx-sssr"
-    SE_HYBRID_REFLECTIONS_RT = "1"
+    SE_SSR = if ($GpuOcclusion) { "0" } else { "1" }
+    SE_SSR_BACKEND = if ($GpuOcclusion) { "" } else { "ffx-sssr" }
+    SE_HYBRID_REFLECTIONS_RT = if ($GpuOcclusion) { "0" } else { "1" }
     SE_FORWARD3D_AA_MODE = $AaMode
+    SE_NATIVE_TAA_JITTER_SCALE = if ($GpuOcclusion) { "0" } else { "" }
     SE_BENCHMARK_SCENE = if ($Forward3DFbx) { "" } else { $BenchmarkScene }
+    SE_BENCHMARK_CAMERA_MOTION = if ($GpuOcclusion) { "orbit" } else { "" }
+    SE_BENCHMARK_CAMERA_MOTION_SPEED = if ($GpuOcclusion) { "0" } else { "" }
+    SE_GPU_OCCLUSION = if ($GpuOcclusion) { "1" } else { "" }
+    SE_GPU_OCCLUSION_DIAGNOSTICS_OFF = ""
     SE_DEFAULT_SCENE_SKINNED_FBX_PRODUCTION = if ($Forward3DFbx) { "1" } else { "" }
     SE_LIGHTING_SHOWCASE_FORCE_OFF = if ($Forward3DFbx) { "1" } else { "" }
     SE_SCENE_UPDATE_FREEZE = "1"

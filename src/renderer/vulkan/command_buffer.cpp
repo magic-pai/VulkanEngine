@@ -33,6 +33,7 @@
 
 #include <bit>
 #include <cstddef>
+#include <limits>
 
 namespace se {
 
@@ -447,7 +448,9 @@ void DrawRenderCommand(
     u64& pushConstantByteCount,
     f32 hdrOutputFlag = 0.0f,
     u32* bonePaletteDescriptorBindCount = nullptr,
-    bool pushViewportZPerDraw = false
+    bool pushViewportZPerDraw = false,
+    VkBuffer indexedIndirectBuffer = VK_NULL_HANDLE,
+    VkDeviceSize indexedIndirectOffset = 0u
 ) {
     SE_ASSERT(renderCommand.mesh != nullptr, "RenderCommand must reference a mesh");
     SE_ASSERT(renderCommand.material != nullptr, "RenderCommand must reference a material");
@@ -516,7 +519,24 @@ void DrawRenderCommand(
         bonePaletteDescriptorBindCount != nullptr) {
         ++(*bonePaletteDescriptorBindCount);
     }
-    vkCmdDrawIndexed(commandBuffer, renderCommand.mesh->IndexCount(), 1, 0, 0, 0);
+    if (indexedIndirectBuffer != VK_NULL_HANDLE) {
+        vkCmdDrawIndexedIndirect(
+            commandBuffer,
+            indexedIndirectBuffer,
+            indexedIndirectOffset,
+            1u,
+            sizeof(VkDrawIndexedIndirectCommand)
+        );
+    } else {
+        vkCmdDrawIndexed(
+            commandBuffer,
+            renderCommand.mesh->IndexCount(),
+            1,
+            0,
+            0,
+            0
+        );
+    }
 }
 
 void DrawForwardCommands(
@@ -2698,6 +2718,7 @@ void VulkanCommandBuffer::Record(
     const VulkanDepthPyramid* occlusionHizDepthPyramid,
     VulkanGpuOcclusionAudit* gpuOcclusionAudit,
     RendererGpuOcclusionStats* gpuOcclusionStats,
+    bool gpuOcclusionIndirectConsume,
     const VulkanComputePipeline* ssrTracePipeline,
     const VulkanComputePipeline* ssrTemporalPipeline,
     const VulkanComputePipeline* ssrSpatialPipeline,
@@ -3217,6 +3238,20 @@ void VulkanCommandBuffer::Record(
                         renderCommand.reflectionAuditObjectId
                     )
                     : 0.0f;
+                const bool skinnedCommand =
+                    !renderCommand.bonePaletteResourceId.empty();
+                const bool hasCandidateIndex =
+                    renderCommand.gpuOcclusionCandidateIndex !=
+                        std::numeric_limits<u32>::max();
+                const bool useIndirectCommand =
+                    gpuOcclusionIndirectConsume &&
+                    gpuOcclusionAudit != nullptr &&
+                    !skinnedCommand &&
+                    hasCandidateIndex &&
+                    gpuOcclusionAudit->CanConsumeCommand(
+                        imageIndex,
+                        renderCommand.gpuOcclusionCandidateIndex
+                    );
                 DrawRenderCommand(
                     commandBuffer,
                     activeGBufferPipeline,
@@ -3232,8 +3267,27 @@ void VulkanCommandBuffer::Record(
                     gBufferPushConstantBytes,
                     reflectionAuditObjectId,
                     &gBufferBonePaletteDescriptorBinds,
-                    reflectionAuditObjectIdEnabled
+                    reflectionAuditObjectIdEnabled,
+                    useIndirectCommand
+                        ? gpuOcclusionAudit->IndirectBuffer(imageIndex)
+                        : VK_NULL_HANDLE,
+                    useIndirectCommand
+                        ? static_cast<VkDeviceSize>(
+                            renderCommand.gpuOcclusionCandidateIndex
+                        ) * sizeof(VkDrawIndexedIndirectCommand)
+                        : 0u
                 );
+                if (gpuOcclusionStats != nullptr &&
+                    gpuOcclusionStats->requested != 0u) {
+                    if (useIndirectCommand) {
+                        ++gpuOcclusionStats->indirectSubmittedDrawCount;
+                    } else {
+                        ++gpuOcclusionStats->indirectDirectFallbackDrawCount;
+                        if (skinnedCommand) {
+                            ++gpuOcclusionStats->indirectSkinnedFallbackCount;
+                        }
+                    }
+                }
             }
 
             if (bindStats != nullptr) {
@@ -6011,6 +6065,11 @@ void VulkanCommandBuffer::Record(
             );
             commandIndex += batch.commandCount;
             ++batchIndex;
+            if (gpuOcclusionStats != nullptr &&
+                gpuOcclusionStats->requested != 0u) {
+                ++gpuOcclusionStats->indirectInstanceBatchFallbackCount;
+                ++gpuOcclusionStats->indirectDirectFallbackDrawCount;
+            }
             continue;
         }
 
@@ -6029,6 +6088,13 @@ void VulkanCommandBuffer::Record(
         const u32 materialId = frameMaterials != nullptr
             ? frameMaterials->IdFor(renderCommands[commandIndex].material)
             : 0;
+        const RenderCommand& mainCommand = renderCommands[commandIndex];
+        const bool skinnedCommand = !mainCommand.bonePaletteResourceId.empty();
+        const bool useIndirectCommand =
+            gpuOcclusionIndirectConsume &&
+            gpuOcclusionAudit != nullptr &&
+            !skinnedCommand &&
+            gpuOcclusionAudit->CanConsumeCommand(imageIndex, static_cast<u32>(commandIndex));
         DrawRenderCommand(
             commandBuffer,
             activeRegularPipeline,
@@ -6043,8 +6109,27 @@ void VulkanCommandBuffer::Record(
             mainPushConstantUpdates,
             mainPushConstantBytes,
             0.0f,
-            &mainBonePaletteDescriptorBinds
+            &mainBonePaletteDescriptorBinds,
+            false,
+            useIndirectCommand
+                ? gpuOcclusionAudit->IndirectBuffer(imageIndex)
+                : VK_NULL_HANDLE,
+            useIndirectCommand
+                ? static_cast<VkDeviceSize>(commandIndex) *
+                    sizeof(VkDrawIndexedIndirectCommand)
+                : 0u
         );
+        if (gpuOcclusionStats != nullptr &&
+            gpuOcclusionStats->requested != 0u) {
+            if (useIndirectCommand) {
+                ++gpuOcclusionStats->indirectSubmittedDrawCount;
+            } else {
+                ++gpuOcclusionStats->indirectDirectFallbackDrawCount;
+                if (skinnedCommand) {
+                    ++gpuOcclusionStats->indirectSkinnedFallbackCount;
+                }
+            }
+        }
         ++commandIndex;
         }
     }

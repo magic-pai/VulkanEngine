@@ -83,7 +83,7 @@ private:
     VkDescriptorSetLayout m_DescriptorSetLayout = VK_NULL_HANDLE;
 };
 
-// Occlusion culling: Hi-Z texture + instance bounds SSBO + visibility SSBO
+// Occlusion culling: Hi-Z texture + candidate/result/indirect-command SSBOs.
 class VulkanOcclusionCullDescriptorSetLayout {
 public:
     static constexpr u32 kMaxInstances = 4096;

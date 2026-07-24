@@ -200,6 +200,16 @@ This track is frozen until the renderer-first acceptance gate above is met. Exis
 ### Phase 8: Renderer Feature-Complete Stabilization
 
 - Promote deferred HDR to the default visible path only after the fallback/debug forward path, imported generic assets, material parity, lighting, shadows, probes, translucency, post, temporal stability, and diagnostics all pass smoke coverage.
+Current Phase 5 state: production static-mesh LOD selection and persistent `.selod`
+derived data are complete. The first GPU Hi-Z consumer now writes one indexed-indirect
+command per rigid opaque candidate, zeros `indexCount` for occluded commands, and is
+consumed by the deferred GBuffer and legacy forward main pass without Release
+readback. Exact candidate-content and ViewProjection matching preserve conservative
+history reuse; skinned commands and instance batches remain direct fallbacks. This is
+not compacted MDI yet. The next Phase 5 slice is render-state/data restructuring for
+material/mesh buckets and compacted multi-draw-indirect submission, followed by
+instance compaction and the FidelityFX SPD HZB build replacement.
+
 - Run feature-combination benchmarks instead of single-feature demos: many lights plus CSM plus SSAO/SSR/probes, volumetrics plus transparency plus bloom, TAA/upscaling plus motion vectors, and imported-model material grids under multiple quality presets.
 - Build renderer-owned reference captures and visual diffs for built-in stress scenes and generic imported scenes. These captures become the readiness proof for returning to UE integration later.
 - Produce a single missing-feature report that lists unsupported renderer features, degraded fallbacks, disabled quality tiers, and known visual mismatches before any UE project-preview work resumes.
@@ -253,7 +263,7 @@ Known incomplete areas that still block the renderer acceptance target:
 - Post/temporal quality is still early: bloom now has a first downsample/upsample pyramid but still lacks dirt-mask/lens/anamorphic and temporal polish, auto exposure now has GPU histogram/eye-adaptation history but still lacks percentile clipping and per-volume exposure, grading has only a neutral renderer-owned LUT carrier and still lacks authored LUT import, per-volume blending, filmic look libraries, and auto-exposure coupling, sharpening is not CAS/RCAS or TAAU-coupled, DOF/motion blur are still missing, skeletal animation playback and broad skinned velocity coverage are not production-ready, and DLSS SR/DLAA remains opt-in with production quality proven only for controlled opaque routes so far.
 - SSAO remains a first visibility tier. SSR now has a data-validated conservative min-depth pyramid and coarse-to-fine hierarchical traversal, while temporal accumulation, depth/normal/velocity history rejection, denoise, roughness-aware radiance filtering, and stronger probe fallback blending remain open.
 - Volumetrics are not complete; current fog is analytic height/distance fog, not volumetric fog, aerial perspective, cloud media, light shafts, or volumetric shadows.
-- Visibility/scalability is still mostly classic CPU-side infrastructure; engine-native mesh cache, LOD groups, Hi-Z/occlusion, instance compaction, indirect draw preparation, and cost metrics remain open.
+- Visibility/scalability now has production static-mesh LOD, persistent `.selod` derived data, conservative GPU Hi-Z classification, and a first real per-command indexed-indirect consumer for rigid opaque GBuffer/legacy-forward draws. The indirect history contract now separates non-jittered camera identity from real Native TAA/DLSS temporal samples, bounds reuse with an explicit pixel guard, and preserves camera-motion/extent/content fallbacks with zero Release readback. A full imported-model cache, compacted MDI, instance compaction, material/mesh buckets, SPD HZB replacement, and broader pass consumers remain open.
 - Renderer tooling still needs RenderDoc markers, renderer-owned reference captures, screenshot/visual-diff automation, broader benchmark scenes, and quality-preset comparison evidence.
 
 ## Current Slice
@@ -267,7 +277,7 @@ Active renderer backlog, in practical near-term order:
 - Finish production shadow quality: close contact-shadow motion/denoise evidence and broader preset-level visual comparisons, then evaluate whether an EVSM/VSM tier is justified for large area-light penumbrae. Directional and point/spot/rect PCSS, CSM stability, cache invalidation, bias evidence, default Ultra, fallback isolation, and cross-scene resource/sample/depth-memory budgets are now data-closed.
 - Deepen SSAO/SSR into production tiers: GTAO-style filtering, then SSR temporal history accumulation, depth/normal/velocity rejection, denoise, roughness-aware radiance filtering, and reflection-probe fallback blending on top of the hierarchical traversal carrier.
 - Deepen the completed first height/distance fog tier into volumetric fog, aerial perspective, fog history/stability, light scattering, volumetric shadow hooks, and stronger visual baselines.
-- Build visibility/scalability: engine-native mesh cache, classic LODs, instance compaction, Hi-Z/occlusion, indirect draw preparation, material bucketing, and cost metrics.
+- Finish the remaining visibility/scalability work beyond the completed LOD/cache and first Hi-Z indirect-consumer slices: full imported-model cache, compacted MDI, instance compaction, material/mesh bucketing, SPD HZB, and broader cost metrics.
 - Complete forward residual/Forward+ feature carriers for weighted blended translucency/OIT, particles, water-like/special materials, hair-card style materials, and debug overlays.
 - Expand renderer tooling: asynchronous PSO prewarming with visible cold-compile progress for new devices/shader revisions, renderer-owned benchmark scenes, RenderDoc markers, screenshot/reference capture, visual-diff tooling, quality presets, and CSV coverage for every expensive system.
 

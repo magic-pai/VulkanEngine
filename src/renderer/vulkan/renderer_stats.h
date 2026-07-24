@@ -124,6 +124,16 @@ enum class RendererGpuOcclusionHistoryResetReason : u32 {
     CandidateIdentityChanged = 3
 };
 
+enum class RendererGpuOcclusionIndirectFallbackReason : u32 {
+    None = 0,
+    NoPreviousResult = 1,
+    CandidateCountChanged = 2,
+    CandidateContentChanged = 3,
+    CanonicalViewProjectionChanged = 4,
+    ProjectionExtentChanged = 5,
+    JitterDeltaExceeded = 6
+};
+
 struct RendererGpuOcclusionStats {
     u32 contractVersion = 0;
     u32 requested = 0;
@@ -140,6 +150,10 @@ struct RendererGpuOcclusionStats {
     u32 uploadedCandidateCount = 0;
     u64 uploadedCandidateBytes = 0;
     u64 candidateIdentityHash = 0;
+    u64 candidateContentHash = 0;
+    f32 classificationJitterPixelsX = 0.0f;
+    f32 classificationJitterPixelsY = 0.0f;
+    f32 classificationJitterGuardPixels = 0.0f;
     u32 depthPyramidAllocated = 0;
     u32 depthPyramidWidth = 0;
     u32 depthPyramidHeight = 0;
@@ -176,6 +190,21 @@ struct RendererGpuOcclusionStats {
     u32 actualDrawCount = 0;
     u64 actualTriangleCount = 0;
     u64 auditBufferMemoryBytes = 0;
+    u32 indirectConsumerReady = 0;
+    u32 indirectConsumerActive = 0;
+    u32 indirectFallbackReason = 0;
+    u32 indirectCandidateCountMatches = 0;
+    u32 indirectCandidateContentMatches = 0;
+    u32 indirectCanonicalViewProjectionMatches = 0;
+    u32 indirectProjectionExtentMatches = 0;
+    u32 indirectJitterDeltaWithinGuard = 0;
+    f32 indirectJitterDeltaPixelsX = 0.0f;
+    f32 indirectJitterDeltaPixelsY = 0.0f;
+    f32 indirectJitterGuardPixels = 0.0f;
+    u32 indirectSubmittedDrawCount = 0;
+    u32 indirectDirectFallbackDrawCount = 0;
+    u32 indirectInstanceBatchFallbackCount = 0;
+    u32 indirectSkinnedFallbackCount = 0;
 };
 
 struct RendererShadowCascadeStats {

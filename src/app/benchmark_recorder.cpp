@@ -2120,6 +2120,10 @@ void BenchmarkRecorder::RecordFrame(
         << gpuOcclusion.depthPyramidHeight << ','
         << gpuOcclusion.depthPyramidMipCount << ','
         << gpuOcclusion.depthPyramidImageCount << ','
+        << gpuOcclusion.candidateContentHash << ','
+        << gpuOcclusion.classificationJitterPixelsX << ','
+        << gpuOcclusion.classificationJitterPixelsY << ','
+        << gpuOcclusion.classificationJitterGuardPixels << ','
         << static_cast<u32>(gpuOcclusion.depthPyramidFormat) << ','
         << gpuOcclusion.depthPyramidMemoryBytes << ','
         << gpuOcclusion.depthPyramidBuildDispatchCount << ','
@@ -2156,6 +2160,21 @@ void BenchmarkRecorder::RecordFrame(
         << binds.pushConstantUpdates << ','
         << binds.pushConstantBytes << '\n';
 
+        << gpuOcclusion.indirectConsumerReady << ','
+        << gpuOcclusion.indirectConsumerActive << ','
+        << gpuOcclusion.indirectFallbackReason << ','
+        << gpuOcclusion.indirectCandidateCountMatches << ','
+        << gpuOcclusion.indirectCandidateContentMatches << ','
+        << gpuOcclusion.indirectCanonicalViewProjectionMatches << ','
+        << gpuOcclusion.indirectProjectionExtentMatches << ','
+        << gpuOcclusion.indirectJitterDeltaWithinGuard << ','
+        << gpuOcclusion.indirectJitterDeltaPixelsX << ','
+        << gpuOcclusion.indirectJitterDeltaPixelsY << ','
+        << gpuOcclusion.indirectJitterGuardPixels << ','
+        << gpuOcclusion.indirectSubmittedDrawCount << ','
+        << gpuOcclusion.indirectDirectFallbackDrawCount << ','
+        << gpuOcclusion.indirectInstanceBatchFallbackCount << ','
+        << gpuOcclusion.indirectSkinnedFallbackCount << ','
     ++m_CapturedFrames;
     if (m_CapturedFrames >= m_Config.captureFrames) {
         m_StopRequested = true;
@@ -3763,6 +3782,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_occlusion_classification_dispatch_count,"
         << "gpu_occlusion_classification_group_count,"
         << "gpu_occlusion_readback_ready,gpu_occlusion_readback_valid,"
+        << "gpu_occlusion_candidate_content_hash,"
+        << "gpu_occlusion_classification_jitter_pixels_x,"
+        << "gpu_occlusion_classification_jitter_pixels_y,"
+        << "gpu_occlusion_classification_jitter_guard_pixels,"
         << "gpu_occlusion_readback_stale,gpu_occlusion_readback_invalid_count,"
         << "gpu_occlusion_readback_candidate_count,"
         << "gpu_occlusion_classified_visible_count,"
@@ -3785,3 +3808,18 @@ void BenchmarkRecorder::WriteHeader() {
 }
 
 }
+        << "gpu_occlusion_indirect_consumer_ready,"
+        << "gpu_occlusion_indirect_consumer_active,"
+        << "gpu_occlusion_indirect_fallback_reason,"
+        << "gpu_occlusion_indirect_candidate_count_matches,"
+        << "gpu_occlusion_indirect_candidate_content_matches,"
+        << "gpu_occlusion_indirect_canonical_view_projection_matches,"
+        << "gpu_occlusion_indirect_projection_extent_matches,"
+        << "gpu_occlusion_indirect_jitter_delta_within_guard,"
+        << "gpu_occlusion_indirect_jitter_delta_pixels_x,"
+        << "gpu_occlusion_indirect_jitter_delta_pixels_y,"
+        << "gpu_occlusion_indirect_jitter_guard_pixels,"
+        << "gpu_occlusion_indirect_submitted_draw_count,"
+        << "gpu_occlusion_indirect_direct_fallback_draw_count,"
+        << "gpu_occlusion_indirect_instance_batch_fallback_count,"
+        << "gpu_occlusion_indirect_skinned_fallback_count,"

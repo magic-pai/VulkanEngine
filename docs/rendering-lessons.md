@@ -3993,3 +3993,238 @@ Validation:
   removed triangles while real draws remain unchanged.
 - RenderDoc 1.44 frame 12 inspection passes `10 / 0`; the standard RenderDoc
   integration gate passes `33 / 0`.
+
+## 2026-07-24 - GPU Occlusion Must Prove A Real Draw Consumer
+
+Symptom:
+- The Debug audit classified valid Hi-Z candidates and estimated removable
+  triangles, but real draws were unchanged. The first consumer attempt also
+  reported active state while LightingShowcase submitted zero indirect draws.
+
+False leads:
+- Treating a valid GPU classification/readback as proof that production draws
+  consume the result.
+- Connecting only the legacy forward main pass. LightingShowcase opaque geometry
+  is submitted through the deferred GBuffer command list.
+- Calling a fixed one-command-per-candidate array "compacted MDI" while
+  per-object push constants, material descriptors, and mesh bindings still
+  require individual CPU setup.
+
+Cause:
+- The original audit had no Release consumer. The first indirect hook missed
+  the GBuffer path and lost the original main-queue candidate index when it
+  split commands by material render class.
+- TAA jitter, camera motion, candidate-count/content changes, and frame-slot
+  reuse also require explicit conservative invalidation; identity-only matching
+  cannot prove that an old command still describes the current draw.
+
+Control test:
+- Freeze the LightingShowcase at the occlusion-rich orbit bookmark, set native
+  TAA jitter scale to zero, and compare GPU occlusion enabled/disabled.
+- Keep a moving-camera lane and the animated Forward3D FBX lane. Motion must
+  fall back explicitly, while the skinned command remains a direct draw and
+  rigid commands use the indirect buffer.
+
+Fix:
+- The classification shader writes one `VkDrawIndexedIndirectCommand` per
+  candidate and sets occluded `indexCount=0`.
+- Preserve the original candidate index through GBuffer list construction and
+  consume the indirect buffer in both deferred GBuffer and legacy forward main
+  passes. Gate reuse on exact count, content hash, and ViewProjection equality.
+- Keep Debug readback as the semantic oracle; Release uses device-local buffers
+  and performs no visibility readback.
+
+Prevention:
+- A GPU-culling gate must prove producer, physical command contents, consumer
+  draw events, fallback counts, and Release readback behavior separately.
+- Preserve source command identity through every queue split. Validate the real
+  deferred and forward consumers, not only the renderer path easiest to patch.
+- Do not claim compacted MDI until command compaction, indirect count, and the
+  per-object state/binding bottleneck are actually removed.
+
+Validation:
+- `Test-GpuOcclusionHealth.ps1 -SkipBuild -Strict -OutputDirectory
+  tmp\gpu_occlusion_indirect_health_v3`: `83 / 0`, zero FrameGraph/Vulkan
+  findings. LightingShowcase submits `39` indirect commands with `22` occluded;
+  Forward3D submits `6` indirect and `1` skinned direct fallback; Release
+  readback is `0/0`.
+- RenderDoc frame 12 inspection passes `13 / 0`: binding 3 is the named indirect
+  buffer, with `39` indirect uses, `22` zero-index commands, and `17` visible
+  commands.
+- Release GPU timestamp medians over `600` samples per state are
+  `14.6916 ms` disabled and `14.6576 ms` enabled (`-0.23%`, run noise).
+
+## 2026-07-25 - Visual Acceptance Windows Must Not Reuse Frozen Benchmark Controls
+
+Symptom:
+- The LightingShowcase rendered continuously and Windows reported it responding,
+  but mouse/camera operation appeared to do nothing.
+
+False leads:
+- Treating the window as a render-thread hang or blaming Ray Query cost. The
+  process remained `Responding=True` with active renderer CPU work.
+
+Cause:
+- The visual launch reused data-gate controls:
+  `SE_SCENE_UPDATE_FREEZE=1`, `SE_BENCHMARK_CAMERA_MOTION=orbit`, and motion
+  speed `0`. `forward_3d.cpp` therefore skipped `Camera3D::Update` or replaced
+  the camera pose with the fixed benchmark orbit every frame.
+
+Control test:
+- Keep the same GPU Hi-Z and Ray Query + hit IBL rendering configuration, but
+  clear benchmark camera motion and set scene freeze to `0`.
+
+Fix:
+- Relaunch the single LightingShowcase window without benchmark/freeze camera
+  controls. The Hi-Z consumer remains active while the camera is stationary and
+  falls back conservatively during camera changes.
+
+Prevention:
+- Separate headless data-lane environment maps from interactive visual-launch
+  environment maps. Never carry scene freeze, benchmark motion, auto-exit, CSV,
+  or hidden-window controls into a user acceptance window unless the user asks
+  for a fixed-camera comparison.
+
+Validation:
+- Automated foreground left-drag changed `320 / 960` sampled window pixels
+  (`33.33%`) while the process remained `Responding=True`. User confirmation is
+  still required for normal manual interaction.
+
+## 2026-07-25 - Hi-Z Acceptance Must Not Disable Temporal AA Jitter
+
+Symptom:
+- The interactive GPU Hi-Z acceptance window showed obvious edge aliasing even
+  though Native TAA was nominally selected.
+
+False leads:
+- Treating the requested AA mode name as proof that production AA inputs were
+  active. The temporal sample pattern matters as much as the resolved mode.
+
+Cause:
+- The launch inherited `SE_NATIVE_TAA_JITTER_SCALE=0` from the static Hi-Z
+  consume lane. This made exact ViewProjection history matching easy but removed
+  the subpixel jitter needed for useful Native TAA edge reconstruction.
+
+Control test:
+- Keep the same interactive camera and Ray Query + hit IBL configuration, change
+  only AA to cold-start DLSS SR Performance, and clear the zero-jitter override.
+
+Fix status:
+- The visual window now uses DLSS SR Performance again. GPU occlusion remains
+  conservative and falls back to direct draws when temporal jitter invalidates
+  the current exact-matrix reuse contract.
+- Production Hi-Z work is still open: history identity must separate the
+  unjittered camera transform from the per-frame AA jitter, while classification
+  bounds/depth remain conservative for the maximum jitter delta.
+
+Prevention:
+- Never disable temporal jitter to make occlusion-history tests green or to open
+  a visual acceptance window. Test no-jitter only as an explicit control lane;
+  the production lane must retain the intended TAA/DLSS quality mode.
+
+Validation:
+- The replacement single window starts in `sr-performance` and remains
+  interactive. User visual confirmation of edge quality is pending.
+
+## 2026-07-25 - Hi-Z Camera Identity Must Exclude Temporal Jitter
+
+Symptom:
+- GPU Hi-Z classified valid candidates and consumed indirect commands with zero
+  jitter, but real Native TAA and DLSS Performance fell back every frame with
+  indirect fallback reason `4` even when the camera and scene were static.
+
+False leads:
+- Disabling temporal jitter to make exact matrix equality pass.
+- Removing the ViewProjection check entirely, which would reuse stale visibility
+  during real camera motion.
+- Treating cross-process CPU/present timing drift as a large indirect-draw
+  regression before enabling the project's Vulkan timestamp control.
+
+Cause:
+- The frame-slot history gate compared the jittered ViewProjection. Halton sample
+  changes therefore looked identical to camera motion. The shader's fixed one-pixel
+  expansion also hid the accepted temporal delta instead of making it auditable.
+
+Control test:
+- Keep the camera and scene static under real Native TAA or DLSS Performance jitter.
+  Candidate count/content must match, canonical ViewProjection and extent must
+  match, and the actual frame-slot jitter delta must stay within the stored guard.
+- Set benchmark orbit speed to `0.01`: canonical ViewProjection must fail with
+  reason `4`, classification must continue, and all main draws must use the direct
+  fallback.
+
+Fix:
+- Feed the actual jittered ViewProjection to HZB classification, but store and
+  compare the non-jittered ViewProjection for camera identity.
+- Store projection extent, current jitter pixels, and the maximum accepted jitter
+  delta with each frame slot. Expand shader rectangles by the same explicit guard
+  and fall back if the current delta exceeds it.
+- Expose canonical/extent/jitter matches, delta, guard, and fallback through
+  contract-v3 CSV fields. Release reuses the necessary values without visibility
+  readback.
+
+Prevention:
+- Temporal sampling and camera identity are separate contracts. Never disable
+  jitter for production Hi-Z acceptance and never delete camera invalidation to
+  accommodate jitter.
+- Performance runs must set `SE_ENABLE_GPU_TIMESTAMPS=1`; CPU submit/present time
+  can drift substantially across short DLSS processes.
+
+Validation:
+- Strict cross-scene health passes `104 / 0`; real Native TAA uses delta
+  `0.1875/0.0555556 <= 0.5`, DLSS Performance uses
+  `0.375/0.111111 <= 1.0`, moving camera falls back, and Release readback is `0/0`.
+- RenderDoc GPU occlusion passes `13 / 0`; integration passes `33 / 0`.
+- DLSS Performance Vulkan timestamp medians are `4.3454 ms` disabled and
+  `4.5120 ms` enabled. Consumer/fallback medians are `4.3268/4.3717 ms`, so the
+  current bounded cost belongs to HZB/classification rather than indirect consume.
+- The final one-window acceptance used `SelfEnginePbrModelShowcase` with
+  `assets/models/lvjuren.glb`, DLSS Performance, production jitter, LOD, and GPU
+  Hi-Z enabled. The user judged the overall result good.
+
+## 2026-07-25 - LOD Visual Acceptance Requires Real Imported PBR Geometry
+
+Symptom:
+- The procedural LightingShowcase looked stable, but it did not expose the real
+  imported-model geometry, material, normal-map, silhouette, or distance-transition
+  behavior that the LOD feature is intended to preserve.
+
+False leads:
+- Treating a clean procedural showcase window as final evidence for imported-mesh
+  LOD quality.
+- Relying only on selected-level and triangle-count telemetry after the data gate
+  had passed.
+
+Cause:
+- LightingShowcase remains a useful Hi-Z and draw-consumer stress lane, but its
+  small procedural mesh set is not representative of a 499,719-triangle textured
+  PBR asset moving through multiple generated LOD levels.
+
+Control test:
+- Run the strict LOD matrix first, then open exactly one interactive
+  `SelfEnginePbrModelShowcase` window on `assets/models/lvjuren.glb` with production
+  temporal jitter, the intended upscaler mode, LOD, and GPU Hi-Z enabled.
+- Judge disappearance/flicker, silhouette collapse, texture or normal corruption,
+  temporal aliasing, and visible distance-transition popping while moving the camera.
+
+Fix:
+- Make the imported PBR showcase the mandatory final visual lane for LOD changes.
+  Keep LightingShowcase and animated Forward3D as structural control lanes, not as
+  substitutes for imported-model visual acceptance.
+
+Prevention:
+- No LOD milestone may be marked visually accepted from procedural geometry alone.
+- Pair telemetry proving real mesh/index-buffer selection with a high-complexity,
+  textured imported PBR model before closing the slice.
+
+Validation:
+- `Test-PbrModelShowcase.ps1 -SkipBuild -Strict`: `18 pass / 0 fail` with glTF
+  validation at `0` errors and one expected generated-tangent warning.
+- `Test-PbrModelLodHealth.ps1 -SkipBuild -Strict`: `38 pass / 0 fail`; near/far
+  triangles remain `499,719 / 49,971` and far projected error is `0.711708 px`.
+- A six-frame hidden DLSS Performance + GPU Hi-Z probe reported contract v3,
+  six distinct real jitter samples, active indirect consumption, canonical
+  ViewProjection/extent/jitter-guard matches, three indirect draws, zero direct
+  fallbacks, and zero FrameGraph validation issues.
+- The user accepted the interactive PBR model result as the future LOD visual
+  validation baseline.

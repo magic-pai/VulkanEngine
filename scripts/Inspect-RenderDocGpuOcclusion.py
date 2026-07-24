@@ -69,7 +69,7 @@ def add_check(checks, name, passed, actual, expected):
 
 
 report = {
-    "contractVersion": 1,
+    "contractVersion": 2,
     "status": "starting",
     "capturePath": CAPTURE_PATH,
     "checks": [],
@@ -96,6 +96,10 @@ try:
     actions = flatten_actions(controller.GetRootActions(), structured_file)
     resources = controller.GetResources()
     resource_names = {str(item.resourceId): item.name for item in resources}
+    resource_ids = {str(item.resourceId): item.resourceId for item in resources}
+    actions_by_event = {
+        int(action.eventId): (action, path) for action, path in actions
+    }
     textures = {
         str(item.resourceId): item for item in controller.GetTextures()
     }
@@ -151,6 +155,7 @@ try:
         "0": PYRAMID_NAME,
         "1": "SelfEngine.GpuOcclusion.Candidates",
         "2": "SelfEngine.GpuOcclusion.Results",
+        "3": "SelfEngine.GpuOcclusion.Indirect",
     }
     for binding, expected_name in expected_bindings.items():
         record = classification_bindings.get(binding)
@@ -171,9 +176,39 @@ try:
     add_check(
         checks,
         "classification resources do not alias",
-        len(classification_resources) == 3,
+        len(classification_resources) == 4,
         sorted(classification_resources),
-        "3 distinct resources",
+        "4 distinct resources",
+    )
+
+    indirect_record = classification_bindings.get("3")
+    indirect_resource_id = (
+        None if indirect_record is None
+        else resource_ids.get(indirect_record["resource"])
+    )
+    indirect_usages = []
+    if indirect_resource_id is not None:
+        for usage in controller.GetUsage(indirect_resource_id):
+            usage_name = str(usage.usage)
+            if "Indirect" not in usage_name:
+                continue
+            event_id = int(usage.eventId)
+            action_record = actions_by_event.get(event_id)
+            action = None if action_record is None else action_record[0]
+            indirect_usages.append({
+                "eventId": event_id,
+                "usage": usage_name,
+                "path": "" if action_record is None else action_record[1],
+                "flags": "" if action is None else str(action.flags),
+                "numIndices": 0 if action is None else int(action.numIndices),
+                "numInstances": 0 if action is None else int(action.numInstances),
+            })
+    add_check(
+        checks,
+        "classified command buffer is consumed as indirect input",
+        len(indirect_usages) > 0,
+        indirect_usages,
+        "one or more ResourceUsage.Indirect events",
     )
 
     pyramid_record = classification_bindings.get("0")
@@ -249,6 +284,18 @@ try:
         },
         "all build event IDs precede classification",
     )
+    indirect_event_ids = [item["eventId"] for item in indirect_usages]
+    add_check(
+        checks,
+        "prior-frame indirect consumers precede command refresh",
+        bool(indirect_event_ids) and
+        classification_event_id > max(indirect_event_ids),
+        {
+            "indirect": indirect_event_ids,
+            "classification": classification_event_id,
+        },
+        "all current-frame indirect reads precede the same-buffer compute refresh",
+    )
 
     report["pyramid"] = {
         "extent": pyramid_extent,
@@ -257,6 +304,7 @@ try:
     }
     report["buildDispatches"] = build_dispatches
     report["classificationDispatch"] = classification
+    report["indirectUsages"] = indirect_usages
     report["passCount"] = sum(
         1 for check in checks if check["status"] == "pass"
     )

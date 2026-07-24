@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -130,6 +131,7 @@ struct RenderCommand {
     std::uintptr_t meshSortKey = 0;
     std::size_t submissionIndex = 0;
     u64 renderableIdentity = 0u;
+    u32 gpuOcclusionCandidateIndex = std::numeric_limits<u32>::max();
     u32 reflectionAuditObjectId = 0u;
     // 0 selects global IBL; 1..4 select a stable frame-local reflection probe.
     u32 reflectionProbeAssignmentCode = 0u;
