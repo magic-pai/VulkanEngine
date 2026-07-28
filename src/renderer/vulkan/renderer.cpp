@@ -89,6 +89,10 @@ static_assert(
 );
 
 FrameLightConstants FrameLightSet::Constants() const {
+    if (directionalCount == 0u) {
+        return {};
+    }
+
     glm::vec3 direction = primaryDirectional.direction;
     if (glm::dot(direction, direction) <= 0.0001f) {
         direction = glm::vec3(-0.45f, -0.82f, -0.35f);
@@ -246,12 +250,47 @@ constexpr f32 kDlssSrPerformanceScale = 0.5f;
 constexpr f32 kDlssSrQualityMipLodBias = -1.58496f;
 constexpr f32 kDlssSrBalancedMipLodBias = -1.78588f;
 constexpr f32 kDlssSrPerformanceMipLodBias = -2.0f;
-constexpr std::array<u8, 4> kVisibleSkyboxFallbackPixel = {
-    112u,
-    126u,
-    142u,
-    255u
-};
+
+std::vector<u8> BuildProceduralVisibleSkyboxPixels(
+    u32 width,
+    u32 height
+) {
+    std::vector<u8> pixels(
+        static_cast<std::size_t>(width) *
+            static_cast<std::size_t>(height) *
+            4u
+    );
+    for (u32 y = 0u; y < height; ++y) {
+        const f32 v = height > 1u
+            ? static_cast<f32>(y) / static_cast<f32>(height - 1u)
+            : 0.5f;
+        const f32 horizon = std::clamp(
+            1.0f - std::abs(v * 2.0f - 1.0f),
+            0.0f,
+            1.0f
+        );
+        const glm::vec3 color = v < 0.5f
+            ? glm::mix(
+                glm::vec3(0.20f, 0.32f, 0.52f),
+                glm::vec3(0.52f, 0.60f, 0.68f),
+                horizon
+            )
+            : glm::mix(
+                glm::vec3(0.52f, 0.60f, 0.68f),
+                glm::vec3(0.075f, 0.065f, 0.060f),
+                (v - 0.5f) * 2.0f
+            );
+        for (u32 x = 0u; x < width; ++x) {
+            const std::size_t offset =
+                (static_cast<std::size_t>(y) * width + x) * 4u;
+            pixels[offset + 0u] = static_cast<u8>(std::round(color.r * 255.0f));
+            pixels[offset + 1u] = static_cast<u8>(std::round(color.g * 255.0f));
+            pixels[offset + 2u] = static_cast<u8>(std::round(color.b * 255.0f));
+            pixels[offset + 3u] = 255u;
+        }
+    }
+    return pixels;
+}
 
 std::string ReadEnvironmentString(const char* name);
 constexpr u32 kTemporalConsumerSsrBit = 1u << 0u;
@@ -719,6 +758,41 @@ MaterialRenderClass RenderClassForCommand(const RenderCommand& command) {
     return properties.renderClass;
 }
 
+bool CommandIsTransparentSceneObject(const RenderCommand& command) {
+    return RenderClassForCommand(command) == MaterialRenderClass::Transparent;
+}
+
+std::span<const RenderCommand> FilterTransparentSceneObjects(
+    std::span<const RenderCommand> commands,
+    std::vector<RenderCommand>& filteredCommands,
+    bool transparentObjectsEnabled,
+    u32& skippedDraws,
+    u64& skippedTriangles
+) {
+    skippedDraws = 0u;
+    skippedTriangles = 0ull;
+    if (transparentObjectsEnabled || commands.empty()) {
+        return commands;
+    }
+
+    filteredCommands.clear();
+    filteredCommands.reserve(commands.size());
+    for (const RenderCommand& command : commands) {
+        if (CommandIsTransparentSceneObject(command)) {
+            ++skippedDraws;
+            skippedTriangles += TriangleCountForCommand(command);
+            continue;
+        }
+
+        filteredCommands.push_back(command);
+    }
+
+    return std::span<const RenderCommand>(
+        filteredCommands.data(),
+        filteredCommands.size()
+    );
+}
+
 f32 RenderClassValue(MaterialRenderClass renderClass) {
     return static_cast<f32>(static_cast<u32>(renderClass));
 }
@@ -1149,6 +1223,12 @@ RendererShadowCascadeStats ShadowCascadeStatsFor(
     stats.configuredCount = cascades.configuredCount;
     stats.activeCount = cascades.activeCount;
     stats.stableSnappingEnabled = cascades.stableSnappingEnabled ? 1u : 0u;
+    stats.requestedCoverageMode = static_cast<u32>(cascades.requestedCoverageMode);
+    stats.activeCoverageMode = static_cast<u32>(cascades.activeCoverageMode);
+    stats.cameraIndependent = cascades.cameraIndependent ? 1u : 0u;
+    stats.sceneBoundsValid = cascades.sceneBoundsValid ? 1u : 0u;
+    stats.coverageFallbackReason = cascades.coverageFallbackReason;
+    stats.projectionHash = cascades.projectionHash;
     stats.splitLambda = cascades.splitLambda;
     stats.maxDistance = cascades.maxDistance;
     stats.nearDepth = cascades.nearDepth;
@@ -2760,6 +2840,20 @@ VulkanIblGenerationSettings GlobalIblGenerationSettingsFromEnvironment() {
     return settings;
 }
 
+bool SameIblGenerationSettings(
+    const VulkanIblGenerationSettings& left,
+    const VulkanIblGenerationSettings& right
+) {
+    return left.quality == right.quality &&
+        left.source == right.source &&
+        left.cachePolicy == right.cachePolicy &&
+        left.sourceAssetPath == right.sourceAssetPath;
+}
+
+std::string SceneBuilderStudioPanoramaPath() {
+    return (std::filesystem::path(SE_ASSET_DIR) / "skybox" / "bk.jpg").string();
+}
+
 std::optional<RendererReflectionProbeCaptureSource>
 ReflectionProbeCaptureSourceOverrideFromEnvironment() {
     const std::string value =
@@ -3224,6 +3318,36 @@ bool WeightedTranslucencyAlphaReferenceEnabled() {
         EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_ALPHA_REFERENCE");
 }
 
+bool TransparentSceneObjectsEnabledFromEnvironment() {
+    if (EnvironmentFlagEnabled("SE_TRANSPARENT_OBJECTS_OFF") ||
+        EnvironmentFlagEnabled("SE_TRANSLUCENT_OBJECTS_OFF") ||
+        EnvironmentFlagEnabled("SE_SCENE_TRANSPARENCY_OFF") ||
+        EnvironmentFlagEnabled("SE_WEIGHTED_TRANSLUCENCY_OFF")) {
+        return false;
+    }
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_TRANSPARENT_OBJECTS")) {
+        return *overrideValue;
+    }
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_TRANSLUCENT_OBJECTS")) {
+        return *overrideValue;
+    }
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_SCENE_TRANSPARENCY")) {
+        return *overrideValue;
+    }
+    if (const std::optional<bool> overrideValue =
+            EnvironmentFlagOverride("SE_WEIGHTED_TRANSLUCENCY")) {
+        return *overrideValue;
+    }
+
+    // Temporary production-safe default: Blend/Transparent scene objects do not
+    // enter the main temporal/DLSS input until the translucent velocity,
+    // reactive-mask, and post-upscale ownership contract is rebuilt.
+    return false;
+}
+
 RendererLocalLight PointLocalLight(
     glm::vec3 position,
     f32 radius,
@@ -3344,7 +3468,7 @@ ReflectionProbeBoxProjectionRayResult ReflectionProbeBoxProjectDirection(
     }
 
     const glm::vec3 extents = glm::max(probe.boxExtents, glm::vec3(0.001f));
-    const glm::vec3 localPosition = worldPosition - probe.center;
+    const glm::vec3 localPosition = worldPosition - probe.boxCenter;
     glm::vec3 safeDirection = direction;
     for (i32 axis = 0; axis < 3; ++axis) {
         if (std::abs(safeDirection[axis]) < 0.0001f) {
@@ -3362,11 +3486,13 @@ ReflectionProbeBoxProjectionRayResult ReflectionProbeBoxProjectDirection(
         return result;
     }
 
-    const glm::vec3 hitLocal = localPosition + direction * hitDistance;
-    if (glm::dot(hitLocal, hitLocal) <= 0.0001f) {
+    const glm::vec3 hitPosition = probe.boxCenter +
+        localPosition + direction * hitDistance;
+    const glm::vec3 captureDirection = hitPosition - probe.center;
+    if (glm::dot(captureDirection, captureDirection) <= 0.0001f) {
         return result;
     }
-    result.direction = glm::normalize(hitLocal);
+    result.direction = glm::normalize(captureDirection);
     result.hitDistance = hitDistance;
     result.hit = true;
     result.directionChanged = glm::dot(result.direction, direction) < 0.9999f;
@@ -3383,7 +3509,7 @@ f32 ReflectionProbeBoxWeight(
 
     const glm::vec3 extents = glm::max(probe.boxExtents, glm::vec3(0.01f));
     const glm::vec3 normalized =
-        glm::abs(position - probe.center) / extents;
+        glm::abs(position - probe.boxCenter) / extents;
     const f32 maxAxis =
         std::max(normalized.x, std::max(normalized.y, normalized.z));
     if (maxAxis <= 1.0f) {
@@ -3412,15 +3538,17 @@ f32 ReflectionProbeInfluenceWeight(
         return 0.0f;
     }
 
+    const glm::vec3 influenceCenter = ReflectionProbeBoxProjectionEnabled(probe)
+        ? probe.boxCenter : probe.center;
     const f32 radius = std::max(probe.radius, 0.001f);
-    const f32 normalizedDistance = glm::length(position - probe.center) / radius;
+    const f32 normalizedDistance = glm::length(position - influenceCenter) / radius;
     const f32 falloff = std::clamp(probe.falloff, 0.25f, 8.0f);
     f32 influence =
         std::pow(std::clamp(1.0f - normalizedDistance, 0.0f, 1.0f), falloff);
     if (ReflectionProbeBoxProjectionEnabled(probe)) {
         const glm::vec3 extents = glm::max(probe.boxExtents, glm::vec3(0.001f));
         const glm::vec3 normalizedBox =
-            glm::abs(position - probe.center) / extents;
+            glm::abs(position - probe.boxCenter) / extents;
         const f32 maxAxis =
             std::max(normalizedBox.x, std::max(normalizedBox.y, normalizedBox.z));
         influence *= 1.0f - SmoothStep(1.0f, 1.25f, maxAxis);
@@ -3435,7 +3563,7 @@ f32 ReflectionProbeShapeCoordinate(
 ) {
     if (ReflectionProbeBoxProjectionEnabled(probe)) {
         const glm::vec3 extents = glm::max(probe.boxExtents, glm::vec3(0.001f));
-        const glm::vec3 normalized = glm::abs(position - probe.center) / extents;
+        const glm::vec3 normalized = glm::abs(position - probe.boxCenter) / extents;
         return std::max(normalized.x, std::max(normalized.y, normalized.z));
     }
 
@@ -3518,8 +3646,10 @@ f32 ReflectionProbeSelectionScore(
     const RendererReflectionProbe& probe,
     glm::vec3 position
 ) {
+    const glm::vec3 influenceCenter = ReflectionProbeBoxProjectionEnabled(probe)
+        ? probe.boxCenter : probe.center;
     const f32 radius = std::max(probe.radius, 0.001f);
-    const f32 distance = glm::length(position - probe.center);
+    const f32 distance = glm::length(position - influenceCenter);
     const f32 normalizedDistance = distance / radius;
     const f32 falloff = std::clamp(probe.falloff, 0.25f, 8.0f);
     const f32 sphereInfluence =
@@ -3770,6 +3900,18 @@ struct CapturedReflectionProbeGeometrySample {
     u32 affectedRenderableRegionMask = 0;
 };
 
+bool ReflectionProbeExcludesRenderable(
+    const RendererReflectionProbe& probe,
+    const RenderCommand& command
+) {
+    return command.renderableIdentity != 0u &&
+        std::binary_search(
+            probe.captureExcludedRenderableIdentities.begin(),
+            probe.captureExcludedRenderableIdentities.end(),
+            command.renderableIdentity
+        );
+}
+
 CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
     const RendererReflectionProbe& probe,
     std::span<const RenderCommand> commands
@@ -3778,7 +3920,8 @@ CapturedReflectionProbeGeometrySample CapturedReflectionProbeGeometrySampleFor(
     u64 signature = 0x2fdb9a9f90ca7f23ull;
     const f32 captureDistance = ReflectionProbeCaptureDistance(probe);
     for (const RenderCommand& command : commands) {
-        if (!command.reflectionCaptureVisible) {
+        if (!command.reflectionCaptureVisible ||
+            ReflectionProbeExcludesRenderable(probe, command)) {
             continue;
         }
         if (!SphereIntersectsAabb(
@@ -4108,6 +4251,7 @@ RendererReflectionProbe SceneReflectionProbe(
     RendererReflectionProbe probe{};
     probe.center = source.center;
     probe.radius = source.radius;
+    probe.boxCenter = source.boxCenter;
     probe.boxExtents = source.boxExtents;
     probe.color = source.color;
     probe.intensity = source.intensity;
@@ -4119,6 +4263,8 @@ RendererReflectionProbe SceneReflectionProbe(
     probe.captureSource = RendererCaptureSource(source.captureSource);
     probe.captureAssetId = source.captureAssetId;
     probe.refreshPolicy = RendererRefreshPolicy(source.refreshPolicy);
+    probe.captureExcludedRenderableIdentities =
+        source.captureExcludedRenderableIdentities;
     return ClampReflectionProbe(probe);
 }
 
@@ -4131,6 +4277,7 @@ RendererReflectionProbe SettingsReflectionProbe(
         settings.localReflectionProbeCenterY,
         settings.localReflectionProbeCenterZ
     };
+    probe.boxCenter = probe.center;
     probe.radius = settings.localReflectionProbeRadius;
     probe.boxExtents = glm::vec3(settings.localReflectionProbeRadius);
     probe.color = {
@@ -4373,6 +4520,10 @@ void WriteFrameReflectionProbeStats(
     RendererReflectionProbeStats& stats
 ) {
     const RendererReflectionProbe& localProbe = frameProbes.localProbe;
+    stats.fallbackEnabled = frameProbes.fallbackEnabled ? 1u : 0u;
+    stats.diffuseIntensity = frameProbes.diffuseIntensity;
+    stats.specularIntensity = frameProbes.specularIntensity;
+    stats.horizonBlend = frameProbes.horizonBlend;
     stats.sceneProbeCount = frameProbes.sceneProbeCount;
     stats.activeProbeCount = frameProbes.activeLocalProbeCount;
     stats.sceneEligibleProbeCount = frameProbes.eligibleSceneProbeCount;
@@ -4548,6 +4699,24 @@ void WriteFrameReflectionProbeStats(
     WriteReflectionReceiverAuditStats(frameProbes, stats);
 }
 
+void WriteFrameEnvironmentStats(
+    const FrameEnvironmentSettings& environment,
+    bool visibleSkyboxSourceTextureReady,
+    RendererEnvironmentStats& stats
+) {
+    stats.iblEnabled = environment.iblEnabled ? 1u : 0u;
+    stats.diffuseIntensity = environment.diffuseIntensity;
+    stats.specularIntensity = environment.specularIntensity;
+    stats.horizonBlend = environment.horizonBlend;
+    stats.skyboxEnabled = environment.skyboxEnabled ? 1u : 0u;
+    stats.skyboxIntensity = environment.skyboxIntensity;
+    stats.skyboxBlur = environment.skyboxBlur;
+    stats.lightingAsset = environment.lightingAsset;
+    stats.visibleSkyboxUsesActiveIbl = 0u;
+    stats.visibleSkyboxSourceTextureReady =
+        visibleSkyboxSourceTextureReady ? 1u : 0u;
+}
+
 void PopulateReflectionProbeUniforms(
     const FrameReflectionProbeSet& reflectionProbes,
     bool globalCubemapSamplingEnabled,
@@ -4564,7 +4733,7 @@ void PopulateReflectionProbeUniforms(
         cubemapSamplingEnabled &&
         reflectionProbes.captureResourceReady;
     uniformData.localReflectionProbePositionRadius = glm::vec4(
-        localProbe.center,
+        localProbe.boxCenter,
         localProbe.radius
     );
     uniformData.localReflectionProbeControls = glm::vec4(
@@ -4610,7 +4779,7 @@ void PopulateReflectionProbeUniforms(
             cubemapSamplingEnabled &&
             reflectionProbes.selectedCaptureDescriptorBound[index];
         uniformData.reflectionProbePositionRadius[index] = glm::vec4(
-            probe.center,
+            probe.boxCenter,
             probe.radius
         );
         uniformData.reflectionProbeControlsArray[index] = glm::vec4(
@@ -4637,7 +4806,12 @@ void PopulateReflectionProbeUniforms(
                 ? 0.0f
                 : mipCount > 0u ? static_cast<f32>(mipCount - 1u) : 0.0f,
             static_cast<f32>(mipCount),
-            probeCubemapApplied ? 1.0f : 0.0f,
+            probeCubemapApplied
+                ? probe.captureSource ==
+                        RendererReflectionProbeCaptureSource::CapturedScene
+                    ? 2.0f
+                    : 1.0f
+                : 0.0f,
             probe.captureSource ==
                     RendererReflectionProbeCaptureSource::CapturedScene &&
                     reflectionProbes
@@ -4645,6 +4819,10 @@ void PopulateReflectionProbeUniforms(
                     probeCubemapApplied
                 ? 1.0f
                 : 0.0f
+        );
+        uniformData.reflectionProbeCapturePositions[index] = glm::vec4(
+            probe.center,
+            1.0f
         );
         if (reflectionProbes.selectedDiffuseIrradianceLobesReady[index]) {
             for (std::size_t lobe = 0; lobe < kReflectionProbeDiffuseLobeCount;
@@ -5100,34 +5278,6 @@ bool ApplySceneDirectionalLight(
     );
     lights.directionalCount = 1;
     return true;
-}
-
-bool ApplyMaterialDirectionalFallback(
-    std::span<const RenderCommand> renderCommands,
-    FrameLightSet& lights
-) {
-    for (const RenderCommand& command : renderCommands) {
-        const glm::vec3 candidate{
-            command.materialPushConstants.materialCustom.x,
-            command.materialPushConstants.materialCustom.y,
-            command.materialPushConstants.materialCustom.z
-        };
-        if (glm::dot(candidate, candidate) <= 0.0001f) {
-            continue;
-        }
-
-        lights.primaryDirectional.direction = glm::normalize(candidate);
-        lights.primaryDirectional.intensity =
-            std::max(command.materialPushConstants.materialControls.y, 0.0f);
-        lights.primaryDirectional.ambient =
-            std::max(command.materialPushConstants.materialCustom.w, 0.0f);
-        lights.primaryDirectional.specular =
-            std::max(command.materialPushConstants.materialControls.z, 0.0f);
-        lights.directionalCount = 1;
-        return true;
-    }
-
-    return false;
 }
 
 int GBufferDebugViewIndex(ForwardDebugView view) {
@@ -5882,8 +6032,8 @@ VulkanRenderer::~VulkanRenderer() {
     m_SsrDepthPyramidSampler.reset();
     m_SceneTargetSampler.reset();
     m_VisibleSkyboxSampler.reset();
-    m_VisibleSkyboxTexture.reset();
-    m_VisibleSkyboxFallbackTexture.reset();
+    m_VisibleSkyboxStudioTexture.reset();
+    m_VisibleSkyboxProceduralTexture.reset();
     m_ColorGradingLut.reset();
     m_BloomPyramid.reset();
     m_SsrDepthPyramid.reset();
@@ -5949,7 +6099,6 @@ void VulkanRenderer::DrawFrame() {
         gpuOcclusion.requested == 0u
             ? RendererGpuOcclusionFallbackReason::Disabled
             : RendererGpuOcclusionFallbackReason::ResourcesUnavailable
-#endif
     );
     const VulkanRayTracingCapabilities& rayTracingCapabilities =
         m_Device.RayTracingCapabilities();
@@ -6046,6 +6195,8 @@ void VulkanRenderer::DrawFrame() {
         m_TemporalRenderTargetsRecreateRequested = false;
         RecreateSwapchain();
     }
+
+    (void)RefreshSceneEnvironmentIblAsset();
 
     const VkFence currentFrameFence = m_SyncObjects->InFlightFence(m_CurrentFrame);
     const VkSemaphore imageAvailableSemaphore = m_SyncObjects->ImageAvailableSemaphore(m_CurrentFrame);
@@ -6334,9 +6485,18 @@ void VulkanRenderer::DrawFrame() {
                 SetTemporalAntialiasingMode(
                     static_cast<RendererTemporalAntialiasingMode>(mode)
                 );
-            }
+            },
+            m_ImGuiSceneBuilder
         );
 
+        frameStats.sceneBuilderGizmo.enabled =
+            m_ImGuiSceneBuilder != nullptr ? 1u : 0u;
+        frameStats.sceneBuilderGizmo.mode =
+            m_ImGuiLayer->SceneBuilderGizmoModeId();
+        frameStats.sceneBuilderGizmo.shortcutModeSwitchCount =
+            m_ImGuiLayer->SceneBuilderGizmoShortcutModeSwitchCount();
+        frameStats.sceneBuilderGizmo.shortcutModeMask =
+            m_ImGuiLayer->SceneBuilderGizmoShortcutModeMask();
         sectionEnd = FrameClock::now();
         frameStats.cpu.imguiMs = ElapsedMilliseconds(sectionStart, sectionEnd);
     } else {
@@ -6465,11 +6625,58 @@ void VulkanRenderer::DrawFrame() {
     frameStats.cpu.queueBuildMs = ElapsedMilliseconds(sectionStart, sectionEnd);
     sectionStart = sectionEnd;
 
-    const std::span<const RenderCommand> mainCommands = m_RenderQueue.Commands();
-    const std::span<const RenderCommand> hybridReflectionCommands =
+    const bool transparentObjectsEnabled =
+        TransparentSceneObjectsEnabledFromEnvironment();
+    const std::span<const RenderCommand> rawMainCommands = m_RenderQueue.Commands();
+    const std::span<const RenderCommand> rawHybridReflectionCommands =
         m_HybridReflectionRenderQueue.Commands();
-    const std::span<const RenderCommand> overlayCommands = m_OverlayRenderQueue.Commands();
-    const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
+    const std::span<const RenderCommand> rawOverlayCommands =
+        m_OverlayRenderQueue.Commands();
+    const std::span<const RenderCommand> rawShadowCommands = ShadowRenderCommands();
+    std::vector<RenderCommand> filteredMainCommands;
+    std::vector<RenderCommand> filteredHybridReflectionCommands;
+    std::vector<RenderCommand> filteredOverlayCommands;
+    std::vector<RenderCommand> filteredShadowCommands;
+    u32 transparentMainSkippedDraws = 0u;
+    u32 transparentReflectionSkippedDraws = 0u;
+    u32 transparentOverlaySkippedDraws = 0u;
+    u32 transparentShadowSkippedDraws = 0u;
+    u64 transparentMainSkippedTriangles = 0ull;
+    u64 transparentReflectionSkippedTriangles = 0ull;
+    u64 transparentOverlaySkippedTriangles = 0ull;
+    u64 transparentShadowSkippedTriangles = 0ull;
+    const std::span<const RenderCommand> mainCommands =
+        FilterTransparentSceneObjects(
+            rawMainCommands,
+            filteredMainCommands,
+            transparentObjectsEnabled,
+            transparentMainSkippedDraws,
+            transparentMainSkippedTriangles
+        );
+    const std::span<const RenderCommand> hybridReflectionCommands =
+        FilterTransparentSceneObjects(
+            rawHybridReflectionCommands,
+            filteredHybridReflectionCommands,
+            transparentObjectsEnabled,
+            transparentReflectionSkippedDraws,
+            transparentReflectionSkippedTriangles
+        );
+    const std::span<const RenderCommand> overlayCommands =
+        FilterTransparentSceneObjects(
+            rawOverlayCommands,
+            filteredOverlayCommands,
+            transparentObjectsEnabled,
+            transparentOverlaySkippedDraws,
+            transparentOverlaySkippedTriangles
+        );
+    const std::span<const RenderCommand> shadowCommands =
+        FilterTransparentSceneObjects(
+            rawShadowCommands,
+            filteredShadowCommands,
+            transparentObjectsEnabled,
+            transparentShadowSkippedDraws,
+            transparentShadowSkippedTriangles
+        );
     const bool shadowSamplingEnabled = shadowPassEnabled && !shadowCommands.empty();
     const bool recordTransparentAlphaReference =
         WeightedTranslucencyAlphaReferenceEnabled();
@@ -6583,8 +6790,8 @@ void VulkanRenderer::DrawFrame() {
         DepthPyramidMemoryBytes(m_OcclusionDepthPyramid.get());
     gpuOcclusion.auditBufferMemoryBytes = m_GpuOcclusionAudit != nullptr
         ? m_GpuOcclusionAudit->BufferMemoryBytes()
-    bool gpuOcclusionIndirectConsume = false;
         : 0u;
+    bool gpuOcclusionIndirectConsume = false;
 
     if (gpuOcclusion.requested > 0u && !has3DMainPass) {
         gpuOcclusion.fallbackReason = static_cast<u32>(
@@ -6599,6 +6806,7 @@ void VulkanRenderer::DrawFrame() {
         glm::mat4 occlusionProjection = mainFrameMatrices->proj;
         if (temporalState.jitterApplied) {
             ApplyProjectionJitter(occlusionProjection, temporalState.jitterUv);
+        }
         const glm::mat4 canonicalViewProjection =
             mainFrameMatrices->proj * mainFrameMatrices->view;
         const f32 occlusionReuseJitterGuardPixels =
@@ -6607,17 +6815,16 @@ void VulkanRenderer::DrawFrame() {
                     ? NativeTaaJitterScaleFromEnvironment()
                     : 1.0f)
                 : 0.0f;
-        }
         const glm::mat4 inverseView = glm::inverse(mainFrameMatrices->view);
         const GpuOcclusionPrepareResult prepared =
             m_GpuOcclusionAudit->PrepareFrame(
                 imageIndex,
                 mainCommands,
-                canonicalViewProjection,
                 occlusionProjection * mainFrameMatrices->view,
+                canonicalViewProjection,
+                glm::vec3(inverseView[3]),
                 temporalState.jitterPixels,
                 occlusionReuseJitterGuardPixels,
-                glm::vec3(inverseView[3]),
                 m_OcclusionDepthPyramid->Extent(),
                 m_OcclusionDepthPyramid->MipCount(),
                 GpuOcclusionDepthEpsilonFromEnvironment()
@@ -6629,6 +6836,7 @@ void VulkanRenderer::DrawFrame() {
         gpuOcclusion.capacityDroppedCount = prepared.capacityDroppedCount;
         gpuOcclusion.uploadedCandidateCount = prepared.uploadedCandidateCount;
         gpuOcclusion.uploadedCandidateBytes = prepared.uploadedCandidateBytes;
+        gpuOcclusion.candidateIdentityHash = prepared.candidateIdentityHash;
         gpuOcclusion.candidateContentHash = prepared.candidateContentHash;
         gpuOcclusion.classificationJitterPixelsX =
             prepared.classificationJitterPixelsX;
@@ -6636,9 +6844,9 @@ void VulkanRenderer::DrawFrame() {
             prepared.classificationJitterPixelsY;
         gpuOcclusion.classificationJitterGuardPixels =
             prepared.reuseJitterGuardPixels;
-        gpuOcclusion.candidateIdentityHash = prepared.candidateIdentityHash;
         gpuOcclusion.actualTriangleCount = prepared.actualTriangleCount;
         gpuOcclusion.active = prepared.uploadedCandidateCount > 0u ? 1u : 0u;
+        gpuOcclusion.actualDrawsUnchanged = gpuOcclusion.active;
         GpuOcclusionConsumeStatus consumeStatus =
             m_GpuOcclusionAudit->ConsumeStatus(
                 imageIndex,
@@ -6672,7 +6880,6 @@ void VulkanRenderer::DrawFrame() {
         gpuOcclusion.indirectJitterGuardPixels =
             consumeStatus.jitterGuardPixels;
         gpuOcclusionIndirectConsume = consumeStatus.ready;
-        gpuOcclusion.actualDrawsUnchanged = gpuOcclusion.active;
         gpuOcclusion.fallbackReason = static_cast<u32>(
             gpuOcclusion.active > 0u
                 ? RendererGpuOcclusionFallbackReason::None
@@ -6750,15 +6957,28 @@ void VulkanRenderer::DrawFrame() {
         ssrSceneColorHistorySourceValid
             ? *m_PreviousTemporalHistoryImageIndex
             : imageIndex;
+    const bool ffxSssrHistorySourceValid =
+        ssrSceneColorHistorySourceValid &&
+        !temporalState.historyReset &&
+        m_FfxSssrRadianceHistoryValid;
+    const u32 ffxSssrHistorySourceImageIndex =
+        ffxSssrHistorySourceValid
+            ? ssrSceneColorHistorySourceImageIndex
+            : static_cast<u32>(imageIndex);
     const int deferredPbrDebugView =
         DeferredPbrDebugViewIndex(m_RenderDebugSettings.forwardView);
+    const bool rayQueryReflectionCarrierRequested =
+        m_ShadowSettings.rayQueryReflectionCarrierEnabled &&
+        m_HybridReflectionAccelerationStructures != nullptr &&
+        m_HybridReflectionRayQuery != nullptr;
     const bool ssrColorResolveCandidate =
         has3DMainPass &&
         m_DeferredLightingPipeline != nullptr &&
         m_GBufferDescriptorSets != nullptr &&
-        m_ShadowSettings.ssrStrength > 0.0001f &&
-        m_ShadowSettings.ssrRayLength > 0.0001f &&
-        m_ShadowSettings.ssrStepCount > 0u;
+        (rayQueryReflectionCarrierRequested ||
+            (m_ShadowSettings.ssrStrength > 0.0001f &&
+                m_ShadowSettings.ssrRayLength > 0.0001f &&
+                m_ShadowSettings.ssrStepCount > 0u));
     const bool ffxSssrDeferredCompositeSuppressed =
         EnvironmentFlagEnabled("SE_SSR_FFX_COMPOSITE_OFF");
     const bool ffxSssrVisibleOutputClearRequested =
@@ -6767,6 +6987,12 @@ void VulkanRenderer::DrawFrame() {
     const bool ffxSssrVisibleOutputClearEnabled =
         m_ShadowSettings.ssrFidelityFxBackendRequested &&
         ffxSssrVisibleOutputClearRequested;
+    const bool ffxSssrSparseOutputClearRequested =
+        EnvironmentFlagEnabled("SE_SSR_FFX_CLEAR_SPARSE_OUTPUTS") ||
+        !EnvironmentFlagEnabled("SE_SSR_FFX_CLEAR_SPARSE_OUTPUTS_OFF");
+    const bool ffxSssrSparseOutputClearEnabled =
+        m_ShadowSettings.ssrFidelityFxBackendRequested &&
+        ffxSssrSparseOutputClearRequested;
     const bool ffxSssrDeferredCompositeRequested =
         m_ShadowSettings.ssrFidelityFxBackendRequested &&
         !ffxSssrDeferredCompositeSuppressed &&
@@ -6797,17 +7023,18 @@ void VulkanRenderer::DrawFrame() {
     const u32 ffxSssrSamplesPerQuad =
         FfxSssrSamplesPerQuadFromEnvironment();
 #if !defined(NDEBUG)
-    const bool ffxSssrMirrorDnsrPassthroughReverseControlActive =
-        EnvironmentFlagEnabled("SE_SSR_FFX_MIRROR_DNSR_PASSTHROUGH_OFF");
+    const bool ffxSssrExclusiveReflectionOwnerReverseControlActive =
+        EnvironmentFlagEnabled("SE_SSR_FFX_EXCLUSIVE_REFLECTION_OWNER_OFF");
     const bool ffxSssrConfidenceSpatialFilterEnabled =
         !EnvironmentFlagEnabled("SE_SSR_FFX_CONFIDENCE_SPATIAL_FILTER_OFF");
 #else
-    const bool ffxSssrMirrorDnsrPassthroughReverseControlActive = false;
+    const bool ffxSssrExclusiveReflectionOwnerReverseControlActive = false;
     const bool ffxSssrConfidenceSpatialFilterEnabled = true;
 #endif
-    const bool ffxSssrMirrorDnsrPassthroughRequested =
-        ffxSssrSamplesPerQuad == 4u &&
-        !ffxSssrMirrorDnsrPassthroughReverseControlActive;
+    // ResolveTemporal is the sole production source for FFX SSSR radiance.
+    // Feeding raw Intersect output to mirror receivers bypasses DNSR's
+    // temporal accumulation and exposes stochastic hit samples as artifacts.
+    const bool ffxSssrMirrorDnsrPassthroughRequested = false;
     const bool ffxSssrSameFrameCompositeRequested =
         ffxSssrDeferredCompositeRequested &&
         !ffxSssrSameFrameCompositeReverseControlActive &&
@@ -6861,6 +7088,9 @@ void VulkanRenderer::DrawFrame() {
     const bool ffxSssrSameFrameCompositeActive =
         ffxSssrSameFrameCompositeRequested &&
         ffxSssrSameFrameCompositeDescriptorUpdated;
+    const bool ffxSssrExclusiveReflectionOwnerActive =
+        ffxSssrSameFrameCompositeActive &&
+        !ffxSssrExclusiveReflectionOwnerReverseControlActive;
     const bool ffxSssrMirrorDnsrPassthroughActive =
         ffxSssrSameFrameCompositeActive &&
         !ffxSssrHitConfidenceReverseControlActive &&
@@ -6877,6 +7107,41 @@ void VulkanRenderer::DrawFrame() {
                 ssrSceneColorHistorySourceImageIndex
             )
             : VK_NULL_HANDLE;
+    const bool directRayQueryCompositeResourcesReady =
+        rayQueryReflectionCarrierRequested &&
+        hybridReflections.tlasInstanceCount > 0u &&
+        m_FfxSssrConstantsResources != nullptr &&
+        imageIndex < m_FfxSssrConstantsResources->Count() &&
+        m_FfxSssrApplyPipeline != nullptr &&
+        m_FfxSssrApplyGBufferDescriptorSets != nullptr &&
+        imageIndex < m_FfxSssrApplyGBufferDescriptorSets->Count() &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr &&
+        imageIndex < m_HybridReflectionRayQuery->Count() &&
+        m_HybridReflectionRayQuery->HitSurfaceView(
+            static_cast<u32>(imageIndex)
+        ) != VK_NULL_HANDLE;
+    const VkImageView directRayQueryHitSurfaceView =
+        directRayQueryCompositeResourcesReady
+            ? m_HybridReflectionRayQuery->HitSurfaceView(
+                static_cast<u32>(imageIndex)
+            )
+            : VK_NULL_HANDLE;
+    const bool directRayQueryCompositeActive =
+        directRayQueryCompositeResourcesReady &&
+        m_FfxSssrApplyGBufferDescriptorSets->UpdateSsrSceneColorHistory(
+            m_Device,
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            imageIndex,
+            imageIndex,
+            directRayQueryHitSurfaceView,
+            VK_IMAGE_LAYOUT_GENERAL,
+            directRayQueryHitSurfaceView,
+            VK_IMAGE_LAYOUT_GENERAL,
+            directRayQueryHitSurfaceView,
+            VK_IMAGE_LAYOUT_GENERAL
+        );
     const bool gBufferSceneColorHistoryDescriptorUpdated =
         m_GBufferDescriptorSets != nullptr &&
         m_SceneRenderTargets != nullptr &&
@@ -6889,6 +7154,20 @@ void VulkanRenderer::DrawFrame() {
             ssrSceneColorHistorySourceImageIndex,
             ffxSssrDeferredCompositeView,
             VK_IMAGE_LAYOUT_GENERAL
+        );
+    const bool ssrReconstructionHistoryDescriptorUpdated =
+        ssrSceneColorHistorySourceValid &&
+        m_SsrReconstructionDescriptorSets != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr &&
+        imageIndex < m_SsrReconstructionDescriptorSets->Count() &&
+        m_SsrReconstructionDescriptorSets->Count() ==
+            m_SceneRenderTargets->Count() &&
+        m_SsrReconstructionDescriptorSets->UpdateHistoryInputs(
+            *m_SceneRenderTargets,
+            *m_SceneTargetSampler,
+            imageIndex,
+            ssrSceneColorHistorySourceImageIndex
         );
     // SSR Temporal binding 7 is created against the current frame's HDR
     // scene-color image and must remain that way until the post-lighting
@@ -6910,10 +7189,11 @@ void VulkanRenderer::DrawFrame() {
         frameLightSet,
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr
     );
-    const FrameReflectionProbeSet frameReflectionProbes =
-        BuildFrameReflectionProbeSet(
-            mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr
-        );
+    const FrameEnvironmentSettings frameEnvironment = BuildFrameEnvironmentSettings();
+    const FrameReflectionProbeSet frameReflectionProbes = BuildFrameReflectionProbeSet(
+        mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
+        frameEnvironment
+    );
     const bool objectReflectionProbeAssignmentsChanged =
         AssignObjectReflectionProbes(
             m_RenderQueue.MutableCommands(),
@@ -7312,7 +7592,9 @@ void VulkanRenderer::DrawFrame() {
         ? BuildFrameMaterialSet(mainCommands)
         : FrameMaterialSet{};
     const FrameLightConstants frameLights = frameLightSet.Constants();
-    const glm::mat4 lightViewProjection = LightViewProjection(shadowCommands, frameLightSet);
+    const glm::mat4 lightViewProjection = frameLightSet.directionalCount > 0u
+        ? LightViewProjection(shadowCommands, frameLightSet)
+        : glm::mat4(1.0f);
     const DirectionalShadowCascadeSet directionalShadowCascades =
         BuildDirectionalShadowCascades(
             shadowCommands,
@@ -7368,6 +7650,7 @@ void VulkanRenderer::DrawFrame() {
         lightViewProjection,
         frameLights,
         frameReflectionProbes,
+        frameEnvironment,
         shadowSamplingEnabled,
         &temporalState,
         ffxSssrDeferredCompositeActive,
@@ -7375,12 +7658,24 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrSameFrameCompositeActive && !ffxSssrHitConfidenceReverseControlActive,
         ffxSssrSameFrameCompositeActive &&
             !ffxSssrHitConfidenceReverseControlActive &&
-            ffxSssrConfidenceSpatialFilterEnabled
+            ffxSssrConfidenceSpatialFilterEnabled,
+        ffxSssrExclusiveReflectionOwnerActive,
+        directRayQueryCompositeActive
     );
+    const bool ffxSssrHistoryDescriptorsUpdated =
+        m_FfxSssrReprojectResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_FfxSssrReprojectResources->UpdateHistorySources(
+            m_Device,
+            *m_SceneRenderTargets,
+            imageIndex,
+            ffxSssrHistorySourceImageIndex
+        );
     UpdateFfxSssrConstants(
         imageIndex,
         mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr,
         &temporalState,
+        ffxSssrHistorySourceValid && ffxSssrHistoryDescriptorsUpdated,
         ffxSssrTemporalStabilityFactor,
         ffxSssrSamplesPerQuad,
         ffxSssrStableEnvironmentFallbackEnabled,
@@ -7403,6 +7698,7 @@ void VulkanRenderer::DrawFrame() {
         lightViewProjection,
         frameLights,
         frameReflectionProbes,
+        frameEnvironment,
         shadowSamplingEnabled
     );
     FrameLightTileStats lightTileStats{};
@@ -7464,12 +7760,48 @@ void VulkanRenderer::DrawFrame() {
         overlayCommands,
         shadowCommands
     );
+    frameStats.draw.transparentObjectsEnabled =
+        transparentObjectsEnabled ? 1u : 0u;
+    frameStats.draw.transparentObjectMainSkippedDraws =
+        transparentMainSkippedDraws;
+    frameStats.draw.transparentObjectShadowSkippedDraws =
+        transparentShadowSkippedDraws;
+    frameStats.draw.transparentObjectReflectionSkippedDraws =
+        transparentReflectionSkippedDraws;
+    frameStats.draw.transparentObjectOverlaySkippedDraws =
+        transparentOverlaySkippedDraws;
+    frameStats.draw.transparentObjectSkippedDraws =
+        transparentMainSkippedDraws +
+        transparentShadowSkippedDraws +
+        transparentReflectionSkippedDraws +
+        transparentOverlaySkippedDraws;
+    frameStats.draw.transparentObjectSkippedTriangles =
+        transparentMainSkippedTriangles +
+        transparentShadowSkippedTriangles +
+        transparentReflectionSkippedTriangles +
+        transparentOverlaySkippedTriangles;
     frameStats.bonePaletteDraw = BonePaletteDrawStatsFor(
         mainCommands,
         m_BonePaletteFallbackDescriptorSet != nullptr &&
             m_BonePaletteFallbackDescriptorSet->Ready() != 0u
     );
     frameStats.shadowCascades = ShadowCascadeStatsFor(directionalShadowCascades);
+    if (directionalShadowCascades.activeCount > 0u &&
+        directionalShadowCascades.projectionHash != 0u) {
+        if (!m_DirectionalShadowProjectionAvailable ||
+            m_DirectionalShadowProjectionHash !=
+                directionalShadowCascades.projectionHash) {
+            m_DirectionalShadowProjectionHash =
+                directionalShadowCascades.projectionHash;
+            ++m_DirectionalShadowProjectionRevision;
+            m_DirectionalShadowProjectionAvailable = true;
+        }
+    } else {
+        m_DirectionalShadowProjectionAvailable = false;
+        m_DirectionalShadowProjectionHash = 0u;
+    }
+    frameStats.shadowCascades.projectionRevision =
+        m_DirectionalShadowProjectionRevision;
     frameStats.shadowCascades.quality = static_cast<u32>(m_ShadowSettings.quality);
     frameStats.shadowCascades.directionalReceiveEnabled =
         m_ShadowSettings.directionalShadowReceiveEnabled ? 1u : 0u;
@@ -7612,9 +7944,13 @@ void VulkanRenderer::DrawFrame() {
     frameStats.shadowCascades.casterDepthBiasSlope =
         std::clamp(m_ShadowSettings.casterDepthBiasSlope, 0.0f, 16.0f);
     frameStats.shadowCascades.blendRatio =
-        std::clamp(m_ShadowSettings.cascadeBlendRatio, 0.0f, 0.25f);
+        directionalShadowCascades.cameraIndependent
+            ? 0.0f
+            : std::clamp(m_ShadowSettings.cascadeBlendRatio, 0.0f, 0.25f);
     frameStats.shadowCascades.fadeRatio =
-        std::clamp(m_ShadowSettings.cascadeFadeRatio, 0.0f, 0.35f);
+        directionalShadowCascades.cameraIndependent
+            ? 0.0f
+            : std::clamp(m_ShadowSettings.cascadeFadeRatio, 0.0f, 0.35f);
     frameStats.shadowCascades.receiverGuardRatio =
         ShadowCascadeReceiverGuardRatio();
     frameStats.shadowCascades.contactShadowStrength =
@@ -7639,6 +7975,8 @@ void VulkanRenderer::DrawFrame() {
         ffxSssrDeferredCompositeRequested ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrVisibleOutputClearEnabled =
         ffxSssrVisibleOutputClearEnabled ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrSparseOutputClearEnabled =
+        ffxSssrSparseOutputClearEnabled ? 1u : 0u;
     frameStats.ssr.fidelityFxSssrCompositeConfidenceMode =
         ffxSssrCompositeConfidenceMode;
     frameStats.ssr.fidelityFxSssrDeferredCompositeActive =
@@ -7697,6 +8035,10 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.fidelityFxSssrSameFrameCompositeSourceFrameAge = 0u;
     frameStats.ssr.fidelityFxSssrSameFrameCompositeReverseControlActive =
         ffxSssrSameFrameCompositeReverseControlActive ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrExclusiveReflectionOwnerActive =
+        ffxSssrExclusiveReflectionOwnerActive ? 1u : 0u;
+    frameStats.ssr.fidelityFxSssrExclusiveReflectionOwnerReverseControlActive =
+        ffxSssrExclusiveReflectionOwnerReverseControlActive ? 1u : 0u;
     frameStats.ssr.holeDiagnosticsRequested =
         ssrHoleDiagnosticsRequested ? 1u : 0u;
     frameStats.ssr.holeDiagnosticsReadbackValid =
@@ -7755,6 +8097,20 @@ void VulkanRenderer::DrawFrame() {
         frameReflectionProbes,
         frameStats.reflectionProbe
     );
+    const bool studioSkyboxSelected =
+        frameEnvironment.lightingAsset == static_cast<u32>(
+            SceneEnvironmentLightingAsset::StudioPanorama
+        );
+    WriteFrameEnvironmentStats(
+        frameEnvironment,
+        studioSkyboxSelected
+            ? m_VisibleSkyboxStudioTexture != nullptr
+            : m_VisibleSkyboxProceduralTexture != nullptr,
+        frameStats.environment
+    );
+    frameStats.environment.iblReloadCount = m_SceneEnvironmentIblReloadCount;
+    frameStats.environment.iblReloadFailureCount =
+        m_SceneEnvironmentIblReloadFailureCount;
     const bool recordAutoExposureCompute =
         frameStats.postProcess.autoExposureEnabled > 0 &&
         hdrCompositeAvailable &&
@@ -7901,6 +8257,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.captureCulledCount;
     frameStats.reflectionProbe.capturedSceneSelfCaptureExcludedCount =
         capturedSceneAudit.selfCaptureExcludedCount;
+    frameStats.reflectionProbe.capturedSceneExplicitProbeExcludedCount =
+        capturedSceneAudit.explicitProbeExcludedCount;
     frameStats.reflectionProbe.capturedSceneCaptureFaceOrientationMask =
         capturedSceneAudit.captureFaceOrientationMask;
     frameStats.reflectionProbe.capturedSceneMipGenerationCount =
@@ -7917,6 +8275,8 @@ void VulkanRenderer::DrawFrame() {
         capturedSceneAudit.ggxPrefilterSourceImageSeparated ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterPdfLodEnabled =
         capturedSceneAudit.ggxPrefilterPdfLodEnabled ? 1u : 0u;
+    frameStats.reflectionProbe.capturedSceneGlobalIblCompositionApplied =
+        capturedSceneAudit.globalIblCompositionApplied ? 1u : 0u;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterDispatchCount =
         capturedSceneAudit.ggxPrefilterDispatchCount;
     frameStats.reflectionProbe.capturedSceneGgxPrefilterSampleCount =
@@ -9088,16 +9448,20 @@ void VulkanRenderer::DrawFrame() {
             m_Swapchain->Extent(),
             static_cast<u32>(m_Swapchain->Images().size()),
             m_ShadowMap != nullptr ? m_ShadowMap->Extent().width : 0,
-            m_DirectionalShadowCascadeAtlas != nullptr
+            directionalShadowCascades.activeCount > 0u &&
+                    m_DirectionalShadowCascadeAtlas != nullptr
                 ? m_DirectionalShadowCascadeAtlas->Extent().width
                 : 0,
-            m_DirectionalShadowCascadeAtlas != nullptr
+            directionalShadowCascades.activeCount > 0u &&
+                    m_DirectionalShadowCascadeAtlas != nullptr
                 ? m_DirectionalShadowCascadeAtlas->Extent().height
                 : 0,
-            m_DirectionalShadowCascadeAtlas != nullptr
+            directionalShadowCascades.activeCount > 0u &&
+                    m_DirectionalShadowCascadeAtlas != nullptr
                 ? m_DirectionalShadowCascadeAtlas->TileSize()
                 : 0,
-            m_DirectionalShadowCascadeAtlas != nullptr
+            directionalShadowCascades.activeCount > 0u &&
+                    m_DirectionalShadowCascadeAtlas != nullptr
                 ? m_DirectionalShadowCascadeAtlas->CascadeCapacity()
                 : 0,
             m_LocalShadowAtlas != nullptr
@@ -9420,6 +9784,24 @@ void VulkanRenderer::DrawFrame() {
             "SE_HYBRID_REFLECTIONS_RAY_QUERY_ORIGIN_BIAS_MAX",
             rayQuerySettings.originBiasMax
         );
+        const FrameEnvironmentSettings rayQueryEnvironment =
+            BuildFrameEnvironmentSettings();
+        rayQuerySettings.hitIblDiffuseIntensity = std::clamp(
+            rayQueryEnvironment.diffuseIntensity,
+            0.0f,
+            4.0f
+        );
+        rayQuerySettings.hitIblSpecularIntensity = std::clamp(
+            rayQueryEnvironment.specularIntensity,
+            0.0f,
+            4.0f
+        );
+        rayQuerySettings.globalIblEnabled =
+            m_ShadowSettings.globalIblCubemapEnabled &&
+            rayQueryEnvironment.iblEnabled;
+        rayQuerySettings.globalSpecularVisible =
+            rayQueryEnvironment.skyboxEnabled;
+        rayQuerySettings.hitIblEnabled = rayQueryEnvironment.iblEnabled;
         rayQuerySettings.maxShadowedLocalLights = static_cast<u32>(std::clamp(
             std::round(EnvironmentFloatOrDefault(
                 "SE_HYBRID_REFLECTIONS_SHADOW_MAX_LOCAL_LIGHTS",
@@ -9462,9 +9844,9 @@ void VulkanRenderer::DrawFrame() {
             "SE_HYBRID_REFLECTIONS_FORCE_ALL_RAY_QUERIES"
         );
 #if !defined(NDEBUG)
-        rayQuerySettings.hitIblEnabled = !EnvironmentFlagEnabled(
-            "SE_HYBRID_REFLECTIONS_HIT_IBL_OFF"
-        );
+        rayQuerySettings.hitIblEnabled =
+            rayQuerySettings.hitIblEnabled &&
+            !EnvironmentFlagEnabled("SE_HYBRID_REFLECTIONS_HIT_IBL_OFF");
         rayQuerySettings.sourceFusionEnabled = !EnvironmentFlagEnabled(
             "SE_HYBRID_REFLECTIONS_SOURCE_FUSION_OFF"
         );
@@ -9472,6 +9854,13 @@ void VulkanRenderer::DrawFrame() {
             "SE_HYBRID_REFLECTIONS_DIRECT_MIRROR_OFF"
         );
 #endif
+        if (rayQueryReflectionCarrierRequested) {
+            // Direct hardware Ray Query is the sole geometry-reflection
+            // producer for Scene Builder. No screen-space source is mixed in.
+            rayQuerySettings.forceAllRayQueries = true;
+            rayQuerySettings.sourceFusionEnabled = false;
+            rayQuerySettings.directMirrorRayQueryEnabled = false;
+        }
         HybridReflectionProbeFrameInputs rayQueryProbeInputs{};
         std::array<VkImageView, kMaxHybridReflectionProbes>
             rayQueryProbePrefilteredViews{};
@@ -9553,7 +9942,7 @@ void VulkanRenderer::DrawFrame() {
                 );
             const u32 mipCount =
                 frameReflectionProbes.selectedCaptureMipCounts[probeIndex];
-            output.positionRadius = glm::vec4(probe.center, probe.radius);
+            output.positionRadius = glm::vec4(probe.boxCenter, probe.radius);
             output.controls = glm::vec4(
                 probeApplied ? 1.0f : 0.0f,
                 probe.intensity,
@@ -9574,6 +9963,7 @@ void VulkanRenderer::DrawFrame() {
                 0.0f,
                 0.0f
             );
+            output.capturePosition = glm::vec4(probe.center, 1.0f);
             if (prefilteredReady) {
                 rayQueryProbePrefilteredReadyMask |= 1u << probeIndex;
             }
@@ -9604,12 +9994,10 @@ void VulkanRenderer::DrawFrame() {
         rayQuerySettings.fullAuditEnabled = false;
 #endif
         const bool rayQueryConsumerEnabled =
+            rayQueryReflectionCarrierRequested &&
             hybridReflections.rayQueryConsumerControlDisabled == 0u &&
-            frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0u &&
             hybridReflections.tlasInstanceCount > 0u;
-        const bool denoiserInjectionEnabled =
-            hybridReflections.rayQueryDenoiserInjectionControlDisabled == 0u &&
-            ffxSssrSameFrameCompositeActive;
+        constexpr bool denoiserInjectionEnabled = false;
 #if !defined(NDEBUG)
         constexpr bool rayQueryDiagnosticsEnabled = true;
 #else
@@ -9855,7 +10243,7 @@ void VulkanRenderer::DrawFrame() {
         m_DoubleSidedGraphicsPipeline.get(),
         *m_DescriptorSets,
         *m_MaterialDescriptorSets,
-        m_RenderQueue.Commands(),
+        mainCommands,
         *m_Framebuffer,
         m_DepthLoadRenderPass.get(),
         m_DepthLoadFramebuffer.get(),
@@ -9926,7 +10314,7 @@ void VulkanRenderer::DrawFrame() {
         gBufferDebugView,
         has3DMainPass ? m_DepthPrefillGraphicsPipeline.get() : nullptr,
         has3DMainPass ? m_DoubleSidedDepthPrefillGraphicsPipeline.get() : nullptr,
-        has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
+        m_SceneRenderTargets.get(),
         has3DMainPass ? m_DepthBuffer.get() : nullptr,
         m_GBufferRenderPass.get(),
         m_GBufferFramebuffer.get(),
@@ -10037,10 +10425,12 @@ void VulkanRenderer::DrawFrame() {
             ? m_GpuOcclusionAudit.get()
             : nullptr,
         &frameStats.gpuOcclusion,
+        gpuOcclusionIndirectConsume,
         frameStats.ssr.reconstructionActive > 0
             ? m_SsrTraceComputePipeline.get()
             : nullptr,
-        frameStats.ssr.reconstructionActive > 0
+        (frameStats.ssr.reconstructionActive > 0 ||
+            ffxSssrSameFrameCompositeActive)
             ? m_SsrTemporalComputePipeline.get()
             : nullptr,
         frameStats.ssr.reconstructionActive > 0
@@ -10049,17 +10439,18 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.holeDiagnosticsActive > 0
             ? m_SsrDiagnosticsComputePipeline.get()
             : nullptr,
-        frameStats.ssr.reconstructionActive > 0
+        (frameStats.ssr.reconstructionActive > 0 ||
+            ffxSssrSameFrameCompositeActive)
             ? m_SsrReconstructionDescriptorSets.get()
             : nullptr,
-        frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
+        (frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0 ||
+            directRayQueryCompositeActive)
             ? m_FfxSssrConstantsResources.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
             ? m_FfxSssrClassifyTilesPipeline.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
-        gpuOcclusionIndirectConsume,
             ? m_FfxSssrClassifyTilesResources.get()
             : nullptr,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
@@ -10098,24 +10489,31 @@ void VulkanRenderer::DrawFrame() {
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0
             ? m_FfxSssrResolveTemporalResources.get()
             : nullptr,
-        ffxSssrSameFrameCompositeActive
+        (ffxSssrSameFrameCompositeActive || directRayQueryCompositeActive)
             ? m_FfxSssrApplyPipeline.get()
             : nullptr,
-        ffxSssrSameFrameCompositeActive
+        (ffxSssrSameFrameCompositeActive || directRayQueryCompositeActive)
             ? m_FfxSssrApplyGBufferDescriptorSets.get()
             : nullptr,
         ffxSssrSameFrameCompositeActive,
+        directRayQueryCompositeActive,
         frameStats.ssr.fidelityFxSssrRuntimeDispatchReady > 0,
+        !rayQueryReflectionCarrierRequested,
         ffxSssrVisibleOutputClearEnabled,
-        has3DMainPass ? m_SceneRenderTargets.get() : nullptr,
+        ffxSssrSparseOutputClearEnabled,
+        ffxSssrHistorySourceImageIndex,
+        ffxSssrHistorySourceValid && ffxSssrHistoryDescriptorsUpdated,
+        m_SceneRenderTargets.get(),
         frameStats.ssr.reconstructionActive > 0,
+        ffxSssrSameFrameCompositeActive &&
+            ffxSssrHistoryDescriptorsUpdated,
         m_SsrReconstructionImagesInitialized,
         frameStats.temporal.historyReset > 0,
         m_HybridReflectionAccelerationStructures.get(),
         m_HybridReflectionRayQuery.get(),
         &hybridReflections
     );
-    if (has3DMainPass && m_SceneRenderTargets != nullptr) {
+    if (m_SceneRenderTargets != nullptr) {
         m_SsrReconstructionImagesInitialized = true;
     }
     frameStats.ssr.reconstructionTraceDispatches =
@@ -10189,8 +10587,12 @@ void VulkanRenderer::DrawFrame() {
         frameStats.binds.ffxSssrResolveTemporalDescriptorBinds;
     frameStats.ssr.fidelityFxSssrResolveTemporalHistoryCopies =
         frameStats.binds.ffxSssrResolveTemporalHistoryCopies;
+    frameStats.ssr.fidelityFxSssrReceiverHistoryUpdates =
+        frameStats.binds.ffxSssrReceiverHistoryUpdates;
     frameStats.ssr.fidelityFxSssrVisibleOutputClears =
         frameStats.binds.ffxSssrVisibleOutputClears;
+    frameStats.ssr.fidelityFxSssrSparseOutputClears =
+        frameStats.binds.ffxSssrSparseOutputClears;
     frameStats.ssr.fidelityFxSssrSameFrameCompositeApplyDraws =
         frameStats.binds.ffxSssrApplyDraws;
     frameStats.ssr.fidelityFxSssrSameFrameCompositeFrameBinds =
@@ -10206,11 +10608,15 @@ void VulkanRenderer::DrawFrame() {
             frameStats.ssr.fidelityFxSssrSameFrameCompositeGBufferBinds == 1u
             ? 1u
             : 0u;
+    const bool ffxSssrRadianceProducerActive =
+        frameStats.ssr.fidelityFxSssrIntersectDispatches > 0u ||
+        (rayQueryReflectionCarrierRequested &&
+            hybridReflections.rayQueryDispatchCount > 0u);
     frameStats.ssr.fidelityFxSssrRuntimeActive =
         frameStats.ssr.fidelityFxSssrClassifyTilesDispatches > 0u &&
             frameStats.ssr.fidelityFxSssrPrepareIndirectArgsDispatches > 0u &&
             frameStats.ssr.fidelityFxSssrBlueNoiseDispatches > 0u &&
-            frameStats.ssr.fidelityFxSssrIntersectDispatches > 0u &&
+            ffxSssrRadianceProducerActive &&
             frameStats.ssr.fidelityFxSssrReprojectDispatches > 0u &&
             frameStats.ssr.fidelityFxSssrPrefilterDispatches > 0u &&
             frameStats.ssr.fidelityFxSssrResolveTemporalDispatches > 0u
@@ -10266,6 +10672,15 @@ void VulkanRenderer::DrawFrame() {
     frameStats.ssr.reconstructionCurrentHdrRadianceFilterEnabled =
         frameStats.ssr.reconstructionCurrentHdrSourceEnabled > 0 &&
             m_ShadowSettings.ssrCurrentHdrRadianceFilterEnabled
+            ? 1u
+            : 0u;
+    frameStats.ssr.reconstructionHistoryDescriptorUpdated =
+        ssrReconstructionHistoryDescriptorUpdated ? 1u : 0u;
+    frameStats.ssr.reconstructionHistorySourceImageIndex =
+        ssrSceneColorHistorySourceImageIndex;
+    frameStats.ssr.reconstructionHistorySourceMatchesSceneColorHistory =
+        ssrReconstructionHistoryDescriptorUpdated &&
+            ssrSceneColorHistorySourceValid
             ? 1u
             : 0u;
     frameStats.ssr.reconstructionCurrentHdrMipLevels =
@@ -10558,6 +10973,11 @@ void VulkanRenderer::DrawFrame() {
     frameStats.cpu.submitPresentMs = ElapsedMilliseconds(sectionStart, sectionEnd);
     frameStats.cpu.totalFrameMs = ElapsedMilliseconds(frameStart, sectionEnd);
     m_LastStats = frameStats;
+    BuildRuntimeMonitorSnapshot(
+        imageIndex,
+        sceneExtent,
+        mainFrameMatrices.has_value() ? &*mainFrameMatrices : nullptr
+    );
 
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
         presentResult == VK_SUBOPTIMAL_KHR ||
@@ -10698,6 +11118,22 @@ void VulkanRenderer::SetImGui3DContext(Scene3D* scene, Camera3D* camera) {
     m_ImGuiCamera3D = camera;
 }
 
+void VulkanRenderer::SetImGuiSceneBuilder(SceneBuilder* sceneBuilder) {
+    m_ImGuiSceneBuilder = sceneBuilder;
+}
+
+bool VulkanRenderer::SceneBuilderGizmoCapturesMouse() const {
+    return m_ImGuiLayer != nullptr && m_ImGuiLayer->SceneBuilderGizmoCapturesMouse();
+}
+
+void VulkanRenderer::SetSceneBuilderGizmoModeFromShortcut(
+    SceneBuilderGizmoMode mode
+) {
+    if (m_ImGuiLayer != nullptr) {
+        m_ImGuiLayer->SetSceneBuilderGizmoModeFromShortcut(mode);
+    }
+}
+
 void VulkanRenderer::SetOverlay3DContext(
     Scene3D* scene,
     Camera3D* camera,
@@ -10777,6 +11213,282 @@ const VulkanRenderDebugSettings& VulkanRenderer::RenderDebugSettings() const {
 
 const RendererStats& VulkanRenderer::Stats() const {
     return m_LastStats;
+}
+
+const RendererFrameMonitorSnapshot& VulkanRenderer::RuntimeMonitorSnapshot() const {
+    return m_RuntimeMonitorSnapshot;
+}
+
+void VulkanRenderer::BuildRuntimeMonitorSnapshot(
+    std::size_t imageIndex,
+    VkExtent2D renderExtent,
+    const FrameMatrices* matrices
+) {
+    RendererFrameMonitorSnapshot snapshot{};
+
+    const VkPhysicalDeviceProperties& properties = m_PhysicalDevice.Properties();
+    const QueueFamilyIndices& queueFamilies = m_PhysicalDevice.QueueFamilies();
+    const VulkanRayTracingCapabilities& rayTracing =
+        m_Device.RayTracingCapabilities();
+    snapshot.session.deviceName = properties.deviceName;
+#if defined(_DEBUG)
+    snapshot.session.buildConfiguration = "Debug";
+#else
+    snapshot.session.buildConfiguration = "Release";
+#endif
+    snapshot.session.vendorId = properties.vendorID;
+    snapshot.session.deviceId = properties.deviceID;
+    snapshot.session.driverVersion = properties.driverVersion;
+    snapshot.session.apiVersion = properties.apiVersion;
+    snapshot.session.graphicsQueueFamily =
+        queueFamilies.graphicsFamily.value_or(0u);
+    snapshot.session.presentQueueFamily =
+        queueFamilies.presentFamily.value_or(0u);
+    snapshot.session.rayQueryHardwareReady =
+        rayTracing.RayQueryHardwareReady() ? 1u : 0u;
+    snapshot.session.accelerationStructureSupported =
+        rayTracing.accelerationStructureExtensionSupported &&
+            rayTracing.accelerationStructureFeatureSupported
+            ? 1u
+            : 0u;
+    snapshot.session.rayTracingPipelineSupported =
+        rayTracing.rayTracingPipelineExtensionSupported &&
+            rayTracing.rayTracingPipelineFeatureSupported
+            ? 1u
+            : 0u;
+
+    const VkExtent2D displayExtent = m_Swapchain != nullptr
+        ? m_Swapchain->Extent()
+        : VkExtent2D{};
+    snapshot.frame.swapchainImageIndex = static_cast<u32>(imageIndex);
+    snapshot.frame.displayWidth = displayExtent.width;
+    snapshot.frame.displayHeight = displayExtent.height;
+    snapshot.frame.renderWidth = renderExtent.width;
+    snapshot.frame.renderHeight = renderExtent.height;
+    snapshot.frame.swapchainFormat = m_Swapchain != nullptr
+        ? static_cast<u32>(m_Swapchain->ImageFormat())
+        : static_cast<u32>(VK_FORMAT_UNDEFINED);
+    snapshot.frame.antialiasingModeId =
+        static_cast<u32>(m_TemporalAntialiasingMode);
+    switch (m_TemporalAntialiasingMode) {
+    case RendererTemporalAntialiasingMode::Environment:
+        snapshot.frame.antialiasingMode = "Environment";
+        break;
+    case RendererTemporalAntialiasingMode::NativeTaa:
+        snapshot.frame.antialiasingMode = "NativeTaa";
+        break;
+    case RendererTemporalAntialiasingMode::DlssDlaa:
+        snapshot.frame.antialiasingMode = "DlssDlaa";
+        break;
+    case RendererTemporalAntialiasingMode::DlssSrQuality:
+        snapshot.frame.antialiasingMode = "DlssSrQuality";
+        break;
+    case RendererTemporalAntialiasingMode::DlssSrBalanced:
+        snapshot.frame.antialiasingMode = "DlssSrBalanced";
+        break;
+    case RendererTemporalAntialiasingMode::DlssSrPerformance:
+        snapshot.frame.antialiasingMode = "DlssSrPerformance";
+        break;
+    case RendererTemporalAntialiasingMode::Off:
+        snapshot.frame.antialiasingMode = "Off";
+        break;
+    }
+    if (m_LastStats.cpu.totalFrameMs > 0.0f) {
+        snapshot.frame.instantaneousFps = 1000.0f / m_LastStats.cpu.totalFrameMs;
+    }
+    if (matrices != nullptr) {
+        snapshot.frame.view = matrices->view;
+        snapshot.frame.projection = matrices->proj;
+        snapshot.frame.matricesAvailable = true;
+    }
+
+    const auto appendQueue = [&snapshot](
+        std::string name,
+        std::span<const RenderCommand> commands
+    ) {
+        RendererMonitorQueueSnapshot queue{};
+        queue.name = std::move(name);
+        queue.commands.reserve(commands.size());
+        for (const RenderCommand& command : commands) {
+            RendererMonitorCommandSnapshot commandSnapshot{};
+            commandSnapshot.renderIdentity = command.renderableIdentity;
+#if !defined(NDEBUG)
+            commandSnapshot.debugName = std::string(command.debugRenderableName);
+#endif
+            commandSnapshot.submissionIndex =
+                static_cast<u32>(command.submissionIndex);
+            commandSnapshot.drawOrder = command.drawOrder;
+            commandSnapshot.lodLevel = command.lodLevel;
+            commandSnapshot.lodScreenFraction = command.lodScreenFraction;
+            commandSnapshot.castShadow = command.castShadow;
+            commandSnapshot.reflectionCaptureVisible =
+                command.reflectionCaptureVisible;
+            commandSnapshot.boundsValid = command.worldBounds.valid;
+            commandSnapshot.boundsMin = command.worldBounds.min;
+            commandSnapshot.boundsMax = command.worldBounds.max;
+            commandSnapshot.gpuOcclusionCandidateIndex =
+                command.gpuOcclusionCandidateIndex;
+            commandSnapshot.reflectionProbeAssignmentCode =
+                command.reflectionProbeAssignmentCode;
+            commandSnapshot.reflectionProbeSceneIndex =
+                command.reflectionProbeSceneIndex;
+            commandSnapshot.bonePaletteResourceId = command.bonePaletteResourceId;
+            commandSnapshot.bonePaletteReady = command.bonePaletteReady;
+            commandSnapshot.bonePaletteDescriptorReady =
+                command.bonePaletteDescriptorSetReady;
+            commandSnapshot.bonePaletteRevision = command.bonePaletteRevision;
+            if (command.mesh != nullptr) {
+                commandSnapshot.vertexCount = command.mesh->VertexCount();
+                commandSnapshot.indexCount = command.mesh->IndexCount();
+                commandSnapshot.vertexStride = command.mesh->VertexStride();
+                commandSnapshot.triangleCount = commandSnapshot.indexCount > 0u
+                    ? commandSnapshot.indexCount / 3u
+                    : commandSnapshot.vertexCount / 3u;
+            }
+            queue.submittedTriangles += commandSnapshot.triangleCount;
+            queue.commands.push_back(std::move(commandSnapshot));
+        }
+        snapshot.queues.push_back(std::move(queue));
+    };
+
+    appendQueue("mainBuilt", m_RenderQueue.Commands());
+    appendQueue("shadowBuilt", m_ShadowRenderQueue.Commands());
+    appendQueue("overlayBuilt", m_OverlayRenderQueue.Commands());
+    appendQueue(
+        "hybridReflectionBuilt",
+        m_HybridReflectionRenderQueue.Commands()
+    );
+    appendQueue(
+        "reflectionCaptureBuilt",
+        m_ReflectionCaptureRenderQueue.Commands()
+    );
+    appendQueue(
+        "reflectionCaptureInfluenceBuilt",
+        m_ReflectionCaptureInfluenceRenderQueue.Commands()
+    );
+
+    const RenderFrameGraphPlan& frameGraph = m_LastStats.frameGraph;
+    snapshot.resources.reserve(frameGraph.resources.size());
+    for (const RenderGraphResource& resource : frameGraph.resources) {
+        snapshot.resources.push_back(RendererMonitorResourceSnapshot{
+            resource.id,
+            std::string(resource.name),
+            std::string(RenderGraphResourceStatusName(resource.status)),
+            std::string(RenderGraphResourceLifetimeName(resource.lifetime)),
+            std::string(resource.format),
+            std::string(resource.usage),
+            std::string(resource.scale),
+            resource.firstUsePassId,
+            resource.lastUsePassId,
+            resource.readCount,
+            resource.writeCount
+        });
+    }
+
+    snapshot.passes.reserve(frameGraph.passes.size());
+    for (const RenderFramePass& pass : frameGraph.passes) {
+        RendererMonitorPassExecutionSnapshot passSnapshot{};
+        passSnapshot.id = pass.id;
+        passSnapshot.name = std::string(pass.name);
+        passSnapshot.queue = std::string(RenderFramePassQueueName(pass.queue));
+        passSnapshot.status = std::string(RenderFramePassStatusName(pass.status));
+        passSnapshot.kind = static_cast<u32>(pass.kind);
+        passSnapshot.executionSource = pass.status == RenderFramePassStatus::Roadmap
+            ? "roadmap pass"
+            : "frame graph plan; no direct execution counter";
+
+        const auto setDrawMetrics = [&passSnapshot](
+            u32 drawCount,
+            u64 triangleCount,
+            std::string source
+        ) {
+            passSnapshot.executionKnown = true;
+            passSnapshot.drawCount = drawCount;
+            passSnapshot.triangleCount = triangleCount;
+            passSnapshot.executionSource = std::move(source);
+        };
+        const auto setDispatchMetrics = [&passSnapshot](
+            u32 dispatchCount,
+            std::string source
+        ) {
+            passSnapshot.executionKnown = true;
+            passSnapshot.dispatchCount = dispatchCount;
+            passSnapshot.executionSource = std::move(source);
+        };
+
+        if (pass.name == "GBufferOpaque") {
+            setDrawMetrics(
+                m_LastStats.draw.gBufferDraws,
+                m_LastStats.draw.gBufferTriangles,
+                "RendererDrawStats.gBuffer"
+            );
+        } else if (pass.name == "WeightedTranslucencyForwardPlus") {
+            setDrawMetrics(
+                m_LastStats.weightedTranslucency.draws,
+                m_LastStats.draw.hybridWeightedTranslucencyTriangles,
+                "RendererWeightedTranslucencyStats.draws"
+            );
+        } else if (pass.name == "WeightedTranslucencyResolve") {
+            setDrawMetrics(
+                m_LastStats.weightedTranslucency.resolveDraws,
+                0u,
+                "RendererWeightedTranslucencyStats.resolveDraws"
+            );
+        } else if (pass.name == "ForwardResidualHdrPreUpscale") {
+            setDrawMetrics(
+                m_LastStats.draw.hybridForwardResidualDraws,
+                m_LastStats.draw.hybridForwardResidualTriangles,
+                "RendererDrawStats.hybridForwardResidual"
+            );
+        } else if (pass.name == "LegacyForward3D") {
+            setDrawMetrics(
+                m_LastStats.draw.mainDraws,
+                m_LastStats.draw.mainTriangles,
+                "RendererDrawStats.main"
+            );
+        } else if (pass.name == "OverlayForward3D") {
+            setDrawMetrics(
+                m_LastStats.draw.overlayDraws,
+                m_LastStats.draw.overlayTriangles,
+                "RendererDrawStats.overlay"
+            );
+        } else if (pass.name == "SSRDepthPyramidBuild") {
+            setDispatchMetrics(
+                m_LastStats.ssr.depthPyramidBuildDispatchCount,
+                "RendererSsrStats.depthPyramidBuildDispatchCount"
+            );
+        } else if (pass.name == "SSRTrace") {
+            setDispatchMetrics(
+                m_LastStats.ssr.reconstructionTraceDispatches,
+                "RendererSsrStats.reconstructionTraceDispatches"
+            );
+        } else if (pass.name == "SSRTemporal") {
+            setDispatchMetrics(
+                m_LastStats.ssr.reconstructionTemporalDispatches,
+                "RendererSsrStats.reconstructionTemporalDispatches"
+            );
+        } else if (pass.name == "SSRSpatial") {
+            setDispatchMetrics(
+                m_LastStats.ssr.reconstructionSpatialDispatches,
+                "RendererSsrStats.reconstructionSpatialDispatches"
+            );
+        } else if (pass.name == "DeferredLighting") {
+            setDrawMetrics(
+                m_LastStats.binds.deferredLightingDraws,
+                0u,
+                "RendererBindStats.deferredLightingDraws"
+            );
+        } else if (pass.name == "HDRComposite") {
+            setDrawMetrics(
+                m_LastStats.binds.hdrCompositeDraws,
+                0u,
+                "RendererBindStats.hdrCompositeDraws"
+            );
+        }
+        snapshot.passes.push_back(std::move(passSnapshot));
+    }
+
+    m_RuntimeMonitorSnapshot = std::move(snapshot);
 }
 
 VulkanShadowSettings& VulkanRenderer::ShadowSettings() {
@@ -11069,7 +11781,8 @@ void VulkanRenderer::CreateSwapchainResources() {
             m_Device,
             m_PhysicalDevice
         );
-    m_IblGenerationSettings = GlobalIblGenerationSettingsFromEnvironment();
+    m_DefaultIblGenerationSettings = GlobalIblGenerationSettingsFromEnvironment();
+    m_IblGenerationSettings = m_DefaultIblGenerationSettings;
     GenerateIblTextures(m_Device, m_PhysicalDevice, m_CommandPool,
         m_IblBrdfImage, m_IblIrradianceImage, m_IblPrefilteredImage,
         m_IblIrradianceView, m_IblPrefilteredView, m_IblSampler,
@@ -15492,12 +16205,15 @@ void VulkanRenderer::UpdateUniformBuffer(
     const glm::mat4& lightViewProjection,
     const FrameLightConstants& lights,
     const FrameReflectionProbeSet& reflectionProbes,
+    const FrameEnvironmentSettings& environment,
     bool shadowSamplingEnabled,
     const FrameTemporalState* temporalState,
     bool ssrFidelityFxDeferredCompositeActive,
     bool ssrFidelityFxSameFrameCompositeActive,
     bool ssrFidelityFxHitConfidenceActive,
-    bool ssrFidelityFxConfidenceSpatialFilterActive
+    bool ssrFidelityFxConfidenceSpatialFilterActive,
+    bool ssrFidelityFxExclusiveReflectionOwnerActive,
+    bool directRayQueryCompositeActive
 ) const {
     UniformBufferObject uniformData{};
     if (matrices != nullptr) {
@@ -15575,7 +16291,9 @@ void VulkanRenderer::UpdateUniformBuffer(
         (ssrFidelityFxDeferredCompositeActive ? 131072.0f : 0.0f) +
         (ssrFidelityFxSameFrameCompositeActive ? 262144.0f : 0.0f) +
         (ssrFidelityFxHitConfidenceActive ? 524288.0f : 0.0f) +
-        (ssrFidelityFxConfidenceSpatialFilterActive ? 1048576.0f : 0.0f);
+        (ssrFidelityFxConfidenceSpatialFilterActive ? 1048576.0f : 0.0f) +
+        (ssrFidelityFxExclusiveReflectionOwnerActive ? 2097152.0f : 0.0f) +
+        (directRayQueryCompositeActive ? 4194304.0f : 0.0f);
     uniformData.ssrControls = glm::vec4(
         std::clamp(m_ShadowSettings.ssrStrength, 0.0f, 1.0f),
         std::clamp(m_ShadowSettings.ssrRayLength, 0.0f, 64.0f),
@@ -15584,10 +16302,10 @@ void VulkanRenderer::UpdateUniformBuffer(
             (m_ShadowSettings.ssrRefinementEnabled ? 1.0f : -1.0f)
     );
     uniformData.reflectionProbeControls = glm::vec4(
-        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
+        reflectionProbes.fallbackEnabled ? 1.0f : 0.0f,
+        std::clamp(environment.diffuseIntensity, 0.0f, 4.0f),
+        std::clamp(environment.specularIntensity, 0.0f, 4.0f),
+        std::clamp(environment.horizonBlend, 0.0f, 1.0f)
     );
     PopulateReflectionProbeUniforms(
         reflectionProbes,
@@ -15600,9 +16318,9 @@ void VulkanRenderer::UpdateUniformBuffer(
         TemporalNativeTaaModeActive() ||
         TaaResolveEnabledFromEnvironment();
     uniformData.environmentControls = glm::vec4(
-        m_ShadowSettings.skyboxEnabled ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.skyboxIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.skyboxBlur, 0.0f, 8.0f),
+        environment.skyboxEnabled ? 1.0f : 0.0f,
+        std::clamp(environment.skyboxIntensity, 0.0f, 4.0f),
+        std::clamp(environment.skyboxBlur, 0.0f, 8.0f),
         temporalSkyboxStabilization ? 2.0f : 1.0f
     );
     PopulateProbeGridUniforms(uniformData);
@@ -15693,6 +16411,7 @@ void VulkanRenderer::UpdateFfxSssrConstants(
     std::size_t imageIndex,
     const FrameMatrices* matrices,
     const FrameTemporalState* temporalState,
+    bool historySourceValid,
     f32 temporalStabilityFactor,
     u32 samplesPerQuad,
     bool stableEnvironmentFallbackEnabled,
@@ -15776,7 +16495,7 @@ void VulkanRenderer::UpdateFfxSssrConstants(
     constants.reprojectionContractReady =
         temporalState != nullptr &&
         temporalState->historyValid &&
-        m_FfxSssrRadianceHistoryValid
+        historySourceValid
         ? 1u
         : 0u;
     constants.compositeConfidenceMode =
@@ -15804,6 +16523,7 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
     const glm::mat4& lightViewProjection,
     const FrameLightConstants& lights,
     const FrameReflectionProbeSet& reflectionProbes,
+    const FrameEnvironmentSettings& environment,
     bool shadowSamplingEnabled
 ) const {
     if (m_OverlayUniformBuffer == nullptr || matrices == nullptr) {
@@ -15888,10 +16608,10 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
             (m_ShadowSettings.ssrRefinementEnabled ? 1.0f : -1.0f)
     );
     uniformData.reflectionProbeControls = glm::vec4(
-        m_ShadowSettings.reflectionProbeFallbackEnabled ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.reflectionProbeDiffuseIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.reflectionProbeSpecularIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.reflectionProbeHorizonBlend, 0.0f, 1.0f)
+        reflectionProbes.fallbackEnabled ? 1.0f : 0.0f,
+        std::clamp(environment.diffuseIntensity, 0.0f, 4.0f),
+        std::clamp(environment.specularIntensity, 0.0f, 4.0f),
+        std::clamp(environment.horizonBlend, 0.0f, 1.0f)
     );
     PopulateReflectionProbeUniforms(
         reflectionProbes,
@@ -15904,9 +16624,9 @@ void VulkanRenderer::UpdateOverlayUniformBuffer(
         TemporalNativeTaaModeActive() ||
         TaaResolveEnabledFromEnvironment();
     uniformData.environmentControls = glm::vec4(
-        m_ShadowSettings.skyboxEnabled ? 1.0f : 0.0f,
-        std::clamp(m_ShadowSettings.skyboxIntensity, 0.0f, 4.0f),
-        std::clamp(m_ShadowSettings.skyboxBlur, 0.0f, 8.0f),
+        environment.skyboxEnabled ? 1.0f : 0.0f,
+        std::clamp(environment.skyboxIntensity, 0.0f, 4.0f),
+        std::clamp(environment.skyboxBlur, 0.0f, 8.0f),
         temporalSkyboxStabilization ? 2.0f : 1.0f
     );
     PopulateProbeGridUniforms(uniformData);
@@ -16301,11 +17021,13 @@ void VulkanRenderer::UpdateDirectionalShadowCascadeBuffer(
         cascades.stableSnappingEnabled ? 1.0f : 0.0f,
         cascades.singleMapSampling ? -1.0f : cascades.splitLambda
     );
+    const bool fixedCoverage =
+        cascades.singleMapSampling || cascades.cameraIndependent;
     cascadeData.cascadeBlendControls = glm::vec4(
-        cascades.singleMapSampling
+        fixedCoverage
             ? 0.0f
             : std::clamp(m_ShadowSettings.cascadeBlendRatio, 0.0f, 0.25f),
-        cascades.singleMapSampling
+        fixedCoverage
             ? 0.0f
             : std::clamp(m_ShadowSettings.cascadeFadeRatio, 0.0f, 0.35f),
         static_cast<f32>(std::clamp<u32>(m_ShadowSettings.pcfKernelRadius, 0u, 2u)),
@@ -16509,9 +17231,8 @@ void VulkanRenderer::UpdateLocalShadowBuffer(
 
 FrameLightSet VulkanRenderer::BuildFrameLightSet(std::span<const RenderCommand> renderCommands) const {
     FrameLightSet lights{};
-    if (!ApplySceneDirectionalLight(m_MainScene3D, lights)) {
-        (void)ApplyMaterialDirectionalFallback(renderCommands, lights);
-    }
+    (void)renderCommands;
+    ApplySceneDirectionalLight(m_MainScene3D, lights);
 
     AddScenePointLights(m_MainScene3D, lights);
     AddSceneSpotLights(m_MainScene3D, lights);
@@ -16531,12 +17252,61 @@ FrameLightSet VulkanRenderer::BuildFrameLightSet(std::span<const RenderCommand> 
     return lights;
 }
 
+FrameEnvironmentSettings VulkanRenderer::BuildFrameEnvironmentSettings() const {
+    FrameEnvironmentSettings environment{
+        m_ShadowSettings.reflectionProbeFallbackEnabled,
+        m_ShadowSettings.reflectionProbeDiffuseIntensity,
+        m_ShadowSettings.reflectionProbeSpecularIntensity,
+        m_ShadowSettings.reflectionProbeHorizonBlend,
+        m_ShadowSettings.skyboxEnabled,
+        m_ShadowSettings.skyboxIntensity,
+        m_ShadowSettings.skyboxBlur,
+        0u
+    };
+    if (m_MainScene3D == nullptr || !m_MainScene3D->EnvironmentAuthored()) {
+        return environment;
+    }
+
+    const SceneEnvironment3D& sceneEnvironment = m_MainScene3D->Environment();
+    environment.iblEnabled =
+        m_ShadowSettings.reflectionProbeFallbackEnabled && sceneEnvironment.iblEnabled;
+    environment.diffuseIntensity = sceneEnvironment.diffuseIntensity;
+    environment.specularIntensity = sceneEnvironment.specularIntensity;
+    environment.horizonBlend = sceneEnvironment.horizonBlend;
+    environment.skyboxEnabled = sceneEnvironment.skyboxEnabled;
+    environment.skyboxIntensity = sceneEnvironment.skyboxIntensity;
+    environment.skyboxBlur = sceneEnvironment.skyboxBlur;
+    environment.lightingAsset = static_cast<u32>(sceneEnvironment.lightingAsset);
+    return environment;
+}
+
+VulkanIblGenerationSettings VulkanRenderer::BuildSceneEnvironmentIblGenerationSettings() const {
+    VulkanIblGenerationSettings settings = m_DefaultIblGenerationSettings;
+    if (m_MainScene3D == nullptr || !m_MainScene3D->EnvironmentAuthored()) {
+        return settings;
+    }
+
+    const SceneEnvironment3D& environment = m_MainScene3D->Environment();
+    if (environment.lightingAsset != SceneEnvironmentLightingAsset::StudioPanorama) {
+        return settings;
+    }
+
+    settings.source = VulkanIblSource::AuthoredEquirectangular;
+    settings.cachePolicy = VulkanIblCachePolicy::PreferOffline;
+    settings.sourceAssetPath = SceneBuilderStudioPanoramaPath();
+    return settings;
+}
+
 FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
-    const FrameMatrices* matrices
+    const FrameMatrices* matrices,
+    const FrameEnvironmentSettings& environment
 ) const {
     FrameReflectionProbeSet probes{};
     ResetFrameReflectionProbeCaptureDiagnostics(probes);
-    probes.fallbackEnabled = m_ShadowSettings.reflectionProbeFallbackEnabled;
+    probes.fallbackEnabled = environment.iblEnabled;
+    probes.diffuseIntensity = environment.diffuseIntensity;
+    probes.specularIntensity = environment.specularIntensity;
+    probes.horizonBlend = environment.horizonBlend;
     probes.influenceMode = 1u;
     const bool builtInCubemapReady = LocalReflectionProbeCubemapReady();
     const u32 reflectionProbeDescriptorSetsBound =
@@ -16618,6 +17388,19 @@ FrameReflectionProbeSet VulkanRenderer::BuildFrameReflectionProbeSet(
             probes.selectedProbeCount = std::min<u32>(
                 static_cast<u32>(candidates.size()),
                 static_cast<u32>(kMaxFrameReflectionProbes)
+            );
+            // Camera-relative scoring decides which probes fit in the frame
+            // budget. Once selected, their descriptor-array slots must stay
+            // scene-index stable: otherwise a camera move permutes cubemaps
+            // and per-object probe assignment codes from one frame to the
+            // next even when the selected probe set is unchanged.
+            std::sort(
+                candidates.begin(),
+                candidates.begin() + probes.selectedProbeCount,
+                [](const ReflectionProbeCandidate& left,
+                   const ReflectionProbeCandidate& right) {
+                    return left.probe.sceneIndex < right.probe.sceneIndex;
+                }
             );
             probes.activeLocalProbeCount = probes.selectedProbeCount;
             probes.blendedProbeCount = probes.selectedProbeCount;
@@ -17512,10 +18295,89 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
     bool shadowSamplingEnabled
 ) const {
     DirectionalShadowCascadeSet cascadeSet{};
-    if (!m_ShadowSettings.enabled || !shadowSamplingEnabled) {
+    cascadeSet.requestedCoverageMode =
+        m_ShadowSettings.directionalCoverageMode;
+    cascadeSet.activeCoverageMode =
+        VulkanDirectionalShadowCoverageMode::CameraCascades;
+    if (!m_ShadowSettings.enabled || !shadowSamplingEnabled ||
+        lights.directionalCount == 0u) {
         return cascadeSet;
     }
+
+    if (cascadeSet.requestedCoverageMode ==
+        VulkanDirectionalShadowCoverageMode::SceneBounds) {
+        glm::vec3 worldBoundsMin{ std::numeric_limits<f32>::max() };
+        glm::vec3 worldBoundsMax{ std::numeric_limits<f32>::lowest() };
+        bool hasBounds = false;
+        for (const RenderCommand& command : renderCommands) {
+            IncludeCommandBounds(
+                command,
+                worldBoundsMin,
+                worldBoundsMax,
+                hasBounds
+            );
+        }
+
+        if (hasBounds) {
+            std::array<glm::vec3, 8> corners{};
+            u32 cornerIndex = 0u;
+            for (const f32 x : { worldBoundsMin.x, worldBoundsMax.x }) {
+                for (const f32 y : { worldBoundsMin.y, worldBoundsMax.y }) {
+                    for (const f32 z : { worldBoundsMin.z, worldBoundsMax.z }) {
+                        corners[cornerIndex++] = glm::vec3(x, y, z);
+                    }
+                }
+            }
+
+            cascadeSet.configuredCount = 1u;
+            cascadeSet.activeCount = 1u;
+            cascadeSet.stableSnappingEnabled = m_ShadowSettings.stableCascades;
+            cascadeSet.activeCoverageMode =
+                VulkanDirectionalShadowCoverageMode::SceneBounds;
+            cascadeSet.cameraIndependent = true;
+            cascadeSet.sceneBoundsValid = true;
+            cascadeSet.maxDistance = std::max(
+                m_ShadowSettings.cascadeMaxDistance,
+                0.1f
+            );
+            cascadeSet.nearDepth = 0.0f;
+            cascadeSet.farDepth = cascadeSet.maxDistance;
+            cascadeSet.lightAngularRadiusRadians = std::clamp(
+                lights.primaryDirectional.angularRadiusRadians,
+                0.0f,
+                0.05f
+            );
+
+            DirectionalShadowCascade& cascade = cascadeSet.cascades[0];
+            cascade.nearDepth = 0.0f;
+            cascade.farDepth = cascadeSet.maxDistance;
+            cascade.splitDepth = cascadeSet.maxDistance;
+            cascade.viewProjection = LightViewProjectionForCascade(
+                renderCommands,
+                lights,
+                corners,
+                cascadeSet.stableSnappingEnabled,
+                std::max(m_ShadowSettings.mapSize, 1u),
+                &cascade.texelWorldSize,
+                &cascade.lightDepthWorldSpan,
+                nullptr,
+                0.0f,
+                cascadeSet.maxDistance
+            );
+            cascadeSet.projectionHash = HashMatrix(
+                0x83d2e4a17b59c601ull,
+                cascade.viewProjection
+            );
+            return cascadeSet;
+        }
+
+        cascadeSet.coverageFallbackReason = 1u;
+    }
+
     if (matrices == nullptr) {
+        if (cascadeSet.coverageFallbackReason != 0u) {
+            cascadeSet.coverageFallbackReason = 2u;
+        }
         return cascadeSet;
     }
 
@@ -17586,6 +18448,17 @@ DirectionalShadowCascadeSet VulkanRenderer::BuildDirectionalShadowCascades(
         ++cascadeSet.activeCount;
         previousSplit = splitDepth;
     }
+
+    u64 projectionHash = 0x83d2e4a17b59c601ull;
+    for (u32 index = 0u; index < cascadeSet.activeCount; ++index) {
+        projectionHash = HashMatrix(
+            projectionHash,
+            cascadeSet.cascades[index].viewProjection
+        );
+    }
+    cascadeSet.projectionHash = cascadeSet.activeCount > 0u
+        ? projectionHash
+        : 0u;
 
     return cascadeSet;
 }
@@ -17905,53 +18778,286 @@ bool VulkanRenderer::LocalReflectionProbeCubemapReady() const {
 }
 
 void VulkanRenderer::EnsureVisibleSkyboxResources() {
-    if (m_VisibleSkyboxFallbackTexture == nullptr) {
-        m_VisibleSkyboxFallbackTexture = std::make_unique<VulkanTexture2D>(
+    if (m_VisibleSkyboxProceduralTexture == nullptr) {
+        const std::vector<u8> pixels = BuildProceduralVisibleSkyboxPixels(
+            256u,
+            128u
+        );
+        m_VisibleSkyboxProceduralTexture = std::make_unique<VulkanTexture2D>(
             m_Device,
             m_PhysicalDevice,
             m_CommandPool,
             VulkanTexturePixels{
-                std::span<const u8>(
-                    kVisibleSkyboxFallbackPixel.data(),
-                    kVisibleSkyboxFallbackPixel.size()
-                ),
-                1u,
-                1u
+                std::span<const u8>(pixels.data(), pixels.size()),
+                256u,
+                128u
             },
             true,
-            false,
+            true,
             false
         );
     }
 
-    if (m_VisibleSkyboxTexture == nullptr) {
-        const std::filesystem::path skyboxPath =
-            std::filesystem::path(SE_ASSET_DIR) / "skybox" / "bk.jpg";
-        try {
-            m_VisibleSkyboxTexture = std::make_unique<VulkanTexture2D>(
-                m_Device,
-                m_PhysicalDevice,
-                m_CommandPool,
-                skyboxPath.string(),
-                true,
-                true,
-                false
-            );
-        } catch (...) {
-            m_VisibleSkyboxTexture.reset();
+    if (m_VisibleSkyboxStudioTexture == nullptr) {
+        const std::filesystem::path studioPath = SceneBuilderStudioPanoramaPath();
+        if (std::filesystem::is_regular_file(studioPath)) {
+            try {
+                m_VisibleSkyboxStudioTexture = std::make_unique<VulkanTexture2D>(
+                    m_Device,
+                    m_PhysicalDevice,
+                    m_CommandPool,
+                    studioPath.string(),
+                    true,
+                    true,
+                    false
+                );
+            } catch (...) {
+                m_VisibleSkyboxStudioTexture.reset();
+            }
         }
     }
 
-    const VulkanTexture2D* samplerTexture =
-        m_VisibleSkyboxTexture != nullptr
-            ? m_VisibleSkyboxTexture.get()
-            : m_VisibleSkyboxFallbackTexture.get();
-    if (m_VisibleSkyboxSampler == nullptr && samplerTexture != nullptr) {
+    if (m_VisibleSkyboxSampler == nullptr &&
+        m_VisibleSkyboxProceduralTexture != nullptr) {
+        u32 mipLevels = m_VisibleSkyboxProceduralTexture->MipLevels();
+        if (m_VisibleSkyboxStudioTexture != nullptr) {
+            mipLevels = std::max(
+                mipLevels,
+                m_VisibleSkyboxStudioTexture->MipLevels()
+            );
+        }
         m_VisibleSkyboxSampler = std::make_unique<VulkanSampler>(
             m_Device,
             m_PhysicalDevice,
-            std::max(1u, samplerTexture->MipLevels())
+            std::max(1u, mipLevels)
         );
+    }
+}
+
+bool VulkanRenderer::RefreshSceneEnvironmentIblAsset() {
+    const VulkanIblGenerationSettings desired =
+        BuildSceneEnvironmentIblGenerationSettings();
+    if (SameIblGenerationSettings(desired, m_IblGenerationSettings)) {
+        return true;
+    }
+    if (m_HasFailedIblGenerationSettings &&
+        SameIblGenerationSettings(desired, m_LastFailedIblGenerationSettings)) {
+        return false;
+    }
+    if (vkDeviceWaitIdle(m_Device.Handle()) != VK_SUCCESS) {
+        m_LastFailedIblGenerationSettings = desired;
+        m_HasFailedIblGenerationSettings = true;
+        ++m_SceneEnvironmentIblReloadFailureCount;
+        return false;
+    }
+
+    std::unique_ptr<VulkanImage> candidateBrdf;
+    std::unique_ptr<VulkanImage> candidateIrradiance;
+    std::unique_ptr<VulkanImage> candidatePrefiltered;
+    VkImageView candidateIrradianceView = VK_NULL_HANDLE;
+    VkImageView candidatePrefilteredView = VK_NULL_HANDLE;
+    VkSampler candidateSampler = VK_NULL_HANDLE;
+    VulkanIblGenerationInfo candidateInfo{};
+    try {
+        GenerateIblTextures(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            candidateBrdf,
+            candidateIrradiance,
+            candidatePrefiltered,
+            candidateIrradianceView,
+            candidatePrefilteredView,
+            candidateSampler,
+            desired,
+            &candidateInfo
+        );
+    } catch (...) {
+        if (candidateSampler != VK_NULL_HANDLE) {
+            vkDestroySampler(m_Device.Handle(), candidateSampler, nullptr);
+        }
+        m_LastFailedIblGenerationSettings = desired;
+        m_HasFailedIblGenerationSettings = true;
+        ++m_SceneEnvironmentIblReloadFailureCount;
+        return false;
+    }
+
+    const bool sourceAccepted = candidateInfo.actualSource == desired.source &&
+        candidateBrdf != nullptr &&
+        candidateIrradiance != nullptr &&
+        candidatePrefiltered != nullptr &&
+        candidateSampler != VK_NULL_HANDLE;
+    if (!sourceAccepted) {
+        if (candidateSampler != VK_NULL_HANDLE) {
+            vkDestroySampler(m_Device.Handle(), candidateSampler, nullptr);
+        }
+        m_LastFailedIblGenerationSettings = desired;
+        m_HasFailedIblGenerationSettings = true;
+        ++m_SceneEnvironmentIblReloadFailureCount;
+        return false;
+    }
+
+    const VkSampler previousSampler = m_IblSampler;
+    m_IblBrdfImage = std::move(candidateBrdf);
+    m_IblIrradianceImage = std::move(candidateIrradiance);
+    m_IblPrefilteredImage = std::move(candidatePrefiltered);
+    m_IblIrradianceView = candidateIrradianceView;
+    m_IblPrefilteredView = candidatePrefilteredView;
+    m_IblSampler = candidateSampler;
+    m_IblGenerationSettings = desired;
+    m_IblGenerationInfo = candidateInfo;
+    m_HasFailedIblGenerationSettings = false;
+    if (previousSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_Device.Handle(), previousSampler, nullptr);
+    }
+
+    RecreateIblDependentResources();
+    m_ReflectionProbeResources.SetDescriptorSetsBound(
+        UpdateEnvironmentDescriptorSets(m_DescriptorSets.get()) +
+        UpdateEnvironmentDescriptorSets(m_OverlayDescriptorSets.get())
+    );
+    ++m_SceneEnvironmentIblReloadCount;
+    return true;
+}
+
+void VulkanRenderer::RecreateIblDependentResources() {
+    if (m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrClassifyTilesDescriptorSetLayout != nullptr &&
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_SceneRenderTargets != nullptr) {
+        m_FfxSssrClassifyTilesResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrClassifyTilesDescriptorSetLayout,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_SceneRenderTargets,
+            m_IblPrefilteredView,
+            m_IblSampler
+        );
+    }
+    if (m_FfxSssrIntersectResources != nullptr &&
+        m_FfxSssrIntersectDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrPrepareIndirectArgsResources != nullptr &&
+        m_FfxSssrBlueNoiseResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SsrDepthPyramid != nullptr) {
+        m_FfxSssrIntersectResources->Recreate(
+            m_Device,
+            *m_FfxSssrIntersectDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrPrepareIndirectArgsResources,
+            *m_FfxSssrBlueNoiseResources,
+            *m_SceneRenderTargets,
+            *m_SsrDepthPyramid,
+            m_IblPrefilteredView,
+            m_IblSampler
+        );
+    }
+    // Classify owns the ray-list, denoiser-tile, intersection, roughness, and
+    // confidence resources. Recreating it invalidates descriptor views held by
+    // every DNSR consumer, so rebuild the complete producer-to-consumer chain.
+    if (m_FfxSssrReprojectResources != nullptr &&
+        m_FfxSssrReprojectDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrBlueNoiseResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_FfxSssrReprojectResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrReprojectDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrBlueNoiseResources,
+            *m_SceneRenderTargets,
+            m_SceneTargetSampler->Handle()
+        );
+    }
+    if (m_FfxSssrPrefilterResources != nullptr &&
+        m_FfxSssrPrefilterDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrReprojectResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_FfxSssrPrefilterResources->Recreate(
+            m_Device,
+            m_PhysicalDevice,
+            m_CommandPool,
+            *m_FfxSssrPrefilterDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrReprojectResources,
+            *m_SceneRenderTargets,
+            m_SceneTargetSampler->Handle()
+        );
+    }
+    if (m_FfxSssrResolveTemporalResources != nullptr &&
+        m_FfxSssrResolveTemporalDescriptorSetLayout != nullptr &&
+        m_FfxSssrClassifyTilesResources != nullptr &&
+        m_FfxSssrReprojectResources != nullptr &&
+        m_FfxSssrPrefilterResources != nullptr &&
+        m_SceneRenderTargets != nullptr &&
+        m_SceneTargetSampler != nullptr) {
+        m_FfxSssrResolveTemporalResources->Recreate(
+            m_Device,
+            *m_FfxSssrResolveTemporalDescriptorSetLayout,
+            *m_FfxSssrClassifyTilesResources,
+            *m_FfxSssrReprojectResources,
+            *m_FfxSssrPrefilterResources,
+            *m_SceneRenderTargets,
+            m_SceneTargetSampler->Handle()
+        );
+    }
+
+    m_HybridReflectionRayQuery.reset();
+    if (m_HybridReflectionAccelerationStructures == nullptr ||
+        m_FfxSssrConstantsDescriptorSetLayout == nullptr ||
+        m_FfxSssrClassifyTilesResources == nullptr ||
+        m_FfxSssrPrepareIndirectArgsResources == nullptr ||
+        m_FfxSssrBlueNoiseResources == nullptr ||
+        m_SceneRenderTargets == nullptr ||
+        m_SsrDepthPyramid == nullptr ||
+        m_LightBuffer == nullptr) {
+        return;
+    }
+
+    m_HybridReflectionRayQuery = std::make_unique<VulkanHybridReflectionRayQuery>(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool,
+        *m_FfxSssrConstantsDescriptorSetLayout,
+        *m_FfxSssrClassifyTilesResources,
+        *m_FfxSssrPrepareIndirectArgsResources,
+        *m_FfxSssrBlueNoiseResources,
+        *m_SceneRenderTargets,
+        *m_SsrDepthPyramid,
+        *m_LightBuffer,
+        m_IblBrdfImage->View(),
+        m_IblIrradianceView,
+        m_IblPrefilteredView,
+        m_IblSampler,
+        m_IblGenerationInfo.prefilteredMipCount,
+        std::string(SE_SHADER_DIR) +
+            (HybridReflectionFullAuditRequested()
+                ? "/hybrid_reflection_ray_query_audit.hlsl.spv"
+                : "/hybrid_reflection_ray_query.hlsl.spv")
+    );
+    if (m_HybridReflectionRayQuery->FullAuditResourcesAllocated()) {
+        SE_ASSERT(
+            m_DescriptorSets != nullptr &&
+                m_DescriptorSets->Count() == m_Swapchain->Images().size(),
+            "Full reflection audit requires frame descriptor sets"
+        );
+        for (u32 frameIndex = 0u;
+             frameIndex < m_DescriptorSets->Count();
+             ++frameIndex) {
+            m_DescriptorSets->UpdateReflectionFullAuditBuffer(
+                m_Device,
+                frameIndex,
+                m_HybridReflectionRayQuery->FullAuditDescriptorInfo(frameIndex)
+            );
+        }
     }
 }
 
@@ -18142,9 +19248,21 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     std::vector<RenderCommand> reflectionCaptureCommands;
     reflectionCaptureCommands.reserve(m_ReflectionCaptureRenderQueue.Count());
     u32 selfCaptureExcludedCount = 0u;
+    u32 explicitProbeExcludedCount = 0u;
+    const bool transparentObjectsEnabled =
+        TransparentSceneObjectsEnabledFromEnvironment();
     for (const RenderCommand& command : m_ReflectionCaptureRenderQueue.Commands()) {
         if (!command.reflectionCaptureVisible) {
             ++selfCaptureExcludedCount;
+            continue;
+        }
+        if (ReflectionProbeExcludesRenderable(probe, command)) {
+            ++selfCaptureExcludedCount;
+            ++explicitProbeExcludedCount;
+            continue;
+        }
+        if (!transparentObjectsEnabled &&
+            CommandIsTransparentSceneObject(command)) {
             continue;
         }
         reflectionCaptureCommands.push_back(command);
@@ -18192,7 +19310,10 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
     const std::span<const RenderCommand> shadowCommands = ShadowRenderCommands();
     reflectionCaptureShadowCommands.reserve(shadowCommands.size());
     for (const RenderCommand& command : shadowCommands) {
-        if (command.reflectionCaptureVisible) {
+        if (command.reflectionCaptureVisible &&
+            !ReflectionProbeExcludesRenderable(probe, command) &&
+            (transparentObjectsEnabled ||
+                !CommandIsTransparentSceneObject(command))) {
             reflectionCaptureShadowCommands.push_back(command);
         }
     }
@@ -18380,8 +19501,12 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         return false;
     }
     const FrameMaterialSet captureMaterials = BuildFrameMaterialSet(captureCommands);
+    const FrameEnvironmentSettings captureEnvironment = BuildFrameEnvironmentSettings();
     FrameReflectionProbeSet captureProbes{};
-    captureProbes.fallbackEnabled = m_ShadowSettings.reflectionProbeFallbackEnabled;
+    captureProbes.fallbackEnabled = captureEnvironment.iblEnabled;
+    captureProbes.diffuseIntensity = captureEnvironment.diffuseIntensity;
+    captureProbes.specularIntensity = captureEnvironment.specularIntensity;
+    captureProbes.horizonBlend = captureEnvironment.horizonBlend;
     // Slot zero is intentionally reserved for capture-only data. Wait for the
     // previous main submission before rewriting it, because main rendering can
     // use that same swapchain-indexed slot on a prior frame.
@@ -18417,6 +19542,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             : glm::mat4{ 1.0f },
         lightConstants,
         captureProbes,
+        captureEnvironment,
         directionalShadowAvailable || captureLocalShadowAvailable,
         nullptr
     );
@@ -18527,7 +19653,10 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         }
 
         std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+        // Alpha carries captured-geometry coverage. The normal PBR consumer
+        // fills uncovered directions from the global IBL instead of treating
+        // the probe's black clear color as reflected radiance.
+        clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
         clearValues[1].depthStencil = { 1.0f, 0u };
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -18557,7 +19686,9 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
             m_ReflectionProbeResources.RecordGpuCapturedSceneMipGeneration(
                 probe.sceneIndex,
                 commandBuffer,
-                captureFilteringSettings
+                captureFilteringSettings,
+                m_IblPrefilteredView,
+                m_IblSampler
             );
             m_ReflectionProbeResources.RecordGpuCapturedSceneDiffuseIrradiance(
                 probe.sceneIndex,
@@ -18697,6 +19828,7 @@ bool VulkanRenderer::CaptureNextReflectionProbeFace(
         cullingStats.visible,
         cullingStats.culled,
         selfCaptureExcludedCount,
+        explicitProbeExcludedCount,
         captureComplete,
         m_ReflectionCaptureSchedulerFrame
     );
@@ -18807,8 +19939,19 @@ void VulkanRenderer::PrepareReflectionProbeCaptureResources(
         return;
     }
 
-    const std::span<const RenderCommand> influenceCommands =
+    const std::span<const RenderCommand> rawInfluenceCommands =
         ReflectionCaptureInfluenceCommands();
+    std::vector<RenderCommand> filteredInfluenceCommands;
+    u32 transparentInfluenceSkippedDraws = 0u;
+    u64 transparentInfluenceSkippedTriangles = 0ull;
+    const std::span<const RenderCommand> influenceCommands =
+        FilterTransparentSceneObjects(
+            rawInfluenceCommands,
+            filteredInfluenceCommands,
+            TransparentSceneObjectsEnabledFromEnvironment(),
+            transparentInfluenceSkippedDraws,
+            transparentInfluenceSkippedTriangles
+        );
 
     std::sort(
         sceneCapturedProbes.begin(),
@@ -18956,10 +20099,15 @@ u32 VulkanRenderer::UpdateEnvironmentDescriptorSets(
         m_VisibleSkyboxSampler == nullptr) {
         return 0;
     }
+    const FrameEnvironmentSettings environment = BuildFrameEnvironmentSettings();
+    const bool studioSkyboxSelected =
+        environment.lightingAsset == static_cast<u32>(
+            SceneEnvironmentLightingAsset::StudioPanorama
+        );
     const VulkanTexture2D* visibleSkyboxTexture =
-        m_VisibleSkyboxTexture != nullptr
-            ? m_VisibleSkyboxTexture.get()
-            : m_VisibleSkyboxFallbackTexture.get();
+        studioSkyboxSelected && m_VisibleSkyboxStudioTexture != nullptr
+            ? m_VisibleSkyboxStudioTexture.get()
+            : m_VisibleSkyboxProceduralTexture.get();
     if (visibleSkyboxTexture == nullptr ||
         visibleSkyboxTexture->View() == VK_NULL_HANDLE) {
         return 0;

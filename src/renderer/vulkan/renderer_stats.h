@@ -34,6 +34,12 @@ struct RendererDrawStats {
     u32 gBufferDraws = 0;
     u32 overlayDraws = 0;
     u32 shadowDraws = 0;
+    u32 transparentObjectsEnabled = 0;
+    u32 transparentObjectSkippedDraws = 0;
+    u32 transparentObjectMainSkippedDraws = 0;
+    u32 transparentObjectShadowSkippedDraws = 0;
+    u32 transparentObjectReflectionSkippedDraws = 0;
+    u32 transparentObjectOverlaySkippedDraws = 0;
     u32 hybridDeferredOpaqueDraws = 0;
     u32 hybridForwardTransparentDraws = 0;
     u32 hybridForwardSpecialDraws = 0;
@@ -48,6 +54,7 @@ struct RendererDrawStats {
     u64 gBufferTriangles = 0;
     u64 overlayTriangles = 0;
     u64 shadowTriangles = 0;
+    u64 transparentObjectSkippedTriangles = 0;
     u64 hybridDeferredOpaqueTriangles = 0;
     u64 hybridWeightedTranslucencyTriangles = 0;
     u64 hybridForwardResidualTriangles = 0;
@@ -229,6 +236,13 @@ struct RendererShadowCascadeStats {
     u32 activeCount = 0;
     u32 directionalReceiveEnabled = 0;
     u32 stableSnappingEnabled = 0;
+    u32 requestedCoverageMode = 0;
+    u32 activeCoverageMode = 0;
+    u32 cameraIndependent = 0;
+    u32 sceneBoundsValid = 0;
+    u32 coverageFallbackReason = 0;
+    u64 projectionHash = 0;
+    u64 projectionRevision = 0;
     u32 atlasAllocated = 0;
     u32 atlasTileSize = 0;
     u32 atlasWidth = 0;
@@ -465,6 +479,9 @@ struct RendererSsrStats {
     u32 reconstructionRawResolvedAliased = 0;
     u32 reconstructionCurrentHdrSourceEnabled = 0;
     u32 reconstructionCurrentHdrRadianceFilterEnabled = 0;
+    u32 reconstructionHistoryDescriptorUpdated = 0;
+    u32 reconstructionHistorySourceImageIndex = 0;
+    u32 reconstructionHistorySourceMatchesSceneColorHistory = 0;
     u32 reconstructionCurrentHdrMipLevels = 0;
     u32 reconstructionCurrentHdrMipChainReady = 0;
     u32 fallbackBlendRequested = 0;
@@ -613,8 +630,11 @@ struct RendererSsrStats {
     u64 fidelityFxSssrResolveTemporalMemoryBytes = 0;
     u32 fidelityFxSssrResolveTemporalIndirectArgsOffsetBytes = 0;
     u32 fidelityFxSssrResolveTemporalHistoryCopies = 0;
+    u32 fidelityFxSssrReceiverHistoryUpdates = 0;
     u32 fidelityFxSssrVisibleOutputClearEnabled = 0;
     u32 fidelityFxSssrVisibleOutputClears = 0;
+    u32 fidelityFxSssrSparseOutputClearEnabled = 0;
+    u32 fidelityFxSssrSparseOutputClears = 0;
     // 0 = AMD-style glossy validity, 1 = sample-count/variance confidence.
     u32 fidelityFxSssrCompositeConfidenceMode = 1;
     u32 fidelityFxSssrSampleCountWritebackReady = 0;
@@ -638,6 +658,8 @@ struct RendererSsrStats {
     u32 fidelityFxSssrSameFrameCompositeFrameBinds = 0;
     u32 fidelityFxSssrSameFrameCompositeGBufferBinds = 0;
     u32 fidelityFxSssrSameFrameCompositeReverseControlActive = 0;
+    u32 fidelityFxSssrExclusiveReflectionOwnerActive = 0;
+    u32 fidelityFxSssrExclusiveReflectionOwnerReverseControlActive = 0;
     u32 fidelityFxSssrRayCounterReadbackValid = 0;
     u32 fidelityFxSssrClassifiedRayCount = 0;
     u32 fidelityFxSssrClassifiedDenoiserTileCount = 0;
@@ -791,6 +813,10 @@ struct RendererHybridReflectionStats {
     u32 rayQueryDiagnosticTargetMaterialIndex = 0;
     u32 rayQueryForceAllRayQueries = 0;
     u32 rayQueryHitIblEnabled = 1;
+    u32 rayQueryHitIblDiffuseIntensityMilliunits = 0;
+    u32 rayQueryHitIblSpecularIntensityMilliunits = 0;
+    u32 rayQueryGlobalIblEnabled = 0;
+    u32 rayQueryGlobalSpecularVisible = 1;
     u32 rayQueryCullBackFacingTriangles = 1;
     u32 rayQueryFullAuditRequested = 0;
     u32 rayQueryFullAuditResourcesReady = 0;
@@ -978,6 +1004,21 @@ struct RendererIblStats {
     u32 shaderIntegrationEnabled = 0;
 };
 
+struct RendererEnvironmentStats {
+    u32 iblEnabled = 1;
+    f32 diffuseIntensity = 1.0f;
+    f32 specularIntensity = 1.0f;
+    f32 horizonBlend = 0.22f;
+    u32 skyboxEnabled = 0;
+    f32 skyboxIntensity = 1.0f;
+    f32 skyboxBlur = 0.0f;
+    u32 lightingAsset = 0;
+    u32 visibleSkyboxUsesActiveIbl = 0;
+    u32 visibleSkyboxSourceTextureReady = 0;
+    u32 iblReloadCount = 0;
+    u32 iblReloadFailureCount = 0;
+};
+
 enum class RendererProbeGridFallbackReason : u32 {
     None = 0,
     Disabled = 1,
@@ -1087,6 +1128,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneCaptureVisibleCount = 0;
     u32 capturedSceneCaptureCulledCount = 0;
     u32 capturedSceneSelfCaptureExcludedCount = 0;
+    u32 capturedSceneExplicitProbeExcludedCount = 0;
     u32 capturedSceneCaptureFaceOrientationMask = 0;
     u32 capturedSceneMipGenerationCount = 0;
     u32 capturedSceneSourceMipGenerationCount = 0;
@@ -1095,6 +1137,7 @@ struct RendererReflectionProbeStats {
     u32 capturedSceneSourceMipChainReady = 0;
     u32 capturedSceneGgxPrefilterSourceImageSeparated = 0;
     u32 capturedSceneGgxPrefilterPdfLodEnabled = 0;
+    u32 capturedSceneGlobalIblCompositionApplied = 0;
     u32 capturedSceneGgxPrefilterDispatchCount = 0;
     u32 capturedSceneGgxPrefilterSampleCount = 0;
     u32 capturedSceneGgxPrefilterQuality = 0;
@@ -1455,10 +1498,13 @@ struct RendererBindStats {
     u32 ffxSssrResolveTemporalDispatches = 0;
     u32 ffxSssrResolveTemporalDescriptorBinds = 0;
     u32 ffxSssrResolveTemporalHistoryCopies = 0;
+    u32 ffxSssrReceiverHistoryUpdates = 0;
     u32 ffxSssrVisibleOutputClears = 0;
+    u32 ffxSssrSparseOutputClears = 0;
     u32 ffxSssrApplyDraws = 0;
     u32 ffxSssrApplyFrameBinds = 0;
     u32 ffxSssrApplyGBufferBinds = 0;
+    u32 rayQueryApplyDraws = 0;
     u32 reflectionProbeDebugDraws = 0;
     u32 reflectionProbeDebugFrameBinds = 0;
     u32 reflectionProbeDebugGBufferBinds = 0;
@@ -1873,6 +1919,13 @@ struct RendererTemporalStats {
     u32 temporalUpscalerDlssQualityReferenceBaselineReady = 0;
 };
 
+struct RendererSceneBuilderGizmoStats {
+    u32 enabled = 0;
+    u32 mode = 0;
+    u32 shortcutModeSwitchCount = 0;
+    u32 shortcutModeMask = 0;
+};
+
 struct RendererStats {
     RendererCpuStats cpu;
     RendererRenderDebugStats renderDebug;
@@ -1886,6 +1939,7 @@ struct RendererStats {
     RendererSsrStats ssr;
     RendererHybridReflectionStats hybridReflections;
     RendererIblStats ibl;
+    RendererEnvironmentStats environment;
     RendererProbeGridStats probeGrid;
     RendererBonePaletteDrawStats bonePaletteDraw;
     RendererReflectionProbeStats reflectionProbe;
@@ -1894,6 +1948,7 @@ struct RendererStats {
     RendererBindStats binds;
     RendererGpuStats gpu;
     RendererTemporalStats temporal;
+    RendererSceneBuilderGizmoStats sceneBuilderGizmo;
     RenderFrameGraphPlan frameGraph = BuildAAAFrameGraphBlueprint();
 };
 

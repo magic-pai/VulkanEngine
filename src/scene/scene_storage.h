@@ -31,6 +31,32 @@ public:
         m_SelectedIndex = 0;
     }
 
+    // Removes one renderable and keeps the view/selection consistent. Returns
+    // false when the renderable does not belong to this storage.
+    bool RemoveRenderable(const Renderable& renderable) {
+        const auto found = std::find_if(
+            m_RenderableStorage.begin(),
+            m_RenderableStorage.end(),
+            [&renderable](const std::unique_ptr<Renderable>& candidate) {
+                return candidate.get() == &renderable;
+            }
+        );
+        if (found == m_RenderableStorage.end()) {
+            return false;
+        }
+
+        const std::size_t removedIndex = static_cast<std::size_t>(
+            std::distance(m_RenderableStorage.begin(), found)
+        );
+        m_RenderableStorage.erase(found);
+        if (m_SelectedIndex > removedIndex && m_SelectedIndex > 0) {
+            --m_SelectedIndex;
+        }
+        RebuildRenderableView();
+
+        return true;
+    }
+
     std::span<Renderable* const> Renderables() const {
         return std::span<Renderable* const>(m_Renderables.data(), m_Renderables.size());
     }

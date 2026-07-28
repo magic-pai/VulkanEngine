@@ -26,6 +26,13 @@ void Camera3D::Update(Window& window, f32 deltaSeconds, bool inputBlocked) {
     UpdateFreeLook(window, inputBlocked, deltaSeconds);
 }
 
+void Camera3D::SetOrbitInputEnabled(bool enabled) {
+    m_OrbitInputEnabled = enabled;
+    if (!enabled) {
+        m_OrbitDragging = false;
+    }
+}
+
 void Camera3D::SetOrbit(f32 yawRadians, f32 pitchRadians, f32 distance) {
     m_Yaw = yawRadians;
     m_Pitch = std::clamp(
@@ -78,6 +85,38 @@ void Camera3D::ResetOrbit() {
     UpdateOrbitPosition();
 }
 
+bool Camera3D::RestoreState(const Camera3DState& state) {
+    const auto finite = [](f32 value) {
+        return std::isfinite(value);
+    };
+    if (!finite(state.position.x) || !finite(state.position.y) ||
+        !finite(state.position.z) || !finite(state.forward.x) ||
+        !finite(state.forward.y) || !finite(state.forward.z) ||
+        !finite(state.distance) || !finite(state.fovScale) ||
+        glm::length(state.forward) <= 0.0001f) {
+        return false;
+    }
+
+    const glm::vec3 forward = glm::normalize(state.forward);
+    m_FovScale = ClampFovScale(state.fovScale);
+    m_Yaw = std::atan2(-forward.z, -forward.x);
+    m_Pitch = std::asin(std::clamp(-forward.y, -1.0f, 1.0f));
+
+    if (state.freeLookActive) {
+        m_Position = state.position;
+        m_Forward = forward;
+        // Free-look can move beyond the orbit distance limits, so retain its
+        // captured distance rather than converting it into an orbit state.
+        m_Distance = state.distance;
+        m_FreeLookActive = true;
+        return true;
+    }
+
+    m_Distance = ClampDistance(state.distance);
+    UpdateOrbitPosition();
+    return true;
+}
+
 const glm::vec3& Camera3D::Position() const {
     return m_Position;
 }
@@ -104,6 +143,10 @@ f32 Camera3D::NearClip() const {
 
 f32 Camera3D::FarClip() const {
     return m_Controls.farClip;
+}
+
+bool Camera3D::OrbitInputEnabled() const {
+    return m_OrbitInputEnabled;
 }
 
 bool Camera3D::FreeLookActive() const {
@@ -164,6 +207,7 @@ void Camera3D::UpdateOrbitPosition() {
 
 void Camera3D::UpdateOrbit(Window& window, bool inputBlocked) {
     const bool leftMouseDown =
+        m_OrbitInputEnabled &&
         window.IsLeftMouseDown() &&
         !window.IsRightMouseDown() &&
         !inputBlocked;

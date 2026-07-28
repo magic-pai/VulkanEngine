@@ -371,6 +371,14 @@ public:
         const VulkanCommandPool& commandPool,
         std::string cubemapDirectory
     );
+    void SetBlackHoleLookupTables(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        VulkanTextureData deflection,
+        VulkanTextureData inverseRadius,
+        VulkanTextureData blackBody
+    );
 
 private:
     u32 SamplerMipLevels() const;

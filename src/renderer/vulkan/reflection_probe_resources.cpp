@@ -2605,7 +2605,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
             throw std::runtime_error("Failed to create reflection capture prefilter sampler");
         }
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+        std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
         bindings[0].binding = 0u;
         bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[0].descriptorCount = 1u;
@@ -2614,6 +2614,10 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
         bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         bindings[1].descriptorCount = 1u;
         bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[2].binding = 2u;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[2].descriptorCount = 1u;
+        bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = static_cast<u32>(bindings.size());
@@ -2633,7 +2637,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedScenePrefilterResources(
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0] = {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            descriptorSetCapacity
+            descriptorSetCapacity * 2u
         };
         poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, descriptorSetCapacity };
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -3063,7 +3067,11 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
             VkDescriptorImageInfo destinationInfo{};
             destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
             destinationInfo.imageView = resource->prefilterMipViews[mip - 1u];
-            std::array<VkWriteDescriptorSet, 2> writes{};
+            VkDescriptorImageInfo globalIblInfo{};
+            globalIblInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            globalIblInfo.imageView = resource->prefilterSourceView;
+            globalIblInfo.sampler = m_GpuCapturedScenePrefilterSampler;
+            std::array<VkWriteDescriptorSet, 3> writes{};
             writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet = resource->prefilterDescriptorSets[mip - 1u];
             writes[0].dstBinding = 0u;
@@ -3076,6 +3084,12 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
             writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[1].descriptorCount = 1u;
             writes[1].pImageInfo = &destinationInfo;
+            writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet = resource->prefilterDescriptorSets[mip - 1u];
+            writes[2].dstBinding = 2u;
+            writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[2].descriptorCount = 1u;
+            writes[2].pImageInfo = &globalIblInfo;
             vkUpdateDescriptorSets(
                 device.Handle(),
                 static_cast<u32>(writes.size()),
@@ -3104,7 +3118,7 @@ bool VulkanReflectionProbeResources::EnsureGpuCapturedSceneResources(
         }
         VkDescriptorImageInfo sourceInfo{};
         sourceInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        sourceInfo.imageView = resource->prefilterSourceView;
+        sourceInfo.imageView = resource->targetImage->View();
         sourceInfo.sampler = m_GpuCapturedScenePrefilterSampler;
         VkDescriptorImageInfo destinationInfo{};
         destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -3498,6 +3512,8 @@ bool VulkanReflectionProbeResources::RequestGpuCapturedSceneRefresh(
             previousAudit.ggxPrefilterSourceImageSeparated;
         audit.ggxPrefilterPdfLodEnabled =
             previousAudit.ggxPrefilterPdfLodEnabled;
+        audit.globalIblCompositionApplied =
+            previousAudit.globalIblCompositionApplied;
         audit.ggxPrefilterDispatchCount =
             previousAudit.ggxPrefilterDispatchCount;
         audit.ggxPrefilterSampleCount = previousAudit.ggxPrefilterSampleCount;
@@ -3657,7 +3673,9 @@ VkExtent2D VulkanReflectionProbeResources::GpuCapturedSceneExtent(
 void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     i32 probeSceneIndex,
     VkCommandBuffer commandBuffer,
-    CapturedReflectionProbeFilteringSettings filteringSettings
+    CapturedReflectionProbeFilteringSettings filteringSettings,
+    VkImageView globalIblView,
+    VkSampler globalIblSampler
 ) {
     CapturedSceneProbeResource* resource =
         FindCapturedSceneProbeResource(probeSceneIndex);
@@ -3683,6 +3701,10 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
     const u32 sampleCount = CapturedReflectionProbeGgxSampleCount(
         filteringSettings.quality
     );
+    const bool globalIblCompositionEnabled =
+        globalIblView != VK_NULL_HANDLE && globalIblSampler != VK_NULL_HANDLE;
+    resource->audit.globalIblCompositionApplied =
+        ggxPrefilterEnabled && globalIblCompositionEnabled;
 
     RecordImageBarrier(
         commandBuffer,
@@ -3900,7 +3922,7 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
             u32 sourceFaceSize = 1u;
             u32 sourceMipCount = 1u;
             u32 pdfLodEnabled = 1u;
-            u32 reserved0 = 0u;
+            u32 globalIblCompositionEnabled = 0u;
             u32 reserved1 = 0u;
         } constants;
         constants.roughness = static_cast<f32>(mip) /
@@ -3909,6 +3931,30 @@ void VulkanReflectionProbeResources::RecordGpuCapturedSceneMipGeneration(
         constants.sampleCount = sampleCount;
         constants.sourceFaceSize = m_CapturedSceneCubemapFaceSize;
         constants.sourceMipCount = mipCount;
+        constants.globalIblCompositionEnabled =
+            globalIblCompositionEnabled ? 1u : 0u;
+        VkDescriptorImageInfo globalIblInfo{};
+        globalIblInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        globalIblInfo.imageView = globalIblCompositionEnabled
+            ? globalIblView
+            : resource->prefilterSourceView;
+        globalIblInfo.sampler = globalIblCompositionEnabled
+            ? globalIblSampler
+            : m_GpuCapturedScenePrefilterSampler;
+        VkWriteDescriptorSet globalIblWrite{};
+        globalIblWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        globalIblWrite.dstSet = resource->prefilterDescriptorSets[mip - 1u];
+        globalIblWrite.dstBinding = 2u;
+        globalIblWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        globalIblWrite.descriptorCount = 1u;
+        globalIblWrite.pImageInfo = &globalIblInfo;
+        vkUpdateDescriptorSets(
+            m_GpuCapturedSceneDevice,
+            1u,
+            &globalIblWrite,
+            0u,
+            nullptr
+        );
         vkCmdBindDescriptorSets(
             commandBuffer,
             VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -4232,6 +4278,7 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     u32 visibleCount,
     u32 culledCount,
     u32 selfCaptureExcludedCount,
+    u32 explicitProbeExcludedCount,
     bool captureComplete,
     u64 schedulerFrame
 ) {
@@ -4250,6 +4297,7 @@ void VulkanReflectionProbeResources::CompleteGpuCapturedSceneFace(
     resource->audit.captureVisibleCount += visibleCount;
     resource->audit.captureCulledCount += culledCount;
     resource->audit.selfCaptureExcludedCount = selfCaptureExcludedCount;
+    resource->audit.explicitProbeExcludedCount = explicitProbeExcludedCount;
     resource->audit.facesRendered = resource->facesRendered;
     resource->audit.facesPending = 6u - resource->facesRendered;
     resource->audit.captureFaceOrientationValid =

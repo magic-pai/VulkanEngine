@@ -210,6 +210,22 @@ VulkanTexture2D::VulkanTexture2D(
     );
 }
 
+VulkanTexture2D::VulkanTexture2D(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    VulkanTextureData data,
+    VulkanUploadBatch* uploadBatch
+) {
+    CreateTextureImage(
+        device,
+        physicalDevice,
+        commandPool,
+        data,
+        uploadBatch
+    );
+}
+
 VulkanTexture2D::~VulkanTexture2D() = default;
 
 VkImageView VulkanTexture2D::View() const {
@@ -224,8 +240,36 @@ VkExtent2D VulkanTexture2D::Extent() const {
     return m_Image.Extent();
 }
 
+VkFormat VulkanTexture2D::Format() const {
+    return m_Image.Format();
+}
+
 u32 VulkanTexture2D::MipLevels() const {
     return m_Image.MipLevels();
+}
+
+void VulkanTexture2D::SetDebugName(
+    const VulkanDevice& device,
+    const char* prefix
+) const {
+    if (prefix == nullptr || prefix[0] == '\0') {
+        return;
+    }
+
+    const std::string imageName = std::string(prefix) + ".Image";
+    const std::string viewName = std::string(prefix) + ".View";
+    SetVulkanDebugObjectName(
+        device.Handle(),
+        VK_OBJECT_TYPE_IMAGE,
+        m_Image.Handle(),
+        imageName.c_str()
+    );
+    SetVulkanDebugObjectName(
+        device.Handle(),
+        VK_OBJECT_TYPE_IMAGE_VIEW,
+        m_Image.View(),
+        viewName.c_str()
+    );
 }
 
 void VulkanTexture2D::CreateTextureImage(
@@ -380,6 +424,73 @@ void VulkanTexture2D::CreateTextureImage(
             uploadBatch
         );
     }
+    if (uploadBatch != nullptr) {
+        uploadBatch->KeepAlive(std::move(stagingBuffer));
+    }
+
+    m_Layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+void VulkanTexture2D::CreateTextureImage(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    VulkanTextureData data,
+    VulkanUploadBatch* uploadBatch
+) {
+    SE_ASSERT(data.width > 0 && data.height > 0, "Texture size must be valid");
+    SE_ASSERT(data.bytesPerTexel > 0, "Texture bytes per texel must be valid");
+    SE_ASSERT(data.format != VK_FORMAT_UNDEFINED, "Texture format must be explicit");
+
+    const VkDeviceSize imageSize =
+        static_cast<VkDeviceSize>(data.width) *
+        static_cast<VkDeviceSize>(data.height) *
+        static_cast<VkDeviceSize>(data.bytesPerTexel);
+    SE_ASSERT(
+        data.bytes.size_bytes() == imageSize,
+        "Raw texture byte span must exactly match the requested image size"
+    );
+
+    auto stagingBuffer = std::make_unique<VulkanBuffer>(
+        device,
+        physicalDevice,
+        imageSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+    stagingBuffer->Upload(std::as_bytes(data.bytes));
+
+    m_Image.Recreate(
+        device,
+        physicalDevice,
+        VkExtent2D{ data.width, data.height },
+        data.format,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        1,
+        1,
+        0,
+        VK_IMAGE_VIEW_TYPE_2D
+    );
+    m_Image.TransitionLayout(
+        device,
+        commandPool,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        uploadBatch
+    );
+    m_Image.CopyFromBuffer(device, commandPool, stagingBuffer->Handle(), uploadBatch);
+    m_Image.TransitionLayout(
+        device,
+        commandPool,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        1,
+        uploadBatch
+    );
     if (uploadBatch != nullptr) {
         uploadBatch->KeepAlive(std::move(stagingBuffer));
     }

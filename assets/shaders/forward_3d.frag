@@ -67,6 +67,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 temporalRejectionControls;
     vec4 environmentControls;
     vec4 reflectionProbeMipControls[4];
+    vec4 reflectionProbeCapturePositions[4];
 } frame;
 
 struct LocalLightRecord {
@@ -314,6 +315,9 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
 
     float diffuseIntensity = clamp(frame.reflectionProbeControls.y, 0.0, 4.0);
     float specularIntensity = clamp(frame.reflectionProbeControls.z, 0.0, 4.0);
+    // Keep IBL diffuse lighting independent from the visible background, but
+    // never let a hidden skybox remain visible through global specular fallback.
+    float globalSpecularVisible = step(0.5, frame.environmentControls.x);
     float horizonBlend = clamp(frame.reflectionProbeControls.w, 0.0, 1.0);
     float up = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 skyTop = vec3(0.37, 0.50, 0.72);
@@ -327,8 +331,12 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     float sunDisk = pow(max(sunAmount, 0.0001), sunPower);
     vec3 sunTint = vec3(1.12, 1.08, 1.0);
     vec3 sun = sunTint * sunDisk * mix(5.0, 2.2, roughness);
-    float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
-    vec3 procedural = (base + sun) * intensity;
+    float diffuseWeight = smoothstep(0.45, 1.0, roughness);
+    vec3 procedural = mix(
+        (base + sun) * specularIntensity * globalSpecularVisible,
+        (base + sun) * diffuseIntensity,
+        diffuseWeight
+    );
     float cubemapSampling = clamp(frame.reflectionProbeBlendControls.z, 0.0, 1.0);
     if (cubemapSampling <= 0.0001) {
         return procedural * enabled;
@@ -346,8 +354,9 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
             sampleDirection,
             clamp(roughness, 0.0, 1.0) * 4.0
         ).rgb, vec3(0.0)) *
-        specularIntensity;
-    vec3 sampled = mix(sampledSpecular, sampledDiffuse, smoothstep(0.45, 1.0, roughness));
+        specularIntensity *
+        globalSpecularVisible;
+    vec3 sampled = mix(sampledSpecular, sampledDiffuse, diffuseWeight);
     return mix(procedural, sampled, 0.65 * cubemapSampling) * enabled;
 }
 
@@ -562,9 +571,10 @@ vec3 BoxProjectedLocalReflectionDirectionAt(
         return sampleDirection;
     }
 
-    vec3 center = positionRadius.xyz;
+    vec3 boxCenter = positionRadius.xyz;
+    vec3 capturePosition = frame.reflectionProbeCapturePositions[probeIndex].xyz;
     vec3 extents = max(boxExtentsProjection.xyz, vec3(0.001));
-    vec3 localPosition = worldPosition - center;
+    vec3 localPosition = worldPosition - boxCenter;
     vec3 safeDirection = sampleDirection;
     safeDirection.x = abs(safeDirection.x) < 0.0001
         ? (safeDirection.x < 0.0 ? -0.0001 : 0.0001)
@@ -584,9 +594,10 @@ vec3 BoxProjectedLocalReflectionDirectionAt(
         return sampleDirection;
     }
 
-    vec3 hitLocal = localPosition + sampleDirection * hitDistance;
-    return dot(hitLocal, hitLocal) > 0.0001
-        ? normalize(hitLocal)
+    vec3 hitPosition = boxCenter + localPosition + sampleDirection * hitDistance;
+    vec3 captureDirection = hitPosition - capturePosition;
+    return dot(captureDirection, captureDirection) > 0.0001
+        ? normalize(captureDirection)
         : sampleDirection;
 }
 
@@ -594,30 +605,30 @@ vec3 BoxProjectedLocalReflectionDirection(vec3 direction, vec3 worldPosition) {
     return BoxProjectedLocalReflectionDirectionAt(0, direction, worldPosition);
 }
 
-vec3 SampleLocalReflectionProbeMap(int slotIndex, vec3 direction, float lod) {
+vec4 SampleLocalReflectionProbeMap(int slotIndex, vec3 direction, float lod) {
     if (slotIndex == 0) {
-        return textureLod(localReflectionProbeMaps[0], direction, lod).rgb;
+        return textureLod(localReflectionProbeMaps[0], direction, lod);
     }
     if (slotIndex == 1) {
-        return textureLod(localReflectionProbeMaps[1], direction, lod).rgb;
+        return textureLod(localReflectionProbeMaps[1], direction, lod);
     }
     if (slotIndex == 2) {
-        return textureLod(localReflectionProbeMaps[2], direction, lod).rgb;
+        return textureLod(localReflectionProbeMaps[2], direction, lod);
     }
-    return textureLod(localReflectionProbeMaps[3], direction, lod).rgb;
+    return textureLod(localReflectionProbeMaps[3], direction, lod);
 }
 
-vec3 SampleLocalReflectionProbeDiffuseIrradianceMap(int slotIndex, vec3 direction) {
+vec4 SampleLocalReflectionProbeDiffuseIrradianceMap(int slotIndex, vec3 direction) {
     if (slotIndex == 0) {
-        return texture(localReflectionProbeDiffuseIrradianceMaps[0], direction).rgb;
+        return texture(localReflectionProbeDiffuseIrradianceMaps[0], direction);
     }
     if (slotIndex == 1) {
-        return texture(localReflectionProbeDiffuseIrradianceMaps[1], direction).rgb;
+        return texture(localReflectionProbeDiffuseIrradianceMaps[1], direction);
     }
     if (slotIndex == 2) {
-        return texture(localReflectionProbeDiffuseIrradianceMaps[2], direction).rgb;
+        return texture(localReflectionProbeDiffuseIrradianceMaps[2], direction);
     }
-    return texture(localReflectionProbeDiffuseIrradianceMaps[3], direction).rgb;
+    return texture(localReflectionProbeDiffuseIrradianceMaps[3], direction);
 }
 
 vec3 LocalReflectionProbeDiffuseRadianceAt(
@@ -635,10 +646,17 @@ vec3 LocalReflectionProbeDiffuseRadianceAt(
             0,
             MAX_REFLECTION_PROBES - 1
         );
-        return max(
-            SampleLocalReflectionProbeDiffuseIrradianceMap(slotIndex, n),
-            vec3(0.0)
-        ) * max(frame.reflectionProbeColorArray[probeIndex].rgb, vec3(0.0));
+        vec4 localIrradiance =
+            SampleLocalReflectionProbeDiffuseIrradianceMap(slotIndex, n);
+        float localCoverage = frame.reflectionProbeMipControls[probeIndex].z > 1.5
+            ? clamp(localIrradiance.a, 0.0, 1.0)
+            : 1.0;
+        return mix(
+            fallbackRadiance,
+            max(localIrradiance.rgb, vec3(0.0)) *
+                max(frame.reflectionProbeColorArray[probeIndex].rgb, vec3(0.0)),
+            localCoverage
+        );
     }
     if (frame.reflectionProbeDiffuseLobes[baseIndex].a <= 0.5) {
         return fallbackRadiance;
@@ -804,18 +822,24 @@ EnvironmentRadianceResult ResolveEnvironmentRadiance(
         if (color.a > 0.5) {
             int slotIndex = clamp(int(color.a + 0.5) - 1, 0, MAX_REFLECTION_PROBES - 1);
             float localCubemapWeight = 1.0 - smoothstep(0.88, 1.0, roughnessClamped);
-            vec3 cubemapRadiance =
-                max(SampleLocalReflectionProbeMap(
+            vec4 localCubemap = SampleLocalReflectionProbeMap(
                     slotIndex,
                     sampleDirection,
                     roughnessClamped * max(
                         frame.reflectionProbeMipControls[probeIndex].x,
                         0.0
                     )
-                ), vec3(0.0)) *
-                localTint;
+                );
+            float localCoverage = frame.reflectionProbeMipControls[probeIndex].z > 1.5
+                ? clamp(localCubemap.a, 0.0, 1.0)
+                : 1.0;
+            vec3 cubemapRadiance = max(localCubemap.rgb, vec3(0.0)) * localTint;
             sampledRadiance =
-                mix(sampledRadiance, cubemapRadiance, localCubemapWeight);
+                mix(
+                    sampledRadiance,
+                    cubemapRadiance,
+                    localCubemapWeight * localCoverage
+                );
         }
         vec3 diffuseRadiance = LocalReflectionProbeDiffuseRadianceAt(
             probeIndex,
@@ -2792,6 +2816,28 @@ float ShadowVisibility(vec3 normal, vec3 lightDir) {
     return ApplyShadowDistanceFade(visibility, cascadeIndex, activeCount, viewDepth);
 }
 
+// Ambient attenuation from the directional shadow term must not darken surfaces
+// that already face away from that light. Those pixels get zero direct light
+// from N.L alone, and the shadow map reports them occluded by their own object,
+// so attenuating their ambient as well darkens them twice. It reads as a hard
+// shadow painted onto an object's own unlit sides, and it disappears the moment
+// the object stops casting - which is exactly the wrong dependency.
+//
+// The gate ramps in over the same terminator band the direct lobe uses, so the
+// ambient response stays continuous instead of banding at N.L == 0. Direct
+// light shadowing is untouched; only the ambient/IBL multiplier is gated.
+//
+// Kept in sync with deferred_lighting.frag and weighted_translucency_3d.frag.
+float AmbientShadowVisibility(float shadowVisibility, vec3 normal, vec3 lightDir) {
+    const float kFacingBand = 0.15;
+    float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
+    if (ambientShadowStrength <= 0.0) {
+        return 1.0;
+    }
+    float facing = smoothstep(0.0, kFacingBand, dot(normal, lightDir));
+    return mix(1.0 - ambientShadowStrength * facing, 1.0, shadowVisibility);
+}
+
 vec3 ApplyNormalMap(vec3 normal, float normalScale, vec2 materialUv) {
     vec3 tangentNormal = texture(normalSampler, materialUv).xyz * 2.0 - 1.0;
     tangentNormal.xy *= max(normalScale, 0.0);
@@ -3130,8 +3176,7 @@ void main() {
             : envStrength * (0.55 + specularStrength)
     );
     vec3 ambient = iblAmbient.diffuse + iblAmbient.specular;
-    float ambientShadowStrength = clamp(frame.shadowFiltering.y, 0.0, 1.0);
-    ambient *= mix(1.0 - ambientShadowStrength, 1.0, shadowVisibility);
+    ambient *= AmbientShadowVisibility(shadowVisibility, normal, lightDir);
     ambient += SampleProbeGridIrradiance(fragWorldPosition, normal) *
         baseColor *
         occlusion *

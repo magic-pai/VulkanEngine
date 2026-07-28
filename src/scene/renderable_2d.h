@@ -30,11 +30,14 @@ public:
     const Transform2D& Transform() const;
     bool HighlightEnabled() const;
     void SetHighlightEnabled(bool enabled);
+    const glm::vec4& Tint() const;
+    void SetTint(const glm::vec4& tint);
 
 private:
     RenderableCore m_Core;
     Transform2D m_Transform;
     bool m_HighlightEnabled = true;
+    glm::vec4 m_Tint{ 0.0f };
 };
 
 }

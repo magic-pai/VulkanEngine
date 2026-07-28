@@ -21,7 +21,10 @@ namespace se {
         int GetWidth() const;
         int GetHeight() const;
         std::array<int, 2> WindowSize() const;
-        bool WasLeftMousePressed();
+        bool WasLeftMousePressed() const;
+        bool WasLeftMouseReleased() const;
+        std::array<f64, 2> LeftMousePressPosition() const;
+        std::array<f64, 2> LeftMouseReleasePosition() const;
         bool IsLeftMouseDown() const;
         bool IsRightMouseDown() const;
         bool IsKeyDown(int key) const;
@@ -45,6 +48,12 @@ namespace se {
         static void WindowPosCallback(GLFWwindow* glfwWindow, int x, int y);
         static void WindowSizeCallback(GLFWwindow* glfwWindow, int width, int height);
         static void WindowCloseCallback(GLFWwindow* glfwWindow);
+        static void MouseButtonCallback(
+            GLFWwindow* glfwWindow,
+            int button,
+            int action,
+            int modifiers
+        );
         static void DropCallback(GLFWwindow* glfwWindow, int pathCount, const char** paths);
 
     private:
@@ -56,7 +65,10 @@ namespace se {
         int m_WindowedWidth = 0;
         int m_WindowedHeight = 0;
         bool m_FramebufferResized = false;
-        bool m_LeftMouseWasDown = false;
+        bool m_LeftMousePressed = false;
+        bool m_LeftMouseReleased = false;
+        std::array<f64, 2> m_LeftMousePressPosition{};
+        std::array<f64, 2> m_LeftMouseReleasePosition{};
         std::unordered_map<int, bool> m_KeyWasDown;
         bool m_DecorationForcedOff = false;
         bool m_MaximizeBorderlessFullscreen = true;

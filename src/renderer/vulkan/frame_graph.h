@@ -2,6 +2,8 @@
 
 #include "renderer/vulkan/vulkan_common.h"
 
+#include <string>
+
 namespace se {
 
 enum class RenderFramePassStatus {
@@ -83,10 +85,10 @@ struct RenderGraphResource {
     u32 id = 0;
     RenderGraphResourceStatus status = RenderGraphResourceStatus::Planned;
     RenderGraphResourceLifetime lifetime = RenderGraphResourceLifetime::PerFrame;
-    std::string_view name;
-    std::string_view format;
-    std::string_view usage;
-    std::string_view scale;
+    std::string name;
+    std::string format;
+    std::string usage;
+    std::string scale;
     u32 firstUsePassId = 0;
     std::string_view firstUsePassName;
     u32 lastUsePassId = 0;

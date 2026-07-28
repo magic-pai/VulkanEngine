@@ -1,0 +1,113 @@
+{
+  "execution": {
+    "legacyFallbackAllowed": false,
+    "requiredBackend": "KerrGeodesicV1",
+    "unavailableBehavior": "Disabled"
+  },
+  "format": "SelfEngineBlackHoleGraph",
+  "links": [
+    {
+      "fromPin": 17,
+      "id": 1,
+      "toPin": 33
+    },
+    {
+      "fromPin": 17,
+      "id": 2,
+      "toPin": 65
+    },
+    {
+      "fromPin": 34,
+      "id": 3,
+      "toPin": 66
+    },
+    {
+      "fromPin": 49,
+      "id": 4,
+      "toPin": 67
+    },
+    {
+      "fromPin": 68,
+      "id": 5,
+      "toPin": 81
+    }
+  ],
+  "nodes": [
+    {
+      "id": 1,
+      "parameters": {
+        "dimensionlessSpin": 0.800000011920929,
+        "massSolar": 10.0,
+        "model": "Kerr"
+      },
+      "position": [
+        40.0,
+        100.0
+      ],
+      "type": "KerrSpacetime"
+    },
+    {
+      "id": 2,
+      "parameters": {
+        "colorCorrection": 1.7000000476837158,
+        "eddingtonRatio": 0.10000000149011612,
+        "innerEdge": "ISCO",
+        "model": "NovikovThorneThinDisk",
+        "outerRadiusRg": 40.0
+      },
+      "position": [
+        310.0,
+        40.0
+      ],
+      "type": "NovikovThorneDisk"
+    },
+    {
+      "id": 3,
+      "parameters": {
+        "intensity": 1.0,
+        "source": "SceneEnvironment"
+      },
+      "position": [
+        310.0,
+        390.0
+      ],
+      "type": "SceneEnvironment"
+    },
+    {
+      "id": 4,
+      "parameters": {
+        "integrator": "AdaptiveDormandPrince54",
+        "maxImageOrder": 2,
+        "maxSteps": 512,
+        "relativeTolerance": 9.999999747378752e-06,
+        "spectralSamples": 16,
+        "transfer": "InvariantSpecificIntensity"
+      },
+      "position": [
+        610.0,
+        130.0
+      ],
+      "type": "KerrRadiativeTransfer"
+    },
+    {
+      "id": 5,
+      "parameters": {
+        "colorSpace": "LinearSceneRadiance"
+      },
+      "position": [
+        930.0,
+        220.0
+      ],
+      "type": "BlackHoleOutput"
+    }
+  ],
+  "physicsContract": {
+    "diskModel": "NovikovThorneThinDisk",
+    "geodesics": "BackwardNull",
+    "lengthUnit": "GMOverC2",
+    "radiativeTransfer": "InvariantSpecificIntensity",
+    "spacetime": "Kerr"
+  },
+  "target": "RelativisticBlackHole",
+  "version": 1
+}

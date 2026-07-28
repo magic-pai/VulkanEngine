@@ -4,10 +4,17 @@
 
 #include <functional>
 
+struct ImFont;
+
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+#include "renderer/vulkan/scene_builder_gizmo.h"
+#endif
+
 namespace se {
 
 class Camera2D;
 class Camera3D;
+class SceneBuilder;
 class VulkanDevice;
 class VulkanPhysicalDevice;
 class VulkanRenderPass;
@@ -19,6 +26,7 @@ struct VulkanRenderDebugSettings;
 struct RendererStats;
 struct VulkanShadowSettings;
 class Window;
+enum class SceneBuilderGizmoMode : u32;
 
 class VulkanImGuiLayer {
 public:
@@ -48,10 +56,17 @@ public:
         VulkanRenderDebugSettings* renderDebugSettings = nullptr,
         VulkanShadowSettings* shadowSettings = nullptr,
         u32 temporalAntialiasingMode = 0,
-        TemporalAntialiasingModeCallback temporalAntialiasingModeCallback = {}
+        TemporalAntialiasingModeCallback temporalAntialiasingModeCallback = {},
+        // Optional runtime scene-building tool. Null hides the panel entirely.
+        SceneBuilder* sceneBuilder = nullptr
     );
     void Render(VkCommandBuffer commandBuffer);
     void OnSwapchainRecreated(const VulkanSwapchain& swapchain);
+    bool SceneBuilderGizmoCapturesMouse() const;
+    void SetSceneBuilderGizmoModeFromShortcut(SceneBuilderGizmoMode mode);
+    u32 SceneBuilderGizmoModeId() const;
+    u32 SceneBuilderGizmoShortcutModeSwitchCount() const;
+    u32 SceneBuilderGizmoShortcutModeMask() const;
 
 private:
     void CreateContext(Window& window);
@@ -65,7 +80,11 @@ private:
 
 private:
     VkDevice m_Device = VK_NULL_HANDLE;
+    ImFont* m_LightIconFont = nullptr;
     bool m_Initialized = false;
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    SceneBuilderGizmo m_SceneBuilderGizmo;
+#endif
 };
 
 }

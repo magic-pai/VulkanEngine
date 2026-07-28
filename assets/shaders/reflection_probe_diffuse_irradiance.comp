@@ -69,6 +69,7 @@ void main() {
     vec3 normal = CubemapDirection(coordinate.z, uv);
     mat3 tangentFrame = TangentFrame(normal);
     vec3 irradiance = vec3(0.0);
+    float coverage = 0.0;
     uint sampleCount = max(constants.sampleCount, 1u);
     for (uint sampleIndex = 0u; sampleIndex < sampleCount; ++sampleIndex) {
         vec2 xi = Hammersley(sampleIndex, sampleCount);
@@ -92,17 +93,22 @@ void main() {
                 maximumLod
             )
             : 0.0;
-        irradiance += textureLod(
+        vec4 radianceSample = textureLod(
             capturedRadiance,
             tangentFrame * localDirection,
             sourceLod
-        ).rgb;
+        );
+        irradiance += radianceSample.rgb;
+        coverage += radianceSample.a;
     }
 
     irradiance *= PI / float(sampleCount);
     imageStore(
         diffuseIrradiance,
         ivec3(coordinate),
-        vec4(max(irradiance, vec3(0.0)), 1.0)
+        vec4(
+            max(irradiance, vec3(0.0)),
+            clamp(coverage / float(sampleCount), 0.0, 1.0)
+        )
     );
 }

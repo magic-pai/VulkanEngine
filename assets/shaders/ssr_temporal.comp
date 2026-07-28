@@ -138,6 +138,11 @@ bool TemporalMissHistoryRejectEnabled() {
     return mod(encoded, 2.0) > 0.5;
 }
 
+bool FfxSssrReceiverHistoryUpdateEnabled() {
+    float encoded = floor(abs(frame.ssrControls.w) / 262144.0);
+    return mod(encoded, 2.0) > 0.5;
+}
+
 bool CurrentHdrHitUvInBounds(vec2 hitUv) {
     ivec2 sceneExtent = textureSize(currentHdrSceneColor, 0);
     ivec2 safeExtent = max(sceneExtent, ivec2(1));
@@ -235,6 +240,18 @@ void main() {
         ? PreviousViewDepthForCurrentPixel(uv, depth)
         : 0.0;
     vec2 encodedNormal = OctEncode(normal);
+
+    // FidelityFX DNSR owns reflection radiance and temporal filtering. It
+    // only needs this receiver history on the next frame for disocclusion
+    // validation, so avoid running the legacy reflection reconstruction.
+    if (FfxSssrReceiverHistoryUpdateEnabled()) {
+        imageStore(
+            historyMetadataOutput,
+            pixel,
+            vec4(viewDepth, encodedNormal, roughness)
+        );
+        return;
+    }
 
     vec4 rawTrace = texelFetch(rawInput, pixel, 0);
     bool currentSceneColorEnabled = CurrentHdrSourceEnabled();
@@ -340,20 +357,20 @@ void main() {
         ? mix(0.65, 0.94, motionConfidence)
         : 0.0;
     float historyLock = TemporalHistoryLockEnabled()
-        ? max(history.a * historyPersistence, historyValidity)
+        ? history.a * historyPersistence * historyValidity
         : historyValidity;
     if (TemporalMissHistoryRejectEnabled() && currentHitValid < 0.5) {
-        // When the current trace misses, stale history should fall away faster
-        // if the reprojected sample is weak or the receiver is moving.
+        // A prior hit cannot create a reflection by itself. Carry it only
+        // when the current trace still has local support, otherwise an old
+        // glossy hit expands into a displaced reflected silhouette.
         float missHistoryReject = mix(0.18, 0.72, historyValidity) *
             mix(0.25, 1.0, motionConfidence);
-        historyLock *= missHistoryReject;
+        float currentNeighborhoodSupport = neighborhoodValid ? 1.0 : 0.0;
+        historyLock *= missHistoryReject * currentNeighborhoodSupport;
     }
 
-    // Keep a validated history sample for a short grace period when the
-    // current SSR ray misses. Hi-Z crossings can toggle at grazing angles;
-    // rejecting history immediately turns that toggle into visible flicker.
-    // Miss history decays every frame and is reduced under larger motion.
+    // Local current support can bridge a grazing Hi-Z toggle, but unrelated
+    // history is rejected above and falls back to the environment instead.
     float hitHistoryWeight = TemporalHistoryLockEnabled()
         ? mix(0.08, 0.28, motionConfidence) *
             mix(0.50, 1.0, currentHistoryAgreement)

@@ -22,6 +22,12 @@ class Scene2D;
 class Application {
 public:
     using UpdateCallback = std::function<void(float deltaSeconds, float elapsedSeconds)>;
+    using FrameCompletedCallback = std::function<void(
+        u32 renderedFrameIndex,
+        float elapsedSeconds,
+        const RendererStats& stats,
+        const RendererFrameMonitorSnapshot& monitorSnapshot
+    )>;
 
     Application(
         int width,
@@ -46,6 +52,7 @@ public:
     void CreateRenderer();
     void DestroyRenderer();
     void Run(UpdateCallback update);
+    void SetFrameCompletedCallback(FrameCompletedCallback callback);
 
 protected:
     virtual Scene2D* Scene2DForRenderer();
@@ -62,6 +69,7 @@ private:
     VulkanRenderResources2D m_RenderResources;
     PipelineSpec m_PipelineSpec;
     std::unique_ptr<VulkanRenderer> m_Renderer;
+    FrameCompletedCallback m_FrameCompleted;
 };
 
 }

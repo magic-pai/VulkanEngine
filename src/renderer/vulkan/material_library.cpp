@@ -175,6 +175,60 @@ VulkanMaterial& VulkanMaterialLibrary::CreateBlackHoleMaterial(
     return material;
 }
 
+VulkanMaterial& VulkanMaterialLibrary::CreateBlackHoleMaterial(
+    std::string name,
+    std::string fallbackTexturePath,
+    std::string colorMapPath,
+    std::string cubemapDirectory,
+    VulkanTextureData deflection,
+    VulkanTextureData inverseRadius,
+    VulkanTextureData blackBody,
+    MaterialProperties properties
+) {
+    SE_ASSERT(!name.empty(), "Material name must not be empty");
+    SE_ASSERT(!Contains(name), "Material name already exists");
+
+    auto material = std::make_unique<VulkanMaterial>(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool,
+        std::move(fallbackTexturePath),
+        true,
+        false,
+        nullptr,
+        m_TextureMipLodBias
+    );
+    material->Properties() = properties;
+    material->SetColorMap(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool,
+        std::move(colorMapPath),
+        false,
+        true
+    );
+    material->SetSkyboxCubemap(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool,
+        std::move(cubemapDirectory)
+    );
+    material->SetBlackHoleLookupTables(
+        m_Device,
+        m_PhysicalDevice,
+        m_CommandPool,
+        deflection,
+        inverseRadius,
+        blackBody
+    );
+
+    m_Materials.push_back(MaterialEntry{
+        std::move(name),
+        std::move(material)
+    });
+    return *m_Materials.back().material;
+}
+
 VulkanMaterial& VulkanMaterialLibrary::Get(std::string_view name) {
     const std::optional<std::size_t> index = FindIndex(name);
     SE_ASSERT(index.has_value(), "Material was not found");

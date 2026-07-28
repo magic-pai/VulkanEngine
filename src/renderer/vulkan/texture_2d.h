@@ -16,6 +16,14 @@ struct VulkanTexturePixels {
     u32 height = 0;
 };
 
+struct VulkanTextureData {
+    std::span<const u8> bytes;
+    u32 width = 0;
+    u32 height = 0;
+    u32 bytesPerTexel = 0;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+};
+
 struct VulkanEncodedTextureBytes {
     std::span<const u8> bytes;
 };
@@ -52,6 +60,13 @@ public:
         bool flipVertically = false,
         VulkanUploadBatch* uploadBatch = nullptr
     );
+    VulkanTexture2D(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        VulkanTextureData data,
+        VulkanUploadBatch* uploadBatch = nullptr
+    );
 
     ~VulkanTexture2D();
 
@@ -61,7 +76,9 @@ public:
     VkImageView View() const;
     VkImageLayout Layout() const;
     VkExtent2D Extent() const;
+    VkFormat Format() const;
     u32 MipLevels() const;
+    void SetDebugName(const VulkanDevice& device, const char* prefix) const;
 
 private:
     void CreateTextureImage(
@@ -92,6 +109,13 @@ private:
         bool srgb,
         bool generateMipmaps,
         bool flipVertically,
+        VulkanUploadBatch* uploadBatch
+    );
+    void CreateTextureImage(
+        const VulkanDevice& device,
+        const VulkanPhysicalDevice& physicalDevice,
+        const VulkanCommandPool& commandPool,
+        VulkanTextureData data,
         VulkanUploadBatch* uploadBatch
     );
 

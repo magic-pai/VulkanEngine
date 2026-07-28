@@ -63,4 +63,12 @@ void Renderable2D::SetHighlightEnabled(bool enabled) {
     m_HighlightEnabled = enabled;
 }
 
+const glm::vec4& Renderable2D::Tint() const {
+    return m_Tint;
+}
+
+void Renderable2D::SetTint(const glm::vec4& tint) {
+    m_Tint = tint;
+}
+
 }

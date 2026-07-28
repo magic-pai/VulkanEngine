@@ -7,6 +7,7 @@
 #include "renderer/vulkan/render_debug_settings.h"
 #include "renderer/vulkan/render_feature_registry.h"
 #include "renderer/vulkan/renderer_stats.h"
+#include "renderer/vulkan/renderer_runtime_monitor.h"
 #include "renderer/vulkan/shadow_settings.h"
 #include "renderer/vulkan/uniform_buffer.h"
 #include "renderer/vulkan/vertex.h"
@@ -109,7 +110,9 @@ class Camera2D;
 class Camera3D;
 class Scene2D;
 class Scene3D;
+class SceneBuilder;
 class Window;
+enum class SceneBuilderGizmoMode : u32;
 struct FrameMaterialSet;
 
 struct FrameMatrices {
@@ -196,8 +199,8 @@ struct FrameTemporalUpscaleState {
 };
 
 struct FrameLightConstants {
-    glm::vec4 directionalLight{ -0.45f, -0.82f, -0.35f, 0.78f };
-    glm::vec4 ambientLight{ 0.22f, 0.24f, 0.0f, 0.0f };
+    glm::vec4 directionalLight{ 0.0f };
+    glm::vec4 ambientLight{ 0.0f };
 };
 
 enum class RendererLightKind : u32 {
@@ -209,10 +212,10 @@ enum class RendererLightKind : u32 {
 
 struct RendererDirectionalLight {
     RendererLightKind kind = RendererLightKind::Directional;
-    glm::vec3 direction{ -0.45f, -0.82f, -0.35f };
-    f32 intensity = 0.78f;
-    f32 ambient = 0.22f;
-    f32 specular = 0.24f;
+    glm::vec3 direction{ 0.0f };
+    f32 intensity = 0.0f;
+    f32 ambient = 0.0f;
+    f32 specular = 0.0f;
     f32 angularRadiusRadians = 0.00464258f;
 };
 
@@ -236,7 +239,7 @@ inline constexpr std::size_t kRendererMaxFrameLocalLights = 64;
 struct FrameLightSet {
     RendererDirectionalLight primaryDirectional{};
     std::array<RendererLocalLight, kRendererMaxFrameLocalLights> localLights{};
-    u32 directionalCount = 1;
+    u32 directionalCount = 0;
     u32 localCount = 0;
     u32 rectCount = 0;
 
@@ -254,8 +257,11 @@ enum class RendererTemporalAntialiasingMode : u32 {
 };
 
 struct RendererReflectionProbe {
+    // Cubemap capture origin. Retains the established member name internally.
     glm::vec3 center{ 0.0f, 1.2f, 0.0f };
     f32 radius = 5.5f;
+    // Proxy-volume center used for receiver coverage and box intersection.
+    glm::vec3 boxCenter{ 0.0f, 1.2f, 0.0f };
     glm::vec3 boxExtents{ 5.5f };
     glm::vec3 color{ 1.0f, 0.82f, 0.62f };
     f32 intensity = 1.25f;
@@ -269,6 +275,7 @@ struct RendererReflectionProbe {
     std::string captureAssetId;
     RendererReflectionProbeRefreshPolicy refreshPolicy =
         RendererReflectionProbeRefreshPolicy::Static;
+    std::vector<u64> captureExcludedRenderableIdentities;
 };
 
 struct FrameReflectionProbeSet {
@@ -342,6 +349,9 @@ struct FrameReflectionProbeSet {
     f32 totalBlendWeight = 0.0f;
     f32 normalizedBlendWeightSum = 0.0f;
     f32 normalizedBlendWeightError = 0.0f;
+    f32 diffuseIntensity = 1.0f;
+    f32 specularIntensity = 1.0f;
+    f32 horizonBlend = 0.22f;
     bool fallbackEnabled = false;
     bool boxProjectionEnabled = false;
     bool parallaxCorrectionEnabled = false;
@@ -358,6 +368,17 @@ struct FrameReflectionProbeSet {
     bool sceneDirtyRequested = false;
     RendererReflectionProbeCaptureFallbackReason captureFallbackReason =
         RendererReflectionProbeCaptureFallbackReason::NoActiveSceneProbe;
+};
+
+struct FrameEnvironmentSettings {
+    bool iblEnabled = true;
+    f32 diffuseIntensity = 1.0f;
+    f32 specularIntensity = 1.0f;
+    f32 horizonBlend = 0.22f;
+    bool skyboxEnabled = false;
+    f32 skyboxIntensity = 1.0f;
+    f32 skyboxBlur = 0.0f;
+    u32 lightingAsset = 0;
 };
 
 struct FrameLightTileStats {
@@ -441,6 +462,14 @@ struct DirectionalShadowCascadeSet {
     // Capture-side shadows use a full standalone depth map instead of the main
     // camera's 2x2 CSM atlas.
     bool singleMapSampling = false;
+    VulkanDirectionalShadowCoverageMode requestedCoverageMode =
+        VulkanDirectionalShadowCoverageMode::CameraCascades;
+    VulkanDirectionalShadowCoverageMode activeCoverageMode =
+        VulkanDirectionalShadowCoverageMode::CameraCascades;
+    bool cameraIndependent = false;
+    bool sceneBoundsValid = false;
+    u32 coverageFallbackReason = 0;
+    u64 projectionHash = 0;
     f32 splitLambda = 0.0f;
     f32 maxDistance = 0.0f;
     f32 nearDepth = 0.0f;
@@ -566,11 +595,16 @@ public:
     void ToggleTemporalAntialiasingMode();
     RendererTemporalAntialiasingMode TemporalAntialiasingMode() const;
     void SetImGui3DContext(Scene3D* scene, Camera3D* camera);
+    // Optional runtime scene-building tool panel. Null keeps it hidden.
+    void SetImGuiSceneBuilder(SceneBuilder* sceneBuilder);
+    bool SceneBuilderGizmoCapturesMouse() const;
+    void SetSceneBuilderGizmoModeFromShortcut(SceneBuilderGizmoMode mode);
     void SetOverlay3DContext(Scene3D* scene, Camera3D* camera, PipelineSpec pipelineSpec);
     void RefreshMaterialDescriptors();
     VulkanRenderDebugSettings& RenderDebugSettings();
     const VulkanRenderDebugSettings& RenderDebugSettings() const;
     const RendererStats& Stats() const;
+    const RendererFrameMonitorSnapshot& RuntimeMonitorSnapshot() const;
     VulkanShadowSettings& ShadowSettings();
     const VulkanShadowSettings& ShadowSettings() const;
     void ApplyEnvironmentRenderSettings();
@@ -662,17 +696,21 @@ private:
         const glm::mat4& lightViewProjection,
         const FrameLightConstants& lights,
         const FrameReflectionProbeSet& reflectionProbes,
+        const FrameEnvironmentSettings& environment,
         bool shadowSamplingEnabled,
         const FrameTemporalState* temporalState,
         bool ssrFidelityFxDeferredCompositeActive = false,
         bool ssrFidelityFxSameFrameCompositeActive = false,
         bool ssrFidelityFxHitConfidenceActive = false,
-        bool ssrFidelityFxConfidenceSpatialFilterActive = false
+        bool ssrFidelityFxConfidenceSpatialFilterActive = false,
+        bool ssrFidelityFxExclusiveReflectionOwnerActive = false,
+        bool directRayQueryCompositeActive = false
     ) const;
     void UpdateFfxSssrConstants(
         std::size_t imageIndex,
         const FrameMatrices* matrices,
         const FrameTemporalState* temporalState,
+        bool historySourceValid,
         f32 temporalStabilityFactor,
         u32 samplesPerQuad,
         bool stableEnvironmentFallbackEnabled,
@@ -695,6 +733,7 @@ private:
         const glm::mat4& lightViewProjection,
         const FrameLightConstants& lights,
         const FrameReflectionProbeSet& reflectionProbes,
+        const FrameEnvironmentSettings& environment,
         bool shadowSamplingEnabled
     ) const;
     void UpdateLightBuffer(
@@ -752,8 +791,13 @@ private:
         u32 face
     ) const;
     std::span<const RenderCommand> ReflectionCaptureInfluenceCommands();
+    FrameEnvironmentSettings BuildFrameEnvironmentSettings() const;
+    VulkanIblGenerationSettings BuildSceneEnvironmentIblGenerationSettings() const;
+    bool RefreshSceneEnvironmentIblAsset();
+    void RecreateIblDependentResources();
     FrameReflectionProbeSet BuildFrameReflectionProbeSet(
-        const FrameMatrices* matrices
+        const FrameMatrices* matrices,
+        const FrameEnvironmentSettings& environment
     ) const;
     bool AssignObjectReflectionProbes(
         std::span<RenderCommand> renderCommands,
@@ -813,6 +857,11 @@ private:
         bool allowCacheReuse
     );
     bool UploadMainInstancesIfNeeded(std::size_t imageIndex);
+    void BuildRuntimeMonitorSnapshot(
+        std::size_t imageIndex,
+        VkExtent2D renderExtent,
+        const FrameMatrices* matrices
+    );
 
 private:
     struct ObjectReflectionProbeAssignment {
@@ -867,6 +916,7 @@ private:
     Scene3D* m_MainScene3D = nullptr;
     Scene3D* m_ImGuiScene3D = nullptr;
     Camera3D* m_ImGuiCamera3D = nullptr;
+    SceneBuilder* m_ImGuiSceneBuilder = nullptr;
     Scene3D* m_OverlayScene3D = nullptr;
     Camera3D* m_OverlayCamera3D = nullptr;
     const VulkanRenderResources2D& m_RenderResources;
@@ -883,8 +933,12 @@ private:
     std::vector<LocalShadowCacheState> m_LocalShadowCacheStates;
     VulkanRenderDebugSettings m_RenderDebugSettings;
     VulkanShadowSettings m_ShadowSettings;
+    u64 m_DirectionalShadowProjectionHash = 0;
+    u64 m_DirectionalShadowProjectionRevision = 0;
+    bool m_DirectionalShadowProjectionAvailable = false;
     VulkanRenderFeatureRegistry m_RenderFeatures;
     RendererStats m_LastStats;
+    RendererFrameMonitorSnapshot m_RuntimeMonitorSnapshot;
     std::size_t m_CurrentFrame = 0;
     FrameMatrices m_PreviousTemporalMatrices{};
     VkExtent2D m_PreviousTemporalExtent{};
@@ -1054,8 +1108,13 @@ private:
     VkImageView m_IblIrradianceView = VK_NULL_HANDLE;
     VkImageView m_IblPrefilteredView = VK_NULL_HANDLE;
     VkSampler m_IblSampler = VK_NULL_HANDLE;
+    VulkanIblGenerationSettings m_DefaultIblGenerationSettings{};
     VulkanIblGenerationSettings m_IblGenerationSettings{};
+    VulkanIblGenerationSettings m_LastFailedIblGenerationSettings{};
     VulkanIblGenerationInfo m_IblGenerationInfo{};
+    bool m_HasFailedIblGenerationSettings = false;
+    u32 m_SceneEnvironmentIblReloadCount = 0;
+    u32 m_SceneEnvironmentIblReloadFailureCount = 0;
     VulkanReflectionProbeResources m_ReflectionProbeResources;
     std::unordered_map<u64, ObjectReflectionProbeAssignment>
         m_ObjectReflectionProbeAssignments;
@@ -1067,8 +1126,8 @@ private:
         kReflectionCapturePersistentShadowCacheCapacity>
         m_ReflectionCapturePersistentShadowSnapshots{};
     u32 m_ReflectionCapturePersistentShadowSnapshotEvictionCount = 0;
-    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxTexture;
-    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxFallbackTexture;
+    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxStudioTexture;
+    std::unique_ptr<VulkanTexture2D> m_VisibleSkyboxProceduralTexture;
     std::unique_ptr<VulkanSampler> m_VisibleSkyboxSampler;
     std::unique_ptr<VulkanGraphicsPipeline> m_DepthPrefillGraphicsPipeline;
     std::unique_ptr<VulkanGraphicsPipeline> m_DoubleSidedDepthPrefillGraphicsPipeline;

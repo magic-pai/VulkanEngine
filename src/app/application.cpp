@@ -144,6 +144,10 @@ void Application::DestroyRenderer() {
     m_Renderer.reset();
 }
 
+void Application::SetFrameCompletedCallback(FrameCompletedCallback callback) {
+    m_FrameCompleted = std::move(callback);
+}
+
 void Application::Run(UpdateCallback update) {
     SE_ASSERT(m_Renderer != nullptr, "Application renderer must be created before Run");
 
@@ -182,9 +186,18 @@ void Application::Run(UpdateCallback update) {
         renderDocCapture.EndFrame(nextRenderedFrame);
 #endif
         ++renderedFrameCount;
+        const float elapsedSeconds = ElapsedSeconds(startTime);
+        if (m_FrameCompleted) {
+            m_FrameCompleted(
+                static_cast<u32>(renderedFrameCount),
+                elapsedSeconds,
+                m_Renderer->Stats(),
+                m_Renderer->RuntimeMonitorSnapshot()
+            );
+        }
         benchmark.RecordFrame(
             static_cast<u32>(renderedFrameCount),
-            ElapsedSeconds(startTime),
+            elapsedSeconds,
             m_Renderer->Stats()
         );
 

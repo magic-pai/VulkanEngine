@@ -1,6 +1,100 @@
 # SelfEngine AAA Next Stage Plan
 
-## Stage
+## Current Stage: Static GI / Irradiance Probe Volume Foundation
+
+Date: 2026-07-24
+
+The active next stage is no longer Temporal AA. Temporal/DLSS work remains
+important, but the renderer mainline is now blocked by the missing real GI
+producer: `StaticLightProbeGrid` exists as a renderer resource and shader
+consumer path, yet still receives deterministic placeholder data.
+
+This stage follows the third-party-first decision in
+`docs/GI_THIRD_PARTY_DECISION.md`. It deliberately starts with a static
+irradiance probe-volume tier before any fully dynamic GI SDK, Brixelizer GI
+integration, RTXGI/DDGI backend, SDFGI path, or Lumen-class research.
+
+## Current Stage Goal
+
+Turn the existing probe-grid carrier into a scene-derived static irradiance
+volume with a production data contract.
+
+The stage is complete when SelfEngine can enable a static GI/probe-volume path
+whose producer is no longer `BuildDeterministicProbeGridData()`, whose data
+source/revision/coefficient energy/fallback state are visible through CSV,
+ImGui, and FrameGraph, and whose deferred, legacy forward, and WBOIT consumers
+are proven on LightingShowcase plus a structurally different control scene.
+
+This is diffuse indirect lighting only. Specular reflections remain in the
+reflection-probe / Ray Query hit-IBL path, and SSR/fallback reflection blending
+stays parked until redesigned.
+
+## Current Acceptance Evidence
+
+- CSV exposes GI backend/source type, probe count, dimensions, spacing, bounds,
+  cell count, record/coefficient layout, producer revision or hash, update
+  count, fallback reason, coefficient energy min/max/average, and consumer
+  integration flags for deferred, forward, and WBOIT.
+- FrameGraph distinguishes the probe-volume producer/data resource from the
+  shader consumer path and records explicit fallback/resource states.
+- ImGui shows the resolved GI source/backend, whether deterministic placeholder
+  data is still active, probe-volume bounds/dimensions, coefficient energy, and
+  fallback reason.
+- `SE_PROBE_GRID=1/0` remains the isolation control; add or reuse a clearer
+  source/backend control such as `SE_PROBE_GRID_SOURCE` or
+  `SE_GI_BACKEND=static-probe-volume`.
+- `SE_RENDER_VIEW=probe-grid` and `SE_RENDER_VIEW=probe-grid-cell` continue to
+  visualize contribution and coverage. Add a GI/source debug row if the
+  existing views cannot distinguish baked data from fallback/placeholder data.
+- Strict data gates cover default off, static-GI enabled, placeholder rejected
+  or explicitly classified, invalid/missing data fallback, zero-blend fallback,
+  and cross-scene portability.
+- Validation must run on LightingShowcase and a structurally different control
+  scene before any one-window visual acceptance test.
+
+## Current Execution Slices
+
+1. GI decision and plan update. Implemented in this planning slice.
+   - Add `docs/GI_THIRD_PARTY_DECISION.md`.
+   - Update `docs/AAA_RENDERING_PIPELINE_PLAN.md` so GI becomes the next queue
+     item and dynamic GI SDKs remain later candidates.
+   - Mark the existing probe-grid producer as placeholder, not real GI.
+
+2. Probe-volume data contract.
+   - Add explicit source/backend enums and fallback reasons for static GI.
+   - Record producer revision/hash, coefficient layout, dimensions, bounds,
+     energy metrics, and update lifecycle.
+   - Keep the current deterministic producer only as a Debug/control source,
+     never as accepted GI.
+
+3. First scene-derived/static producer.
+   - Load or generate static irradiance-volume data from scene-owned/baked
+     inputs.
+   - Prefer SH or a documented directional-lobe representation based on mature
+     irradiance-volume practice.
+   - If offline baking needs ray queries against static geometry, evaluate
+     Embree/OIDN-style tooling before writing custom ray kernels.
+
+4. Consumer hardening.
+   - Ensure deferred, legacy forward, and WBOIT diffuse ambient paths consume
+     the same static GI data and report matching integration flags.
+   - Preserve IBL fallback and existing reflection-probe/Ray Query specular
+     behavior.
+
+5. Strict health gate and visual acceptance.
+   - Add a strict script or extend the existing probe-grid health matrix.
+   - Require LightingShowcase plus a different control scene.
+   - Only after data passes, open one LightingShowcase window using the accepted
+     Ray Query + hit IBL reflection baseline and static GI enabled.
+
+## First Slice To Execute Now
+
+Implement the probe-volume data contract and health gate before changing the
+visual look. This keeps the next coding step small and prevents a repeat of the
+SSR problem where a data-validated path was mistaken for production visual
+quality.
+
+## Previous Temporal Stage (Historical)
 
 Temporal AA resolve, history, and upscaling readiness.
 

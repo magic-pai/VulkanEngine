@@ -35,7 +35,9 @@ ColorBlendMode FidelityFxSssrApplyBlendMode() {
         return ColorBlendMode::DestinationAlphaAdditive;
     }
 #endif
-    return ColorBlendMode::DestinationAlphaAdditive;
+    // The deferred HDR target does not carry a reflection visibility alpha.
+    // Destination-alpha blending would therefore suppress every FFX result.
+    return ColorBlendMode::Additive;
 }
 
 const char* ColorBlendModeName(ColorBlendMode mode) {

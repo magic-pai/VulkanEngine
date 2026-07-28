@@ -54,6 +54,16 @@ public:
         std::string cubemapDirectory,
         MaterialProperties properties = {}
     );
+    VulkanMaterial& CreateBlackHoleMaterial(
+        std::string name,
+        std::string fallbackTexturePath,
+        std::string colorMapPath,
+        std::string cubemapDirectory,
+        VulkanTextureData deflection,
+        VulkanTextureData inverseRadius,
+        VulkanTextureData blackBody,
+        MaterialProperties properties = {}
+    );
 
     VulkanMaterial& Get(std::string_view name);
     const VulkanMaterial& Get(std::string_view name) const;

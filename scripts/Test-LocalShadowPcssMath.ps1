@@ -178,7 +178,6 @@ $bufferSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/uniform_buffe
 $layoutSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/descriptor_set_layout.h"
 $descriptorSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/descriptor_sets.cpp"
 $sceneSource = Get-Content -Raw -LiteralPath "src/scene/scene_3d.h"
-$bridgeSource = Get-Content -Raw -LiteralPath "src/forward_3d.cpp"
 $cmakeSource = Get-Content -Raw -LiteralPath "CMakeLists.txt"
 $spirvScript = Get-Content -Raw -LiteralPath "scripts/Set-SpirvShadowFunctionControl.ps1"
 $cpuContract = [pscustomobject]@{
@@ -210,7 +209,7 @@ $cpuContract = [pscustomobject]@{
         "count * kMaterialDescriptorCombinedImageSamplerCount"
     )
     authoredSourceRadius = $sceneSource.Contains("f32 sourceRadius = 0.05f") -and
-        $bridgeSource.Contains("PositiveOrFallback(light.sourceRadius, 0.05f)")
+        $rendererSource.Contains("std::max(light.sourceRadius, 0.0f)")
     spirvFunctionControl = $cmakeSource.Contains(
         "Set-SpirvShadowFunctionControl.ps1"
     ) -and $spirvScript.Contains("DontInline")

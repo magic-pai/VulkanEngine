@@ -106,11 +106,14 @@ struct HybridReflectionFullAuditQueueCommandRecord {
 };
 
 struct alignas(16) HybridReflectionProbeGpuRecord {
+    // Proxy-volume center and influence radius.
     glm::vec4 positionRadius{ 0.0f };
     glm::vec4 controls{ 0.0f };
     glm::vec4 colorAndMip{ 1.0f, 1.0f, 1.0f, 0.0f };
     glm::vec4 boxExtentsProjection{ 1.0f, 1.0f, 1.0f, 0.0f };
     glm::vec4 resourceControls{ 0.0f };
+    // Cubemap capture origin used after the proxy ray reaches its hit point.
+    glm::vec4 capturePosition{ 0.0f, 1.2f, 0.0f, 1.0f };
 };
 
 struct alignas(16) HybridReflectionProbeFrameInputs {
@@ -128,12 +131,16 @@ struct HybridReflectionRayQuerySettings {
     f32 originBiasMin = 0.002f;
     f32 originBiasScale = 0.00025f;
     f32 originBiasMax = 0.05f;
+    f32 hitIblDiffuseIntensity = 1.0f;
+    f32 hitIblSpecularIntensity = 1.0f;
     u32 maxShadowedLocalLights = 2u;
     u32 rectangleShadowSampleCount = 2u;
     u32 diagnosticTargetSubmissionIndex = std::numeric_limits<u32>::max();
     u32 diagnosticTargetInstanceIndex = std::numeric_limits<u32>::max();
     bool forceAllRayQueries = false;
     bool hitIblEnabled = true;
+    bool globalIblEnabled = false;
+    bool globalSpecularVisible = true;
     bool sourceFusionEnabled = true;
     bool directMirrorRayQueryEnabled = true;
     bool cullBackFacingTriangles = true;
@@ -292,7 +299,6 @@ public:
         VkCommandBuffer commandBuffer,
         u32 imageIndex,
         VkDescriptorSet ffxConstantsDescriptorSet,
-        VkBuffer indirectArgsBuffer,
         RendererHybridReflectionStats& stats
     );
 

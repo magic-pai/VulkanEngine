@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
+#include <unordered_set>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/geometric.hpp>
@@ -391,7 +393,7 @@ void RenderQueue::BuildFromScene2D(
             renderResources,
             *renderable,
             renderable->Transform().Matrix(),
-            glm::vec4(0.0f)
+            renderable->Tint()
         ));
     }
 
@@ -411,6 +413,8 @@ void RenderQueue::BuildFromScene3D(
         m_3DCommandCache.clear();
         m_PreviousLodByRenderable.clear();
         m_3DSceneCache.valid = false;
+        m_LastSceneIdentity = options.sceneIdentity;
+        m_LastSceneMembershipRevision = options.sceneMembershipRevision;
         if (options.cullingStats != nullptr) {
             *options.cullingStats = RenderQueueCullingStats{};
         }
@@ -425,6 +429,13 @@ void RenderQueue::BuildFromScene3D(
         m_3DCommandCache.clear();
         m_PreviousLodByRenderable.clear();
         m_3DSceneCache.valid = false;
+    }
+    if (options.useSceneRevisions &&
+        (options.sceneIdentity != m_LastSceneIdentity ||
+            options.sceneMembershipRevision != m_LastSceneMembershipRevision)) {
+        PruneDestroyedRenderableCache(renderables);
+        m_LastSceneIdentity = options.sceneIdentity;
+        m_LastSceneMembershipRevision = options.sceneMembershipRevision;
     }
     if (options.cullingStats != nullptr) {
         *options.cullingStats = RenderQueueCullingStats{};
@@ -826,6 +837,40 @@ void RenderQueue::StoreCachedVisibility(
     cached.visibilityFrustumSignature = frustumSignature;
     cached.visibilityValid = true;
     cached.visible = visible;
+}
+
+void RenderQueue::PruneDestroyedRenderableCache(
+    std::span<Renderable3D* const> renderables
+) {
+    if (m_3DCommandCache.empty() && m_PreviousLodByRenderable.empty()) {
+        return;
+    }
+
+    std::unordered_set<const Renderable3D*> livePointers;
+    std::unordered_set<u64> liveIdentities;
+    livePointers.reserve(renderables.size());
+    liveIdentities.reserve(renderables.size());
+    for (const Renderable3D* renderable : renderables) {
+        if (renderable == nullptr) {
+            continue;
+        }
+
+        livePointers.insert(renderable);
+        liveIdentities.insert(renderable->RenderIdentity());
+    }
+
+    for (auto entry = m_3DCommandCache.begin(); entry != m_3DCommandCache.end();) {
+        const bool live =
+            livePointers.find(entry->first) != livePointers.end() &&
+            liveIdentities.find(entry->second.renderableIdentity) != liveIdentities.end();
+        entry = live ? std::next(entry) : m_3DCommandCache.erase(entry);
+    }
+
+    for (auto entry = m_PreviousLodByRenderable.begin();
+         entry != m_PreviousLodByRenderable.end();) {
+        const bool live = liveIdentities.find(entry->first) != liveIdentities.end();
+        entry = live ? std::next(entry) : m_PreviousLodByRenderable.erase(entry);
+    }
 }
 
 u64 RenderQueue::Scene3DQueueSignature(

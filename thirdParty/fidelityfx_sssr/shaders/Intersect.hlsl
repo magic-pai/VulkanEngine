@@ -296,12 +296,6 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
 
     SelfEngine_FfxSssrRecordHitAttribution(confidence);
 
-    float3 reflection_radiance = 0;
-    if (confidence > 0) {
-        // Found an intersection with the depth buffer -> We can lookup the color from lit scene.
-        reflection_radiance = g_lit_scene.Load(int3(screen_size * hit.xy, 0)).xyz;  
-    }
-
     // Sample environment map.
     float3 world_space_reflected_direction = mul(g_inv_view, float4(view_space_reflected_direction, 0)).xyz;
     float3 world_space_environment_direction = mul(
@@ -313,7 +307,16 @@ void main(uint group_index : SV_GroupIndex, uint group_id : SV_GroupID) {
         world_space_environment_direction,
         roughness
     );
-    reflection_radiance = lerp(environment_lookup, reflection_radiance, confidence);
+    // Keep radiance and hit validity separate. The scene color is an unbiased
+    // estimate once a depth hit exists; the downstream compositor owns the
+    // confidence-based transition to the environment fallback. Blending here
+    // as well attenuates a valid geometric reflection twice.
+    float3 reflection_radiance = environment_lookup;
+    if (confidence > 0) {
+        reflection_radiance = SelfEngine_FfxSssrSanitizeRadiance(
+            g_lit_scene.Load(int3(screen_size * hit.xy, 0)).xyz
+        );
+    }
 
     float4 new_sample = float4(reflection_radiance, world_ray_length);
     StoreIntersectionSample(

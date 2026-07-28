@@ -32,12 +32,19 @@ enum class VulkanDirectionalShadowFilterMode : u32 {
     OptimizedTentPcf = 1
 };
 
+enum class VulkanDirectionalShadowCoverageMode : u32 {
+    CameraCascades = 0,
+    SceneBounds = 1
+};
+
 struct VulkanShadowSettings {
     VulkanShadowQuality quality = VulkanShadowQuality::Ultra;
     bool enabled = true;
     bool cascadesEnabled = true;
     bool directionalShadowReceiveEnabled = true;
     bool stableCascades = true;
+    VulkanDirectionalShadowCoverageMode directionalCoverageMode =
+        VulkanDirectionalShadowCoverageMode::CameraCascades;
     f32 strength = 1.0f;
     f32 ambientStrength = 0.54f;
     f32 biasMin = 0.00065f;
@@ -110,11 +117,17 @@ struct VulkanShadowSettings {
     bool ssrHitValidationEnabled = true;
     bool ssrDeferredReceiverReprojectionEnabled = true;
     bool ssrFidelityFxBackendRequested = false;
+    // Uses the existing FidelityFX DNSR/Apply resources as the Ray Query
+    // temporal carrier without running its screen-space intersection stage.
+    bool rayQueryReflectionCarrierEnabled = false;
     bool reflectionProbeFallbackEnabled = true;
     f32 reflectionProbeDiffuseIntensity = 1.0f;
     f32 reflectionProbeSpecularIntensity = 1.0f;
     f32 reflectionProbeHorizonBlend = 0.22f;
-    bool globalIblCubemapEnabled = false;
+    // Scene Builder's global environment preset is the baseline specular
+    // reflection source. A disabled environment still resolves to zero through
+    // the per-scene IBL gate.
+    bool globalIblCubemapEnabled = true;
     bool reflectionProbeCubemapEnabled = true;
     bool skyboxEnabled = false;
     f32 skyboxIntensity = 1.0f;

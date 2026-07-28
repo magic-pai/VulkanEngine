@@ -42,6 +42,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(meshoptimizer)
 
+FetchContent_Declare(
+    imgui_node_editor
+    GIT_REPOSITORY https://github.com/thedmd/imgui-node-editor.git
+    GIT_TAG 021aa0ea4da13fed864bafb2a92d4c5205076866
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES ""
+)
+FetchContent_MakeAvailable(imgui_node_editor)
+include(cmake/PatchImGuiNodeEditor.cmake)
+selfengine_patch_imgui_node_editor("${imgui_node_editor_SOURCE_DIR}")
+
 find_program(GLSLC_EXECUTABLE glslc
     HINTS "$ENV{VULKAN_SDK}/Bin"
     REQUIRED
@@ -106,7 +117,6 @@ set(SHADER_SOURCES
     ${SHADER_SOURCE_DIR}/reflection_probe_prefilter.comp
     ${SHADER_SOURCE_DIR}/depth_prefill_3d.vert
     ${SHADER_SOURCE_DIR}/shadow_depth.vert
-    ${SHADER_SOURCE_DIR}/black_hole.frag
 )
 
 set(SHADER_OUTPUTS)
@@ -336,8 +346,8 @@ add_custom_target(SelfEngineShaders DEPENDS ${SHADER_OUTPUTS})
 
 set(SELFENGINE_COMMON_SOURCES
     src/app/application.cpp
-    src/app/application_2d.cpp
     src/app/benchmark_recorder.cpp
+    src/app/scene_builder_runtime_monitor.cpp
     src/app/renderdoc_capture.cpp
     src/assets/mesh_lod_derived_data_cache.cpp
     src/assets/model_importer.cpp
@@ -350,7 +360,7 @@ set(SELFENGINE_COMMON_SOURCES
     src/scene/renderable_2d_order.cpp
     src/scene/scene_2d.cpp
     src/scene/scene_3d.cpp
-    src/scene/sample_scene_2d.cpp
+    src/scene/scene_builder.cpp
     src/scene/runtime_model_loader.cpp
     src/scene/camera_2d.cpp
     src/scene/camera_3d.cpp
@@ -446,38 +456,66 @@ if (WIN32 AND
     set(SELFENGINE_NVIDIA_DLSS_ENABLED TRUE)
 endif()
 
-add_executable(SelfEngine
-    src/main.cpp
-    ${SELFENGINE_COMMON_SOURCES}
-)
-
-add_executable(SelfEngineBlackHole
-    src/black_hole.cpp
-    ${SELFENGINE_COMMON_SOURCES}
-)
-
 add_executable(SelfEngineForward3D
-    src/forward_3d.cpp
+    src/scene_builder_main.cpp
     ${SELFENGINE_COMMON_SOURCES}
 )
 
-add_executable(SelfEngineLightingShowcase
-    src/forward_3d.cpp
-    ${SELFENGINE_COMMON_SOURCES}
+target_sources(SelfEngineForward3D PRIVATE
+    src/renderer/vulkan/scene_builder_gizmo.cpp
+    thirdParty/imguizmo/ImGuizmo.cpp
+)
+target_include_directories(SelfEngineForward3D PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/imguizmo
+)
+target_compile_definitions(SelfEngineForward3D PRIVATE
+    SE_ENABLE_SCENE_BUILDER_GIZMO=1
 )
 
-add_executable(SelfEnginePbrModelShowcase
-    src/forward_3d.cpp
-    ${SELFENGINE_COMMON_SOURCES}
+add_executable(SelfEngineMaterialEditor
+    src/editor/material_graph/material_editor_main.cpp
+    src/editor/material_graph/material_graph_editor.cpp
+    thirdParty/imgui/imgui.cpp
+    thirdParty/imgui/imgui_draw.cpp
+    thirdParty/imgui/imgui_tables.cpp
+    thirdParty/imgui/imgui_widgets.cpp
+    thirdParty/imgui/backends/imgui_impl_dx11.cpp
+    thirdParty/imgui/backends/imgui_impl_win32.cpp
+    ${imgui_node_editor_SOURCE_DIR}/crude_json.cpp
+    ${imgui_node_editor_SOURCE_DIR}/imgui_canvas.cpp
+    ${imgui_node_editor_SOURCE_DIR}/imgui_node_editor.cpp
+    ${imgui_node_editor_SOURCE_DIR}/imgui_node_editor_api.cpp
 )
+target_include_directories(SelfEngineMaterialEditor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/imgui
+    ${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/include
+    ${imgui_node_editor_SOURCE_DIR}
+)
+target_compile_definitions(SelfEngineMaterialEditor PRIVATE
+    SE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+)
+target_link_libraries(SelfEngineMaterialEditor PRIVATE
+    nlohmann_json::nlohmann_json
+    d3d11
+    d3dcompiler
+    dxgi
+    dwmapi
+    user32
+    gdi32
+)
+set_target_properties(SelfEngineMaterialEditor PROPERTIES
+    WIN32_EXECUTABLE TRUE
+    CXX_SCAN_FOR_MODULES OFF
+)
+if (MSVC)
+    target_link_options(SelfEngineMaterialEditor PRIVATE /ENTRY:mainCRTStartup)
+    target_compile_options(SelfEngineMaterialEditor PRIVATE /W4 /permissive- /FS)
+endif()
 
-add_dependencies(SelfEngine SelfEngineShaders)
-add_dependencies(SelfEngineBlackHole SelfEngineShaders)
 add_dependencies(SelfEngineForward3D SelfEngineShaders)
-add_dependencies(SelfEngineLightingShowcase SelfEngineShaders)
-add_dependencies(SelfEnginePbrModelShowcase SelfEngineShaders)
 
-foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D SelfEngineLightingShowcase SelfEnginePbrModelShowcase)
+foreach(SELFENGINE_TARGET SelfEngineForward3D)
     if (WIN32)
         set_target_properties(${SELFENGINE_TARGET} PROPERTIES
             WIN32_EXECUTABLE TRUE
@@ -538,17 +576,5 @@ foreach(SELFENGINE_TARGET SelfEngine SelfEngineBlackHole SelfEngineForward3D Sel
 endforeach()
 
 if (MSVC)
-    target_compile_options(SelfEngine PRIVATE /W4 /permissive- /FS)
-    target_compile_options(SelfEngineBlackHole PRIVATE /W4 /permissive- /FS)
     target_compile_options(SelfEngineForward3D PRIVATE /W4 /permissive- /FS)
-    target_compile_options(SelfEngineLightingShowcase PRIVATE /W4 /permissive- /FS)
-    target_compile_options(SelfEnginePbrModelShowcase PRIVATE /W4 /permissive- /FS)
 endif()
-
-target_compile_definitions(SelfEngineLightingShowcase PRIVATE
-    SE_FORCE_LIGHTING_SHOWCASE=1
-)
-
-target_compile_definitions(SelfEnginePbrModelShowcase PRIVATE
-    SE_FORCE_PBR_MODEL_SHOWCASE=1
-)

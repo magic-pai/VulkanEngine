@@ -228,6 +228,7 @@ struct CapturedSceneCaptureAudit {
     u32 captureVisibleCount = 0;
     u32 captureCulledCount = 0;
     u32 selfCaptureExcludedCount = 0;
+    u32 explicitProbeExcludedCount = 0;
     u32 captureFaceOrientationMask = 0;
     u32 mipGenerationCount = 0;
     u32 sourceMipGenerationCount = 0;
@@ -289,6 +290,7 @@ struct CapturedSceneCaptureAudit {
     bool sourceMipChainReady = false;
     bool ggxPrefilterSourceImageSeparated = false;
     bool ggxPrefilterPdfLodEnabled = false;
+    bool globalIblCompositionApplied = false;
     bool ggxPrefilterReady = false;
     bool ggxPrefilterFallbackActive = false;
     bool diffuseIrradianceReady = false;
@@ -356,7 +358,9 @@ public:
     void RecordGpuCapturedSceneMipGeneration(
         i32 probeSceneIndex,
         VkCommandBuffer commandBuffer,
-        CapturedReflectionProbeFilteringSettings filteringSettings
+        CapturedReflectionProbeFilteringSettings filteringSettings,
+        VkImageView globalIblView,
+        VkSampler globalIblSampler
     );
     void RecordGpuCapturedSceneFaceOrientation(
         i32 probeSceneIndex,
@@ -427,6 +431,7 @@ public:
         u32 visibleCount,
         u32 culledCount,
         u32 selfCaptureExcludedCount,
+        u32 explicitProbeExcludedCount,
         bool captureComplete,
         u64 schedulerFrame
     );

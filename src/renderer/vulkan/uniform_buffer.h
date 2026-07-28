@@ -91,6 +91,10 @@ struct UniformBufferObject {
     // w: captured-scene diffuse irradiance map readiness.
     alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes>
         reflectionProbeMipControls{};
+    // Cubemap capture origins. Probe position arrays above continue to carry
+    // proxy-volume centers for coverage and box projection.
+    alignas(16) std::array<glm::vec4, kMaxFrameReflectionProbes>
+        reflectionProbeCapturePositions{};
 };
 
 struct GpuLocalLightRecord {
@@ -106,9 +110,9 @@ struct GpuLightTileRecord {
 };
 
 struct LightBufferObject {
-    alignas(16) glm::vec4 directionalLight{ -0.45f, -0.82f, -0.35f, 0.78f };
-    alignas(16) glm::vec4 ambientLight{ 0.22f, 0.24f, 0.0f, 0.0f };
-    alignas(16) glm::vec4 lightCounts{ 1.0f, 1.0f, 0.0f, 0.0f };
+    alignas(16) glm::vec4 directionalLight{ 0.0f };
+    alignas(16) glm::vec4 ambientLight{ 0.0f };
+    alignas(16) glm::vec4 lightCounts{ 0.0f };
     alignas(16) glm::vec4 tileInfo{
         static_cast<f32>(kLightTileSize),
         0.0f,
@@ -239,7 +243,7 @@ static_assert(
         sizeof(glm::mat4) * 7 +
         sizeof(glm::vec4) *
             (30 + kMaxFrameReflectionProbes *
-                (5 + kReflectionProbeDiffuseLobeCount)),
+                (6 + kReflectionProbeDiffuseLobeCount)),
     "UniformBufferObject layout must match the shader uniform block"
 );
 

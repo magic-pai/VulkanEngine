@@ -1,0 +1,47 @@
+{
+  "defaults": {
+    "baseColor": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "metallic": 0.0,
+    "roughness": 1.0
+  },
+  "format": "SelfEngineMaterialGraph",
+  "links": [
+    {
+      "fromPin": 33,
+      "id": 1,
+      "toPin": 17
+    }
+  ],
+  "nodes": [
+    {
+      "id": 1,
+      "position": [
+        480.0,
+        180.0
+      ],
+      "type": "UnlitOutput"
+    },
+    {
+      "id": 2,
+      "position": [
+        80.0,
+        180.0
+      ],
+      "type": "Color",
+      "value": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "shadingModel": "Unlit",
+  "target": "Surface",
+  "version": 2
+}

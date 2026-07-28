@@ -2108,7 +2108,7 @@ RenderFrameGraphPlan BuildCurrentVulkanFrameGraphPlan(
         );
     }
     if (inputs.directionalShadowCascadeScaffoldEnabled &&
-        inputs.directionalShadowCascadeCount > 1) {
+        inputs.directionalShadowCascadeCount > 0) {
         AppendPass(
             plan,
             RenderFramePassKind::Shadow,

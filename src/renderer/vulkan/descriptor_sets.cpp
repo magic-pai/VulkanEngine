@@ -1204,6 +1204,45 @@ std::size_t VulkanSsrReconstructionDescriptorSets::Count() const {
     return m_DescriptorSets.size();
 }
 
+bool VulkanSsrReconstructionDescriptorSets::UpdateHistoryInputs(
+    const VulkanSceneRenderTargets& renderTargets,
+    const VulkanSampler& sampler,
+    std::size_t descriptorImageIndex,
+    std::size_t historyImageIndex
+) {
+    if (m_Device == VK_NULL_HANDLE ||
+        descriptorImageIndex >= m_DescriptorSets.size() ||
+        historyImageIndex >= renderTargets.Count()) {
+        return false;
+    }
+
+    std::array<VkDescriptorImageInfo, 2> imageInfos{};
+    imageInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageInfos[0].imageView = renderTargets.SsrHistoryColorView(historyImageIndex);
+    imageInfos[0].sampler = sampler.Handle();
+    imageInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageInfos[1].imageView = renderTargets.SsrHistoryMetadataView(historyImageIndex);
+    imageInfos[1].sampler = sampler.Handle();
+
+    std::array<VkWriteDescriptorSet, 2> writes{};
+    for (u32 bindingOffset = 0; bindingOffset < writes.size(); ++bindingOffset) {
+        writes[bindingOffset].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[bindingOffset].dstSet = m_DescriptorSets[descriptorImageIndex];
+        writes[bindingOffset].dstBinding = 9u + bindingOffset;
+        writes[bindingOffset].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[bindingOffset].descriptorCount = 1;
+        writes[bindingOffset].pImageInfo = &imageInfos[bindingOffset];
+    }
+    vkUpdateDescriptorSets(
+        m_Device,
+        static_cast<u32>(writes.size()),
+        writes.data(),
+        0,
+        nullptr
+    );
+    return true;
+}
+
 void VulkanSsrReconstructionDescriptorSets::Recreate(
     const VulkanDevice& device,
     const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,

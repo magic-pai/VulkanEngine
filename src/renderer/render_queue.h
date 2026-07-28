@@ -250,11 +250,20 @@ private:
     );
     void Refresh3DDynamicCommandState(const VulkanRenderResources2D& renderResources);
 
+    // Drops per-renderable cache entries whose Renderable3D no longer exists in
+    // the scene. Without this, a newly allocated renderable can land on the
+    // address of a destroyed one and inherit its cached visibility state.
+    void PruneDestroyedRenderableCache(
+        std::span<Renderable3D* const> renderables
+    );
+
     std::vector<RenderCommand> m_Commands;
     std::unordered_map<const Renderable3D*, CachedRenderable3DCommand> m_3DCommandCache;
     std::unordered_map<u64, u32> m_PreviousLodByRenderable;
     CachedScene3DQueue m_3DSceneCache;
     std::size_t m_NextSubmissionIndex = 0;
+    u64 m_LastSceneMembershipRevision = 0;
+    const void* m_LastSceneIdentity = nullptr;
 };
 
 }

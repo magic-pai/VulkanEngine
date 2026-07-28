@@ -452,7 +452,7 @@ void VulkanSsrFeature::WriteStats(
             ? 1u
             : 0u;
     ssr.colorResolveEnabled =
-        ssr.enabled > 0 &&
+        (ssr.enabled > 0 || settings.rayQueryReflectionCarrierEnabled) &&
         ssr.traceInputsReady > 0
             ? 1u
             : 0u;
@@ -534,7 +534,12 @@ void VulkanSsrFeature::WriteStats(
     ssr.signedDepthValidationEnabled = ssr.hitValidationActive;
     ssr.originBiasMinimumPixels = ssr.hitValidationActive > 0 ? 2.0f : 0.0f;
     ssr.originBiasMaximumPixels = ssr.hitValidationActive > 0 ? 6.0f : 0.0f;
-    ssr.reconstructionRequested = ssr.colorResolveEnabled;
+    // FidelityFX SSSR owns radiance reconstruction and DNSR filtering. The
+    // legacy trace/temporal/spatial chain must not run alongside it.
+    ssr.reconstructionRequested =
+        ssr.colorResolveEnabled && !settings.ssrFidelityFxBackendRequested
+            ? 1u
+            : 0u;
     ssr.reconstructionTargetsAllocated =
         context.renderer.ssrReconstructionTargetsAllocated ? 1u : 0u;
     ssr.reconstructionDescriptorSetsReady =

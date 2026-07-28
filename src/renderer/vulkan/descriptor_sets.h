@@ -264,6 +264,12 @@ public:
 
     VkDescriptorSet Handle(std::size_t imageIndex) const;
     std::size_t Count() const;
+    bool UpdateHistoryInputs(
+        const VulkanSceneRenderTargets& renderTargets,
+        const VulkanSampler& sampler,
+        std::size_t descriptorImageIndex,
+        std::size_t historyImageIndex
+    );
     void Recreate(
         const VulkanDevice& device,
         const VulkanSsrReconstructionDescriptorSetLayout& descriptorSetLayout,

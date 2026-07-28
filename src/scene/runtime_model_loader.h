@@ -144,6 +144,10 @@ private:
         std::vector<VulkanMaterial*> materials;
         std::vector<std::string> meshIds;
         std::vector<std::string> materialIds;
+        // Immutable asset-template mapping reused by every scene instance.
+        // Mesh and material GPU resources are registered only for the first
+        // load; later instances reference these ids directly.
+        std::vector<std::size_t> meshMaterialIndices;
         u32 sourceNodeCount = 0;
         u32 sourceBoneNodeCount = 0;
         u32 sourceAnimationChannelBoundCount = 0;

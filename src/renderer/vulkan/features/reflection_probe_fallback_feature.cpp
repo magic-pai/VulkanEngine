@@ -18,15 +18,23 @@ void VulkanReflectionProbeFallbackFeature::AppendFrameGraph(
         context.stats.reflectionProbe;
     if (reflectionProbe.fallbackEnabled > 0 &&
         context.renderer.has3DMainPass) {
+        const bool globalIblCubemapSampling =
+            reflectionProbe.globalIblCubemapSamplingEnabled > 0;
         AppendRenderFrameGraphPass(
             context.plan,
             RenderFramePassKind::Reflections,
             RenderFramePassStatus::Active,
             RenderFramePassQueue::Graphics,
-            "GlobalReflectionFallback",
+            globalIblCubemapSampling
+                ? "GlobalEnvironmentIbl"
+                : "GlobalReflectionFallback",
+            globalIblCubemapSampling
+                ? "BRDFLUT, IrradianceMap, PrefilteredEnvironmentMap"
+                : "",
             "",
-            "",
-            "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting until imported UE reflection captures and local probes are available."
+            globalIblCubemapSampling
+                ? "Samples the global preset's split-sum GGX IBL resources in deferred, forward, and WBOIT lighting."
+                : "Procedural global reflection fallback used by deferred, forward, and WBOIT lighting when global IBL cubemap sampling is unavailable."
         );
     }
     if (reflectionProbe.localEnabled > 0 &&

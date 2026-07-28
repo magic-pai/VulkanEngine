@@ -2,6 +2,355 @@
 
 This file records compact debugging lessons for SelfEngine rendering issues. Keep entries practical: symptom, false leads, cause, control test, fix, prevention, validation.
 
+## 2026-07-26 - Scene Builder Picking Must Test Primitive Surfaces, Not Bounds
+
+Symptom:
+- In the Scene Builder, clicking where editor primitives overlapped could select
+  an object behind the visible surface, especially around planes, spheres, and
+  cones.
+
+False leads:
+- Treating vector storage order or the delete-selection synchronization as the
+  selection authority problem.
+- Reusing the generic renderable unit-AABB hit test for every primitive.
+
+Cause:
+- The generic picker intersects a fixed local `[-0.5, 0.5]` box. That box has
+  volume where a plane has no surface and where a sphere/cone has no geometry,
+  so it can report a nearer false hit.
+
+Control test:
+- A cone at `{0,0,1}` and cube at `{0.4,0,-1}` receive a ray from
+  `{0.4,0,7}` toward `-Z`: the cone AABB intersects, its actual surface does
+  not, and the cube must win. A second ray through a front sphere and rear cube
+  must select the sphere.
+
+Fix:
+- Route only Scene Builder viewport clicks to analytic local-space tests for
+  its cube, plane, sphere, and capped-cone meshes, preserving the ray parameter
+  through the inverse model matrix and choosing the smallest valid distance.
+- Keep the generic picker unchanged for all non-editor scenes. Debug diagnostics
+  count primitive ray queries/hits; Release does not update those counters.
+
+Prevention:
+- A new selectable primitive must add its exact surface intersection and a
+  false-positive overlap regression before it is exposed to the editor.
+- When arbitrary imported meshes are made selectable, replace this fixed-set
+  path with GPU object-ID picking or an owned mesh/BVH path; do not approximate
+  arbitrary geometry with unit bounds.
+
+Validation:
+- `scripts/Test-SceneBuilderHealth.ps1 -SkipBuild -Strict -OutputDirectory
+  tmp/scene_builder_health_compact` passed `16 / 0`. Its Debug
+  self-test ran the two analytic-picking regressions, reported failed mask `0`,
+  and preserved main/shadow draws `3/2` with zero FrameGraph issues.
+
+## 2026-07-25 - FFX/Hybrid Sparse Reflection Outputs Must Be Cleared Before Ray Query Injection
+
+Symptom:
+- In the `cyberpunk-neon` mirror-ground scene, static startup frames could show
+  blocky purple/blue/red mirror artifacts or stale-looking reflection regions.
+  Moving the camera made the artifact disappear.
+
+False leads:
+- Treating the mirror material, Ray Query hit shading, or hit IBL color as the
+  primary fault after the standalone Ray Query path had already been validated.
+- Judging only the final steady-state direct-mirror hit count; the first bad
+  frames happened before direct-mirror Ray Query candidates appeared.
+
+Cause:
+- FFX SSSR/Hybrid reflection image outputs are sparse. The current
+  `IntersectionOutput`, current `HitConfidence`, and Reproject current
+  `HitConfidence` images were created in `GENERAL` layout and reused across
+  frames without an explicit per-frame clear.
+- Apply was already active while direct-mirror Ray Query candidates were still
+  zero during startup warmup. Unwritten sparse pixels could therefore retain
+  uninitialized or previous contents until camera motion changed the candidate
+  distribution and overwrote them.
+
+Control test:
+- In `cyberpunk-neon` with FFX SSSR as the ray-list carrier, transparent objects
+  off, mirror ground on, and hit IBL/local Probe IBL/source fusion disabled, the
+  cold 20-frame static lane must report `ssr_ffx_sssr_sparse_output_clear_enabled=1`
+  and `ssr_ffx_sssr_sparse_output_clears=3` on every captured row, including the
+  first frames where direct-mirror candidates are still `0`.
+- `SE_SSR_FFX_CLEAR_SPARSE_OUTPUTS_OFF=1` is the reverse control and must report
+  sparse clears `0`.
+
+Fix:
+- Added a default-on sparse-output clear stage before FFX SSSR sparse writes. It
+  clears current `IntersectionOutput`, current classify `HitConfidence`, and
+  current Reproject `HitConfidence`; it does not clear the previous-frame
+  confidence history input.
+- Added `VK_IMAGE_USAGE_TRANSFER_DST_BIT` to the classify/intersect images so
+  Vulkan validation accepts `vkCmdClearColorImage`.
+- Added CSV counters and health-gate assertions for sparse-output clear state.
+
+Prevention:
+- Any storage image consumed as a current sparse producer must either be fully
+  written or explicitly cleared before sparse dispatch. Do not rely on ray-list
+  coverage to overwrite every visible pixel.
+- Preserve temporal history inputs separately from current sparse outputs; do
+  not fix stale current pixels by clearing the history owner.
+
+Validation:
+- `scripts\Test-FidelityFxSssrIntegration.ps1 -SkipBuild -Strict -ForwardExecutablePath build\Debug\SelfEngineForward3D.exe -ShowcaseExecutablePath build\Debug\SelfEngineForward3D.exe -OutputDirectory tmp\ffx_sparse_clear_regression` passed `1334 / 0`, including the sparse-clear reverse control.
+- `scripts\Test-CyberpunkNeonScene.ps1 -SkipBuild -Strict -ExecutablePath build\Debug\SelfEngineForward3D.exe -OutputDirectory tmp\cyberpunk_sparse_clear_health -MirrorGround -MirrorRayCarrier` passed `24 / 0`; key metrics were direct mirror `1/74634/39225/35409`, sparse clear `1/3`, visible clear `1/1`, and FrameGraph issues `0`.
+- Cold static/moving diagnostic probe under `tmp\cyberpunk_mirror_temporal_probe_after_sparse_clear` reported sparse clear `1/3` for all 20 captured rows in both lanes.
+
+## 2026-07-25 - Transparent Scene Objects Stay Out Of DLSS Until Their Temporal Contract Exists
+
+Symptom:
+- In the `cyberpunk-neon` Forward3D scene, semi-transparent/glass objects
+  visibly jittered under DLSS SR Performance and made the otherwise accepted
+  Ray Query + hit IBL mirror presentation unstable.
+
+False leads:
+- Treating the problem as another reflection or DLSS global jitter regression.
+- Converting transparent materials to opaque materials. That would hide the
+  symptom while polluting authored material, shadow, reflection, and import
+  semantics.
+- Checking only weighted-translucency draw count. An empty resolve pass can
+  still leave the transparent composition stage active in the frame.
+
+Current best cause:
+- Blend/Transparent scene objects still enter the weighted-translucency,
+  velocity, DLSS mask, and reflection candidate paths, but the current
+  translucent temporal contract is not production-safe enough for DLSS.
+
+Control test:
+- Hold the cyberpunk scene, DLSS Performance, Ray Query + hit IBL, mirror
+  ground, and fallback blend disabled. Toggle only `SE_TRANSPARENT_OBJECTS`.
+
+Fix:
+- Default Blend/Transparent scene objects off in the renderer until the
+  translucent velocity, reactive/transparency mask, and post-DLSS ownership
+  contract is rebuilt.
+- Added `SE_TRANSPARENT_OBJECTS=1` / `SE_SCENE_TRANSPARENCY=1` reverse controls
+  and `*_OFF=1` force-off aliases.
+- Filter transparent commands consistently from main, shadow, hybrid-reflection
+  candidate, overlay, and reflection-capture queues. Skip the weighted
+  translucency clear/resolve pass when there are no transparent draws unless a
+  weighted-translucency debug view explicitly asks for it.
+
+Prevention:
+- Do not feed thin or blended scene geometry into DLSS/TAA as ordinary scene
+  surfaces unless it owns velocity, depth/coverage, reactive/transparency mask,
+  and composition ordering data. For debug or decorative translucent overlays,
+  prefer a post-DLSS overlay path.
+- Validate both command draws and empty fullscreen resolve/composite passes when
+  disabling a temporal input path.
+
+Validation:
+- `scripts\Test-CyberpunkNeonScene.ps1 -MirrorGround -MirrorRayCarrier -Strict`
+  passed `23 / 0`: transparent `0/25`, breakdown `main=10 shadow=0
+  reflection=15 overlay=0`, weighted path `hybrid=0 draws=0 resolve=0
+  velocity=0 dlssMask=0`.
+- Reverse control with `-AllowTransparentObjects` passed `23 / 0` and restored
+  weighted path `hybrid=10 draws=10 resolve=1 velocity=10 dlssMask=10`.
+- Structurally different Forward3D grid control with
+  `SE_BENCHMARK_TRANSPARENT_MATERIAL=1` reported transparent `0/164`,
+  breakdown `main=79 shadow=85 reflection=0 overlay=0`, weighted path
+  `hybrid=0 draws=0 resolve=0 velocity=0 dlssMask=0`, and frame graph issues
+  `0`.
+
+## 2026-07-25 - Mirror Ray Query Needs An Explicit Ray-List Carrier
+
+Symptom:
+- In the `cyberpunk-neon` Forward3D scene, the mirror ground did not reflect
+  nearby imported buildings or neon signs. With SSR disabled, it showed
+  probe/IBL-like purple-blue color blocks instead of scene geometry.
+
+False leads:
+- Treating the mirror material as the main fault after metallic/roughness had
+  already been forced to a mirror-like opt-in.
+- Assuming Ray Query hit shading was wrong even though LightingShowcase had
+  already validated the standalone Ray Query + hit IBL path.
+- Re-enabling SSR/Probe fallback as the visible quality answer. Previous visual
+  gates rejected that path for noise, warping, and ghosted reflections.
+
+Cause:
+- The current direct-mirror Ray Query path consumes the `g_ray_list` carrier
+  produced by the FidelityFX SSSR/Classify path. With `SE_SSR=0`, mirror pixels
+  had no direct-mirror candidates (`1/0/0/0`), so final reflection ownership
+  fell back to Probe/IBL instead of hardware hits.
+
+Control test:
+- Hold the cyberpunk scene, mirror ground, DLSS Performance, Ray Query + hit
+  IBL, and Probe fallback blend disabled. Toggle only the FFX SSSR carrier.
+- The accepted carrier lane is `SE_SSR=1`, `SE_SSR_BACKEND=ffx-sssr`,
+  `SE_SSR_PROBE_FALLBACK_BLEND_OFF=1`, and `SE_HYBRID_REFLECTIONS_RT=1`.
+
+Fix:
+- Added a cyberpunk mirror-ground data gate that requires the carrier lane to
+  submit direct-mirror Ray Query work before visual acceptance.
+- Keep FFX SSSR as a ray-list/DNSR carrier in this mode while preventing the
+  rejected Probe fallback blend from owning the visible mirror result.
+
+Prevention:
+- Do not call Ray Query mirror reflections active from TLAS readiness or shader
+  bindings alone. Mirror receivers must prove `candidate > 0`, `hit > 0`, and
+  fallback accounting before visual review.
+- If a production mode should run without SSR, add a dedicated mirror ray-list
+  producer first. Do not silently drop mirror pixels to Probe/IBL color.
+
+Validation:
+- `scripts\Test-CyberpunkNeonScene.ps1 -MirrorGround -MirrorRayCarrier` passed
+  `22 / 0` with `rayQueryDirectMirror = 1/74634/40825/33809`, frame graph
+  issues `0`, runtime import `1/1/1`, and imported source geometry
+  `vertices=5363019 triangles=8879538`.
+- User visually accepted the live `cyberpunk-neon` mirror-ground result as
+  normal after enabling the FFX SSSR carrier with fallback blend disabled.
+
+## 2026-07-24 - Ray Query Hit IBL Must Inherit The Scene Environment Contract
+
+Symptom:
+- Ray Query alone removed the displaced duplicate reflection, but enabling hit
+  IBL made the LightingShowcase metal sphere noticeably blue-purple. Disabling
+  hit IBL restored the expected color but left wall hits without indirect light.
+
+False leads:
+- The dark region from skybox/reflection coverage was not the color defect.
+- Material textures already used SRGB formats; adding another gamma conversion
+  had no supporting evidence.
+- Keeping `SE_HYBRID_REFLECTIONS_HIT_IBL_OFF=1` would only hide the missing
+  environment contribution and was not an acceptable final fix.
+
+Cause:
+- Ray Query hit shading scaled split-sum IBL with the primary directional
+  light's ambient/specular values (`0.62/0.52`) instead of the scene environment
+  intensities (`1.32/0.16`). Metal hits therefore received about 3.25 times the
+  intended authored-cubemap specular scale.
+
+Control test:
+- `SE_HYBRID_REFLECTIONS_HIT_IBL_OFF=1` keeps Ray Query, direct lighting, shadow
+  visibility, material resolution, emissive, DNSR, and Apply active while only
+  suppressing hit IBL. The control records `95,661` hits, direct/IBL/emissive
+  luminance `15,292,886 / 0 / 3,666,497`, and resolved scene controls
+  `0 / 1320 / 160 / 0`.
+
+Fix:
+- Ray Query contract v7 appends a 16-byte hit-IBL control block. The renderer
+  supplies scene diffuse/specular IBL intensities and the global-cubemap enable
+  state every frame; hit shading no longer consumes directional-light ambient
+  or specular values for IBL.
+- Local Probe IBL remains available when global cubemap IBL is disabled. No
+  scene name, object identity, or Showcase-only shader constant is used.
+
+Prevention:
+- Treat direct-light controls and environment-light controls as separate ABIs.
+  Every secondary-hit lighting path must inherit the same scene-owned IBL
+  intensity and enable state as the primary path.
+- An IBL-off control is a diagnostic isolator, never the final color fix.
+
+Validation:
+- Static red/green contract: `63 / 1` before the implementation, `64 / 0`
+  after it. Hybrid runtime matrix: `634 / 0`; FidelityFX matrix: `1260 / 0`.
+- LightingShowcase Full Audit: `1115 / 0`; frozen Forward3D FBX Full Audit:
+  `366 / 0`; RenderDoc reflection bindings/integration: `11 / 0` and `37 / 0`.
+- A dynamic Forward3D Full Audit separately reported three receiver origins
+  outside CPU bounds out of `6,403` rays; the dynamic Hybrid contract passed,
+  and this pre-existing skinned-bounds timing issue is outside the IBL fix.
+- Release visual acceptance is pending.
+
+References:
+- https://gpuopen.com/fidelityfx-hybrid-reflections/
+- https://gpuopen.com/manuals/fidelityfx_sdk/techniques/stochastic-screen-space-reflections/
+- https://github.com/google/filament/blob/main/docs/Filament.md.html#lighting/imagebasedlights
+
+## 2026-07-24 - SSR Plus Probe Fallback Failed The Visual Production Gate
+
+Symptom:
+- With Ray Query disabled and the normal FFX SSR plus Probe fallback enabled,
+  the LightingShowcase metal spheres showed severe edge grain, black gaps, and
+  warped fallback imagery. The reflected fixture layout and floor did not
+  preserve the scene's expected spatial relationship.
+- The same camera and DLSS Performance setting looked natural when forced to
+  Ray Query plus hit IBL with ordinary Probe fallback disabled.
+
+False leads:
+- Treating passing FFX, Hybrid, and Full Audit data contracts as proof of
+  production visual quality.
+- Explaining the visible discontinuities solely as missing skybox coverage.
+
+Current best cause:
+- Existing attribution records only `4,070` high-confidence and `1,749`
+  partial screen hits against `150,803` fallback samples in this Showcase.
+  The fallback consequently dominates the visible result rather than filling
+  a small number of SSR holes.
+- A Probe/cubemap is not geometrically equivalent to a reflected scene at the
+  receiver. The observed warped fixtures and missing floor show that the active
+  fallback projection/selection contract is not visually acceptable here.
+- The remaining screen-space result is also not temporally clean at DLSS
+  Performance; its cyan edge grain is a quality failure, not an acceptable
+  trade for coverage.
+
+Control test:
+- Pure SSR: `SE_SSR_BACKEND=ffx-sssr`, Ray Query disabled, Probe fallback off.
+  This exposed sparse/noisy screen coverage.
+- SSR plus fallback: same controls with `SE_REFLECTION_PROBE_FALLBACK=1`.
+  This replaced the holes with visibly warped Probe imagery.
+- Ray Query plus hit IBL: force all Ray Queries, source fusion off, normal
+  Probe fallback off. The user accepted this as natural and free of displaced
+  duplicate projections.
+
+Fix status:
+- Do not ship or present the current SSR-plus-Probe composition as a
+  production-quality reflection path. Ray Query plus hit IBL is the accepted
+  Showcase baseline while the FFX SSR temporal quality and fallback projection
+  contracts are independently reworked and visually revalidated.
+
+Prevention:
+- A reflection data gate is necessary but never sufficient. Promotion requires
+  real-scene visual approval at the intended DLSS mode, with source ownership,
+  SSR coverage/noise, and fallback spatial correctness judged separately.
+
+Validation:
+- User visually rejected both pure SSR and SSR plus fallback on the real Debug
+  LightingShowcase on 2026-07-24. No implementation fix is claimed by this
+  entry.
+
+## 2026-07-24 - Hybrid Reflection Replacement Needs One Absolute Owner
+
+Symptom:
+- The same rectangle light appeared twice at displaced positions on the
+  LightingShowcase center mirror. Ray Query alone was correct; the duplicate
+  first appeared in `HdrAfterApply`, before DLSS.
+
+False leads:
+- The black reflection region from the missing skybox integration was unrelated.
+- Ray Query/DNSR and DLSS were not the first bad stages. Intersect contained one
+  correct projection, while Deferred HDR contained the separate Probe projection.
+- Zero mixed-Probe pixels and full mirror blend weight did not prove that the
+  Deferred baseline had been removed.
+
+Cause:
+- Deferred pre-wrote local Probe specular. Apply recomputed a Probe estimate and
+  submitted `resolved - recomputedProbe`; the recomputation was not an exact
+  carrier for the already committed Deferred term, so its displaced fixture
+  projection survived beside the Ray Query result.
+
+Control test:
+- `SE_SSR_FFX_EXCLUSIVE_REFLECTION_OWNER_OFF=1` restores the legacy delta path.
+  Full Audit fails three ownership checks, reports `0 / 44,025`
+  exclusive/legacy pixels, and restores `2,717` negative contributions.
+
+Fix:
+- Same-frame Deferred omits eligible indirect specular. Apply now writes one
+  absolute `mix(Probe fallback, resolved radiance, confidence)` term through the
+  preserved visibility carrier. Full Audit v9 records exclusive versus legacy
+  ownership without adding a Release readback or GPU resource.
+
+Prevention:
+- Never replace an already committed RGB lighting term by recomputing it in a
+  later shader. Preserve the exact term as a carrier or assign one pass exclusive
+  ownership; require the reverse control to make the ownership gate red.
+
+Validation:
+- LightingShowcase Full Audit `1115 / 0`, raw stage audit `1137 / 0`, Forward3D
+  FBX Full Audit `372 / 0`, FidelityFX cross-scene matrix `1259 / 0`.
+- Visual Release acceptance is pending.
+
 ## 2026-07-23 - Reflection Replacement Needs A Preserved Visibility Carrier
 
 Symptom:
@@ -4228,3 +4577,80 @@ Validation:
   fallbacks, and zero FrameGraph validation issues.
 - The user accepted the interactive PBR model result as the future LOD visual
   validation baseline.
+
+## 2026-07-25 - Complex Scene Reflection Source Boundaries Must Be Audited
+
+Symptom:
+- Cyberpunk mirror ground showed large colored or offset reflection blocks while
+  LightingShowcase appeared visually acceptable.
+
+False leads:
+- Treating the artifact as a generic PBR or Ray Query failure.
+- Treating `SE_SSR_PROBE_FALLBACK_BLEND_OFF=1` as proof that probe mixing was
+  impossible.
+
+Cause:
+- The cyberpunk lane combines a near-perfect mirror (roughness `0.04`),
+  procedural IBL, three scene probes, 187 renderables, 27 local lights, and
+  transparent-material filtering. Adjacent pixels on the same ground receiver
+  therefore alternate between Ray Query hit and miss sources.
+- The audit recorded `2,379` Apply blend discontinuities on `74,858` ground
+  samples, including `716` contribution jumps. `ffx_sssr_apply.frag` and
+  `deferred_lighting.frag` still return confidence when fallback blending is off,
+  so the final owner can remain a partial `mix(probeFallback, resolved, confidence)`.
+- The full-audit script does not manage all scene/reflection environment keys;
+  its managed-key array also misses a comma between two SSR keys. Runs can thus
+  use different inherited controls even when the command line looks identical.
+
+Control test:
+- A hidden audit with the same explicit controls (hit IBL, local probe IBL,
+  source fusion, and fallback all off) on LightingShowcase produced `228` Apply
+  discontinuities on the selected mirror sphere and `22` contribution jumps,
+  versus cyberpunk's `2,379` and `716`; both audits passed structural
+  identity/finite-value checks.
+
+Prevention:
+- Treat reflection-source ownership and scene environment as explicit audit
+  inputs. Do not declare a complex scene accepted from a structural pass or a
+  different source configuration; compare the first bad stage and contribution
+  discontinuity counts before opening a visual window.
+
+## 2026-07-26 - Scene Builder Selection Visual Deferred Until Geometry-ID Mask Exists
+
+Symptom:
+- The runtime scene builder's projected gold bounds did not follow the selected
+  sphere/cone silhouette and could visibly detach from the rendered object
+  while the camera moved.
+
+False leads:
+- Treating a fixed local cube's projected edges as an object outline.
+- Making the selected object's PBR material emissive, or rendering a
+  transparent selection shell with the ordinary scene queue.
+
+Cause:
+- The ImGui visual was a hard-coded `[-0.5, 0.5]` box, not a per-pixel mask of
+  the rendered mesh. It also had no shared display-resolution contract with
+  the renderer's temporal/upscale output.
+
+Control test:
+- Keep only the existing ray-pick and builder-owned Delete self test. No
+  selection visual is submitted.
+
+Fix:
+- Remove the projected-bounds visual, its environment switch, telemetry, and
+  special validation lane.
+- Keep `Scene3D::SelectAlongRay`, stable builder identity synchronization, and
+  the Delete path unchanged.
+
+Prevention:
+- Do not ship a selection outline unless it is derived from the selected mesh's
+  actual per-pixel ID/mask and composed at the real final output extent.
+- Do not encode selection state in material emissive factors, GBuffer data,
+  shadow casters, probes, or reflection candidates.
+- Shortcut deletion must resolve through the editor's stable owned identity;
+  never delete the arbitrary `Scene3D` selection directly.
+
+Validation:
+- `scripts\Test-SceneBuilderHealth.ps1 -SkipBuild -Strict` passed `16 / 0`:
+  builder create/destroy/live was `4/1/3`, main/shadow draws were `3/2`, and
+  the empty editor lane drew `0` without launching a historical scene.

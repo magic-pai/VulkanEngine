@@ -123,7 +123,8 @@ void WriteReflectionApplyAudit(
     int objectProbeAssignmentCode,
     uint activeProbeMask,
     bool objectStableEnabled,
-    bool mirrorDnsrPassthrough
+    bool mirrorDnsrPassthrough,
+    bool exclusiveReflectionOwner
 ) {
     uint recordIndex = atomicAdd(
         reflectionAudit[FULL_AUDIT_APPLY_COUNT_INDEX],
@@ -149,6 +150,7 @@ void WriteReflectionApplyAudit(
     flags |= (uint(clamp(objectProbeAssignmentCode, 0, 7)) & 0x7u) << 8u;
     flags |= (activeProbeMask & 0xFu) << 11u;
     if (objectStableEnabled) flags |= 1u << 15u;
+    if (exclusiveReflectionOwner) flags |= 1u << 16u;
     reflectionAudit[base + 0u] =
         (coordinates.x & 0xffffu) | (coordinates.y << 16u);
     reflectionAudit[base + 1u] = objectId;
@@ -233,6 +235,14 @@ bool FfxSssrHitProvenanceEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 524288.0), 2.0) > 0.5;
 }
 
+bool SsrFidelityFxExclusiveReflectionOwnerEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 2097152.0), 2.0) > 0.5;
+}
+
+bool DirectRayQueryCompositeEnabled() {
+    return mod(floor(abs(frame.ssrControls.w) / 4194304.0), 2.0) > 0.5;
+}
+
 bool FfxSssrConfidenceSpatialFilterEnabled() {
     return mod(floor(abs(frame.ssrControls.w) / 1048576.0), 2.0) > 0.5;
 }
@@ -310,6 +320,14 @@ float SsrProbeFallbackBlendWeight(float confidence, float roughness) {
     return clamp(confidenceStability * roughnessCeiling, 0.0, 1.0);
 }
 
+float FfxSssrHitCompositeWeight(float confidence) {
+    // FidelityFX stores hit radiance and hit validity separately. Convert its
+    // geometric confidence into a stable ownership mask here, without
+    // attenuating the hit radiance a second time.
+    float supportedHit = smoothstep(0.10, 0.45, clamp(confidence, 0.0, 1.0));
+    return supportedHit * clamp(frame.ssrControls.x, 0.0, 1.0);
+}
+
 bool ReflectionProbeDominantMirrorEnabled() {
     float mode = floor(frame.reflectionProbeBlendControls.w + 0.5);
     return mod(
@@ -367,6 +385,9 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     }
     float diffuseIntensity = clamp(frame.reflectionProbeControls.y, 0.0, 4.0);
     float specularIntensity = clamp(frame.reflectionProbeControls.z, 0.0, 4.0);
+    // Keep IBL diffuse lighting independent from the visible background, but
+    // never let a hidden skybox remain visible through global specular fallback.
+    float globalSpecularVisible = step(0.5, frame.environmentControls.x);
     float horizonBlend = clamp(frame.reflectionProbeControls.w, 0.0, 1.0);
     float up = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 skyTop = vec3(0.37, 0.50, 0.72);
@@ -377,8 +398,14 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
     float sunAmount = max(dot(direction, sunDirection), 0.0);
     float sunPower = mix(128.0, 24.0, roughness);
     float sunDisk = pow(max(sunAmount, 0.0001), sunPower);
-    float intensity = mix(specularIntensity, diffuseIntensity, smoothstep(0.45, 1.0, roughness));
-    vec3 procedural = (base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness)) * intensity;
+    float diffuseWeight = smoothstep(0.45, 1.0, roughness);
+    vec3 proceduralBase =
+        base + vec3(1.12, 1.08, 1.0) * sunDisk * mix(5.0, 2.2, roughness);
+    vec3 procedural = mix(
+        proceduralBase * specularIntensity * globalSpecularVisible,
+        proceduralBase * diffuseIntensity,
+        diffuseWeight
+    );
     float cubemapSampling = clamp(frame.reflectionProbeBlendControls.z, 0.0, 1.0);
     if (cubemapSampling <= 0.0001) {
         return procedural * enabled;
@@ -387,8 +414,11 @@ vec3 GlobalEnvironmentRadiance(vec3 direction, vec3 sunDirection, float roughnes
         ? normalize(direction)
         : vec3(0.0, 1.0, 0.0);
     vec3 sampledDiffuse = max(texture(irradianceMap, sampleDirection).rgb, vec3(0.0)) * diffuseIntensity;
-    vec3 sampledSpecular = max(textureLod(prefilteredMap, sampleDirection, clamp(roughness, 0.0, 1.0) * 4.0).rgb, vec3(0.0)) * specularIntensity;
-    vec3 sampled = mix(sampledSpecular, sampledDiffuse, smoothstep(0.45, 1.0, roughness));
+    vec3 sampledSpecular =
+        max(textureLod(prefilteredMap, sampleDirection, clamp(roughness, 0.0, 1.0) * 4.0).rgb, vec3(0.0)) *
+        specularIntensity *
+        globalSpecularVisible;
+    vec3 sampled = mix(sampledSpecular, sampledDiffuse, diffuseWeight);
     return mix(procedural, sampled, 0.65 * cubemapSampling) * enabled;
 }
 
@@ -674,6 +704,22 @@ void main() {
         objectProbeAssignmentCode,
         activeProbeMask
     );
+    if (DirectRayQueryCompositeEnabled()) {
+        // Deferred lighting already contributed the receiver's sky/IBL
+        // reflection. Replace that term only when hardware Ray Query found a
+        // hit; misses deliberately retain the stable environment reflection.
+        vec4 hitPayload = texture(ffxSssrCurrentIntersectionRadiance, fragUv);
+        bool validHit = hitPayload.a > 0.0001 &&
+            all(not(isnan(hitPayload.rgb))) &&
+            all(not(isinf(hitPayload.rgb)));
+        vec3 contribution = validHit
+            ? (max(hitPayload.rgb, vec3(0.0)) - probeFallback) *
+                envSpecularBrdf *
+                IblSpecularStability(roughness) * occlusion
+            : vec3(0.0);
+        outColor = vec4(contribution, 1.0);
+        return;
+    }
     float provenanceConfidence = FfxSssrHitProvenanceEnabled()
         ? FfxSssrFilteredHitConfidence(fragUv)
         : clamp(denoisedResolved.a, 0.0, 1.0);
@@ -694,33 +740,31 @@ void main() {
             mirrorDnsrPassthrough = false;
         }
     }
-    float mirrorSourceFactor = MirrorSourceSelectionIndependentEnabled()
-        ? ReflectionProbeMirrorFactor(roughness)
-        : 0.0;
-    float sourceSelectionConfidence = provenanceConfidence * mix(
-        clamp(frame.ssrControls.x, 0.0, 1.0),
-        1.0,
-        mirrorSourceFactor
-    );
     float blendWeight = mirrorDnsrPassthrough
         ? 1.0
-        : SsrProbeFallbackBlendWeight(
-            sourceSelectionConfidence,
-            roughness
-        );
+        : FfxSssrHitCompositeWeight(provenanceConfidence);
     float ambientStrength = max(lights.ambientLight.x, 0.08);
     float specularScale = floor(frame.reflectionProbeBlendControls.w + 0.5) > 1.5
         ? 1.0
         : 0.36 * ambientStrength;
-    vec3 reflectionDelta = FfxSssrHitProvenanceEnabled()
-        ? (max(resolved.rgb, vec3(0.0)) - probeFallback)
-        : max(resolved.rgb, vec3(0.0));
-    vec3 contribution = reflectionDelta *
+    bool exclusiveReflectionOwner =
+        SsrFidelityFxExclusiveReflectionOwnerEnabled();
+    vec3 reflectionSource = exclusiveReflectionOwner
+        ? mix(
+            probeFallback,
+            max(resolved.rgb, vec3(0.0)),
+            blendWeight
+        )
+        : FfxSssrHitProvenanceEnabled()
+            ? (max(resolved.rgb, vec3(0.0)) - probeFallback)
+            : max(resolved.rgb, vec3(0.0));
+    float contributionWeight = exclusiveReflectionOwner ? 1.0 : blendWeight;
+    vec3 contribution = reflectionSource *
         envSpecularBrdf *
         max(specularScale, 0.0) *
         IblSpecularStability(roughness) *
         occlusion *
-        blendWeight;
+        contributionWeight;
 #if defined(SE_REFLECTION_FULL_AUDIT)
     WriteReflectionApplyAudit(
         resolved,
@@ -734,7 +778,8 @@ void main() {
         objectProbeAssignmentCode,
         activeProbeMask,
         ReflectionProbeObjectStableEnabled(),
-        mirrorDnsrPassthrough
+        mirrorDnsrPassthrough,
+        exclusiveReflectionOwner
     );
 #endif
     outColor = vec4(contribution, 1.0);

@@ -412,6 +412,51 @@ void BenchmarkRecorder::RecordFrame(
         << skinnedVertexAttributes.boneWeightsOffset << ','
         << skinnedVertexAttributes.pathReady << ','
         << sceneDiagnostics.runtimeImportSkinnedAnimationUnsupported << ','
+        << sceneDiagnostics.sceneBuilderAvailable << ','
+        << sceneDiagnostics.sceneBuilderPrimitiveAvailabilityMask << ','
+        << sceneDiagnostics.sceneBuilderObjectCount << ','
+        << sceneDiagnostics.sceneBuilderCreatedObjectCount << ','
+        << sceneDiagnostics.sceneBuilderDestroyedObjectCount << ','
+        << sceneDiagnostics.sceneBuilderLightCount << ','
+        << sceneDiagnostics.sceneBuilderCreatedLightCount << ','
+        << sceneDiagnostics.sceneBuilderDestroyedLightCount << ','
+        << sceneDiagnostics.sceneBuilderLiveMaterialCount << ','
+        << sceneDiagnostics.sceneBuilderMaterialLibraryCount << ','
+        << sceneDiagnostics.sceneBuilderFrameMaterialBudget << ','
+        << sceneDiagnostics.sceneBuilderSceneRenderableCount << ','
+        << sceneDiagnostics.sceneBuilderSelectedIdentity << ','
+        << sceneDiagnostics.sceneBuilderSelectedLightIdentity << ','
+        << sceneDiagnostics.sceneBuilderSelectedPrimitive << ','
+        << sceneDiagnostics.sceneBuilderEditRevision << ','
+        << sceneDiagnostics.sceneBuilderTransformEditCount << ','
+        << sceneDiagnostics.sceneBuilderMaterialEditCount << ','
+        << sceneDiagnostics.sceneBuilderLightEditCount << ','
+        << sceneDiagnostics.sceneBuilderRenameCount << ','
+        << sceneDiagnostics.sceneBuilderSelectionSyncCount << ','
+        << sceneDiagnostics.sceneBuilderSelectionShortcutDeleteCount << ','
+        << sceneDiagnostics.sceneBuilderMaterialDescriptorRefreshCount << ','
+        << sceneDiagnostics.sceneBuilderLastCreateFailure << ','
+        << sceneDiagnostics.sceneBuilderCreateFailureCount << ','
+        << sceneDiagnostics.sceneBuilderBlendObjectCount << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentIblEnabled << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentSkyboxEnabled << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentDiffuseIntensity << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentSpecularIntensity << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentHorizonBlend << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentSkyboxIntensity << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentSkyboxBlur << ','
+        << sceneDiagnostics.sceneBuilderEnvironmentLightingAsset << ','
+        << sceneDiagnostics.sceneBuilderCubeCount << ','
+        << sceneDiagnostics.sceneBuilderPlaneCount << ','
+        << sceneDiagnostics.sceneBuilderSphereCount << ','
+        << sceneDiagnostics.sceneBuilderConeCount << ','
+        << sceneDiagnostics.sceneBuilderDirectionalLightCount << ','
+        << sceneDiagnostics.sceneBuilderPointLightCount << ','
+        << sceneDiagnostics.sceneBuilderSpotLightCount << ','
+        << sceneDiagnostics.sceneBuilderRectLightCount << ','
+        << sceneDiagnostics.sceneBuilderSelfTestRan << ','
+        << sceneDiagnostics.sceneBuilderSelfTestPassed << ','
+        << sceneDiagnostics.sceneBuilderSelfTestFailedCheckMask << ','
         << sceneDiagnostics.benchmarkCameraMotionTimeSeconds << ','
         << sceneDiagnostics.benchmarkObjectMotionTimeSeconds << ','
         << stats.renderDebug.forwardView << ','
@@ -442,6 +487,12 @@ void BenchmarkRecorder::RecordFrame(
         << draw.gBufferDraws << ','
         << draw.overlayDraws << ','
         << draw.shadowDraws << ','
+        << draw.transparentObjectsEnabled << ','
+        << draw.transparentObjectSkippedDraws << ','
+        << draw.transparentObjectMainSkippedDraws << ','
+        << draw.transparentObjectShadowSkippedDraws << ','
+        << draw.transparentObjectReflectionSkippedDraws << ','
+        << draw.transparentObjectOverlaySkippedDraws << ','
         << draw.hybridDeferredOpaqueDraws << ','
         << draw.hybridForwardTransparentDraws << ','
         << draw.hybridForwardSpecialDraws << ','
@@ -456,6 +507,7 @@ void BenchmarkRecorder::RecordFrame(
         << draw.gBufferTriangles << ','
         << draw.overlayTriangles << ','
         << draw.shadowTriangles << ','
+        << draw.transparentObjectSkippedTriangles << ','
         << draw.hybridDeferredOpaqueTriangles << ','
         << draw.hybridWeightedTranslucencyTriangles << ','
         << draw.hybridForwardResidualTriangles << ','
@@ -747,6 +799,8 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrResolveTemporalHistoryCopies << ','
         << ssr.fidelityFxSssrVisibleOutputClearEnabled << ','
         << ssr.fidelityFxSssrVisibleOutputClears << ','
+        << ssr.fidelityFxSssrSparseOutputClearEnabled << ','
+        << ssr.fidelityFxSssrSparseOutputClears << ','
         << ssr.fidelityFxSssrCompositeConfidenceMode << ','
         << ssr.fidelityFxSssrSampleCountWritebackReady << ','
         << ssr.fidelityFxSssrDeferredCompositeRequested << ','
@@ -767,6 +821,8 @@ void BenchmarkRecorder::RecordFrame(
         << ssr.fidelityFxSssrSameFrameCompositeFrameBinds << ','
         << ssr.fidelityFxSssrSameFrameCompositeGBufferBinds << ','
         << ssr.fidelityFxSssrSameFrameCompositeReverseControlActive << ','
+        << ssr.fidelityFxSssrExclusiveReflectionOwnerActive << ','
+        << ssr.fidelityFxSssrExclusiveReflectionOwnerReverseControlActive << ','
         << ssr.fidelityFxSssrRayCounterReadbackValid << ','
         << ssr.fidelityFxSssrClassifiedRayCount << ','
         << ssr.fidelityFxSssrClassifiedDenoiserTileCount << ','
@@ -911,6 +967,9 @@ void BenchmarkRecorder::RecordFrame(
         << hybridReflections.rayQueryDiagnosticTargetMaterialIndex << ','
         << hybridReflections.rayQueryForceAllRayQueries << ','
         << hybridReflections.rayQueryHitIblEnabled << ','
+        << hybridReflections.rayQueryHitIblDiffuseIntensityMilliunits << ','
+        << hybridReflections.rayQueryHitIblSpecularIntensityMilliunits << ','
+        << hybridReflections.rayQueryGlobalIblEnabled << ','
         << hybridReflections.rayQueryCullBackFacingTriangles << ','
         << hybridReflections.rayQueryFullAuditRequested << ','
         << hybridReflections.rayQueryFullAuditResourcesReady << ','
@@ -1145,6 +1204,18 @@ void BenchmarkRecorder::RecordFrame(
         << bonePaletteDraw.shaderVelocityPreviousPaletteOffset << ','
         << bonePaletteDraw.shaderVelocityPreviousEntryCount << ','
         << bonePaletteDraw.shaderVelocityPathReady << ','
+        << stats.environment.iblEnabled << ','
+        << stats.environment.diffuseIntensity << ','
+        << stats.environment.specularIntensity << ','
+        << stats.environment.horizonBlend << ','
+        << stats.environment.skyboxEnabled << ','
+        << stats.environment.skyboxIntensity << ','
+        << stats.environment.skyboxBlur << ','
+        << stats.environment.lightingAsset << ','
+        << stats.environment.visibleSkyboxUsesActiveIbl << ','
+        << stats.environment.visibleSkyboxSourceTextureReady << ','
+        << stats.environment.iblReloadCount << ','
+        << stats.environment.iblReloadFailureCount << ','
         << reflectionProbe.fallbackEnabled << ','
         << reflectionProbe.diffuseIntensity << ','
         << reflectionProbe.specularIntensity << ','
@@ -1190,6 +1261,7 @@ void BenchmarkRecorder::RecordFrame(
         << reflectionProbe.capturedSceneSourceMipChainReady << ','
         << reflectionProbe.capturedSceneGgxPrefilterSourceImageSeparated << ','
         << reflectionProbe.capturedSceneGgxPrefilterPdfLodEnabled << ','
+        << reflectionProbe.capturedSceneGlobalIblCompositionApplied << ','
         << reflectionProbe.capturedSceneGgxPrefilterDispatchCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterSampleCount << ','
         << reflectionProbe.capturedSceneGgxPrefilterQuality << ','
@@ -2115,15 +2187,15 @@ void BenchmarkRecorder::RecordFrame(
         << gpuOcclusion.uploadedCandidateCount << ','
         << gpuOcclusion.uploadedCandidateBytes << ','
         << gpuOcclusion.candidateIdentityHash << ','
+        << gpuOcclusion.candidateContentHash << ','
+        << gpuOcclusion.classificationJitterPixelsX << ','
+        << gpuOcclusion.classificationJitterPixelsY << ','
+        << gpuOcclusion.classificationJitterGuardPixels << ','
         << gpuOcclusion.depthPyramidAllocated << ','
         << gpuOcclusion.depthPyramidWidth << ','
         << gpuOcclusion.depthPyramidHeight << ','
         << gpuOcclusion.depthPyramidMipCount << ','
         << gpuOcclusion.depthPyramidImageCount << ','
-        << gpuOcclusion.candidateContentHash << ','
-        << gpuOcclusion.classificationJitterPixelsX << ','
-        << gpuOcclusion.classificationJitterPixelsY << ','
-        << gpuOcclusion.classificationJitterGuardPixels << ','
         << static_cast<u32>(gpuOcclusion.depthPyramidFormat) << ','
         << gpuOcclusion.depthPyramidMemoryBytes << ','
         << gpuOcclusion.depthPyramidBuildDispatchCount << ','
@@ -2155,11 +2227,6 @@ void BenchmarkRecorder::RecordFrame(
         << gpuOcclusion.actualDrawCount << ','
         << gpuOcclusion.actualTriangleCount << ','
         << gpuOcclusion.auditBufferMemoryBytes << ','
-        << binds.mainInstanceBufferUploads << ','
-        << binds.mainInstanceBufferUploadSkips << ','
-        << binds.pushConstantUpdates << ','
-        << binds.pushConstantBytes << '\n';
-
         << gpuOcclusion.indirectConsumerReady << ','
         << gpuOcclusion.indirectConsumerActive << ','
         << gpuOcclusion.indirectFallbackReason << ','
@@ -2175,6 +2242,11 @@ void BenchmarkRecorder::RecordFrame(
         << gpuOcclusion.indirectDirectFallbackDrawCount << ','
         << gpuOcclusion.indirectInstanceBatchFallbackCount << ','
         << gpuOcclusion.indirectSkinnedFallbackCount << ','
+        << binds.mainInstanceBufferUploads << ','
+        << binds.mainInstanceBufferUploadSkips << ','
+        << binds.pushConstantUpdates << ','
+        << binds.pushConstantBytes << '\n';
+
     ++m_CapturedFrames;
     if (m_CapturedFrames >= m_Config.captureFrames) {
         m_StopRequested = true;
@@ -2358,6 +2430,41 @@ void BenchmarkRecorder::WriteHeader() {
         << "renderer_skinned_vertex_attribute_bone_weights_offset,"
         << "renderer_skinned_vertex_attribute_path_ready,"
         << "runtime_import_skinned_animation_unsupported,"
+        << "scene_builder_available,scene_builder_primitive_availability_mask,"
+        << "scene_builder_object_count,scene_builder_created_object_count,"
+        << "scene_builder_destroyed_object_count,"
+        << "scene_builder_light_count,scene_builder_created_light_count,"
+        << "scene_builder_destroyed_light_count,"
+        << "scene_builder_live_material_count,"
+        << "scene_builder_material_library_count,"
+        << "scene_builder_frame_material_budget,"
+        << "scene_builder_scene_renderable_count,"
+        << "scene_builder_selected_identity,scene_builder_selected_light_identity,"
+        << "scene_builder_selected_primitive,"
+        << "scene_builder_edit_revision,"
+        << "scene_builder_transform_edit_count,"
+        << "scene_builder_material_edit_count,scene_builder_light_edit_count,"
+        << "scene_builder_rename_count,"
+        << "scene_builder_selection_sync_count,"
+        << "scene_builder_selection_shortcut_delete_count,"
+        << "scene_builder_material_descriptor_refresh_count,"
+        << "scene_builder_last_create_failure,"
+        << "scene_builder_create_failure_count,"
+        << "scene_builder_blend_object_count,"
+        << "scene_builder_environment_ibl_enabled,"
+        << "scene_builder_environment_skybox_enabled,"
+        << "scene_builder_environment_diffuse_intensity,"
+        << "scene_builder_environment_specular_intensity,"
+        << "scene_builder_environment_horizon_blend,"
+        << "scene_builder_environment_skybox_intensity,"
+        << "scene_builder_environment_skybox_blur,"
+        << "scene_builder_environment_lighting_asset,"
+        << "scene_builder_cube_count,scene_builder_plane_count,"
+        << "scene_builder_sphere_count,scene_builder_cone_count,"
+        << "scene_builder_directional_light_count,scene_builder_point_light_count,"
+        << "scene_builder_spot_light_count,scene_builder_rect_light_count,"
+        << "scene_builder_self_test_ran,scene_builder_self_test_passed,"
+        << "scene_builder_self_test_failed_check_mask,"
         << "benchmark_camera_motion_time_seconds,"
         << "benchmark_object_motion_time_seconds,"
         << "render_debug_forward_view,render_debug_deferred_pbr_view,"
@@ -2368,6 +2475,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "cpu_queue_build_ms,cpu_uniform_update_ms,cpu_command_record_ms,cpu_submit_present_ms,"
         << "gpu_available,gpu_total_recorded_ms,gpu_shadow_ms,gpu_main_ms,gpu_overlay_ms,gpu_imgui_ms,"
         << "main_draws,gbuffer_draws,overlay_draws,shadow_draws,"
+        << "transparent_objects_enabled,transparent_objects_skipped_draws,"
+        << "transparent_objects_main_skipped_draws,transparent_objects_shadow_skipped_draws,"
+        << "transparent_objects_reflection_skipped_draws,transparent_objects_overlay_skipped_draws,"
         << "hybrid_deferred_opaque_draws,hybrid_forward_transparent_draws,"
         << "hybrid_forward_special_draws,hybrid_weighted_translucency_draws,"
         << "hybrid_weighted_translucency_sort_ops,"
@@ -2377,6 +2487,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_forward_residual_sorted_transparent_draws,"
         << "hybrid_forward_residual_stable_special_draws,"
         << "main_triangles,gbuffer_triangles,overlay_triangles,shadow_triangles,"
+        << "transparent_objects_skipped_triangles,"
         << "hybrid_deferred_opaque_triangles,hybrid_weighted_translucency_triangles,"
         << "hybrid_forward_residual_triangles,"
         << "matrix_recalculations,"
@@ -2610,6 +2721,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_resolve_temporal_history_copies,"
         << "ssr_ffx_sssr_visible_output_clear_enabled,"
         << "ssr_ffx_sssr_visible_output_clears,"
+        << "ssr_ffx_sssr_sparse_output_clear_enabled,"
+        << "ssr_ffx_sssr_sparse_output_clears,"
         << "ssr_ffx_sssr_composite_confidence_mode,"
         << "ssr_ffx_sssr_sample_count_writeback_ready,"
         << "ssr_ffx_sssr_deferred_composite_requested,"
@@ -2630,6 +2743,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "ssr_ffx_sssr_same_frame_composite_frame_binds,"
         << "ssr_ffx_sssr_same_frame_composite_gbuffer_binds,"
         << "ssr_ffx_sssr_same_frame_composite_reverse_control_active,"
+        << "ssr_ffx_sssr_exclusive_reflection_owner_active,"
+        << "ssr_ffx_sssr_exclusive_reflection_owner_reverse_control_active,"
         << "ssr_ffx_sssr_ray_counter_readback_valid,"
         << "ssr_ffx_sssr_classified_ray_count,"
         << "ssr_ffx_sssr_classified_denoiser_tile_count,"
@@ -2768,6 +2883,9 @@ void BenchmarkRecorder::WriteHeader() {
         << "hybrid_reflections_ray_query_diagnostic_target_material_index,"
         << "hybrid_reflections_ray_query_force_all_ray_queries,"
         << "hybrid_reflections_ray_query_hit_ibl_enabled,"
+        << "hybrid_reflections_ray_query_hit_ibl_diffuse_intensity_milliunits,"
+        << "hybrid_reflections_ray_query_hit_ibl_specular_intensity_milliunits,"
+        << "hybrid_reflections_ray_query_global_ibl_enabled,"
         << "hybrid_reflections_ray_query_cull_back_facing_triangles,"
         << "hybrid_reflections_ray_query_full_audit_requested,"
         << "hybrid_reflections_ray_query_full_audit_resources_ready,"
@@ -2971,6 +3089,13 @@ void BenchmarkRecorder::WriteHeader() {
         << "bone_palette_shader_velocity_previous_palette_offset,"
         << "bone_palette_shader_velocity_previous_entry_count,"
         << "bone_palette_shader_velocity_path_ready,"
+        << "environment_ibl_enabled,environment_diffuse_intensity,"
+        << "environment_specular_intensity,environment_horizon_blend,"
+        << "environment_skybox_enabled,environment_skybox_intensity,"
+        << "environment_skybox_blur,environment_lighting_asset,"
+        << "environment_visible_skybox_uses_active_ibl,"
+        << "environment_visible_skybox_source_texture_ready,"
+        << "environment_ibl_reload_count,environment_ibl_reload_failure_count,"
         << "reflection_probe_fallback_enabled,reflection_probe_diffuse_intensity,"
         << "reflection_probe_specular_intensity,reflection_probe_horizon_blend,"
         << "reflection_probe_global_ibl_cubemap_sampling_enabled,"
@@ -3013,6 +3138,7 @@ void BenchmarkRecorder::WriteHeader() {
         << "reflection_probe_captured_scene_source_mip_chain_ready,"
         << "reflection_probe_captured_scene_ggx_prefilter_source_image_separated,"
         << "reflection_probe_captured_scene_ggx_prefilter_pdf_lod_enabled,"
+        << "reflection_probe_captured_scene_global_ibl_composition_applied,"
         << "reflection_probe_captured_scene_ggx_prefilter_dispatch_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_sample_count,"
         << "reflection_probe_captured_scene_ggx_prefilter_quality,"
@@ -3772,6 +3898,10 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_occlusion_uploaded_candidate_count,"
         << "gpu_occlusion_uploaded_candidate_bytes,"
         << "gpu_occlusion_candidate_identity_hash,"
+        << "gpu_occlusion_candidate_content_hash,"
+        << "gpu_occlusion_classification_jitter_pixels_x,"
+        << "gpu_occlusion_classification_jitter_pixels_y,"
+        << "gpu_occlusion_classification_jitter_guard_pixels,"
         << "gpu_occlusion_depth_pyramid_allocated,"
         << "gpu_occlusion_depth_pyramid_width,gpu_occlusion_depth_pyramid_height,"
         << "gpu_occlusion_depth_pyramid_mip_count,"
@@ -3782,10 +3912,6 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_occlusion_classification_dispatch_count,"
         << "gpu_occlusion_classification_group_count,"
         << "gpu_occlusion_readback_ready,gpu_occlusion_readback_valid,"
-        << "gpu_occlusion_candidate_content_hash,"
-        << "gpu_occlusion_classification_jitter_pixels_x,"
-        << "gpu_occlusion_classification_jitter_pixels_y,"
-        << "gpu_occlusion_classification_jitter_guard_pixels,"
         << "gpu_occlusion_readback_stale,gpu_occlusion_readback_invalid_count,"
         << "gpu_occlusion_readback_candidate_count,"
         << "gpu_occlusion_classified_visible_count,"
@@ -3803,11 +3929,6 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_occlusion_history_reset_reason,gpu_occlusion_would_cull_draw_count,"
         << "gpu_occlusion_would_cull_triangle_count,gpu_occlusion_actual_draw_count,"
         << "gpu_occlusion_actual_triangle_count,gpu_occlusion_audit_buffer_memory_bytes,"
-        << "main_instance_buffer_uploads,main_instance_buffer_upload_skips,"
-        << "push_constant_updates,push_constant_bytes\n";
-}
-
-}
         << "gpu_occlusion_indirect_consumer_ready,"
         << "gpu_occlusion_indirect_consumer_active,"
         << "gpu_occlusion_indirect_fallback_reason,"
@@ -3823,3 +3944,8 @@ void BenchmarkRecorder::WriteHeader() {
         << "gpu_occlusion_indirect_direct_fallback_draw_count,"
         << "gpu_occlusion_indirect_instance_batch_fallback_count,"
         << "gpu_occlusion_indirect_skinned_fallback_count,"
+        << "main_instance_buffer_uploads,main_instance_buffer_upload_skips,"
+        << "push_constant_updates,push_constant_bytes\n";
+}
+
+}

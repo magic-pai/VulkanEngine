@@ -1375,7 +1375,9 @@ void VulkanFfxSssrClassifyTilesResources::CreateResources(
         }
 
         VkImageUsageFlags classifyImageUsage =
-            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            VK_IMAGE_USAGE_STORAGE_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 #if !defined(NDEBUG)
         classifyImageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 #endif
@@ -2280,6 +2282,58 @@ u64 VulkanFfxSssrReprojectResources::TotalMemoryBytes() const {
     const u64 averageBytes =
         averagePixels * sizeof(f32) * 4ull * 2ull;
     return static_cast<u64>(Count()) * (fullBytes + averageBytes);
+}
+
+bool VulkanFfxSssrReprojectResources::UpdateHistorySources(
+    const VulkanDevice& device,
+    const VulkanSceneRenderTargets& renderTargets,
+    std::size_t imageIndex,
+    std::size_t historyImageIndex
+) {
+    if (imageIndex >= m_DescriptorSets.size() ||
+        historyImageIndex >= renderTargets.Count() ||
+        historyImageIndex >= m_RadianceHistoryImages.size()) {
+        return false;
+    }
+
+    std::array<VkDescriptorImageInfo, 6> historyImages{};
+    historyImages[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[0].imageView =
+        renderTargets.SsrHistoryMetadataView(historyImageIndex);
+    historyImages[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[1].imageView =
+        m_RadianceHistoryImages[historyImageIndex]->View();
+    historyImages[2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[2].imageView =
+        m_AverageRadianceHistoryImages[historyImageIndex]->View();
+    historyImages[3].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[3].imageView =
+        m_VarianceHistoryImages[historyImageIndex]->View();
+    historyImages[4].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[4].imageView =
+        m_SampleCountHistoryImages[historyImageIndex]->View();
+    historyImages[5].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    historyImages[5].imageView =
+        m_HitConfidenceHistoryImages[historyImageIndex]->View();
+
+    constexpr std::array<u32, 6> kBindings{ 3u, 7u, 9u, 10u, 11u, 20u };
+    std::array<VkWriteDescriptorSet, kBindings.size()> writes{};
+    for (std::size_t index = 0u; index < kBindings.size(); ++index) {
+        writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[index].dstSet = m_DescriptorSets[imageIndex];
+        writes[index].dstBinding = kBindings[index];
+        writes[index].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        writes[index].descriptorCount = 1u;
+        writes[index].pImageInfo = &historyImages[index];
+    }
+    vkUpdateDescriptorSets(
+        device.Handle(),
+        static_cast<u32>(writes.size()),
+        writes.data(),
+        0u,
+        nullptr
+    );
+    return true;
 }
 
 void VulkanFfxSssrReprojectResources::Recreate(

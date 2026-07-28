@@ -64,6 +64,7 @@ struct HybridMaterialRecord {
     uint g_denoiser_bridge_contract_version;
     uint g_diagnostic_target_instance_index;
     uint g_ray_query_runtime_flags;
+    float4 g_hit_ibl_controls;
 };
 
 [[vk::binding(10, 1)]] globallycoherent RWStructuredBuffer<uint>
@@ -95,6 +96,7 @@ struct LocalReflectionProbeRecord {
     float4 colorAndMip;
     float4 boxExtentsProjection;
     float4 resourceControls;
+    float4 capturePosition;
 };
 
 [[vk::binding(24, 1)]] TextureCube<float4>
@@ -784,7 +786,8 @@ float3 BoxProjectedLocalProbeDirection(
     if (probe.boxExtentsProjection.w <= 0.5) {
         return sampleDirection;
     }
-    float3 localPosition = worldPosition - probe.positionRadius.xyz;
+    float3 boxCenter = probe.positionRadius.xyz;
+    float3 localPosition = worldPosition - boxCenter;
     float3 extents = max(probe.boxExtentsProjection.xyz, 0.001);
     float3 safeDirection = sampleDirection;
     safeDirection.x = abs(safeDirection.x) < 0.0001
@@ -805,7 +808,11 @@ float3 BoxProjectedLocalProbeDirection(
     if (hitDistance <= 0.0001 || hitDistance > 100000.0) {
         return sampleDirection;
     }
-    return normalize(localPosition + sampleDirection * hitDistance);
+    float3 hitPosition = boxCenter + localPosition + sampleDirection * hitDistance;
+    float3 captureDirection = hitPosition - probe.capturePosition.xyz;
+    return dot(captureDirection, captureDirection) > 1.0e-4
+        ? normalize(captureDirection)
+        : sampleDirection;
 }
 
 float3 SampleLocalProbePrefiltered(uint index, float3 direction, float lod) {
@@ -1011,7 +1018,6 @@ bool EvaluateHitRadiance(
         g_shadow_visibility_enabled != 0u &&
         g_hit_lighting_visibility_mode == 2u;
     float4 directionalLight = LoadLightFloat4(kLightDirectionalOffset);
-    float4 ambientLight = LoadLightFloat4(kLightAmbientOffset);
     float4 lightCounts = LoadLightFloat4(kLightCountsOffset);
     uint directionalCount = min(
         g_directional_light_count,
@@ -1294,20 +1300,28 @@ bool EvaluateHitRadiance(
             ),
             0.0
         );
-        float3 diffuseEnvironment = max(
-            g_ibl_irradiance.SampleLevel(g_ibl_sampler, normal, 0.0).rgb,
-            0.0
-        );
+        bool globalIblEnabled = g_hit_ibl_controls.z > 0.5;
+        bool globalSpecularVisible = g_ray_query_contract_version < 8u ||
+            g_hit_ibl_controls.w > 0.5;
+        float3 diffuseEnvironment = globalIblEnabled
+            ? max(
+                g_ibl_irradiance.SampleLevel(g_ibl_sampler, normal, 0.0).rgb,
+                0.0
+            )
+            : 0.0;
         float prefilteredLod = roughness *
             float(max(g_ibl_prefiltered_mip_count, 1u) - 1u);
-        float3 specularEnvironment = max(
-            g_ibl_prefiltered.SampleLevel(
-                g_ibl_sampler,
-                reflectionDirection,
-                prefilteredLod
-            ).rgb,
-            0.0
-        );
+        float3 specularEnvironment =
+            globalIblEnabled && globalSpecularVisible
+            ? max(
+                g_ibl_prefiltered.SampleLevel(
+                    g_ibl_sampler,
+                    reflectionDirection,
+                    prefilteredLod
+                ).rgb,
+                0.0
+            )
+            : 0.0;
         bool localProbeInvalid = false;
         bool localProbeResolved = ResolveLocalProbeEnvironment(
             worldPosition,
@@ -1329,10 +1343,10 @@ bool EvaluateHitRadiance(
             DiagnosticAdd(kDiagnosticLocalProbeIblInvalidCount, 1u);
         }
         iblRadiance = diffuseWeight * baseColor * diffuseEnvironment *
-            max(ambientLight.x, 0.0) +
+            max(g_hit_ibl_controls.x, 0.0) +
             specularEnvironment *
             max(f0 * environmentBrdf.x + environmentBrdf.y, 0.0) *
-            max(ambientLight.y, 0.0);
+            max(g_hit_ibl_controls.y, 0.0);
         if (localProbeResolved) {
             DiagnosticAdd(
                 kDiagnosticLocalProbeIblLuminanceSumMilliunits,
@@ -1500,27 +1514,9 @@ float3 ReflectionDirection(
     float roughness,
     uint2 pixel
 ) {
-    float3x3 tangentBasis = CreateTangentBasis(surfaceNormal);
-    float3 tangentView = mul(-viewDirection, tangentBasis);
-    float2 randomVector = g_blue_noise_texture.Load(int3(pixel % 128u, 0));
-    float3 sampledNormal = SampleGgxVndf(
-        tangentView,
-        roughness,
-        roughness,
-        randomVector.x,
-        randomVector.y
-    );
-    if ((g_environment_fallback_control & 0x20000000u) != 0u) {
-        sampledNormal = float3(0.0, 0.0, 1.0);
-    }
-    float3 tangentReflection = reflect(-tangentView, sampledNormal);
-    if (tangentReflection.z <= 0.0) {
-        tangentReflection = reflect(
-            -tangentView,
-            float3(0.0, 0.0, 1.0)
-        );
-    }
-    return mul(tangentReflection, transpose(tangentBasis));
+    // The direct path must not depend on FidelityFX blue-noise resources.
+    // Keep the first integration deterministic and limited to smooth surfaces.
+    return normalize(reflect(viewDirection, surfaceNormal));
 }
 
 void StoreRayQueryResult(
@@ -1612,24 +1608,17 @@ void StoreDenoiserPayload(
 }
 
 [numthreads(8, 8, 1)]
-void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
-    uint rayIndex = groupId * 64u + groupIndex;
-    if (g_ray_query_enabled == 0u || rayIndex >= g_ray_counter[1]) {
+void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
+    if (g_ray_query_enabled == 0u ||
+        any(dispatchThreadId.xy >= g_buffer_dimensions)) {
         return;
     }
 
-    DiagnosticAdd(kDiagnosticCandidateRayCount, 1u);
-    uint2 coordinates;
-    bool copyHorizontal;
-    bool copyVertical;
-    bool copyDiagonal;
-    UnpackRayCoords(
-        g_ray_list[rayIndex],
-        coordinates,
-        copyHorizontal,
-        copyVertical,
-        copyDiagonal
-    );
+    const uint2 coordinates = dispatchThreadId.xy;
+    const uint rayIndex = coordinates.y * g_buffer_dimensions.x + coordinates.x;
+    const bool copyHorizontal = false;
+    const bool copyVertical = false;
+    const bool copyDiagonal = false;
     FullAuditInitialize(
         rayIndex,
         coordinates,
@@ -1638,39 +1627,22 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
         copyDiagonal
     );
 
-    if (any(coordinates >= g_buffer_dimensions)) {
-        DiagnosticAdd(kDiagnosticInvalidRayCount, 1u);
-        return;
-    }
     FullAuditAddFlags(rayIndex, kFullAuditFlagCoordinatesValid);
 
-    float screenConfidence = g_sssr_hit_confidence.Load(int3(coordinates, 0));
-    float4 screenPayload = g_denoiser_radiance[coordinates];
-    bool screenPayloadValid = all(isfinite(screenPayload)) &&
-        screenConfidence > 0.0001;
-    float roughness = max(0.001, g_roughness.Load(int3(coordinates, 0)));
-    bool directMirrorRayQuery =
-        (g_ray_query_runtime_flags & kRayQueryRuntimeDirectMirrorBit) != 0u &&
-        roughness <= kDirectMirrorRoughnessThreshold;
-    if (directMirrorRayQuery) {
-        DiagnosticAdd(kDiagnosticDirectMirrorCandidateCount, 1u);
+    float roughness = max(
+        0.001,
+        g_normal.Load(int3(coordinates, 0)).w
+    );
+    if (roughness >= 0.6) {
+        return;
     }
+    DiagnosticAdd(kDiagnosticCandidateRayCount, 1u);
+    const float screenConfidence = 0.0;
+    const float4 screenPayload = float4(0.0, 0.0, 0.0, 0.0);
+    const bool screenPayloadValid = false;
+    const bool directMirrorRayQuery = false;
+    const bool productionTrace = true;
     FullAuditStoreFloat(rayIndex, 3u, screenConfidence);
-    bool forceAllRayQueries =
-        (g_ray_query_runtime_flags & kRayQueryRuntimeForceAllRaysBit) != 0u;
-#if defined(SE_HYBRID_REFLECTION_DIAGNOSTIC_FORCE_ALL)
-    forceAllRayQueries = true;
-#endif
-    bool screenAccepted = !forceAllRayQueries && !directMirrorRayQuery &&
-        screenConfidence >= g_screen_hit_confidence_threshold;
-    if (screenAccepted) {
-        DiagnosticAdd(kDiagnosticScreenHitAcceptedCount, 1u);
-        FullAuditAddFlags(rayIndex, kFullAuditFlagScreenAccepted);
-        if (!FullAuditEnabled()) {
-            return;
-        }
-    }
-    bool productionTrace = !screenAccepted;
 
     float depth = g_depth_buffer.Load(int3(coordinates, 0));
     float3 worldNormal = normalize(
@@ -1770,9 +1742,6 @@ void main(uint groupIndex : SV_GroupIndex, uint groupId : SV_GroupID) {
                 kFullAuditFlagObjectIdMappedToTlas
         );
         FullAuditInstanceAdd(receiverInstanceId, 0u, 1u);
-        if (screenAccepted) {
-            FullAuditInstanceAdd(receiverInstanceId, 1u, 1u);
-        }
     }
     FullAuditStoreFloat(rayIndex, 9u, worldOrigin.x);
     FullAuditStoreFloat(rayIndex, 10u, worldOrigin.y);

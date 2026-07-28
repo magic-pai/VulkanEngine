@@ -883,64 +883,35 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         auto cacheIt = m_ModelCache.find(lookupKey);
         if (cacheIt != m_ModelCache.end()) {
             LoadedRuntimeModel& cached = *m_LoadedModels[cacheIt->second];
-            const u32 modelId = m_NextModelId++;
-            const std::string idPrefix = "RuntimeModel" + std::to_string(modelId);
             const bool bindShaderSkinningPalette =
                 ShouldBindImportedBonePalette(modelPath, bindBonePalettePreview);
 
-            for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
-                const std::string meshId = idPrefix + "_Mesh" + std::to_string(mi);
-                m_RenderResources.RegisterMesh(meshId, *cached.meshes[mi]);
-                if (mi < cached.lodChains.size() &&
-                    cached.lodChains[mi].Count() > 1u) {
-                    m_RenderResources.RegisterMeshLodChain(
-                        meshId,
-                        cached.lodChains[mi]
-                    );
-                }
-            }
-            for (std::size_t mi = 0; mi < cached.materials.size(); ++mi) {
-                m_RenderResources.RegisterMaterial(idPrefix + "_Material" + std::to_string(mi),
-                    *cached.materials[mi]);
-            }
-            const RendererBonePaletteRegistration rendererBonePalette =
-                RegisterRendererBonePaletteResource(
-                    m_RenderResources,
-                    idPrefix + "_BonePalette",
-                    cached.runtimePreviousBonePalette,
-                    cached.runtimeCurrentBonePalette,
-                    cached.runtimePoseCarrierChangedBonePaletteEntryCount,
-                    cached.runtimePoseCarrierReady
-                );
-            const std::string cachedBonePaletteResourceId = idPrefix + "_BonePalette";
-            if (rendererBonePalette.registered != 0u &&
-                cached.gpuBonePaletteDescriptorSet != nullptr) {
-                m_RenderResources.UpdateBonePaletteDescriptor(
-                    cachedBonePaletteResourceId,
-                    cached.gpuBonePaletteDescriptorSet->Handle(),
-                    cached.gpuBonePaletteDescriptorSet->Ready(),
-                    kBonePaletteDescriptorSetIndex,
-                    cached.gpuBonePaletteDescriptorSet->Binding(),
-                    cached.gpuBonePaletteDescriptorSet->RangeBytes()
-                );
-            }
-
             u32 partIdx = 0;
-            cached.bonePaletteResourceIds.push_back(cachedBonePaletteResourceId);
             u32 cachedRenderableBound = 0;
-            for (std::size_t mi = 0; mi < cached.meshes.size(); ++mi) {
-                const std::size_t matIdx = std::min(mi,
-                    cached.materialIds.empty() ? size_t(0) : cached.materialIds.size() - 1);
+            for (std::size_t mi = 0; mi < cached.meshIds.size(); ++mi) {
+                const std::size_t mappedMaterialIndex =
+                    mi < cached.meshMaterialIndices.size()
+                        ? cached.meshMaterialIndices[mi]
+                        : mi;
+                const std::size_t matIdx = std::min(
+                    mappedMaterialIndex,
+                    cached.materialIds.empty()
+                        ? size_t(0)
+                        : cached.materialIds.size() - 1u
+                );
                 Renderable3D& part = m_Scene.CreateRenderable(
                     "Cached " + PathLabel(modelPath) + " part" + std::to_string(partIdx++),
-                    idPrefix + "_Mesh" + std::to_string(mi),
-                    idPrefix + "_Material" + std::to_string(matIdx));
+                    cached.meshIds[mi],
+                    cached.materialIds[matIdx]
+                );
                 part.Transform().SetPosition(position);
                 part.Transform().SetRotationDegrees(rotationDegrees);
                 part.Transform().SetScale(scale);
                 part.Transform().SetAnimateRotation(false);
-                if (bindShaderSkinningPalette && rendererBonePalette.ready != 0u) {
-                    part.SetBonePaletteResourceId(cachedBonePaletteResourceId);
+                if (bindShaderSkinningPalette &&
+                    cached.runtimePoseCarrierReady != 0u &&
+                    !cached.bonePaletteResourceId.empty()) {
+                    part.SetBonePaletteResourceId(cached.bonePaletteResourceId);
                     cachedRenderableBound = 1u;
                 }
             }
@@ -991,11 +962,11 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
                 static_cast<u32>(cached.runtimePreviousBonePalette.size()),
                 cached.runtimePoseCarrierChangedBonePaletteEntryCount,
                 cached.runtimePoseCarrierReady,
-                rendererBonePalette.registered,
-                rendererBonePalette.currentEntryCount,
-                rendererBonePalette.previousEntryCount,
-                rendererBonePalette.changedEntryCount,
-                rendererBonePalette.ready,
+                !cached.bonePaletteResourceId.empty() ? 1u : 0u,
+                static_cast<u32>(cached.runtimeCurrentBonePalette.size()),
+                static_cast<u32>(cached.runtimePreviousBonePalette.size()),
+                cached.runtimePoseCarrierChangedBonePaletteEntryCount,
+                cached.runtimePoseCarrierReady,
                 cached.gpuBonePaletteBuffer != nullptr ? 1u : 0u,
                 cached.gpuPosePaletteBufferUploaded,
                 cached.gpuPosePaletteDescriptorInfoReady,
@@ -1767,12 +1738,14 @@ RuntimeModelLoadResult RuntimeModelLoader::LoadIntoScene(
         const bool bindShaderSkinningPalette =
             ShouldBindImportedBonePalette(modelPath, bindBonePalettePreview);
 
+        loadedModel->meshMaterialIndices.reserve(importedModelData.meshes.size());
         for (std::size_t meshIndex = 0; meshIndex < importedModelData.meshes.size(); ++meshIndex) {
             const ImportedMesh3D& mesh = importedModelData.meshes[meshIndex];
             const std::size_t materialIndex = std::min<std::size_t>(
                 mesh.materialIndex,
                 loadedModel->materialIds.empty() ? 0 : loadedModel->materialIds.size() - 1
             );
+            loadedModel->meshMaterialIndices.push_back(materialIndex);
             const std::string renderableName = mesh.name.empty()
                 ? "Imported Model"
                 : PathLabel(modelPath) + " / " + mesh.name;

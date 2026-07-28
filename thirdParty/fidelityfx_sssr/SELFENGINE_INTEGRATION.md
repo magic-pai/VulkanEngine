@@ -111,11 +111,15 @@ Current integration state:
   consumer as an explicit diagnostic fallback.
 - The SelfEngine Apply pass does not infer hit provenance from FFX radiance
   alpha. It consumes ResolveTemporal `HitConfidenceHistory` from the same stage
-  that owns `RadianceHistory`,
-  subtracts the selected local `SceneReflectionProbeCubemap` baseline from
-  validated screen-space radiance, and leaves probe/IBL fallback responsible
-  for misses. Apply's local-probe priority and box-projection contract matches
-  Deferred lighting.
+  that owns `RadianceHistory`. Same-frame composition now follows the vendor
+  ownership model: Deferred omits the eligible indirect-specular term, and
+  Apply writes one absolute radiance selected with
+  `mix(localProbeFallback, resolvedRadiance, confidence)`. This avoids the
+  displaced duplicate that occurred when Apply recomputed and subtracted an
+  approximation of the Probe term already written by Deferred. Apply's local-
+  probe priority and box-projection contract still matches Deferred lighting.
+  `SE_SSR_FFX_EXCLUSIVE_REFLECTION_OWNER_OFF=1` restores the legacy signed
+  Probe-delta path in Debug builds for regression testing.
 
 Production visual contract (SelfEngine FFX contract v13):
 - The default ray density is `4 rays/quad`. Sparse `1` and `2` ray modes remain

@@ -150,6 +150,7 @@ namespace se {
         glfwSetWindowPosCallback(m_Window, WindowPosCallback);
         glfwSetWindowSizeCallback(m_Window, WindowSizeCallback);
         glfwSetWindowCloseCallback(m_Window, WindowCloseCallback);
+        glfwSetMouseButtonCallback(m_Window, MouseButtonCallback);
         glfwSetDropCallback(m_Window, DropCallback);
         glfwGetFramebufferSize(m_Window, &m_Width, &m_Height);
     }
@@ -181,6 +182,8 @@ namespace se {
     }
 
     void Window::PollEvents() {
+        m_LeftMousePressed = false;
+        m_LeftMouseReleased = false;
         glfwPollEvents();
     }
 
@@ -203,12 +206,20 @@ namespace se {
         return size;
     }
 
-    bool Window::WasLeftMousePressed() {
-        const bool isDown = glfwGetMouseButton(m_Window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-        const bool wasPressed = isDown && !m_LeftMouseWasDown;
-        m_LeftMouseWasDown = isDown;
+    bool Window::WasLeftMousePressed() const {
+        return m_LeftMousePressed;
+    }
 
-        return wasPressed;
+    bool Window::WasLeftMouseReleased() const {
+        return m_LeftMouseReleased;
+    }
+
+    std::array<f64, 2> Window::LeftMousePressPosition() const {
+        return m_LeftMousePressPosition;
+    }
+
+    std::array<f64, 2> Window::LeftMouseReleasePosition() const {
+        return m_LeftMouseReleasePosition;
     }
 
     bool Window::IsLeftMouseDown() const {
@@ -504,6 +515,32 @@ namespace se {
             << WindowElapsedMilliseconds(kWindowTraceStartTime) << "ms"
             << " framebuffer=" << width << "x" << height
             << std::endl;
+    }
+
+    void Window::MouseButtonCallback(
+        GLFWwindow* glfwWindow,
+        int button,
+        int action,
+        int
+    ) {
+        if (button != GLFW_MOUSE_BUTTON_LEFT) {
+            return;
+        }
+
+        auto* window = static_cast<Window*>(glfwGetWindowUserPointer(glfwWindow));
+        if (window == nullptr) {
+            return;
+        }
+
+        std::array<f64, 2> position{};
+        glfwGetCursorPos(glfwWindow, &position[0], &position[1]);
+        if (action == GLFW_PRESS) {
+            window->m_LeftMousePressed = true;
+            window->m_LeftMousePressPosition = position;
+        } else if (action == GLFW_RELEASE) {
+            window->m_LeftMouseReleased = true;
+            window->m_LeftMouseReleasePosition = position;
+        }
     }
 
     void Window::DropCallback(GLFWwindow* glfwWindow, int pathCount, const char** paths) {

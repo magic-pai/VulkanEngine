@@ -42,6 +42,9 @@ public:
     explicit Camera3D(Controls controls);
 
     void Update(Window& window, f32 deltaSeconds, bool inputBlocked = false);
+    // Scene owners can reserve left-drag for editor interaction while keeping
+    // right-mouse free-look available.
+    void SetOrbitInputEnabled(bool enabled);
     void SetOrbit(f32 yawRadians, f32 pitchRadians, f32 distance);
     void SetPose(glm::vec3 position, glm::vec3 forward);
     void SetDistance(f32 distance);
@@ -49,6 +52,9 @@ public:
     void SetMoveSpeed(f32 moveSpeed);
     void SetClipPlanes(f32 nearClip, f32 farClip);
     void ResetOrbit();
+    // Restores a previously captured pose without going through window input.
+    // Returns false when the supplied state cannot form a valid view.
+    bool RestoreState(const Camera3DState& state);
 
     const glm::vec3& Position() const;
     const glm::vec3& Forward() const;
@@ -57,6 +63,7 @@ public:
     f32 MoveSpeed() const;
     f32 NearClip() const;
     f32 FarClip() const;
+    bool OrbitInputEnabled() const;
     bool FreeLookActive() const;
     Camera3DState State() const;
     glm::mat4 ViewMatrix() const;
@@ -79,6 +86,7 @@ private:
     f32 m_FovScale = 1.0f;
     glm::vec3 m_Position{ 0.0f };
     glm::vec3 m_Forward{ 0.0f, 0.0f, -1.0f };
+    bool m_OrbitInputEnabled = true;
     bool m_OrbitDragging = false;
     bool m_LookDragging = false;
     bool m_FreeLookActive = false;

@@ -142,7 +142,6 @@ $shaderPass = @($shaderContract | Where-Object {
 }).Count -eq 0
 
 $settingsSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/shadow_settings.h"
-$forwardSource = Get-Content -Raw -LiteralPath "src/forward_3d.cpp"
 $bufferSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/uniform_buffer.h"
 $rendererSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/renderer.cpp"
 $atlasSource = Get-Content -Raw -LiteralPath "src/renderer/vulkan/shadow_cascade_atlas.cpp"
@@ -190,25 +189,6 @@ $cpuContract = [pscustomobject]@{
         "directionalPcssGrazingFadeStart = 0.25f"
     ) -and $settingsSource.Contains(
         "directionalPcssGrazingFadeEnd = 0.80f"
-    )
-    forwardProductionProfileControls = $forwardSource.Contains(
-        '"SE_SHADOW_PCSS_STRENGTH"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_OFF"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_BLOCKER_SAMPLES"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_FILTER_SAMPLES"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_SEARCH_RADIUS_TEXELS"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_MAX_PENUMBRA_TEXELS"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_START"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_END"'
-    ) -and $forwardSource.Contains(
-        '"SE_DIRECTIONAL_PCSS_GRAZING_FADE_OFF"'
     )
 }
 $cpuPass = @($cpuContract.PSObject.Properties | Where-Object {

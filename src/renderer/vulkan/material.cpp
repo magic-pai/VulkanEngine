@@ -782,6 +782,65 @@ void VulkanMaterial::SetSkyboxCubemap(
     );
 }
 
+void VulkanMaterial::SetBlackHoleLookupTables(
+    const VulkanDevice& device,
+    const VulkanPhysicalDevice& physicalDevice,
+    const VulkanCommandPool& commandPool,
+    VulkanTextureData deflection,
+    VulkanTextureData inverseRadius,
+    VulkanTextureData blackBody
+) {
+    SE_ASSERT(
+        deflection.format == VK_FORMAT_R32G32_SFLOAT &&
+            inverseRadius.format == VK_FORMAT_R32G32_SFLOAT &&
+            blackBody.format == VK_FORMAT_R32G32B32A32_SFLOAT,
+        "Black-hole lookup tables must use RG32F beams and RGBA32F spectra"
+    );
+
+    auto deflectionTexture = std::make_unique<VulkanTexture2D>(
+        device,
+        physicalDevice,
+        commandPool,
+        deflection
+    );
+    auto inverseRadiusTexture = std::make_unique<VulkanTexture2D>(
+        device,
+        physicalDevice,
+        commandPool,
+        inverseRadius
+    );
+    auto blackBodyTexture = std::make_unique<VulkanTexture2D>(
+        device,
+        physicalDevice,
+        commandPool,
+        blackBody
+    );
+    deflectionTexture->SetDebugName(
+        device,
+        "SelfEngine.BlackHole.DeflectionLUT"
+    );
+    inverseRadiusTexture->SetDebugName(
+        device,
+        "SelfEngine.BlackHole.InverseRadiusLUT"
+    );
+    blackBodyTexture->SetDebugName(
+        device,
+        "SelfEngine.BlackHole.BlackBodyLUT"
+    );
+    if (m_ColorMapTexture != nullptr) {
+        m_ColorMapTexture->SetDebugName(
+            device,
+            "SelfEngine.BlackHole.DiscNoise"
+        );
+    }
+
+    // The dedicated black-hole material aliases descriptor bindings 3, 4, and 5.
+    // All other material classes retain their normal/occlusion meaning.
+    m_NormalTexture = std::move(deflectionTexture);
+    m_OcclusionTexture = std::move(inverseRadiusTexture);
+    m_EmissiveTexture = std::move(blackBodyTexture);
+}
+
 u32 VulkanMaterial::SamplerMipLevels() const {
     if (m_SkyboxCubemap != nullptr) {
         return m_SkyboxCubemap->MipLevels();

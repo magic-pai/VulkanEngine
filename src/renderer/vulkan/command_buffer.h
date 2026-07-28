@@ -358,10 +358,16 @@ public:
         const VulkanGBufferDescriptorSets*
             ffxSssrApplyGBufferDescriptorSets = nullptr,
         bool ffxSssrSameFrameCompositeEnabled = false,
+        bool directRayQueryCompositeEnabled = false,
         bool ffxSssrPrepareIndirectArgsEnabled = false,
+        bool ffxSssrScreenIntersectEnabled = true,
         bool ffxSssrVisibleOutputClearEnabled = false,
+        bool ffxSssrSparseOutputClearEnabled = false,
+        std::size_t ffxSssrHistorySourceImageIndex = 0u,
+        bool ffxSssrHistorySourceValid = false,
         const VulkanSceneRenderTargets* ssrTargets = nullptr,
         bool ssrReconstructionEnabled = false,
+        bool ffxSssrReceiverHistoryUpdateEnabled = false,
         bool ssrImagesInitialized = false,
         bool ssrHistoryReset = false,
         VulkanHybridReflectionAccelerationStructures*

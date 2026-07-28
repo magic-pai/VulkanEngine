@@ -17,7 +17,12 @@
 #include "scene/renderable_3d.h"
 #include "scene/scene_2d.h"
 #include "scene/scene_3d.h"
+#include "scene/scene_builder.h"
 #include "scene/transform.h"
+
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+#include "renderer/vulkan/scene_builder_gizmo.h"
+#endif
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -26,10 +31,14 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstring>
 #include <iterator>
+#include <string>
 #include <utility>
 
 namespace se {
+
+class SceneBuilderGizmo;
 
 namespace {
 
@@ -4537,6 +4546,1108 @@ void DrawRenderable3DControls(
     }
 }
 
+const char* SceneBuilderAlphaModeName(MaterialAlphaMode mode) {
+    switch (mode) {
+        case MaterialAlphaMode::Opaque:
+            return "Opaque";
+        case MaterialAlphaMode::Mask:
+            return "Mask";
+        case MaterialAlphaMode::Blend:
+            return "Blend";
+    }
+
+    return "Opaque";
+}
+
+const char* SceneBuilderCreateFailureName(u32 failure) {
+    switch (static_cast<SceneBuilderCreateFailure>(failure)) {
+        case SceneBuilderCreateFailure::None:
+            return "none";
+        case SceneBuilderCreateFailure::MeshNotRegistered:
+            return "mesh not registered";
+        case SceneBuilderCreateFailure::ObjectLimitReached:
+            return "object limit reached";
+        case SceneBuilderCreateFailure::MaterialIdCollision:
+            return "material id collision";
+        case SceneBuilderCreateFailure::UnknownPrimitiveName:
+            return "unknown primitive name";
+        case SceneBuilderCreateFailure::UnknownModifier:
+            return "unknown modifier";
+        case SceneBuilderCreateFailure::LightLimitReached:
+            return "frame light limit reached";
+        case SceneBuilderCreateFailure::ReflectionProbeLimitReached:
+            return "reflection probe limit reached";
+        case SceneBuilderCreateFailure::ImportedAssetUnavailable:
+            return "imported asset unavailable";
+        case SceneBuilderCreateFailure::ImportedAssetLoadFailed:
+            return "imported asset load failed";
+    }
+
+    return "unknown";
+}
+
+const char* SceneBuilderLightKindName(SceneLightKind kind) {
+    switch (kind) {
+        case SceneLightKind::Directional:
+            return "Directional";
+        case SceneLightKind::Point:
+            return "Point";
+        case SceneLightKind::Spot:
+            return "Spot";
+        case SceneLightKind::Rect:
+            return "Rect";
+    }
+
+    return "Light";
+}
+
+void DrawSceneBuilderPanel(
+    SceneBuilder& builder,
+    Camera3D* camera,
+    SceneBuilderGizmo* gizmo
+) {
+    builder.SyncSelectionFromScene();
+    ImGui::SetNextWindowPos(ImVec2(460.0f, 16.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(410.0f, 640.0f), ImGuiCond_Once);
+    if (!ImGui::Begin("Scene Builder")) {
+        ImGui::End();
+        return;
+    }
+
+    const SceneBuilderStats stats = builder.Stats();
+
+    if (!builder.Available()) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
+            "No primitive mesh ids are registered."
+        );
+        ImGui::TextWrapped(
+            "The builder needs Cube/Plane/Sphere/Cone meshes registered in "
+            "the render resources before it can create objects."
+        );
+        ImGui::End();
+        return;
+    }
+
+    ImGui::SeparatorText("Create");
+    for (u32 index = 0; index < kSceneBuilderPrimitiveCount; ++index) {
+        const SceneBuilderPrimitive primitive =
+            static_cast<SceneBuilderPrimitive>(index);
+        const std::string_view name = SceneBuilder::PrimitiveName(primitive);
+        const std::string label = std::string(name) + "##SceneBuilderCreate";
+        const bool available = builder.PrimitiveAvailable(primitive);
+        if (!available) {
+            ImGui::BeginDisabled();
+        }
+        if (ImGui::Button(label.c_str(), ImVec2(88.0f, 0.0f))) {
+            builder.CreatePrimitive(primitive);
+        }
+        if (!available) {
+            ImGui::EndDisabled();
+        }
+        if (index + 1 < kSceneBuilderPrimitiveCount && index % 4u != 3u) {
+            ImGui::SameLine();
+        }
+    }
+
+    ImGui::SeparatorText("Objects");
+    ImGui::Text(
+        "Builder objects: %u  (scene renderables: %u)",
+        stats.objectCount,
+        stats.sceneRenderableCount
+    );
+    ImGui::Text(
+        "Materials: %u builder / %u library / %u frame budget",
+        stats.liveMaterialCount,
+        stats.materialLibraryCount,
+        stats.frameMaterialBudget
+    );
+    if (stats.createFailureCount > 0) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.6f, 0.35f, 1.0f),
+            "Refused creates: %u (last: %s)",
+            stats.createFailureCount,
+            SceneBuilderCreateFailureName(stats.lastCreateFailure)
+        );
+    }
+
+    ImGui::SeparatorText("Scene");
+    SceneEnvironment3D environment = builder.Environment();
+    bool environmentChanged =
+        ImGui::Checkbox("Environment IBL##SceneBuilder", &environment.iblEnabled);
+    environmentChanged |= ImGui::SliderFloat(
+        "IBL Diffuse##SceneBuilder",
+        &environment.diffuseIntensity,
+        0.0f,
+        4.0f
+    );
+    environmentChanged |= ImGui::SliderFloat(
+        "IBL Specular##SceneBuilder",
+        &environment.specularIntensity,
+        0.0f,
+        4.0f
+    );
+    environmentChanged |= ImGui::SliderFloat(
+        "Horizon blend##SceneBuilder",
+        &environment.horizonBlend,
+        0.0f,
+        1.0f
+    );
+    const char* lightingAssetNames[] = {
+        "Neutral procedural",
+        "Studio panorama"
+    };
+    i32 lightingAsset = static_cast<i32>(environment.lightingAsset);
+    if (ImGui::Combo(
+            "Environment preset##SceneBuilder",
+            &lightingAsset,
+            lightingAssetNames,
+            IM_ARRAYSIZE(lightingAssetNames)
+        )) {
+        environment.lightingAsset =
+            static_cast<SceneEnvironmentLightingAsset>(lightingAsset);
+        environmentChanged = true;
+    }
+    environmentChanged |= ImGui::Checkbox("Skybox##SceneBuilder", &environment.skyboxEnabled);
+    if (environment.skyboxEnabled) {
+        environmentChanged |= ImGui::SliderFloat(
+            "Skybox intensity##SceneBuilder",
+            &environment.skyboxIntensity,
+            0.0f,
+            4.0f
+        );
+        environmentChanged |= ImGui::SliderFloat(
+            "Skybox blur##SceneBuilder",
+            &environment.skyboxBlur,
+            0.0f,
+            8.0f
+        );
+    }
+    if (environmentChanged) {
+        builder.SetEnvironment(environment);
+    }
+
+    ImGui::SeparatorText("Reflection probes");
+    ImGui::Text(
+        "Scene probes: %u / %u  Captured-scene: %u  Static: %u  Excluded: %u",
+        stats.reflectionProbeCount,
+        kSceneBuilderMaxReflectionProbes,
+        stats.reflectionProbeCapturedSceneCount,
+        stats.reflectionProbeStaticRefreshCount,
+        stats.reflectionProbeExcludedRenderableCount
+    );
+    const bool reflectionProbeLimitReached =
+        builder.ReflectionProbeCount() >= kSceneBuilderMaxReflectionProbes;
+    if (reflectionProbeLimitReached) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("New probe##SceneBuilderReflectionProbe")) {
+        builder.CreateReflectionProbe();
+    }
+    if (reflectionProbeLimitReached) {
+        ImGui::EndDisabled();
+    }
+
+    const u32 reflectionProbeCount = builder.ReflectionProbeCount();
+    if (reflectionProbeCount == 0u) {
+        ImGui::TextDisabled("No local reflection probes. Global IBL remains active.");
+    } else {
+        i32 selectedReflectionProbeIndex = builder.SelectedReflectionProbeIndex();
+        if (selectedReflectionProbeIndex < 0 ||
+            static_cast<u32>(selectedReflectionProbeIndex) >= reflectionProbeCount) {
+            builder.SelectReflectionProbe(0u);
+            selectedReflectionProbeIndex = 0;
+        }
+
+        SceneBuilderReflectionProbeEdit selectedReflectionProbe{};
+        builder.ReadReflectionProbeEdit(
+            static_cast<u32>(selectedReflectionProbeIndex),
+            selectedReflectionProbe
+        );
+        const std::string selectedReflectionProbeLabel =
+            selectedReflectionProbe.name + "##" +
+            std::to_string(selectedReflectionProbeIndex);
+        if (ImGui::BeginCombo(
+                "Selected probe##SceneBuilderReflectionProbe",
+                selectedReflectionProbeLabel.c_str()
+            )) {
+            for (u32 index = 0u; index < reflectionProbeCount; ++index) {
+                SceneBuilderReflectionProbeEdit probe{};
+                if (!builder.ReadReflectionProbeEdit(index, probe)) {
+                    continue;
+                }
+                const std::string label = probe.name + "##" +
+                    std::to_string(index);
+                const bool selected = index ==
+                    static_cast<u32>(selectedReflectionProbeIndex);
+                if (ImGui::Selectable(label.c_str(), selected)) {
+                    builder.SelectReflectionProbe(index);
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        selectedReflectionProbeIndex = builder.SelectedReflectionProbeIndex();
+        if (selectedReflectionProbeIndex >= 0 &&
+            ImGui::Button("Duplicate##SceneBuilderReflectionProbe")) {
+            builder.DuplicateReflectionProbe(
+                static_cast<u32>(selectedReflectionProbeIndex)
+            );
+        }
+        ImGui::SameLine();
+        if (selectedReflectionProbeIndex >= 0 &&
+            ImGui::Button("Delete##SceneBuilderReflectionProbe")) {
+            builder.DestroyReflectionProbe(
+                static_cast<u32>(selectedReflectionProbeIndex)
+            );
+        }
+
+        selectedReflectionProbeIndex = builder.SelectedReflectionProbeIndex();
+        SceneBuilderReflectionProbeEdit reflectionProbe{};
+        if (selectedReflectionProbeIndex >= 0 &&
+            builder.ReadReflectionProbeEdit(
+                static_cast<u32>(selectedReflectionProbeIndex),
+                reflectionProbe
+            )) {
+            static char reflectionProbeName[128] = {};
+            static char reflectionProbeAssetId[256] = {};
+            static i32 reflectionProbeBufferIndex = -1;
+            static std::string reflectionProbeNameSnapshot;
+            static std::string reflectionProbeAssetIdSnapshot;
+            if (reflectionProbeBufferIndex != selectedReflectionProbeIndex ||
+                reflectionProbeNameSnapshot != reflectionProbe.name) {
+                const std::size_t copyLength = std::min(
+                    reflectionProbe.name.size(),
+                    sizeof(reflectionProbeName) - 1u
+                );
+                std::memcpy(
+                    reflectionProbeName,
+                    reflectionProbe.name.data(),
+                    copyLength
+                );
+                reflectionProbeName[copyLength] = '\0';
+                reflectionProbeNameSnapshot = reflectionProbe.name;
+            }
+            if (reflectionProbeBufferIndex != selectedReflectionProbeIndex ||
+                reflectionProbeAssetIdSnapshot != reflectionProbe.captureAssetId) {
+                const std::size_t copyLength = std::min(
+                    reflectionProbe.captureAssetId.size(),
+                    sizeof(reflectionProbeAssetId) - 1u
+                );
+                std::memcpy(
+                    reflectionProbeAssetId,
+                    reflectionProbe.captureAssetId.data(),
+                    copyLength
+                );
+                reflectionProbeAssetId[copyLength] = '\0';
+                reflectionProbeAssetIdSnapshot = reflectionProbe.captureAssetId;
+            }
+            reflectionProbeBufferIndex = selectedReflectionProbeIndex;
+
+            bool reflectionProbeChanged = false;
+            if (ImGui::InputText(
+                    "Name##SceneBuilderReflectionProbe",
+                    reflectionProbeName,
+                    sizeof(reflectionProbeName),
+                    ImGuiInputTextFlags_EnterReturnsTrue
+                )) {
+                reflectionProbe.name = reflectionProbeName;
+                reflectionProbeChanged = true;
+            }
+            reflectionProbeChanged |= ImGui::Checkbox(
+                "Enabled##SceneBuilderReflectionProbe",
+                &reflectionProbe.enabled
+            );
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+            if (gizmo != nullptr) {
+                SceneBuilderGizmoMode mode = gizmo->Mode();
+                if (mode == SceneBuilderGizmoMode::Rotate) {
+                    gizmo->SetMode(SceneBuilderGizmoMode::Translate);
+                    mode = SceneBuilderGizmoMode::Translate;
+                }
+                if (ImGui::RadioButton(
+                        "Move##SceneBuilderReflectionProbeGizmo",
+                        mode == SceneBuilderGizmoMode::Translate
+                    )) {
+                    gizmo->SetMode(SceneBuilderGizmoMode::Translate);
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton(
+                        "Scale##SceneBuilderReflectionProbeGizmo",
+                        mode == SceneBuilderGizmoMode::Scale
+                    )) {
+                    gizmo->SetMode(SceneBuilderGizmoMode::Scale);
+                }
+            }
+#endif
+            reflectionProbeChanged |= ImGui::DragFloat3(
+                "Capture position##SceneBuilderReflectionProbe",
+                &reflectionProbe.center.x,
+                0.02f,
+                -256.0f,
+                256.0f
+            );
+            reflectionProbeChanged |= ImGui::DragFloat3(
+                "Proxy center##SceneBuilderReflectionProbe",
+                &reflectionProbe.boxCenter.x,
+                0.02f,
+                -256.0f,
+                256.0f
+            );
+            reflectionProbeChanged |= ImGui::DragFloat(
+                "Influence radius##SceneBuilderReflectionProbe",
+                &reflectionProbe.radius,
+                0.05f,
+                0.01f,
+                256.0f
+            );
+            reflectionProbeChanged |= ImGui::DragFloat3(
+                "Box extents##SceneBuilderReflectionProbe",
+                &reflectionProbe.boxExtents.x,
+                0.05f,
+                0.01f,
+                256.0f
+            );
+            reflectionProbeChanged |= ImGui::ColorEdit3(
+                "Color##SceneBuilderReflectionProbe",
+                &reflectionProbe.color.x,
+                ImGuiColorEditFlags_HDR
+            );
+            reflectionProbeChanged |= ImGui::DragFloat(
+                "Intensity##SceneBuilderReflectionProbe",
+                &reflectionProbe.intensity,
+                0.02f,
+                0.0f,
+                4.0f
+            );
+            reflectionProbeChanged |= ImGui::SliderFloat(
+                "Blend strength##SceneBuilderReflectionProbe",
+                &reflectionProbe.blendStrength,
+                0.0f,
+                1.0f
+            );
+            reflectionProbeChanged |= ImGui::DragFloat(
+                "Falloff##SceneBuilderReflectionProbe",
+                &reflectionProbe.falloff,
+                0.02f,
+                0.25f,
+                8.0f
+            );
+
+            constexpr std::array<ReflectionProbeCaptureSource, 4>
+                kReflectionProbeCaptureSources{
+                    ReflectionProbeCaptureSource::None,
+                    ReflectionProbeCaptureSource::BuiltInProcedural,
+                    ReflectionProbeCaptureSource::AuthoredCubemap,
+                    ReflectionProbeCaptureSource::CapturedScene
+                };
+            if (ImGui::BeginCombo(
+                    "Capture source##SceneBuilderReflectionProbe",
+                    ReflectionCaptureSourceName(
+                        static_cast<u32>(reflectionProbe.captureSource)
+                    )
+                )) {
+                for (const ReflectionProbeCaptureSource source :
+                     kReflectionProbeCaptureSources) {
+                    const bool selected = source == reflectionProbe.captureSource;
+                    if (ImGui::Selectable(
+                            ReflectionCaptureSourceName(static_cast<u32>(source)),
+                            selected
+                        )) {
+                        reflectionProbe.captureSource = source;
+                        reflectionProbeChanged = true;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            if (ImGui::InputText(
+                    "Capture asset ID##SceneBuilderReflectionProbe",
+                    reflectionProbeAssetId,
+                    sizeof(reflectionProbeAssetId),
+                    ImGuiInputTextFlags_EnterReturnsTrue
+                )) {
+                reflectionProbe.captureAssetId = reflectionProbeAssetId;
+                reflectionProbeChanged = true;
+            }
+
+            constexpr std::array<ReflectionProbeRefreshPolicy, 4>
+                kReflectionProbeRefreshPolicies{
+                    ReflectionProbeRefreshPolicy::Static,
+                    ReflectionProbeRefreshPolicy::FileSignature,
+                    ReflectionProbeRefreshPolicy::Forced,
+                    ReflectionProbeRefreshPolicy::SceneDirty
+                };
+            if (ImGui::BeginCombo(
+                    "Refresh policy##SceneBuilderReflectionProbe",
+                    ReflectionProbeRefreshPolicyName(
+                        static_cast<u32>(reflectionProbe.refreshPolicy)
+                    )
+                )) {
+                for (const ReflectionProbeRefreshPolicy policy :
+                     kReflectionProbeRefreshPolicies) {
+                    const bool selected = policy == reflectionProbe.refreshPolicy;
+                    if (ImGui::Selectable(
+                            ReflectionProbeRefreshPolicyName(static_cast<u32>(policy)),
+                            selected
+                        )) {
+                        reflectionProbe.refreshPolicy = policy;
+                        reflectionProbeChanged = true;
+                    }
+                    if (selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            if (ImGui::CollapsingHeader(
+                    "Capture exclusions##SceneBuilderReflectionProbe"
+                )) {
+                for (const SceneBuilderObject& object : builder.Objects()) {
+                    const auto exclusion = std::lower_bound(
+                        reflectionProbe.captureExcludedRenderableIdentities.begin(),
+                        reflectionProbe.captureExcludedRenderableIdentities.end(),
+                        object.renderIdentity
+                    );
+                    bool excluded = exclusion !=
+                            reflectionProbe.captureExcludedRenderableIdentities.end() &&
+                        *exclusion == object.renderIdentity;
+                    ImGui::PushID(static_cast<int>(object.renderIdentity));
+                    if (ImGui::Checkbox(object.name.c_str(), &excluded)) {
+                        if (excluded) {
+                            reflectionProbe.captureExcludedRenderableIdentities.insert(
+                                exclusion,
+                                object.renderIdentity
+                            );
+                        } else {
+                            reflectionProbe.captureExcludedRenderableIdentities.erase(
+                                exclusion
+                            );
+                        }
+                        reflectionProbeChanged = true;
+                    }
+                    ImGui::PopID();
+                }
+            }
+
+            if (reflectionProbeChanged &&
+                builder.ApplyReflectionProbeEdit(
+                    static_cast<u32>(selectedReflectionProbeIndex),
+                    reflectionProbe
+                )) {
+                reflectionProbeNameSnapshot.clear();
+                reflectionProbeAssetIdSnapshot.clear();
+            }
+        }
+    }
+
+    const bool cameraAvailable = camera != nullptr;
+    if (!cameraAvailable) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Save scene##SceneBuilder")) {
+        builder.SaveDefaultDocument(camera->State());
+    }
+    if (!cameraAvailable) {
+        ImGui::EndDisabled();
+    }
+    const std::string& documentStatus = builder.LastDocumentStatus();
+    if (!documentStatus.empty()) {
+        ImGui::TextColored(
+            builder.LastDocumentOperationFailed()
+                ? ImVec4(1.0f, 0.45f, 0.35f, 1.0f)
+                : ImVec4(0.55f, 0.78f, 0.56f, 1.0f),
+            "%s",
+            documentStatus.c_str()
+        );
+    }
+
+    const u64 selectedIdentity = builder.SelectedIdentity();
+    const SceneBuilderObject* selected = builder.FindObject(selectedIdentity);
+    const char* selectedLabel = selected != nullptr ? selected->name.c_str() : "None";
+    if (ImGui::BeginCombo("Selected##SceneBuilder", selectedLabel)) {
+        for (const SceneBuilderObject& object : builder.Objects()) {
+            const bool isSelected = object.renderIdentity == selectedIdentity;
+            if (ImGui::Selectable(object.name.c_str(), isSelected)) {
+                builder.SelectObject(object.renderIdentity);
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    ImGui::SeparatorText("Lights");
+    ImGui::Text(
+        "Builder lights: %u  (D/P/S/R: %u/%u/%u/%u)",
+        stats.lightCount,
+        stats.lightCounts[0],
+        stats.lightCounts[1],
+        stats.lightCounts[2],
+        stats.lightCounts[3]
+    );
+    constexpr std::array<SceneLightKind, 4> kSceneBuilderLightKinds{
+        SceneLightKind::Directional,
+        SceneLightKind::Point,
+        SceneLightKind::Spot,
+        SceneLightKind::Rect
+    };
+    for (u32 index = 0u; index < kSceneBuilderLightKinds.size(); ++index) {
+        const SceneLightKind kind = kSceneBuilderLightKinds[index];
+        const std::string label = std::string(SceneBuilderLightKindName(kind)) +
+            "##SceneBuilderCreateLight";
+        if (ImGui::Button(label.c_str(), ImVec2(88.0f, 0.0f))) {
+            builder.CreateLight(kind);
+        }
+        if (index + 1u < kSceneBuilderLightKinds.size()) {
+            ImGui::SameLine();
+        }
+    }
+
+    const u64 selectedLightIdentity = builder.SelectedLightIdentity();
+    const SceneBuilderLight* selectedLight = builder.FindLight(selectedLightIdentity);
+    const char* selectedLightLabel = selectedLight != nullptr
+        ? SceneBuilderLightKindName(selectedLight->kind)
+        : "None";
+    if (ImGui::BeginCombo("Selected light##SceneBuilder", selectedLightLabel)) {
+        for (const SceneBuilderLight& light : builder.Lights()) {
+            SceneLightEdit lightEdit{};
+            if (!builder.ReadLightEdit(light.lightIdentity, lightEdit)) {
+                continue;
+            }
+            const std::string label = std::string(SceneBuilderLightKindName(light.kind)) +
+                ": " + lightEdit.name + "##" +
+                std::to_string(light.lightIdentity);
+            const bool isSelected = light.lightIdentity == selectedLightIdentity;
+            if (ImGui::Selectable(label.c_str(), isSelected)) {
+                builder.SelectLight(light.lightIdentity);
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (selected == nullptr) {
+        ImGui::TextDisabled("Create an object to edit it.");
+    } else {
+
+    // Identity is stable across create/destroy; vector order is not.
+    ImGui::Text(
+        "Identity %llu  mesh %s",
+        static_cast<unsigned long long>(selected->renderIdentity),
+        selected->meshId.c_str()
+    );
+
+    static char nameBuffer[128] = {};
+    static u64 nameBufferIdentity = 0;
+    if (nameBufferIdentity != selected->renderIdentity) {
+        nameBufferIdentity = selected->renderIdentity;
+        const std::size_t copyLength = std::min(
+            selected->name.size(),
+            sizeof(nameBuffer) - 1
+        );
+        std::memcpy(nameBuffer, selected->name.data(), copyLength);
+        nameBuffer[copyLength] = '\0';
+    }
+    if (ImGui::InputText(
+            "Name##SceneBuilder",
+            nameBuffer,
+            sizeof(nameBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue
+        )) {
+        builder.RenameObject(selected->renderIdentity, std::string(nameBuffer));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rename##SceneBuilder")) {
+        builder.RenameObject(selected->renderIdentity, std::string(nameBuffer));
+    }
+
+    SceneBuilderObjectEdit edit{};
+    if (!builder.ReadObjectEdit(selected->renderIdentity, edit)) {
+        ImGui::TextDisabled("Selected object is no longer readable.");
+        ImGui::End();
+        return;
+    }
+
+    bool changed = false;
+    ImGui::SeparatorText("Transform");
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    if (gizmo != nullptr) {
+        const SceneBuilderGizmoMode mode = gizmo->Mode();
+        if (ImGui::RadioButton(
+                "Move##SceneBuilderGizmo",
+                mode == SceneBuilderGizmoMode::Translate
+            )) {
+            gizmo->SetMode(SceneBuilderGizmoMode::Translate);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(
+                "Rotate##SceneBuilderGizmo",
+                mode == SceneBuilderGizmoMode::Rotate
+            )) {
+            gizmo->SetMode(SceneBuilderGizmoMode::Rotate);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(
+                "Scale##SceneBuilderGizmo",
+                mode == SceneBuilderGizmoMode::Scale
+            )) {
+            gizmo->SetMode(SceneBuilderGizmoMode::Scale);
+        }
+    }
+#else
+    (void)gizmo;
+#endif
+    changed |= ImGui::DragFloat3(
+        "Position##SceneBuilder",
+        &edit.position.x,
+        0.02f,
+        -64.0f,
+        64.0f
+    );
+    changed |= ImGui::DragFloat3(
+        "Rotation##SceneBuilder",
+        &edit.rotationDegrees.x,
+        0.5f,
+        -180.0f,
+        180.0f
+    );
+    changed |= ImGui::DragFloat3(
+        "Scale##SceneBuilder",
+        &edit.scale.x,
+        0.01f,
+        0.001f,
+        64.0f
+    );
+
+    ImGui::SeparatorText("Material");
+    changed |= ImGui::ColorEdit4("Base color##SceneBuilder", &edit.baseColor.r);
+    changed |= ImGui::SliderFloat("Metallic##SceneBuilder", &edit.metallic, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Roughness##SceneBuilder", &edit.roughness, 0.04f, 1.0f);
+    changed |= ImGui::ColorEdit3(
+        "Emissive##SceneBuilder",
+        &edit.emissive.r,
+        ImGuiColorEditFlags_HDR
+    );
+
+    i32 alphaMode = static_cast<i32>(edit.alphaMode);
+    if (ImGui::BeginCombo(
+            "Alpha mode##SceneBuilder",
+            SceneBuilderAlphaModeName(edit.alphaMode)
+        )) {
+        for (i32 candidate = 0; candidate <= 2; ++candidate) {
+            const MaterialAlphaMode candidateMode =
+                static_cast<MaterialAlphaMode>(candidate);
+            const bool isSelected = candidate == alphaMode;
+            if (ImGui::Selectable(
+                    SceneBuilderAlphaModeName(candidateMode),
+                    isSelected
+                )) {
+                edit.alphaMode = candidateMode;
+                changed = true;
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (edit.alphaMode == MaterialAlphaMode::Mask) {
+        changed |= ImGui::SliderFloat(
+            "Alpha cutoff##SceneBuilder",
+            &edit.alphaCutoff,
+            0.0f,
+            1.0f
+        );
+    }
+    if (edit.alphaMode != MaterialAlphaMode::Opaque) {
+        changed |= ImGui::SliderFloat(
+            "Alpha##SceneBuilder",
+            &edit.baseColor.a,
+            0.0f,
+            1.0f
+        );
+    }
+    bool cullBackfaces = !edit.doubleSided;
+    if (ImGui::Checkbox("Backface culling##SceneBuilder", &cullBackfaces)) {
+        edit.doubleSided = !cullBackfaces;
+        changed = true;
+    }
+    changed |= ImGui::Checkbox("Cast shadow##SceneBuilder", &edit.castShadow);
+
+    if (changed) {
+        builder.ApplyObjectEdit(selected->renderIdentity, edit);
+    }
+
+    if (stats.blendObjectCount > 0) {
+        ImGui::Spacing();
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.72f, 0.35f, 1.0f),
+            "%u blend object(s) present.",
+            stats.blendObjectCount
+        );
+        ImGui::TextWrapped(
+            "Blend/Transparent scene geometry is filtered out of the main, "
+            "shadow, reflection, and overlay queues unless "
+            "SE_TRANSPARENT_OBJECTS=1. That path is intentionally disabled "
+            "until its temporal/velocity/reactive-mask contract exists."
+        );
+    }
+
+    ImGui::SeparatorText("Destroy");
+    if (ImGui::Button("Delete selected##SceneBuilder")) {
+        builder.DestroyObject(selected->renderIdentity);
+        nameBufferIdentity = 0;
+    }
+    }
+
+    const u64 activeLightIdentity = builder.SelectedLightIdentity();
+    const SceneBuilderLight* activeLight = builder.FindLight(activeLightIdentity);
+    if (activeLight != nullptr) {
+        SceneLightEdit lightEdit{};
+        if (!builder.ReadLightEdit(activeLightIdentity, lightEdit)) {
+            ImGui::TextDisabled("Selected light is no longer readable.");
+        } else {
+            ImGui::SeparatorText("Light");
+            ImGui::Text(
+                "%s light  Identity %llu",
+                SceneBuilderLightKindName(lightEdit.kind),
+                static_cast<unsigned long long>(activeLightIdentity)
+            );
+
+            static char lightNameBuffer[128] = {};
+            static u64 lightNameBufferIdentity = 0u;
+            if (lightNameBufferIdentity != activeLightIdentity) {
+                lightNameBufferIdentity = activeLightIdentity;
+                const std::size_t copyLength = std::min(
+                    lightEdit.name.size(),
+                    sizeof(lightNameBuffer) - 1u
+                );
+                std::memcpy(lightNameBuffer, lightEdit.name.data(), copyLength);
+                lightNameBuffer[copyLength] = '\0';
+            }
+
+            bool lightChanged = false;
+            if (ImGui::InputText(
+                    "Name##SceneBuilderLight",
+                    lightNameBuffer,
+                    sizeof(lightNameBuffer),
+                    ImGuiInputTextFlags_EnterReturnsTrue
+                )) {
+                lightEdit.name = lightNameBuffer;
+                lightChanged = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Rename##SceneBuilderLight")) {
+                lightEdit.name = lightNameBuffer;
+                lightChanged = true;
+            }
+            lightChanged |= ImGui::Checkbox(
+                "Enabled##SceneBuilderLight",
+                &lightEdit.enabled
+            );
+
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+            if (gizmo != nullptr) {
+                const bool supportsMove = true;
+                const bool supportsRotate = lightEdit.kind != SceneLightKind::Point;
+                SceneBuilderGizmoMode mode = gizmo->Mode();
+                if ((mode == SceneBuilderGizmoMode::Translate && !supportsMove) ||
+                    (mode == SceneBuilderGizmoMode::Rotate && !supportsRotate) ||
+                    mode == SceneBuilderGizmoMode::Scale) {
+                    gizmo->SetMode(
+                        supportsRotate
+                            ? SceneBuilderGizmoMode::Rotate
+                            : SceneBuilderGizmoMode::Translate
+                    );
+                    mode = gizmo->Mode();
+                }
+
+                if (supportsMove && ImGui::RadioButton(
+                        "Move##SceneBuilderLightGizmo",
+                        mode == SceneBuilderGizmoMode::Translate
+                    )) {
+                    gizmo->SetMode(SceneBuilderGizmoMode::Translate);
+                }
+                if (supportsMove && supportsRotate) {
+                    ImGui::SameLine();
+                }
+                if (supportsRotate && ImGui::RadioButton(
+                        "Rotate##SceneBuilderLightGizmo",
+                        mode == SceneBuilderGizmoMode::Rotate
+                    )) {
+                    gizmo->SetMode(SceneBuilderGizmoMode::Rotate);
+                }
+            }
+#endif
+
+            switch (lightEdit.kind) {
+                case SceneLightKind::Directional:
+                    lightChanged |= ImGui::DragFloat3(
+                        "Gizmo position##SceneBuilderLight",
+                        &lightEdit.position.x,
+                        0.02f,
+                        -64.0f,
+                        64.0f
+                    );
+                    {
+                        glm::vec2 rotationDegrees =
+                            SceneBuilderGizmo::DirectionalLightRotationDegrees(
+                                lightEdit.direction
+                            );
+                        if (ImGui::DragFloat2(
+                                "Rotation (Yaw/Pitch)##SceneBuilderLight",
+                                &rotationDegrees.x,
+                                0.25f,
+                                -180.0f,
+                                180.0f,
+                                "%.1f deg"
+                            )) {
+                            rotationDegrees.y = std::clamp(
+                                rotationDegrees.y,
+                                -90.0f,
+                                90.0f
+                            );
+                            lightEdit.direction =
+                                SceneBuilderGizmo::DirectionalLightDirectionFromRotationDegrees(
+                                    rotationDegrees
+                                );
+                            lightChanged = true;
+                        }
+                    }
+                    lightChanged |= ImGui::DragFloat(
+                        "Intensity##SceneBuilderLight",
+                        &lightEdit.intensity,
+                        0.02f,
+                        0.0f,
+                        32.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Ambient##SceneBuilderLight",
+                        &lightEdit.ambient,
+                        0.01f,
+                        0.0f,
+                        4.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Specular##SceneBuilderLight",
+                        &lightEdit.specular,
+                        0.01f,
+                        0.0f,
+                        4.0f
+                    );
+                    lightChanged |= ImGui::SliderFloat(
+                        "Angular radius##SceneBuilderLight",
+                        &lightEdit.angularRadiusRadians,
+                        0.0f,
+                        0.05f
+                    );
+                    break;
+                case SceneLightKind::Point:
+                    lightChanged |= ImGui::DragFloat3(
+                        "Position##SceneBuilderLight",
+                        &lightEdit.position.x,
+                        0.02f,
+                        -64.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::ColorEdit3(
+                        "Color##SceneBuilderLight",
+                        &lightEdit.color.x,
+                        ImGuiColorEditFlags_HDR
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Intensity##SceneBuilderLight",
+                        &lightEdit.intensity,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Radius##SceneBuilderLight",
+                        &lightEdit.radius,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Source radius##SceneBuilderLight",
+                        &lightEdit.sourceRadius,
+                        0.005f,
+                        0.0f,
+                        8.0f
+                    );
+                    break;
+                case SceneLightKind::Spot:
+                    lightChanged |= ImGui::DragFloat3(
+                        "Position##SceneBuilderLight",
+                        &lightEdit.position.x,
+                        0.02f,
+                        -64.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat3(
+                        "Direction##SceneBuilderLight",
+                        &lightEdit.direction.x,
+                        0.01f,
+                        -1.0f,
+                        1.0f
+                    );
+                    lightChanged |= ImGui::ColorEdit3(
+                        "Color##SceneBuilderLight",
+                        &lightEdit.color.x,
+                        ImGuiColorEditFlags_HDR
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Intensity##SceneBuilderLight",
+                        &lightEdit.intensity,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Radius##SceneBuilderLight",
+                        &lightEdit.radius,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Source radius##SceneBuilderLight",
+                        &lightEdit.sourceRadius,
+                        0.005f,
+                        0.0f,
+                        8.0f
+                    );
+                    lightChanged |= ImGui::SliderFloat(
+                        "Inner cone##SceneBuilderLight",
+                        &lightEdit.innerConeDegrees,
+                        0.05f,
+                        89.0f
+                    );
+                    lightChanged |= ImGui::SliderFloat(
+                        "Outer cone##SceneBuilderLight",
+                        &lightEdit.outerConeDegrees,
+                        0.1f,
+                        89.0f
+                    );
+                    break;
+                case SceneLightKind::Rect:
+                    lightChanged |= ImGui::DragFloat3(
+                        "Position##SceneBuilderLight",
+                        &lightEdit.position.x,
+                        0.02f,
+                        -64.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat3(
+                        "Direction##SceneBuilderLight",
+                        &lightEdit.direction.x,
+                        0.01f,
+                        -1.0f,
+                        1.0f
+                    );
+                    lightChanged |= ImGui::ColorEdit3(
+                        "Color##SceneBuilderLight",
+                        &lightEdit.color.x,
+                        ImGuiColorEditFlags_HDR
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Intensity##SceneBuilderLight",
+                        &lightEdit.intensity,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Radius##SceneBuilderLight",
+                        &lightEdit.radius,
+                        0.05f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Width##SceneBuilderLight",
+                        &lightEdit.width,
+                        0.02f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::DragFloat(
+                        "Height##SceneBuilderLight",
+                        &lightEdit.height,
+                        0.02f,
+                        0.0f,
+                        64.0f
+                    );
+                    lightChanged |= ImGui::SliderFloat(
+                        "Specular##SceneBuilderLight",
+                        &lightEdit.specular,
+                        0.0f,
+                        1.0f
+                    );
+                    break;
+            }
+
+            if (lightChanged) {
+                builder.ApplyLightEdit(activeLightIdentity, lightEdit);
+            }
+            if (ImGui::Button("Delete light##SceneBuilder")) {
+                builder.DestroyLight(activeLightIdentity);
+                lightNameBufferIdentity = 0u;
+            }
+        }
+    }
+
+#if !defined(NDEBUG)
+    if (ImGui::CollapsingHeader("Builder diagnostics (Debug)")) {
+        ImGui::Text("Edit revision: %llu",
+            static_cast<unsigned long long>(stats.editRevision));
+        ImGui::Text("Created / destroyed: %u / %u",
+            stats.createdObjectCount,
+            stats.destroyedObjectCount);
+        ImGui::Text("Lights created / destroyed / edited: %u / %u / %u",
+            stats.createdLightCount,
+            stats.destroyedLightCount,
+            stats.lightEditCount);
+        ImGui::Text("Transform / material / rename edits: %u / %u / %u",
+            stats.transformEditCount,
+            stats.materialEditCount,
+            stats.renameCount);
+        ImGui::Text("Viewport selection syncs / Delete actions: %u / %u",
+            stats.selectionSyncCount,
+            stats.selectionShortcutDeleteCount);
+        ImGui::Text("Primitive ray picks / hits: %u / %u",
+            stats.selectionRayQueryCount,
+            stats.selectionRayHitCount);
+        ImGui::Text("Material descriptor refreshes: %u",
+            stats.materialDescriptorRefreshCount);
+        ImGui::Text("Primitive counts: cube %u plane %u sphere %u cone %u",
+            stats.primitiveCounts[0],
+            stats.primitiveCounts[1],
+            stats.primitiveCounts[2],
+            stats.primitiveCounts[3]);
+        if (stats.selfTestRan != 0) {
+            ImGui::Text("Self test: %s (mask %u)",
+                stats.selfTestPassed != 0 ? "pass" : "fail",
+                stats.selfTestFailedCheckMask);
+        }
+    }
+#endif
+
+    ImGui::End();
+}
+
 }
 
 VulkanImGuiLayer::VulkanImGuiLayer(
@@ -4573,11 +5684,20 @@ void VulkanImGuiLayer::BeginFrame(
     VulkanRenderDebugSettings* renderDebugSettings,
     VulkanShadowSettings* shadowSettings,
     u32 temporalAntialiasingMode,
-    TemporalAntialiasingModeCallback temporalAntialiasingModeCallback
+    TemporalAntialiasingModeCallback temporalAntialiasingModeCallback,
+    SceneBuilder* sceneBuilder
 ) {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    if (sceneBuilder != nullptr && camera3D != nullptr) {
+        m_SceneBuilderGizmo.Draw(*sceneBuilder, *camera3D);
+    } else {
+        m_SceneBuilderGizmo.Reset();
+    }
+#endif
 
     ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(430.0f, 620.0f), ImGuiCond_Once);
@@ -4728,6 +5848,14 @@ void VulkanImGuiLayer::BeginFrame(
 
     ImGui::End();
 
+    if (sceneBuilder != nullptr) {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+        DrawSceneBuilderPanel(*sceneBuilder, camera3D, &m_SceneBuilderGizmo);
+#else
+        DrawSceneBuilderPanel(*sceneBuilder, camera3D, nullptr);
+#endif
+    }
+
     if (rendererStats != nullptr && renderDebugSettings != nullptr && scene3D != nullptr) {
         DrawLightingDebugOverlay(*rendererStats, *renderDebugSettings, *scene3D);
         DrawShadowDebugOverlay(
@@ -4748,12 +5876,70 @@ void VulkanImGuiLayer::OnSwapchainRecreated(const VulkanSwapchain& swapchain) {
     ImGui_ImplVulkan_SetMinImageCount(static_cast<u32>(swapchain.Images().size()));
 }
 
+bool VulkanImGuiLayer::SceneBuilderGizmoCapturesMouse() const {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    return m_SceneBuilderGizmo.CapturesMouse();
+#else
+    return false;
+#endif
+}
+
+void VulkanImGuiLayer::SetSceneBuilderGizmoModeFromShortcut(
+    SceneBuilderGizmoMode mode
+) {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    m_SceneBuilderGizmo.SetModeFromShortcut(mode);
+#else
+    (void)mode;
+#endif
+}
+
+u32 VulkanImGuiLayer::SceneBuilderGizmoModeId() const {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    return static_cast<u32>(m_SceneBuilderGizmo.Mode());
+#else
+    return 0u;
+#endif
+}
+
+u32 VulkanImGuiLayer::SceneBuilderGizmoShortcutModeSwitchCount() const {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    return m_SceneBuilderGizmo.ShortcutModeSwitchCount();
+#else
+    return 0u;
+#endif
+}
+
+u32 VulkanImGuiLayer::SceneBuilderGizmoShortcutModeMask() const {
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    return m_SceneBuilderGizmo.ShortcutModeMask();
+#else
+    return 0u;
+#endif
+}
+
 void VulkanImGuiLayer::CreateContext(Window& window) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.Fonts->AddFontDefault();
+    static const ImWchar kMaterialIconRanges[] = { 0xe000, 0xe8ff, 0 };
+    const std::string lightIconFontPath =
+        std::string(SE_ASSET_DIR) + "/editor/MaterialIcons-Regular.ttf";
+    m_LightIconFont = io.Fonts->AddFontFromFileTTF(
+        lightIconFontPath.c_str(),
+        26.0f,
+        nullptr,
+        kMaterialIconRanges
+    );
+    if (m_LightIconFont == nullptr) {
+        throw std::runtime_error("Failed to load Scene Builder Material Icons font");
+    }
+#if defined(SE_ENABLE_SCENE_BUILDER_GIZMO)
+    m_SceneBuilderGizmo.SetLightIconFont(m_LightIconFont);
+#endif
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();

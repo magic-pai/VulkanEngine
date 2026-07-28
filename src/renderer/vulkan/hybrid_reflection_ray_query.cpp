@@ -39,7 +39,7 @@ namespace se {
 
 namespace {
 
-constexpr u32 kRayQueryContractVersion = 6u;
+constexpr u32 kRayQueryContractVersion = 8u;
 constexpr u32 kHitAttributeContractVersion = 1u;
 constexpr u32 kMaterialTableContractVersion = 1u;
 constexpr u32 kHitLightingContractVersion = 1u;
@@ -105,7 +105,7 @@ static_assert(offsetof(HybridReflectionMaterialRecord, uvTransform) == 48u);
 static_assert(offsetof(HybridReflectionMaterialRecord, uvControls) == 64u);
 static_assert(offsetof(HybridReflectionMaterialRecord, textureInfo) == 80u);
 static_assert(offsetof(HybridReflectionMaterialRecord, textureExtent) == 96u);
-static_assert(sizeof(HybridReflectionProbeGpuRecord) == 80u);
+static_assert(sizeof(HybridReflectionProbeGpuRecord) == 96u);
 static_assert(offsetof(HybridReflectionProbeGpuRecord, positionRadius) == 0u);
 static_assert(offsetof(HybridReflectionProbeGpuRecord, controls) == 16u);
 static_assert(offsetof(HybridReflectionProbeGpuRecord, colorAndMip) == 32u);
@@ -115,8 +115,11 @@ static_assert(
 static_assert(
     offsetof(HybridReflectionProbeGpuRecord, resourceControls) == 64u
 );
-static_assert(sizeof(HybridReflectionProbeFrameInputs) == 336u);
-static_assert(offsetof(HybridReflectionProbeFrameInputs, controls) == 320u);
+static_assert(
+    offsetof(HybridReflectionProbeGpuRecord, capturePosition) == 80u
+);
+static_assert(sizeof(HybridReflectionProbeFrameInputs) == 400u);
+static_assert(offsetof(HybridReflectionProbeFrameInputs, controls) == 384u);
 
 struct alignas(16) RayQueryControls {
     f32 maxRayDistance = 100.0f;
@@ -151,9 +154,10 @@ struct alignas(16) RayQueryControls {
     u32 denoiserBridgeContractVersion = kDenoiserBridgeContractVersion;
     u32 diagnosticTargetInstanceIndex = 0u;
     u32 runtimeFlags = 0u;
+    glm::vec4 hitIblControls{ 1.0f, 1.0f, 0.0f, 0.0f };
 };
 
-static_assert(sizeof(RayQueryControls) == 128u);
+static_assert(sizeof(RayQueryControls) == 144u);
 static_assert(offsetof(RayQueryControls, enabled) == 20u);
 static_assert(offsetof(RayQueryControls, contractVersion) == 24u);
 static_assert(offsetof(RayQueryControls, diagnosticsEnabled) == 28u);
@@ -179,6 +183,7 @@ static_assert(offsetof(RayQueryControls, denoiserInjectionEnabled) == 112u);
 static_assert(offsetof(RayQueryControls, denoiserBridgeContractVersion) == 116u);
 static_assert(offsetof(RayQueryControls, diagnosticTargetInstanceIndex) == 120u);
 static_assert(offsetof(RayQueryControls, runtimeFlags) == 124u);
+static_assert(offsetof(RayQueryControls, hitIblControls) == 128u);
 static_assert(offsetof(Vertex3D, position) == 0u);
 static_assert(offsetof(Vertex3D, normal) == 12u);
 static_assert(offsetof(Vertex3D, texCoord) == 36u);
@@ -699,7 +704,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 extent,
                 kHitSurfaceFormat,
                 VK_IMAGE_TILING_OPTIMAL,
-                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT
             );
@@ -1448,6 +1454,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
             1u,
             kMaxRectangleShadowSamples
         );
+        controls.hitIblControls = glm::vec4(
+            std::clamp(settings.hitIblDiffuseIntensity, 0.0f, 4.0f),
+            std::clamp(settings.hitIblSpecularIntensity, 0.0f, 4.0f),
+            settings.globalIblEnabled ? 1.0f : 0.0f,
+            settings.globalSpecularVisible ? 1.0f : 0.0f
+        );
         controls.diagnosticTargetInstanceIndex =
             settings.diagnosticTargetInstanceIndex;
         controls.runtimeFlags =
@@ -1555,6 +1567,16 @@ struct VulkanHybridReflectionRayQuery::Impl {
         stats.rayQueryForceAllRayQueries =
             settings.forceAllRayQueries ? 1u : 0u;
         stats.rayQueryHitIblEnabled = settings.hitIblEnabled ? 1u : 0u;
+        stats.rayQueryHitIblDiffuseIntensityMilliunits = static_cast<u32>(
+            std::round(controls.hitIblControls.x * 1000.0f)
+        );
+        stats.rayQueryHitIblSpecularIntensityMilliunits = static_cast<u32>(
+            std::round(controls.hitIblControls.y * 1000.0f)
+        );
+        stats.rayQueryGlobalIblEnabled =
+            controls.hitIblControls.z > 0.5f ? 1u : 0u;
+        stats.rayQueryGlobalSpecularVisible =
+            controls.hitIblControls.w > 0.5f ? 1u : 0u;
         stats.rayQuerySourceFusionEnabled =
             settings.sourceFusionEnabled ? 1u : 0u;
         stats.rayQueryDirectMirrorEnabled =
@@ -1667,7 +1689,6 @@ struct VulkanHybridReflectionRayQuery::Impl {
         VkCommandBuffer commandBuffer,
         u32 imageIndex,
         VkDescriptorSet ffxConstantsDescriptorSet,
-        VkBuffer indirectArgsBuffer,
         RendererHybridReflectionStats& stats
     ) {
         if (imageIndex >= descriptorSets.size() || !frameEnabled[imageIndex]) {
@@ -1728,25 +1749,12 @@ struct VulkanHybridReflectionRayQuery::Impl {
         VkImageMemoryBarrier hitSurfaceForWrite = hitSurfaceForClear;
         hitSurfaceForWrite.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         hitSurfaceForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        VkImageMemoryBarrier denoiserRadianceForWrite = resultForClear;
-        denoiserRadianceForWrite.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        denoiserRadianceForWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        denoiserRadianceForWrite.image =
-            classifyResources.IntersectionOutputImage(imageIndex);
-        VkImageMemoryBarrier confidenceForReadWrite = resultForClear;
-        confidenceForReadWrite.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        confidenceForReadWrite.dstAccessMask =
-            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        confidenceForReadWrite.image =
-            classifyResources.HitConfidenceImage(imageIndex);
-        std::array<VkImageMemoryBarrier, 4> imageBarriers{
+        std::array<VkImageMemoryBarrier, 2> imageBarriers{
             resultForWrite,
-            hitSurfaceForWrite,
-            denoiserRadianceForWrite,
-            confidenceForReadWrite
+            hitSurfaceForWrite
         };
 
-        std::array<VkBufferMemoryBarrier, 6> bufferBarriers{};
+        std::array<VkBufferMemoryBarrier, 4> bufferBarriers{};
         auto setBufferBarrier = [&] (
             VkBufferMemoryBarrier& barrier,
             VkBuffer buffer,
@@ -1765,41 +1773,27 @@ struct VulkanHybridReflectionRayQuery::Impl {
         };
         setBufferBarrier(
             bufferBarriers[0],
-            classifyResources.RayListBuffer(imageIndex),
-            classifyResources.RayListBufferSize(),
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_ACCESS_SHADER_READ_BIT
-        );
-        setBufferBarrier(
-            bufferBarriers[1],
-            prepareResources.RayCounterBuffer(imageIndex),
-            prepareResources.RayCounterBufferSize(),
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_ACCESS_SHADER_READ_BIT
-        );
-        setBufferBarrier(
-            bufferBarriers[2],
             diagnosticsBuffers[imageIndex]->Handle(),
             diagnosticsBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
         );
         setBufferBarrier(
-            bufferBarriers[3],
+            bufferBarriers[1],
             instanceMetadataBuffers[imageIndex]->Handle(),
             instanceMetadataBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT
         );
         setBufferBarrier(
-            bufferBarriers[4],
+            bufferBarriers[2],
             materialBuffers[imageIndex]->Handle(),
             materialBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT
         );
         setBufferBarrier(
-            bufferBarriers[5],
+            bufferBarriers[3],
             reflectionProbeBuffers[imageIndex]->Handle(),
             reflectionProbeBuffers[imageIndex]->Size(),
             VK_ACCESS_HOST_WRITE_BIT,
@@ -1847,9 +1841,14 @@ struct VulkanHybridReflectionRayQuery::Impl {
             0u,
             nullptr
         );
-        vkCmdDispatchIndirect(commandBuffer, indirectArgsBuffer, 0u);
+        vkCmdDispatch(
+            commandBuffer,
+            (extent.width + 7u) / 8u,
+            (extent.height + 7u) / 8u,
+            1u
+        );
 
-        VkBufferMemoryBarrier diagnosticsForHost = bufferBarriers[2];
+        VkBufferMemoryBarrier diagnosticsForHost = bufferBarriers[0];
         diagnosticsForHost.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         diagnosticsForHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
         vkCmdPipelineBarrier(
@@ -1869,7 +1868,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
         ++stats.rayQueryDispatchCount;
         stats.rayQueryDescriptorBindCount += 2u;
         ++stats.rayQueryResultClearCount;
-        stats.active = denoiserInjectionActive[imageIndex] ? 1u : 0u;
+        stats.active = frameEnabled[imageIndex] ? 1u : 0u;
         stats.fallbackReason = stats.active != 0u ? 0u : 8u;
     }
 
@@ -2428,7 +2427,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "contribution_b,roughness,metallic,flags,"
                 "mirror_dnsr_passthrough,"
                 "object_probe_assignment_code,active_probe_mask,"
-                "object_stable_enabled\n";
+                "object_stable_enabled,exclusive_reflection_owner\n";
             gBufferSamplesFile <<
                 "capture_index,frame_number,sample_index,pixel_x,pixel_y,"
                 "receiver_object_id,roughness,metallic,confidence,"
@@ -2500,6 +2499,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 "apply_mirror_high_confidence_partial_blend_count,"
                 "apply_mirror_cross_source_blend_risk_count,"
                 "apply_mirror_dnsr_passthrough_count,"
+                "apply_exclusive_reflection_owner_count,"
+                "apply_legacy_probe_delta_count,"
                 "gbuffer_non_finite_count,gbuffer_source_negative_count,"
                 "apply_negative_contribution_count,"
                 "receiver_counter_mismatch_count,"
@@ -2739,6 +2740,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             u64 applyMirrorHighConfidencePartialBlend = 0u;
             u64 applyMirrorCrossSourceBlendRisk = 0u;
             u64 applyMirrorDnsrPassthrough = 0u;
+            u64 applyExclusiveReflectionOwner = 0u;
+            u64 applyLegacyProbeDelta = 0u;
             u64 gBufferNonFinite = 0u;
             u64 gBufferSourceNegative = 0u;
             u64 negativeApplyContributions = 0u;
@@ -3102,6 +3105,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 (applyFlags & (1u << 15u)) != 0u;
             const bool mirrorDnsrPassthrough =
                 (applyFlags & (1u << 6u)) != 0u;
+            const bool exclusiveReflectionOwner =
+                (applyFlags & (1u << 16u)) != 0u;
             if (fullAuditRawEvidence) {
                 applyFile << fullAuditFramesWritten << ','
                     << capturedFrameNumber << ',' << applyIndex << ','
@@ -3113,7 +3118,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 applyFile << ',' << applyFlags << ','
                     << (mirrorDnsrPassthrough ? 1u : 0u) << ','
                     << objectProbeAssignmentCode << ',' << activeProbeMask
-                    << ',' << (objectStableEnabled ? 1u : 0u) << '\n';
+                    << ',' << (objectStableEnabled ? 1u : 0u)
+                    << ',' << (exclusiveReflectionOwner ? 1u : 0u) << '\n';
             }
             const f32 resolvedR = std::bit_cast<f32>(values[base + 2u]);
             const f32 resolvedG = std::bit_cast<f32>(values[base + 3u]);
@@ -3144,6 +3150,11 @@ struct VulkanHybridReflectionRayQuery::Impl {
                 std::bit_cast<f32>(values[base + 13u]);
             if (mirrorDnsrPassthrough) {
                 ++frameAudit.applyMirrorDnsrPassthrough;
+            }
+            if (exclusiveReflectionOwner) {
+                ++frameAudit.applyExclusiveReflectionOwner;
+            } else {
+                ++frameAudit.applyLegacyProbeDelta;
             }
             if (receiverRoughness <= 0.3001f) {
                 ++frameAudit.applyMirrorSamples;
@@ -4131,7 +4142,7 @@ struct VulkanHybridReflectionRayQuery::Impl {
             static_cast<u32>(HybridReflectionFullAuditImageStage::HdrAfterApply)
         ];
         const double hdrActualDelta = hdrAfterLuminance - hdrBeforeLuminance;
-        auditIndexFile << 8u << ',' << fullAuditFramesWritten << ','
+        auditIndexFile << 9u << ',' << fullAuditFramesWritten << ','
             << capturedFrameNumber << ',' << recordCount << ','
             << applyRecordCount << ',' << applyRecordCount << ','
             << frameAudit.unknownReceivers << ',' << frameAudit.unknownHits
@@ -4160,6 +4171,8 @@ struct VulkanHybridReflectionRayQuery::Impl {
             << frameAudit.applyMirrorHighConfidencePartialBlend << ','
             << frameAudit.applyMirrorCrossSourceBlendRisk << ','
             << frameAudit.applyMirrorDnsrPassthrough << ','
+            << frameAudit.applyExclusiveReflectionOwner << ','
+            << frameAudit.applyLegacyProbeDelta << ','
             << frameAudit.gBufferNonFinite << ','
             << frameAudit.gBufferSourceNegative << ','
             << frameAudit.negativeApplyContributions << ','
@@ -4345,14 +4358,12 @@ void VulkanHybridReflectionRayQuery::Record(
     VkCommandBuffer commandBuffer,
     u32 imageIndex,
     VkDescriptorSet ffxConstantsDescriptorSet,
-    VkBuffer indirectArgsBuffer,
     RendererHybridReflectionStats& stats
 ) {
     m_Impl->Record(
         commandBuffer,
         imageIndex,
         ffxConstantsDescriptorSet,
-        indirectArgsBuffer,
         stats
     );
 }

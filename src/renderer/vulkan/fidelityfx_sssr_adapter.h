@@ -526,6 +526,12 @@ public:
     VkExtent2D Extent() const;
     VkExtent2D AverageExtent() const;
     u64 TotalMemoryBytes() const;
+    bool UpdateHistorySources(
+        const VulkanDevice& device,
+        const VulkanSceneRenderTargets& renderTargets,
+        std::size_t imageIndex,
+        std::size_t historyImageIndex
+    );
 
     void Recreate(
         const VulkanDevice& device,

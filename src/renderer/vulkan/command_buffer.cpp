@@ -1482,6 +1482,102 @@ void CopyFfxSssrImage(
     );
 }
 
+void ClearFfxSssrGeneralImage(
+    VkCommandBuffer commandBuffer,
+    VkImage image
+) {
+    if (image == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkImageMemoryBarrier clearBarrier{};
+    clearBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    clearBarrier.srcAccessMask =
+        VK_ACCESS_SHADER_READ_BIT |
+        VK_ACCESS_SHADER_WRITE_BIT |
+        VK_ACCESS_TRANSFER_READ_BIT |
+        VK_ACCESS_TRANSFER_WRITE_BIT;
+    clearBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    clearBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    clearBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    clearBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    clearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    clearBarrier.image = image;
+    clearBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    clearBarrier.subresourceRange.baseMipLevel = 0u;
+    clearBarrier.subresourceRange.levelCount = 1u;
+    clearBarrier.subresourceRange.baseArrayLayer = 0u;
+    clearBarrier.subresourceRange.layerCount = 1u;
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1u,
+        &clearBarrier
+    );
+
+    const VkClearColorValue clearValue{};
+    vkCmdClearColorImage(
+        commandBuffer,
+        image,
+        VK_IMAGE_LAYOUT_GENERAL,
+        &clearValue,
+        1u,
+        &clearBarrier.subresourceRange
+    );
+
+    VkImageMemoryBarrier afterClearBarrier = clearBarrier;
+    afterClearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    afterClearBarrier.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,
+        nullptr,
+        0,
+        nullptr,
+        1u,
+        &afterClearBarrier
+    );
+}
+
+u32 ClearFfxSssrSparseOutputs(
+    VkCommandBuffer commandBuffer,
+    const VulkanFfxSssrClassifyTilesResources& classifyResources,
+    const VulkanFfxSssrReprojectResources& reprojectResources,
+    std::size_t imageIndex
+) {
+    if (imageIndex >= classifyResources.Count() ||
+        imageIndex >= reprojectResources.Count()) {
+        return 0u;
+    }
+
+    ClearFfxSssrGeneralImage(
+        commandBuffer,
+        classifyResources.IntersectionOutputImage(imageIndex)
+    );
+    ClearFfxSssrGeneralImage(
+        commandBuffer,
+        classifyResources.HitConfidenceImage(imageIndex)
+    );
+    ClearFfxSssrGeneralImage(
+        commandBuffer,
+        reprojectResources.HitConfidenceImage(imageIndex)
+    );
+    return 3u;
+}
+
 u32 CopyFfxSssrCurrentDenoiserStateToHistory(
     VkCommandBuffer commandBuffer,
     const VulkanFfxSssrReprojectResources& reprojectResources,
@@ -1561,59 +1657,6 @@ void ClearFfxSssrVisibleOutput(
         1u,
         &clearBarrier.subresourceRange
     );
-}
-
-u32 CopyFfxSssrHistoryToOtherImages(
-    VkCommandBuffer commandBuffer,
-    const VulkanFfxSssrReprojectResources& reprojectResources,
-    std::size_t sourceIndex
-) {
-    if (reprojectResources.Count() <= 1 ||
-        sourceIndex >= reprojectResources.Count()) {
-        return 0u;
-    }
-
-    u32 copyCount = 0u;
-    for (std::size_t destinationIndex = 0;
-         destinationIndex < reprojectResources.Count();
-         ++destinationIndex) {
-        if (destinationIndex == sourceIndex) {
-            continue;
-        }
-
-        CopyFfxSssrImage(
-            commandBuffer,
-            reprojectResources.RadianceHistoryImage(sourceIndex),
-            reprojectResources.RadianceHistoryImage(destinationIndex),
-            reprojectResources.Extent()
-        );
-        CopyFfxSssrImage(
-            commandBuffer,
-            reprojectResources.AverageRadianceHistoryImage(sourceIndex),
-            reprojectResources.AverageRadianceHistoryImage(destinationIndex),
-            reprojectResources.AverageExtent()
-        );
-        CopyFfxSssrImage(
-            commandBuffer,
-            reprojectResources.VarianceHistoryImage(sourceIndex),
-            reprojectResources.VarianceHistoryImage(destinationIndex),
-            reprojectResources.Extent()
-        );
-        CopyFfxSssrImage(
-            commandBuffer,
-            reprojectResources.SampleCountHistoryImage(sourceIndex),
-            reprojectResources.SampleCountHistoryImage(destinationIndex),
-            reprojectResources.Extent()
-        );
-        CopyFfxSssrImage(
-            commandBuffer,
-            reprojectResources.HitConfidenceHistoryImage(sourceIndex),
-            reprojectResources.HitConfidenceHistoryImage(destinationIndex),
-            reprojectResources.Extent()
-        );
-        copyCount += 5u;
-    }
-    return copyCount;
 }
 
 VkImage TemporalHistoryCopySourceImage(
@@ -2744,10 +2787,16 @@ void VulkanCommandBuffer::Record(
     const VulkanGraphicsPipeline* ffxSssrApplyPipeline,
     const VulkanGBufferDescriptorSets* ffxSssrApplyGBufferDescriptorSets,
     bool ffxSssrSameFrameCompositeEnabled,
+    bool directRayQueryCompositeEnabled,
     bool ffxSssrPrepareIndirectArgsEnabled,
+    bool ffxSssrScreenIntersectEnabled,
     bool ffxSssrVisibleOutputClearEnabled,
+    bool ffxSssrSparseOutputClearEnabled,
+    std::size_t ffxSssrHistorySourceImageIndex,
+    bool ffxSssrHistorySourceValid,
     const VulkanSceneRenderTargets* ssrTargets,
     bool ssrReconstructionEnabled,
+    bool ffxSssrReceiverHistoryUpdateEnabled,
     bool ssrImagesInitialized,
     bool ssrHistoryReset,
     VulkanHybridReflectionAccelerationStructures*
@@ -2830,6 +2879,21 @@ void VulkanCommandBuffer::Record(
 
     if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("Failed to begin recording Vulkan command buffer");
+    }
+
+    // Material and post-process descriptor sets are shared by 2D and 3D
+    // pipelines. Establish every sampled history/reconstruction image before
+    // the first draw, including scenes that never record Deferred or SSR.
+    if (sceneRenderTargets != nullptr && !temporalHistoryColorInitialized) {
+        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
+        temporalHistoryColorInitialized = true;
+    }
+    if (ssrTargets != nullptr && (!ssrImagesInitialized || ssrHistoryReset)) {
+        ClearSsrReconstructionImages(
+            commandBuffer,
+            *ssrTargets,
+            ssrImagesInitialized
+        );
     }
 
     if (gpuTimer != nullptr) {
@@ -3395,18 +3459,6 @@ void VulkanCommandBuffer::Record(
         vkCmdEndRenderPass(commandBuffer);
     }
 
-    // SSR trace can sample completed scene-color history, so establish its
-    // first-frame layout before the compute chain, not just before Deferred.
-    if (deferredLightingPipeline != nullptr &&
-        sceneRenderTargets != nullptr &&
-        !temporalHistoryColorInitialized) {
-        PrepareTemporalHistoryColorForSampling(
-            commandBuffer,
-            *sceneRenderTargets
-        );
-        temporalHistoryColorInitialized = true;
-    }
-
     auto recordDepthPyramid = [&](const VulkanComputePipeline* buildPipeline,
                                   const VulkanHiZDescriptorSets* descriptorSets,
                                   const VulkanDepthPyramid* depthPyramid,
@@ -3560,15 +3612,6 @@ void VulkanCommandBuffer::Record(
         );
     }
 
-    if (ssrTargets != nullptr &&
-        (!ssrImagesInitialized || ssrHistoryReset)) {
-        ClearSsrReconstructionImages(
-            commandBuffer,
-            *ssrTargets,
-            ssrImagesInitialized
-        );
-    }
-
     const bool ffxSssrPrepareIndirectArgsReady =
         ffxSssrPrepareIndirectArgsEnabled &&
         ffxSssrConstantsResources != nullptr &&
@@ -3590,7 +3633,8 @@ void VulkanCommandBuffer::Record(
         ffxSssrBlueNoiseResources->Count() > imageIndex &&
         ffxSssrBlueNoiseResources->GroupCountX() > 0u &&
         ffxSssrBlueNoiseResources->GroupCountY() > 0u;
-    const bool ffxSssrIntersectReady =
+    const bool ffxSssrScreenIntersectReady =
+        ffxSssrScreenIntersectEnabled &&
         ffxSssrBlueNoiseReady &&
         ffxSssrIntersectPipeline != nullptr &&
         ffxSssrIntersectResources != nullptr &&
@@ -3599,8 +3643,19 @@ void VulkanCommandBuffer::Record(
         ssrTargets->Count() > imageIndex &&
         hdrRenderPass != nullptr &&
         hdrFramebuffer != nullptr;
+    // Ray Query is recorded independently below. It must never be carried by
+    // FidelityFX classify, indirect-argument, or temporal stages.
+    const bool ffxSssrRayQueryCarrierReady = false;
+    const bool directRayQueryDispatchReady =
+        directRayQueryCompositeEnabled &&
+        hybridReflectionRayQuery != nullptr &&
+        hybridReflectionStats != nullptr &&
+        ffxSssrConstantsResources != nullptr &&
+        ffxSssrConstantsResources->Count() > imageIndex;
+    const bool ffxSssrRadianceProducerReady =
+        ffxSssrScreenIntersectReady || ffxSssrRayQueryCarrierReady;
     const bool ffxSssrReprojectReady =
-        ffxSssrIntersectReady &&
+        ffxSssrRadianceProducerReady &&
         ffxSssrReprojectPipeline != nullptr &&
         ffxSssrReprojectResources != nullptr &&
         ffxSssrReprojectResources->Count() > imageIndex;
@@ -3615,6 +3670,27 @@ void VulkanCommandBuffer::Record(
         ffxSssrResolveTemporalResources != nullptr &&
         ffxSssrResolveTemporalResources->Count() > imageIndex;
     bool ffxSssrResolveTemporalDispatched = false;
+    if (ffxSssrSparseOutputClearEnabled &&
+        ffxSssrClassifyTilesReady &&
+        ffxSssrReprojectReady) {
+        const VulkanDebugLabelScope clearLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.FFX.ClearSparseOutputs",
+            0.35f,
+            0.35f,
+            0.95f
+        );
+        const u32 sparseOutputClears = ClearFfxSssrSparseOutputs(
+            commandBuffer,
+            *ffxSssrClassifyTilesResources,
+            *ffxSssrReprojectResources,
+            imageIndex
+        );
+        if (bindStats != nullptr) {
+            bindStats->ffxSssrSparseOutputClears += sparseOutputClears;
+        }
+    }
     const auto recordFullAuditSnapshot = [&, imageIndex](
         HybridReflectionFullAuditImageStage stage,
         VkImage image,
@@ -3998,7 +4074,11 @@ void VulkanCommandBuffer::Record(
         }
     }
 
-    if (weightedTranslucencyRenderPass != nullptr &&
+    const bool recordWeightedTranslucencyPass =
+        !weightedTranslucencyRenderCommands.empty() ||
+        weightedTranslucencyDebugView > 0;
+    if (recordWeightedTranslucencyPass &&
+        weightedTranslucencyRenderPass != nullptr &&
         weightedTranslucencyFramebuffer != nullptr) {
         std::array<VkClearValue, 2> translucencyClearValues{};
         translucencyClearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
@@ -4074,13 +4154,6 @@ void VulkanCommandBuffer::Record(
         if (bindStats != nullptr) {
             ++bindStats->weightedTranslucencyClearPasses;
         }
-    }
-
-    if (deferredLightingPipeline != nullptr &&
-        sceneRenderTargets != nullptr &&
-        !temporalHistoryColorInitialized) {
-        PrepareTemporalHistoryColorForSampling(commandBuffer, *sceneRenderTargets);
-        temporalHistoryColorInitialized = true;
     }
 
     bool forwardResidualDrawnInHdr = false;
@@ -4226,7 +4299,8 @@ void VulkanCommandBuffer::Record(
             }
         }
 
-        if (weightedTranslucencyResolvePipeline != nullptr &&
+        if (recordWeightedTranslucencyPass &&
+            weightedTranslucencyResolvePipeline != nullptr &&
             weightedTranslucencyDescriptorSets != nullptr) {
             vkCmdBindPipeline(
                 commandBuffer,
@@ -4337,11 +4411,11 @@ void VulkanCommandBuffer::Record(
         vkCmdEndRenderPass(commandBuffer);
     }
 
-    if (ffxSssrIntersectReady) {
-        const VulkanDebugLabelScope intersectLabel(
+    if (ffxSssrRadianceProducerReady) {
+        const VulkanDebugLabelScope carrierLabel(
             m_Device,
             commandBuffer,
-            "SelfEngine.Reflection.FFX.Intersect",
+            "SelfEngine.Reflection.DNSR.Carrier",
             0.2f,
             0.8f,
             0.55f
@@ -4349,17 +4423,19 @@ void VulkanCommandBuffer::Record(
         const VkDescriptorSet ffxConstantsDescriptorSet =
             ffxSssrConstantsResources->Handle(imageIndex);
 
-        TransitionColorImage(
-            commandBuffer,
-            ssrTargets->HdrSceneColorImage(imageIndex),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-        );
+        if (ffxSssrScreenIntersectReady) {
+            TransitionColorImage(
+                commandBuffer,
+                ssrTargets->HdrSceneColorImage(imageIndex),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+        }
 
         BarrierSsrComputeImage(
             commandBuffer,
@@ -4413,6 +4489,7 @@ void VulkanCommandBuffer::Record(
                 ffxSssrBlueNoiseResources->GroupCountY();
         }
 
+        if (ffxSssrScreenIntersectReady) {
         VkImageMemoryBarrier blueNoiseToIntersect{};
         blueNoiseToIntersect.sType =
             VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -4528,19 +4605,8 @@ void VulkanCommandBuffer::Record(
             ++bindStats->ffxSssrIntersectDispatches;
             bindStats->ffxSssrIntersectDescriptorBinds += 2u;
         }
-
-        if (hybridReflectionRayQuery != nullptr &&
-            hybridReflectionStats != nullptr) {
-            hybridReflectionRayQuery->Record(
-                commandBuffer,
-                static_cast<u32>(imageIndex),
-                ffxConstantsDescriptorSet,
-                ffxSssrPrepareIndirectArgsResources->IndirectArgsBuffer(
-                    imageIndex
-                ),
-                *hybridReflectionStats
-            );
         }
+
         recordFullAuditSnapshot(
             HybridReflectionFullAuditImageStage::IntersectRadiance,
             ffxSssrClassifyTilesResources->IntersectionOutputImage(imageIndex),
@@ -4563,7 +4629,7 @@ void VulkanCommandBuffer::Record(
                 0.65f,
                 0.2f
             );
-            std::array<VkImageMemoryBarrier, 7> reprojectImageBarriers{};
+            std::array<VkImageMemoryBarrier, 13> reprojectImageBarriers{};
             auto setReprojectImageBarrier = [&](
                 std::size_t barrierIndex,
                 VkImage image,
@@ -4631,6 +4697,63 @@ void VulkanCommandBuffer::Record(
                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                 VK_ACCESS_SHADER_WRITE_BIT
             );
+            u32 reprojectImageBarrierCount = 7u;
+            if (ffxSssrHistorySourceValid &&
+                ssrTargets != nullptr &&
+                ffxSssrHistorySourceImageIndex < ssrTargets->Count() &&
+                ffxSssrHistorySourceImageIndex <
+                    ffxSssrReprojectResources->Count()) {
+                constexpr VkAccessFlags kHistoryWriteAccess =
+                    VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ssrTargets->SsrHistoryMetadataImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ffxSssrReprojectResources->RadianceHistoryImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ffxSssrReprojectResources->AverageRadianceHistoryImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ffxSssrReprojectResources->VarianceHistoryImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ffxSssrReprojectResources->SampleCountHistoryImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+                setReprojectImageBarrier(
+                    reprojectImageBarrierCount++,
+                    ffxSssrReprojectResources->HitConfidenceHistoryImage(
+                        ffxSssrHistorySourceImageIndex
+                    ),
+                    kHistoryWriteAccess,
+                    VK_ACCESS_SHADER_READ_BIT
+                );
+            }
 
             VkBufferMemoryBarrier denoiserTilesToReproject{};
             denoiserTilesToReproject.sType =
@@ -4651,7 +4774,8 @@ void VulkanCommandBuffer::Record(
 
             vkCmdPipelineBarrier(
                 commandBuffer,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
                     VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
                 0,
@@ -4659,7 +4783,7 @@ void VulkanCommandBuffer::Record(
                 nullptr,
                 1u,
                 &denoiserTilesToReproject,
-                static_cast<u32>(reprojectImageBarriers.size()),
+                reprojectImageBarrierCount,
                 reprojectImageBarriers.data()
             );
 
@@ -5037,11 +5161,6 @@ void VulkanCommandBuffer::Record(
                         kFfxSssrDenoiserIndirectArgsOffset
                     );
                     ffxSssrResolveTemporalDispatched = true;
-                    historyCopies += CopyFfxSssrHistoryToOtherImages(
-                        commandBuffer,
-                        *ffxSssrReprojectResources,
-                        imageIndex
-                    );
                     recordFullAuditSnapshot(
                         HybridReflectionFullAuditImageStage::ResolveRadiance,
                         ffxSssrReprojectResources->RadianceHistoryImage(
@@ -5067,6 +5186,119 @@ void VulkanCommandBuffer::Record(
                     }
                 }
             }
+        }
+    }
+
+    if (directRayQueryDispatchReady) {
+        const VulkanDebugLabelScope rayQueryLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.RayQuery"
+        );
+        hybridReflectionRayQuery->Record(
+            commandBuffer,
+            static_cast<u32>(imageIndex),
+            ffxSssrConstantsResources->Handle(imageIndex),
+            *hybridReflectionStats
+        );
+    }
+
+    const bool directRayQueryApplyReady =
+        directRayQueryDispatchReady &&
+        ffxSssrApplyPipeline != nullptr &&
+        ffxSssrApplyGBufferDescriptorSets != nullptr &&
+        ffxSssrApplyGBufferDescriptorSets->Count() > imageIndex &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        deferredLightingFrameDescriptorSets->Count() > imageIndex &&
+        hdrRenderPass != nullptr &&
+        hdrFramebuffer != nullptr;
+    if (directRayQueryApplyReady) {
+        const VulkanDebugLabelScope applyLabel(
+            m_Device,
+            commandBuffer,
+            "SelfEngine.Reflection.RayQuery.Apply",
+            0.2f,
+            0.8f,
+            0.55f
+        );
+        VkImageMemoryBarrier hitSurfaceForApply{};
+        hitSurfaceForApply.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        hitSurfaceForApply.srcAccessMask =
+            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+        hitSurfaceForApply.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        hitSurfaceForApply.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        hitSurfaceForApply.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        hitSurfaceForApply.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        hitSurfaceForApply.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        hitSurfaceForApply.image = hybridReflectionRayQuery->HitSurfaceImage(
+            static_cast<u32>(imageIndex)
+        );
+        hitSurfaceForApply.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_COLOR_BIT;
+        hitSurfaceForApply.subresourceRange.levelCount = 1u;
+        hitSurfaceForApply.subresourceRange.layerCount = 1u;
+        vkCmdPipelineBarrier(
+            commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0u,
+            0u,
+            nullptr,
+            0u,
+            nullptr,
+            1u,
+            &hitSurfaceForApply
+        );
+
+        VkRenderPassBeginInfo applyPassInfo{};
+        applyPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        applyPassInfo.renderPass = hdrRenderPass->LoadHandle();
+        applyPassInfo.framebuffer = hdrFramebuffer->Handle(imageIndex);
+        applyPassInfo.renderArea.offset = { 0, 0 };
+        applyPassInfo.renderArea.extent = hdrFramebuffer->Extent();
+        vkCmdBeginRenderPass(
+            commandBuffer,
+            &applyPassInfo,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+        SetViewportAndScissor(
+            commandBuffer,
+            { 0, 0 },
+            hdrFramebuffer->Extent()
+        );
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Handle()
+        );
+        const VkDescriptorSet frameDescriptorSet =
+            deferredLightingFrameDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Layout(),
+            0,
+            1,
+            &frameDescriptorSet,
+            0,
+            nullptr
+        );
+        const VkDescriptorSet applyGBufferDescriptorSet =
+            ffxSssrApplyGBufferDescriptorSets->Handle(imageIndex);
+        vkCmdBindDescriptorSets(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ffxSssrApplyPipeline->Layout(),
+            1,
+            1,
+            &applyGBufferDescriptorSet,
+            0,
+            nullptr
+        );
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        vkCmdEndRenderPass(commandBuffer);
+        if (bindStats != nullptr) {
+            ++bindStats->rayQueryApplyDraws;
         }
     }
 
@@ -5242,7 +5474,16 @@ void VulkanCommandBuffer::Record(
         ssrTargets->Count() > 1u &&
         hdrRenderPass != nullptr &&
         hdrFramebuffer != nullptr;
-    if (ssrPostReconstructionReady) {
+    const bool ffxSssrReceiverHistoryUpdateReady =
+        ffxSssrReceiverHistoryUpdateEnabled &&
+        deferredLightingFrameDescriptorSets != nullptr &&
+        ssrTemporalPipeline != nullptr &&
+        ssrDescriptorSets != nullptr &&
+        ssrTargets != nullptr &&
+        ssrDescriptorSets->Count() == ssrTargets->Count() &&
+        ssrTargets->Count() > 1u;
+    if (ssrPostReconstructionReady || ffxSssrReceiverHistoryUpdateReady) {
+        const bool runLegacyReconstruction = ssrPostReconstructionReady;
         const VkExtent2D ssrExtent = ssrTargets->Extent();
         const u32 groupCountX = (ssrExtent.width + 7u) / 8u;
         const u32 groupCountY = (ssrExtent.height + 7u) / 8u;
@@ -5251,34 +5492,36 @@ void VulkanCommandBuffer::Record(
         const VkDescriptorSet reconstructionDescriptorSet =
             ssrDescriptorSets->Handle(imageIndex);
 
-        TransitionColorImage(
-            commandBuffer,
-            ssrTargets->HdrSceneColorImage(imageIndex),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-        );
-        if (ssrTargets->HdrSceneColorMipLevels() > 1u) {
-            GenerateColorMipmaps(
+        if (runLegacyReconstruction) {
+            TransitionColorImage(
                 commandBuffer,
                 ssrTargets->HdrSceneColorImage(imageIndex),
-                ssrTargets->Extent(),
-                ssrTargets->HdrSceneColorFormat(),
-                ssrTargets->HdrSceneColorMipLevels(),
-                physicalDevice
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+            if (ssrTargets->HdrSceneColorMipLevels() > 1u) {
+                GenerateColorMipmaps(
+                    commandBuffer,
+                    ssrTargets->HdrSceneColorImage(imageIndex),
+                    ssrTargets->Extent(),
+                    ssrTargets->HdrSceneColorFormat(),
+                    ssrTargets->HdrSceneColorMipLevels(),
+                    physicalDevice
+                );
+            }
+            BarrierSsrComputeImage(
+                commandBuffer,
+                ssrTargets->SsrHistoryColorImage(imageIndex),
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
             );
         }
-        BarrierSsrComputeImage(
-            commandBuffer,
-            ssrTargets->SsrHistoryColorImage(imageIndex),
-            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-        );
         BarrierSsrComputeImage(
             commandBuffer,
             ssrTargets->SsrHistoryMetadataImage(imageIndex),
@@ -5319,8 +5562,22 @@ void VulkanCommandBuffer::Record(
         bindSsrPostPipeline(*ssrTemporalPipeline);
         vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
         if (bindStats != nullptr) {
-            ++bindStats->ssrReconstructionTemporalDispatches;
+            if (runLegacyReconstruction) {
+                ++bindStats->ssrReconstructionTemporalDispatches;
+            } else {
+                ++bindStats->ffxSssrReceiverHistoryUpdates;
+            }
         }
+        if (!runLegacyReconstruction) {
+            BarrierSsrComputeImage(
+                commandBuffer,
+                ssrTargets->SsrHistoryMetadataImage(imageIndex),
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            );
+        } else {
         BarrierSsrComputeImage(
             commandBuffer,
             ssrTargets->SsrHistoryColorImage(imageIndex),
@@ -5398,6 +5655,7 @@ void VulkanCommandBuffer::Record(
                 static_cast<u32>(ssrTargets->Count() > 0
                     ? ssrTargets->Count() - 1u
                     : 0u);
+        }
         }
     }
 

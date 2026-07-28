@@ -240,7 +240,7 @@ MeshData3D MeshFactory::CreateCone(u32 segments) {
         const f32 theta = u * kPi * 2.0f;
         const f32 x = std::cos(theta) * 0.5f;
         const f32 z = std::sin(theta) * 0.5f;
-        const glm::vec3 normal = glm::normalize(glm::vec3{ x, 0.25f, z });
+        const glm::vec3 normal = glm::normalize(glm::vec3{ x, -0.25f, z });
         meshData.vertices.push_back({
             { 0.0f, 0.0f, 0.0f },
             { normal.x, normal.y, normal.z },
